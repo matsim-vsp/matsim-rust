@@ -37,6 +37,7 @@ pub mod simulation;
 pub mod time;
 pub mod time_queue;
 pub mod vehicles;
+pub mod scoring;
 
 pub trait Identifiable<I: StableTypeId> {
     fn id(&self) -> &Id<I>;

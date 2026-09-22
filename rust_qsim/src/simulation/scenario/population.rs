@@ -684,13 +684,14 @@ impl InternalLeg {
     pub fn new(
         route: InternalRoute,
         mode: &str,
+        routing_mode: &str,
         trav_time: Duration,
         dep_time: Option<SimTime>,
     ) -> Self {
         Self {
             route: Some(route),
             mode: Id::create(mode),
-            routing_mode: Some(Id::create(mode)),
+            routing_mode: Some(Id::create(routing_mode)),
             trav_time: Some(trav_time),
             dep_time,
             attributes: InternalAttributes::default(),
