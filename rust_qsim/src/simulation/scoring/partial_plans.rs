@@ -12,6 +12,8 @@ use crate::simulation::scenario::population::{
     InternalPlanElement, InternalRoute,
 };
 use crate::simulation::scenario::vehicles::InternalVehicle;
+use crate::simulation::time::SimTime;
+use std::time::Duration;
 
 pub struct PartialPlan {
     elements: Vec<InternalPlanElement>,
@@ -104,6 +106,7 @@ impl PartialPlan {
         }
 
         InternalPlan {
+            score: None,
             selected: true,
             elements: self.elements,
         }
@@ -114,8 +117,8 @@ struct PartialActivity {
     pub act_type: Option<Id<String>>,
     pub link_id: Option<Id<Link>>,
     pub coordinate: Option<Coordinate>,
-    pub start_time: Option<u32>,
-    pub end_time: Option<u32>,
+    pub start_time: Option<SimTime>,
+    pub end_time: Option<SimTime>,
     // pub max_dur: Option<u32>, (not meant to be set in the experienced plans)
 }
 
@@ -157,8 +160,11 @@ impl PartialActivity {
     /// Consuming function turning PartialActivity into an InternalActivity
     fn finish(self) -> InternalActivity {
         InternalActivity::new(
-            self.coordinate
-                .unwrap_or_else(|| panic!("Tried to finish PartialActivity without coordinate!")),
+            Some(
+                self.coordinate.unwrap_or_else(|| {
+                    panic!("Tried to finish PartialActivity without coordinate!")
+                }),
+            ),
             self.act_type
                 .unwrap_or_else(|| panic!("Tried to finish PartialActivity without act type!"))
                 .external(),
@@ -174,8 +180,8 @@ impl PartialActivity {
 struct PartialLeg {
     pub mode: Option<Id<String>>,
     pub routing_mode: Option<Id<String>>,
-    pub dep_time: Option<u32>,
-    pub trav_time: Option<u32>,
+    pub dep_time: Option<SimTime>,
+    pub trav_time: Option<Duration>,
     pub partial_route: PartialRoute,
 }
 
@@ -199,7 +205,7 @@ impl PartialLeg {
     }
 
     fn handle_person_arrival(&mut self, event: &PersonArrivalEvent) {
-        self.trav_time = Some(event.time - self.dep_time.unwrap());
+        self.trav_time = Some(event.time.duration_since(self.dep_time.unwrap()));
     }
 
     fn handle_event(&mut self, event: &dyn EventTrait) {
@@ -241,8 +247,8 @@ struct PartialRoute {
     // Generic Route Type
     start_link: Option<Id<Link>>,
     end_link: Option<Id<Link>>,
-    start_time: Option<u32>,
-    end_time: Option<u32>,
+    start_time: Option<SimTime>,
+    end_time: Option<SimTime>,
     distance: Option<f64>,
     vehicle: Option<Id<InternalVehicle>>,
 
@@ -355,9 +361,9 @@ impl PartialRoute {
             Some(
                 self.end_time
                     .unwrap_or_else(|| panic!("Tried to finish PartialRoute without end_time!"))
-                    - self.start_time.unwrap_or_else(|| {
+                    .duration_since(self.start_time.unwrap_or_else(|| {
                         panic!("Tried to finish PartialRoute without start_time!")
-                    }),
+                    })),
             ),
             self.distance,
             self.vehicle,

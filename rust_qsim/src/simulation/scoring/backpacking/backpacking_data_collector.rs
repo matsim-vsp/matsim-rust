@@ -11,7 +11,6 @@ use crate::simulation::scoring::InternalScoringMessage;
 use crate::simulation::scoring::backpacking::backpack::Backpack;
 use crate::simulation::scoring::backpacking::backpacking_message_broker::BackpackingMessageBroker;
 use nohash_hasher::{IntMap, IntSet};
-use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
@@ -200,7 +199,7 @@ impl BackpackingDataCollector {
             );
         }
 
-        let persons: HashMap<Id<InternalPerson>, InternalPerson> = self
+        let persons: IntMap<Id<InternalPerson>, InternalPerson> = self
             .person_id2backpack
             .drain()
             .map(|(person_id, backpack)| (person_id, backpack.finish()))

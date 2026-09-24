@@ -254,6 +254,7 @@ mod tests {
         let leg = InternalLeg::new(
             route,
             "walk",
+            "walk",
             Duration::from_nanos(3_250_000),
             Some(SimTime::from_nanos(1_500_000)),
         );

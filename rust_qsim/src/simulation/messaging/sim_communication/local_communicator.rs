@@ -42,7 +42,6 @@ impl SimCommunicator for ChannelSimCommunicator {
                 .recv()
                 .expect("Error while receiving messages")
                 .sync_message();
-
             let from_rank = received_msg.from_process();
 
             // If a message was received from a neighbor partition for this very time step, remove

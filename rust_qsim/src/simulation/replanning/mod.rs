@@ -821,7 +821,13 @@ mod tests {
                     Some(17.0),
                     None,
                 ));
-                plan.add_leg(InternalLeg::new(route, mode, Duration::from_secs(10), None));
+                plan.add_leg(InternalLeg::new(
+                    route,
+                    mode,
+                    mode,
+                    Duration::from_secs(10),
+                    None,
+                ));
             }
         }
         plan
@@ -863,6 +869,7 @@ mod tests {
                     None,
                 )),
                 "walk",
+                "walk",
                 one_second,
                 Some(request.departure_time()),
             ));
@@ -886,6 +893,7 @@ mod tests {
                     vec![from.clone(), to.clone()],
                 )),
                 "car",
+                "car",
                 two_seconds,
                 None,
             ));
@@ -905,6 +913,7 @@ mod tests {
                     Some(0.0),
                     None,
                 )),
+                "walk",
                 "walk",
                 one_second,
                 None,

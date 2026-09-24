@@ -420,6 +420,7 @@ mod tests {
         let leg = InternalLeg::new(
             route,
             "walk",
+            "walk",
             std::time::Duration::default(),
             Some(SimTime::from_secs(1)),
         );

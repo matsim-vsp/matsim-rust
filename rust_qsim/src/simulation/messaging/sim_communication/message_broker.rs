@@ -57,9 +57,7 @@ where
     }
 
     pub fn rank_for_link(&self, link_id: &Id<Link>) -> u32 {
-        *self.link_mapping.get(link_id).unwrap_or_else(|| {
-            panic!("No link mapping for linkId {}", link_id)
-        })
+        *self.link_mapping.get(link_id).unwrap()
     }
 
     pub fn add_veh(&mut self, vehicle: SimulationVehicle, now: impl Into<Tick>) {
