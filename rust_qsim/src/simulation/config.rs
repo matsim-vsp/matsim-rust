@@ -738,6 +738,7 @@ impl Default for Replanning {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Scoring {
+    pub write_experienced_plans: bool,
     pub activity_params: Vec<ActivityParameter>,
     pub mode_params: Vec<ModeParameter>,
     pub agent_params: Vec<AgentParameter>,
@@ -746,6 +747,7 @@ pub struct Scoring {
 impl Default for Scoring {
     fn default() -> Self {
         Self {
+            write_experienced_plans: false,
             activity_params: Vec::new(),
             mode_params: vec![
                 ModeParameter::default_for_mode("car"),
@@ -757,6 +759,10 @@ impl Default for Scoring {
         }
     }
 }
+
+register_override!("scoring.write_experienced_plans", |config, value| {
+    config.scoring_mut().write_experienced_plans = value.parse().unwrap();
+});
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActivityParameter {
@@ -865,6 +871,12 @@ pub struct Controller {
     pub write_events_interval: u32,
     pub write_plans_interval: u32,
     pub compression_type: CompressionType,
+}
+
+impl Controller {
+    pub fn should_write_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
+        is_last_iteration || (iteration != 0 && iteration % self.write_plans_interval == 0)
+    }
 }
 
 #[deprecated(note = "Use `QSim` and `Controller` instead. This will be removed in the future.")]
@@ -1261,9 +1273,11 @@ pub enum WriteEvents {
 #[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum CompressionType {
     None,
+    #[serde(alias = "XmlGz", alias = "Gz")]
     Gz,
     #[default]
     Proto,
+    #[serde(alias = "XmlZst", alias = "Zst")]
     Zst,
 }
 
@@ -1781,6 +1795,7 @@ mod tests {
         modules:
           scoring:
             type: Scoring
+            write_experienced_plans: true
             activity_params:
               - activity_type: home
             mode_params:
@@ -1802,6 +1817,7 @@ mod tests {
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         let expected = Scoring {
+            write_experienced_plans: true,
             activity_params: vec![ActivityParameter {
                 activity_type: "home".to_string(),
             }],
@@ -1846,6 +1862,7 @@ mod tests {
         assert_eq!(
             config.scoring(),
             &Scoring {
+                write_experienced_plans: false,
                 activity_params: Vec::new(),
                 mode_params: vec![
                     ModeParameter::default_for_mode("car"),
@@ -2289,6 +2306,17 @@ modules:
         assert_eq!(config.qsim().sample_size, 0.25);
         assert_eq!(config.qsim().stuck_threshold, 30);
         assert_eq!(config.qsim().main_modes, vec!["car", "bike"]);
+    }
+
+    #[test]
+    fn override_collect_experienced_plans() {
+        let mut config = base_config();
+        config.apply_overrides(&[(
+            "scoring.write_experienced_plans".to_string(),
+            "true".to_string(),
+        )]);
+
+        assert!(config.scoring().write_experienced_plans);
     }
 
     #[test]

@@ -5,33 +5,29 @@ use crate::simulation::framework_events::{
     MobsimEvent, MobsimEventsManager, PartitionEvent, PartitionEventsManager, QSimId, RuntimeEvent,
     WorkerListenerRegisterFunction,
 };
-use crate::simulation::scenario::population::Population;
+use crate::simulation::id::Id;
+use crate::simulation::scenario::population::{InternalPerson, Population};
 use crate::simulation::scoring::backpacking::backpacking_data_collector::BackpackingDataCollector;
 use crate::simulation::scoring::backpacking::backpacking_message_broker::BackpackingMessageBroker;
 use crate::simulation::scoring::{InternalScoringMessage, ScoringEngine};
-use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use tracing::info;
 
 pub struct BackpackingScoringEngine {
     backpacking_data_collector: Arc<Mutex<BackpackingDataCollector>>,
     backpacking_message_broker: Arc<Mutex<BackpackingMessageBroker>>,
-    rank: QSimId,
-    output_path: PathBuf,
 }
 
 impl BackpackingScoringEngine {
     pub fn new(
         rank: QSimId,
-        population: &Population,
+        home_person_ids: Vec<Id<InternalPerson>>,
         receiver: Receiver<InternalScoringMessage>,
         senders: Vec<Sender<InternalScoringMessage>>,
-        output_path: PathBuf,
     ) -> Self {
         let backpacking_message_broker = BackpackingMessageBroker::new(receiver, senders, rank);
         let backpacking_data_collector = BackpackingDataCollector::new(
-            population,
+            home_person_ids,
             rank,
             Arc::clone(&backpacking_message_broker),
         );
@@ -39,8 +35,6 @@ impl BackpackingScoringEngine {
         Self {
             backpacking_data_collector,
             backpacking_message_broker,
-            rank,
-            output_path,
         }
     }
 }
@@ -68,13 +62,8 @@ impl ScoringEngine for BackpackingScoringEngine {
         })
     }
 
-    fn finish(&self) {
-        let population = self.backpacking_data_collector.lock().unwrap().finish();
-        let mut o = self.output_path.clone();
-        o.push(format!("plans/output_plans_{}.binpb", self.rank));
-        info!("Starting writing PartitionPlans to {:?}", o);
-        population.to_file(o.as_path());
-        info!("Finished writing PartitionPlans to {:?}", o);
+    fn finish(&self) -> Population {
+        self.backpacking_data_collector.lock().unwrap().finish()
     }
 
     fn scoring(&self) {
@@ -87,6 +76,11 @@ impl BackpackingScoringEngine {
         data_collector: Arc<Mutex<BackpackingDataCollector>>,
         events: &mut EventsManager,
     ) {
+        let reset_data_collector = Arc::clone(&data_collector);
+        events.on_reset_iteration(move |_| {
+            reset_data_collector.lock().unwrap().reset_iteration();
+        });
+
         // General backpacking event forwarding
         let data_collector1 = Arc::clone(&data_collector);
         events.on_any(move |e: &dyn EventTrait| {

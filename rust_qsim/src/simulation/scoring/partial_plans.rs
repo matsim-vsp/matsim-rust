@@ -257,8 +257,7 @@ struct PartialRoute {
     relative_position_on_arrival_link: Option<f64>,
 
     // Network Route Type
-    route: Vec<Id<Link>>, // Currently, route sequence does not contain start or end-link id even though internally
-                          // the QSim needs them in the sequence (aleks, May'26)
+    route: Vec<Id<Link>>, // LinkEnter events contain links entered after the departure link.
 }
 
 impl Default for PartialRoute {
@@ -353,11 +352,15 @@ impl PartialRoute {
             // panic!("Tried to finish PartialRoute of type Network with empty vector but differing start and end link!");
         }
 
+        let start_link = self
+            .start_link
+            .unwrap_or_else(|| panic!("Tried to finish PartialRoute without start_link!"));
+        let end_link = self
+            .end_link
+            .unwrap_or_else(|| panic!("Tried to finish PartialRoute without end_link!"));
         let route_delegate = InternalGenericRoute::new(
-            self.start_link
-                .unwrap_or_else(|| panic!("Tried to finish PartialRoute without start_link!")),
-            self.end_link
-                .unwrap_or_else(|| panic!("Tried to finish PartialRoute without end_link!")),
+            start_link.clone(),
+            end_link,
             Some(
                 self.end_time
                     .unwrap_or_else(|| panic!("Tried to finish PartialRoute without end_time!"))
@@ -372,7 +375,11 @@ impl PartialRoute {
         match self.route_type {
             Some(PartialRouteTypes::Generic) => InternalRoute::Generic(route_delegate),
             Some(PartialRouteTypes::Network) => {
-                let route = InternalNetworkRoute::new(route_delegate, self.route);
+                let mut links = self.route;
+                if links.first() != Some(&start_link) {
+                    links.insert(0, start_link);
+                }
+                let route = InternalNetworkRoute::new(route_delegate, links);
 
                 InternalRoute::Network(route)
             }

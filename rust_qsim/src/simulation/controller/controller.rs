@@ -24,6 +24,7 @@ use crate::simulation::replanning::routing::{RoutingModule, TripRouter};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
+use crate::simulation::scoring;
 use crate::simulation::{id, io};
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
@@ -100,6 +101,18 @@ impl ControllerBuilder {
         );
         let scenario: ControllerScenario = self.scenario.into();
         let config = scenario.core.config.clone();
+
+        if config.scoring().write_experienced_plans {
+            let (worker_registrations, controller_registration) =
+                scoring::create_for_n_partitions(&scenario);
+            for (rank, registrations) in worker_registrations {
+                self.worker_listener_register_fn
+                    .entry(rank)
+                    .or_default()
+                    .extend(registrations);
+            }
+            controller_registration(&mut controller_event_manager);
+        }
 
         let global_ttc = Arc::new(GlobalTravelTimeCalculator::new(
             num_parts as usize,
@@ -284,6 +297,9 @@ impl Controller {
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
 
         for iteration in first_iteration..=last_iteration {
+            if iteration != first_iteration {
+                self.controller_events_manager.reset_iteration(iteration);
+            }
             self.run_iteration(
                 iteration,
                 last_iteration,
@@ -334,7 +350,11 @@ impl Controller {
         let population = self.run_mobsim_phase(iteration, is_last_iteration, mobsim_workers);
         let population = self.run_scoring_phase(iteration, is_last_iteration, population);
 
-        if self.should_write_iteration_plans(iteration, is_last_iteration) {
+        if self
+            .config
+            .controller()
+            .should_write_plans(iteration, is_last_iteration)
+        {
             self.write_iteration_files(iteration, iters_path, &population);
         }
 
@@ -518,11 +538,6 @@ impl Controller {
                     .with_extension("output_plans"),
             ),
         );
-    }
-
-    fn should_write_iteration_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
-        is_last_iteration
-            || (iteration != 0 && iteration % self.config.controller().write_plans_interval == 0)
     }
 }
 

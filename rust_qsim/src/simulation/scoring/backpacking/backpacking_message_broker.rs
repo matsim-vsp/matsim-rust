@@ -43,6 +43,13 @@ impl BackpackingMessageBroker {
         self.senders.extend(senders);
     }
 
+    pub(crate) fn reset_iteration(&mut self) {
+        self.leaving_buffer_backpacks.clear();
+        self.leaving_buffer_vehicles.clear();
+        self.wait_backpacks.clear();
+        self.wait_vehicles.clear();
+    }
+
     pub(crate) fn add_leaving_backpack(
         &mut self,
         target: QSimId,

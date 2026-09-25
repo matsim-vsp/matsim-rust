@@ -15,6 +15,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 pub struct BackpackingDataCollector {
+    home_person_ids: Vec<Id<InternalPerson>>,
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
     rank: QSimId,
@@ -31,30 +32,31 @@ pub struct BackpackingDataCollector {
 
 impl BackpackingDataCollector {
     pub fn new(
-        population: &Population,
+        home_person_ids: Vec<Id<InternalPerson>>,
         rank: QSimId,
         message_broker: Arc<Mutex<BackpackingMessageBroker>>,
     ) -> Arc<Mutex<Self>> {
-        let data_collector = Arc::new(Mutex::new(Self {
+        Arc::new(Mutex::new(Self {
+            home_person_ids,
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
             rank,
             message_broker,
             pending_vehicles: Default::default(),
             deferred_link_events: Default::default(),
-        }));
-        data_collector
-            .lock()
-            .unwrap()
-            .generate_backpacks_for_population(&population);
-        data_collector
+        }))
     }
 
-    fn generate_backpacks_for_population(&mut self, population: &Population) {
-        for person in population.persons.keys() {
+    pub(crate) fn reset_iteration(&mut self) {
+        self.person_id2backpack.clear();
+        for person in &self.home_person_ids {
             self.person_id2backpack
                 .insert(person.clone(), Backpack::new(person.clone(), self.rank));
         }
+        self.vehicle_id2person_ids.clear();
+        self.pending_vehicles.clear();
+        self.deferred_link_events.clear();
+        self.message_broker.lock().unwrap().reset_iteration();
     }
 
     pub(crate) fn attach_senders(&mut self, senders: Vec<Sender<InternalScoringMessage>>) {
