@@ -33,4 +33,4 @@ modules:
     main_modes: [ "car" ]
   scoring:
     type: Scoring
-    collect_experienced_plans: true
+    write_experienced_plans: true

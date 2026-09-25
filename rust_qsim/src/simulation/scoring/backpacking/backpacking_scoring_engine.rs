@@ -101,7 +101,17 @@ impl BackpackingScoringEngine {
         let data_collector3 = Arc::clone(&data_collector);
         events.on::<PersonLeavesVehicleEvent, _>(move |e: &PersonLeavesVehicleEvent| {
             let mut bdc = data_collector3.lock().unwrap();
-            bdc.get_vehicles_mut().remove(&e.vehicle);
+            let remove_vehicle = bdc
+                .get_vehicles_mut()
+                .get_mut(&e.vehicle)
+                .map(|persons| {
+                    persons.remove(&e.person);
+                    persons.is_empty()
+                })
+                .unwrap_or(false);
+            if remove_vehicle {
+                bdc.get_vehicles_mut().remove(&e.vehicle);
+            }
         });
     }
 
@@ -152,7 +162,7 @@ impl BackpackingScoringEngine {
         let message_broker1 = Arc::clone(&message_broker);
 
         events.on_event(move |e: &RuntimeEvent<MobsimEvent>| match &e.payload {
-            MobsimEvent::BeforeSimStep(_) => {
+            MobsimEvent::BeforeSimStep(_) | MobsimEvent::BeforeCleanup => {
                 let mut bdc = data_collector1.lock().unwrap();
                 bdc.drain_scoring_messages();
                 bdc.replay_deferred_link_events();

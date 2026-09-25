@@ -1,7 +1,8 @@
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
     PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
-    TeleportationArrivalEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
+    PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
+    VehicleLeavesTrafficEvent,
 };
 use crate::simulation::framework_events::QSimId;
 use crate::simulation::id::Id;
@@ -147,6 +148,8 @@ impl BackpackingDataCollector {
             vec![e.person.clone()]
         } else if let Some(e) = event.as_any().downcast_ref::<TeleportationArrivalEvent>() {
             vec![e.person.clone()]
+        } else if let Some(e) = event.as_any().downcast_ref::<PtTeleportationArrivalEvent>() {
+            vec![e.person.clone()]
         } else if let Some(e) = event.as_any().downcast_ref::<PersonEntersVehicleEvent>() {
             vec![e.person.clone()]
         } else if let Some(e) = event.as_any().downcast_ref::<PersonLeavesVehicleEvent>() {
@@ -174,6 +177,16 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn finish(&mut self) -> Population {
+        {
+            let mut broker = self.message_broker.lock().unwrap();
+            broker.finish_send_recv(
+                0,
+                &mut self.person_id2backpack,
+                &mut self.vehicle_id2person_ids,
+                &mut self.pending_vehicles,
+            );
+        }
+
         let mut leaving_person_ids: Vec<_> = Vec::default();
 
         // Send foreign backpacks to their home partition
@@ -195,6 +208,7 @@ impl BackpackingDataCollector {
         {
             let mut broker = self.message_broker.lock().unwrap();
             broker.finish_send_recv(
+                1,
                 &mut self.person_id2backpack,
                 &mut self.vehicle_id2person_ids,
                 &mut self.pending_vehicles,

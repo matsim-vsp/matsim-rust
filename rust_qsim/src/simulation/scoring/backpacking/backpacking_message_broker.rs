@@ -20,6 +20,7 @@ pub struct BackpackingMessageBroker {
         IntMap<QSimId, IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>>,
     wait_backpacks: IntSet<Id<InternalPerson>>,
     wait_vehicles: IntSet<Id<InternalVehicle>>,
+    received_finish_messages: IntMap<u8, IntSet<QSimId>>,
 }
 
 impl BackpackingMessageBroker {
@@ -36,6 +37,7 @@ impl BackpackingMessageBroker {
             leaving_buffer_vehicles: IntMap::default(),
             wait_backpacks: IntSet::default(),
             wait_vehicles: IntSet::default(),
+            received_finish_messages: IntMap::default(),
         }))
     }
 
@@ -48,6 +50,7 @@ impl BackpackingMessageBroker {
         self.leaving_buffer_vehicles.clear();
         self.wait_backpacks.clear();
         self.wait_vehicles.clear();
+        self.received_finish_messages.clear();
     }
 
     pub(crate) fn add_leaving_backpack(
@@ -221,6 +224,7 @@ impl BackpackingMessageBroker {
     /// manually by sending O(n^2) finish-messages.
     pub(crate) fn finish_send_recv(
         &mut self,
+        phase: u8,
         person_id2backpack: &mut IntMap<Id<InternalPerson>, Backpack>,
         vehicle_id2person_ids: &mut IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
         pending_vehicles: &mut IntSet<Id<InternalVehicle>>,
@@ -236,7 +240,7 @@ impl BackpackingMessageBroker {
             let msg = InternalScoringMessage {
                 from_process: self.rank,
                 to_process: target as QSimId,
-                message: Box::new(FinishMessage {}),
+                message: Box::new(FinishMessage { phase }),
             };
 
             self.senders[target].send(msg).unwrap_or_else(|e| {
@@ -247,15 +251,25 @@ impl BackpackingMessageBroker {
             });
         }
 
-        let mut finished_partitions: IntSet<QSimId> = IntSet::default();
+        let mut finished_partitions = self
+            .received_finish_messages
+            .remove(&phase)
+            .unwrap_or_default();
         while finished_partitions.len() < self.senders.len() - 1 {
             let received_msg = self.receiver.recv().expect("Error receiving message");
             let boxed_any = received_msg.message.as_any();
 
             match () {
                 _ if boxed_any.is::<FinishMessage>() => {
-                    // Add finish message to set for break condition
-                    finished_partitions.insert(received_msg.from_process);
+                    let finish = boxed_any.downcast_ref::<FinishMessage>().unwrap();
+                    if finish.phase == phase {
+                        finished_partitions.insert(received_msg.from_process);
+                    } else {
+                        self.received_finish_messages
+                            .entry(finish.phase)
+                            .or_default()
+                            .insert(received_msg.from_process);
+                    }
                 }
                 _ => {
                     // Process arriving data directly into the collector's maps.
@@ -279,4 +293,6 @@ struct BackpackingMessage {
     backpacks: IntMap<Id<InternalPerson>, Backpack>,
 }
 
-struct FinishMessage {}
+struct FinishMessage {
+    phase: u8,
+}

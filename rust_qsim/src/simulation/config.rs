@@ -2309,7 +2309,7 @@ modules:
     }
 
     #[test]
-    fn override_collect_experienced_plans() {
+    fn override_write_experienced_plans() {
         let mut config = base_config();
         config.apply_overrides(&[(
             "scoring.write_experienced_plans".to_string(),
