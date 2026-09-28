@@ -4,57 +4,20 @@ use crate::simulation::framework_events::{
 };
 use crate::simulation::scenario::ControllerScenario;
 use crate::simulation::scenario::population::Population;
-use crate::simulation::scoring::backpacking::backpacking_scoring_engine::BackpackingScoringEngine;
+use crate::simulation::scoring::backpacking::backpacking_engine::{
+    BackpackingEngine, BackpackingWorkerResult,
+};
 use crate::simulation::{config, io};
-use std::any::Any;
+use nohash_hasher::IntMap;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::mpsc::{self, Sender};
-use std::thread;
+use std::rc::Rc;
+use std::sync::mpsc;
 use tracing::info;
 
 pub mod backpacking;
 pub mod partial_plans;
-
-pub trait Message: Any + Send {
-    fn as_any(&self) -> &dyn Any;
-
-    fn into_any(self: Box<Self>) -> Box<dyn Any>;
-}
-
-impl<T: Any + Send> Message for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        self
-    }
-}
-
-pub struct InternalScoringMessage {
-    pub(crate) from_process: QSimId,
-    #[allow(unused)]
-    pub(crate) to_process: QSimId,
-    pub(crate) message: Box<dyn Message>,
-}
-
-/// Trait for a scoring engine that can be initialized and finished by the controller.
-pub trait ScoringEngine: Send + Sync {
-    /// Attaches the senders to the internal structs managing message handling.
-    fn attach_senders(&mut self, senders: Vec<Sender<InternalScoringMessage>>);
-
-    /// Returns the register functions, given to the Partitions
-    fn register_fn(&self) -> Box<WorkerListenerRegisterFunction>;
-
-    /// Called from the Controller after the mobsim is finished. Shall finish remaining tasks,
-    /// that can only be done after the iteration end.
-    fn finish(&self) -> Population;
-
-    /// Actual scoring.
-    fn scoring(&self);
-}
 
 pub type WorkerListenerRegistrations = HashMap<QSimId, Vec<Box<WorkerListenerRegisterFunction>>>;
 
@@ -62,7 +25,7 @@ pub type WorkerListenerRegistrations = HashMap<QSimId, Vec<Box<WorkerListenerReg
 ///
 /// The worker registrations collect experienced plans locally. The controller registration
 /// synchronizes all collectors after mobsim, merges their results, and writes configured output.
-pub fn create_for_n_partitions(
+pub(crate) fn crate_registrations(
     scenario: &ControllerScenario,
 ) -> (
     WorkerListenerRegistrations,
@@ -95,52 +58,68 @@ pub fn create_for_n_partitions(
         ids.sort();
     }
 
-    let mut senders = Vec::with_capacity(num_parts as usize);
-    let mut receivers = Vec::with_capacity(num_parts as usize);
-    for _ in 0..num_parts {
-        let (sender, receiver) = mpsc::channel();
-        senders.push(sender);
-        receivers.push(Some(receiver));
-    }
+    let (result_sender, result_receiver) = mpsc::channel::<BackpackingWorkerResult>();
 
-    let mut engines = Vec::with_capacity(num_parts as usize);
     let mut worker_registrations = WorkerListenerRegistrations::new();
     for rank in 0..num_parts {
-        let engine = BackpackingScoringEngine::new(
-            rank,
-            std::mem::take(&mut home_person_ids[rank as usize]),
-            receivers[rank as usize]
-                .take()
-                .expect("Each backpacking partition must have one receiver"),
-            senders.clone(),
-        );
-        worker_registrations
-            .entry(rank)
-            .or_default()
-            .push(engine.register_fn());
-        engines.push(engine);
+        let home_person_ids = std::mem::take(&mut home_person_ids[rank as usize]);
+        let result_sender = result_sender.clone();
+        worker_registrations.entry(rank).or_default().push(Box::new(
+            move |events, mobsim_events, _partition_events, migration_extensions| {
+                let engine = Rc::new(RefCell::new(BackpackingEngine::new(home_person_ids)));
+                BackpackingEngine::register(
+                    engine,
+                    events,
+                    mobsim_events,
+                    migration_extensions,
+                    result_sender,
+                    rank,
+                );
+            },
+        ));
     }
 
-    let engines = Arc::new(engines);
     let config = scenario.core.config.clone();
     let output_path = io::resolve_path(config.context(), &config.output().output_dir);
     let controller_registration = Box::new(move |events: &mut ControllerEventsManager| {
         events.on_event(move |event| match &event.payload {
             ControllerEvent::AfterMobsim(controller_event) => {
-                let populations = thread::scope(|scope| {
-                    let handles: Vec<_> = engines
-                        .iter()
-                        .map(|engine| scope.spawn(move || engine.finish()))
-                        .collect();
-                    handles
-                        .into_iter()
-                        .map(|handle| {
-                            handle
-                                .join()
-                                .expect("Backpacking scoring engine failed while finishing")
+                let mut populations_by_rank: IntMap<QSimId, Population> = IntMap::default();
+                for _ in 0..num_parts {
+                    let result = result_receiver.recv().unwrap_or_else(|error| {
+                        panic!(
+                            "Failed to receive backpacking result for iteration {}: {error}",
+                            event.meta.iteration
+                        )
+                    });
+                    assert_eq!(
+                        result.iteration, event.meta.iteration,
+                        "Received backpacking result for iteration {}, expected {}.",
+                        result.iteration, event.meta.iteration
+                    );
+                    assert!(
+                        result.rank < num_parts,
+                        "Received backpacking result from invalid rank {}.",
+                        result.rank
+                    );
+                    let previous = populations_by_rank.insert(result.rank, result.population);
+                    assert!(
+                        previous.is_none(),
+                        "Received duplicate backpacking result from rank {} in iteration {}.",
+                        result.rank,
+                        event.meta.iteration
+                    );
+                }
+                let populations = (0..num_parts)
+                    .map(|rank| {
+                        populations_by_rank.remove(&rank).unwrap_or_else(|| {
+                            panic!(
+                                "Missing backpacking result from rank {rank} in iteration {}.",
+                                event.meta.iteration
+                            )
                         })
-                        .collect()
-                });
+                    })
+                    .collect();
                 let population = merge_partition_populations(populations);
 
                 if config
@@ -154,11 +133,6 @@ pub fn create_for_n_partitions(
                         event.meta.iteration,
                         controller_event.last_iteration,
                     );
-                }
-            }
-            ControllerEvent::Scoring(_) => {
-                for engine in engines.iter() {
-                    engine.scoring();
                 }
             }
             _ => {}

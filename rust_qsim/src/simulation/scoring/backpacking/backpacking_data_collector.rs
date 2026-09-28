@@ -1,226 +1,240 @@
+use crate::simulation::Identifiable;
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
     PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
     PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
 };
-use crate::simulation::framework_events::QSimId;
 use crate::simulation::id::Id;
+use crate::simulation::messaging::partition_change::PartitionChangeEntity;
 use crate::simulation::scenario::population::{InternalPerson, Population};
 use crate::simulation::scenario::vehicles::InternalVehicle;
-use crate::simulation::scoring::InternalScoringMessage;
 use crate::simulation::scoring::backpacking::backpack::Backpack;
-use crate::simulation::scoring::backpacking::backpacking_message_broker::BackpackingMessageBroker;
 use nohash_hasher::{IntMap, IntSet};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+
+pub(crate) struct BackpackingAttachment {
+    backpacks: Vec<Backpack>,
+}
 
 pub struct BackpackingDataCollector {
     home_person_ids: Vec<Id<InternalPerson>>,
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
-    rank: QSimId,
-
-    message_broker: Arc<Mutex<BackpackingMessageBroker>>,
-
-    // Vehicles that crossed into this partition in the current step but whose scoring mapping has
-    // not arrived yet (it travels via the broker's AfterSimStep -> BeforeSimStep cycle, one step
-    // behind the vehicle body). LinkEnterEvents for these vehicles are stored in
-    // deferred_link_events and replayed once both the mapping and the backpack are available.
-    pending_vehicles: IntSet<Id<InternalVehicle>>,
-    deferred_link_events: Vec<LinkEnterEvent>,
 }
 
 impl BackpackingDataCollector {
-    pub fn new(
-        home_person_ids: Vec<Id<InternalPerson>>,
-        rank: QSimId,
-        message_broker: Arc<Mutex<BackpackingMessageBroker>>,
-    ) -> Arc<Mutex<Self>> {
-        Arc::new(Mutex::new(Self {
+    pub fn new(home_person_ids: Vec<Id<InternalPerson>>) -> Self {
+        Self {
             home_person_ids,
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
-            rank,
-            message_broker,
-            pending_vehicles: Default::default(),
-            deferred_link_events: Default::default(),
-        }))
+        }
     }
 
     pub(crate) fn reset_iteration(&mut self) {
         self.person_id2backpack.clear();
         for person in &self.home_person_ids {
             self.person_id2backpack
-                .insert(person.clone(), Backpack::new(person.clone(), self.rank));
+                .insert(person.clone(), Backpack::new(person.clone()));
         }
         self.vehicle_id2person_ids.clear();
-        self.pending_vehicles.clear();
-        self.deferred_link_events.clear();
-        self.message_broker.lock().unwrap().reset_iteration();
     }
 
-    pub(crate) fn attach_senders(&mut self, senders: Vec<Sender<InternalScoringMessage>>) {
-        self.message_broker.lock().unwrap().attach_senders(senders);
+    pub(crate) fn person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
+        self.vehicle_id2person_ids
+            .entry(event.vehicle.clone())
+            .or_default()
+            .insert(event.person.clone());
     }
 
-    /// Drains the scoring message channel into this collector's maps, blocking on each pending
-    /// wait_for_backpack/wait_for_vehicle registration until it is satisfied. Splits self into
-    /// disjoint field borrows so the broker can write directly into the maps and clear
-    /// pending_vehicles entries as vehicle mappings arrive. Called from the BeforeSimStep handler.
-    pub(crate) fn drain_scoring_messages(&mut self) {
-        let mut broker = self.message_broker.lock().unwrap();
-        broker.recv_backpacks(
-            &mut self.person_id2backpack,
-            &mut self.vehicle_id2person_ids,
-            &mut self.pending_vehicles,
-        );
-        broker.recv_vehicles(
-            &mut self.person_id2backpack,
-            &mut self.vehicle_id2person_ids,
-            &mut self.pending_vehicles,
-        );
-    }
-
-    /// Replays LinkEnterEvents that were buffered because the vehicle-to-person mapping had not
-    /// yet arrived when they fired. Only called after drain_scoring_messages(), so both backpacks
-    /// and vehicle mappings are guaranteed to be present.
-    pub(crate) fn replay_deferred_link_events(&mut self) {
-        for event in std::mem::take(&mut self.deferred_link_events) {
-            self.handle_event(&event);
+    pub(crate) fn person_leaves_vehicle(&mut self, event: &PersonLeavesVehicleEvent) {
+        let remove_vehicle = self
+            .vehicle_id2person_ids
+            .get_mut(&event.vehicle)
+            .map(|persons| {
+                persons.remove(&event.person);
+                persons.is_empty()
+            })
+            .unwrap_or(false);
+        if remove_vehicle {
+            self.vehicle_id2person_ids.remove(&event.vehicle);
         }
     }
 
-    pub(crate) fn remove_leaving_vehicles(
-        &mut self,
-        vehicle_id: &Id<InternalVehicle>,
-    ) -> IntSet<Id<InternalPerson>> {
-        // TODO Build a checker, so that it only allows missing entries for teleported modes
-        self.vehicle_id2person_ids
-            .remove(vehicle_id)
-            .unwrap_or_else(|| {
-                // warn!("Partition #{}: Tried to remove vehicle {}, which has no entry!", self.rank, vehicle_id);
-                return IntSet::default();
-            })
-    }
-
-    pub(crate) fn remove_leaving_backpack(&mut self, person_id: &Id<InternalPerson>) -> Backpack {
-        self.person_id2backpack
-            .remove(person_id)
-            .unwrap_or_else(|| {
-                panic!("Tried to remove an agent, for which no backpack is available!")
-            })
-    }
-
-    pub(crate) fn get_vehicles_mut(
-        &mut self,
-    ) -> &mut IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>> {
-        &mut self.vehicle_id2person_ids
-    }
-
-    pub(crate) fn get_pending_vehicles_mut(&mut self) -> &mut IntSet<Id<InternalVehicle>> {
-        &mut self.pending_vehicles
-    }
-
-    /// This method's main purpose is to forward relevant events to the backpacks affected by given event.
-    /// Events which do not affect the Backpack of any person will be ignored.
-    /// TODO This method is quite clunky as there is no HasPersonId/HasVehicleId trait as there is in Java MATSim. Adding a trait could make the function much easier. Ask PH.
+    /// Forwards simulation events to all backpacks affected by that event.
     pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
-        let affected_persons = if let Some(e) = event.as_any().downcast_ref::<LinkEnterEvent>() {
-            match self.vehicle_id2person_ids.get(&e.vehicle) {
-                Some(persons) => persons.iter().cloned().collect(),
-                // The vehicle-to-person mapping arrives one step after the vehicle body (broker
-                // AfterSimStep -> BeforeSimStep). Buffer for replay once both the mapping and the
-                // backpack are present (see replay_deferred_link_events).
-                None if self.pending_vehicles.contains(&e.vehicle) => {
-                    self.deferred_link_events.push(e.clone());
-                    return;
-                }
-                None => return, // untracked vehicle (e.g. teleportation)
-            }
-        } else if let Some(e) = event.as_any().downcast_ref::<PersonArrivalEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<PersonDepartureEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<ActivityStartEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<ActivityEndEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<TeleportationArrivalEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<PtTeleportationArrivalEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<PersonEntersVehicleEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<PersonLeavesVehicleEvent>() {
-            vec![e.person.clone()]
-        } else if let Some(e) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
+        let affected_persons = if let Some(event) = event.as_any().downcast_ref::<LinkEnterEvent>()
+        {
             self.vehicle_id2person_ids
-                .get(&e.vehicle)
+                .get(&event.vehicle)
                 .map(|persons| persons.iter().cloned().collect())
                 .unwrap_or_default()
-        } else if let Some(e) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
+        } else if let Some(event) = event.as_any().downcast_ref::<PersonArrivalEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<PersonDepartureEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<ActivityStartEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<ActivityEndEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<TeleportationArrivalEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<PtTeleportationArrivalEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<PersonEntersVehicleEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<PersonLeavesVehicleEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
             self.vehicle_id2person_ids
-                .get(&e.vehicle)
+                .get(&event.vehicle)
+                .map(|persons| persons.iter().cloned().collect())
+                .unwrap_or_default()
+        } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
+            self.vehicle_id2person_ids
+                .get(&event.vehicle)
                 .map(|persons| persons.iter().cloned().collect())
                 .unwrap_or_default()
         } else {
             return;
         };
 
-        affected_persons.into_iter().for_each(|person| {
+        for person in affected_persons {
             self.person_id2backpack
                 .get_mut(&person)
-                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No backpack is available for person {} while handling an event.",
+                        person.external()
+                    )
+                })
                 .handle_event(event);
-        });
+        }
+    }
+
+    pub(crate) fn send(&mut self, entity: PartitionChangeEntity<'_>) -> BackpackingAttachment {
+        let person_ids = Self::person_ids(entity);
+        if let PartitionChangeEntity::Vehicle(vehicle) = entity {
+            self.vehicle_id2person_ids.remove(vehicle.id());
+        }
+
+        let backpacks = person_ids
+            .into_iter()
+            .map(|person_id| {
+                self.person_id2backpack
+                    .remove(&person_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "No backpack is available for departing person {}.",
+                            person_id.external()
+                        )
+                    })
+            })
+            .collect();
+        BackpackingAttachment { backpacks }
+    }
+
+    pub(crate) fn receive(
+        &mut self,
+        entity: PartitionChangeEntity<'_>,
+        attachment: BackpackingAttachment,
+    ) {
+        let expected_person_ids = Self::person_ids(entity);
+        assert_eq!(
+            attachment.backpacks.len(),
+            expected_person_ids.len(),
+            "Backpacking attachment contains the wrong number of backpacks."
+        );
+
+        for (expected_id, backpack) in expected_person_ids.iter().zip(attachment.backpacks) {
+            assert_eq!(
+                backpack.person_id(),
+                expected_id,
+                "Backpacking attachment contains a backpack for the wrong person."
+            );
+            let previous = self
+                .person_id2backpack
+                .insert(expected_id.clone(), backpack);
+            assert!(
+                previous.is_none(),
+                "A backpack for arriving person {} is already present.",
+                expected_id.external()
+            );
+        }
+
+        if let PartitionChangeEntity::Vehicle(vehicle) = entity {
+            let persons = expected_person_ids.into_iter().collect();
+            let previous = self
+                .vehicle_id2person_ids
+                .insert(vehicle.id().clone(), persons);
+            assert!(
+                previous.is_none(),
+                "A vehicle mapping for arriving vehicle {} is already present.",
+                vehicle.id().external()
+            );
+        }
+    }
+
+    fn person_ids(entity: PartitionChangeEntity<'_>) -> Vec<Id<InternalPerson>> {
+        match entity {
+            PartitionChangeEntity::Vehicle(vehicle) => std::iter::once(vehicle.driver().id())
+                .chain(vehicle.passengers().iter().map(Identifiable::id))
+                .cloned()
+                .collect(),
+            PartitionChangeEntity::TeleportationAgent(agent) => vec![agent.id().clone()],
+        }
     }
 
     pub(crate) fn finish(&mut self) -> Population {
-        {
-            let mut broker = self.message_broker.lock().unwrap();
-            broker.finish_send_recv(
-                0,
-                &mut self.person_id2backpack,
-                &mut self.vehicle_id2person_ids,
-                &mut self.pending_vehicles,
-            );
-        }
-
-        let mut leaving_person_ids: Vec<_> = Vec::default();
-
-        // Send foreign backpacks to their home partition
-        for (person, backpack) in self.person_id2backpack.iter() {
-            if backpack.get_starting_partion() != self.rank {
-                leaving_person_ids.push(person.clone());
-            }
-        }
-
-        for person_id in leaving_person_ids.drain(..) {
-            let leaving_backpack = self.remove_leaving_backpack(&person_id);
-            self.message_broker.lock().unwrap().add_leaving_backpack(
-                leaving_backpack.get_starting_partion(),
-                person_id,
-                leaving_backpack,
-            );
-        }
-
-        {
-            let mut broker = self.message_broker.lock().unwrap();
-            broker.finish_send_recv(
-                1,
-                &mut self.person_id2backpack,
-                &mut self.vehicle_id2person_ids,
-                &mut self.pending_vehicles,
-            );
-        }
-
-        let persons: IntMap<Id<InternalPerson>, InternalPerson> = self
+        let persons = self
             .person_id2backpack
             .drain()
             .map(|(person_id, backpack)| (person_id, backpack.finish()))
             .collect();
-
         Population { persons }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::scenario::vehicles::InternalVehicle;
+    use crate::simulation::vehicles::SimulationVehicle;
+    use crate::test_utils::create_agent;
+    use macros::deterministic_id_test;
+
+    #[deterministic_id_test]
+    fn migrates_driver_and_passenger_and_rebuilds_vehicle_mapping() {
+        let driver = create_agent(1, vec!["destination"]);
+        let passenger = create_agent(2, vec!["destination"]);
+        let driver_id = driver.id().clone();
+        let passenger_id = passenger.id().clone();
+        let vehicle = SimulationVehicle::new(
+            InternalVehicle::new(10, 0, 1.0, 1.0),
+            Some(driver),
+            vec![passenger],
+        );
+        let mut departing =
+            BackpackingDataCollector::new(vec![driver_id.clone(), passenger_id.clone()]);
+        departing.reset_iteration();
+        departing.vehicle_id2person_ids.insert(
+            vehicle.id().clone(),
+            [driver_id.clone(), passenger_id.clone()]
+                .into_iter()
+                .collect(),
+        );
+
+        let attachment = departing.send(PartitionChangeEntity::Vehicle(&vehicle));
+        assert!(departing.person_id2backpack.is_empty());
+        assert!(departing.vehicle_id2person_ids.is_empty());
+
+        let mut arriving = BackpackingDataCollector::new(Vec::new());
+        arriving.receive(PartitionChangeEntity::Vehicle(&vehicle), attachment);
+        assert_eq!(arriving.person_id2backpack.len(), 2);
+        let expected: IntSet<_> = [driver_id, passenger_id].into_iter().collect();
+        assert_eq!(
+            arriving.vehicle_id2person_ids.get(vehicle.id()).unwrap(),
+            &expected
+        );
     }
 }

@@ -104,7 +104,7 @@ impl ControllerBuilder {
 
         if config.scoring().write_experienced_plans {
             let (worker_registrations, controller_registration) =
-                scoring::create_for_n_partitions(&scenario);
+                scoring::crate_registrations(&scenario);
             for (rank, registrations) in worker_registrations {
                 self.worker_listener_register_fn
                     .entry(rank)
@@ -133,7 +133,7 @@ impl ControllerBuilder {
             self.worker_listener_register_fn
                 .entry(i)
                 .or_default()
-                .push(Box::new(move |events, mobsim, partition| {
+                .push(Box::new(move |events, mobsim, partition, _migration| {
                     let ttc = travel_time_collector();
                     PartitionTravelTimeCollector::register_events(&ttc, events);
                     PartitionTravelTimeCollector::register_travel_time_publication(

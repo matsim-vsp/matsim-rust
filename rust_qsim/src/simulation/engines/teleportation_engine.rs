@@ -11,7 +11,10 @@ use crate::simulation::events::{
     PtTeleportationArrivalEventBuilder, TeleportationArrivalEventBuilder,
 };
 use crate::simulation::id::Id;
-use crate::simulation::messaging::messages::ScheduledTeleportation;
+use crate::simulation::messaging::messages::TeleportationMessage;
+use crate::simulation::messaging::partition_change::{
+    PartitionChangeContext, PartitionChangeEntity,
+};
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::scenario::population::{InternalPerson, InternalRoute};
@@ -19,8 +22,40 @@ use crate::simulation::simulation::Simulation;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 
+pub(crate) struct TeleportedAgent {
+    pub(crate) agent: SimulationAgent,
+    pub(crate) end_time: SimTime,
+}
+
+impl TeleportedAgent {
+    fn new(agent: SimulationAgent, end_time: SimTime) -> Self {
+        Self { agent, end_time }
+    }
+
+    fn into_agent(self) -> SimulationAgent {
+        self.agent
+    }
+
+    fn agent(&self) -> &SimulationAgent {
+        &self.agent
+    }
+}
+
+impl EndTime for TeleportedAgent {
+    fn end_time(&self, _: SimTime) -> SimTime {
+        self.end_time
+    }
+}
+
+impl From<TeleportationMessage> for TeleportedAgent {
+    fn from(message: TeleportationMessage) -> Self {
+        let time = message.end_time();
+        Self::new(message.into_agent(), time)
+    }
+}
+
 pub(crate) struct TeleportationEngine {
-    queue: TimeQueue<ScheduledTeleportation, InternalPerson>,
+    queue: TimeQueue<TeleportedAgent, InternalPerson>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
 }
@@ -38,7 +73,7 @@ impl TeleportationEngine {
         self.queue
             .drain()
             .into_iter()
-            .map(ScheduledTeleportation::into_agent)
+            .map(TeleportedAgent::into_agent)
             .collect()
     }
 
@@ -51,7 +86,7 @@ impl TeleportationEngine {
         let now_time = self.clock.tick_to_time(now);
         agent.notify_event(&mut AgentEvent::TeleportationStarted(), now_time);
         let end_time = agent.end_time(now_time);
-        let teleportation = ScheduledTeleportation::new(agent, end_time);
+        let teleportation = TeleportedAgent::new(agent, end_time);
 
         if Simulation::is_local_route(teleportation.agent(), net_message_broker) {
             self.enqueue(teleportation, now_time);
@@ -68,45 +103,61 @@ impl TeleportationEngine {
                 to,
                 now_time,
             );
-            net_message_broker.add_teleportation(teleportation, now);
+            let context = PartitionChangeContext {
+                time: now_time,
+                from: net_message_broker.rank(),
+                to,
+            };
+            let attachments = self
+                .comp_env
+                .partition_migration_extensions_manager_borrow_mut()
+                .send(
+                    PartitionChangeEntity::TeleportationAgent(teleportation.agent()),
+                    &context,
+                );
+            let mut message = TeleportationMessage::from(teleportation);
+            message.set_attachments(attachments);
+            net_message_broker.add_teleportation(message, now);
         }
     }
 
     pub(crate) fn receive_remote_agent(
         &mut self,
         now: Tick,
-        teleportation: ScheduledTeleportation,
+        teleported_agent: TeleportedAgent,
         from: u32,
         to: u32,
     ) {
-        let due_tick = self.clock.time_to_tick(teleportation.end_time());
+        let due_tick = self
+            .clock
+            .time_to_tick(teleported_agent.end_time(self.clock.tick_to_time(now)));
         assert!(
             now < due_tick,
             "Remote teleportation for agent {} from partition {} to partition {} arrived at tick {} after its queue-processing deadline: end time {}, due tick {}. This might happen\
             if teleportation messages are received one time step later than expected. To mitigate this problem, you might enable the global sync.",
-            teleportation.id().external(),
+            teleported_agent.agent().id().external(),
             from,
             to,
             now.value(),
-            teleportation.end_time(),
+            teleported_agent.end_time(self.clock.tick_to_time(now)),
             due_tick.value(),
         );
 
         let now_time = self.clock.tick_to_time(now);
         emit_partition_enter_events_for_agent(
             &mut self.comp_env,
-            teleportation.agent(),
+            teleported_agent.agent(),
             from,
             now_time,
         );
-        self.enqueue(teleportation, now_time);
+        self.enqueue(teleported_agent, now_time);
     }
 
-    fn enqueue(&mut self, teleportation: ScheduledTeleportation, now: SimTime) {
+    fn enqueue(&mut self, teleportation: TeleportedAgent, now: SimTime) {
         // Using the internal id is stable since...
         // ... either proto ids were used (by definition stable)
         // ... or the agent was loaded via XML and sorted by external id before creating internal ids. paul, jul'26
-        let stable_order = teleportation.id().internal();
+        let stable_order = teleportation.agent().id().internal();
         self.queue.add_with_order(teleportation, now, stable_order);
     }
 
@@ -123,7 +174,7 @@ impl TeleportationEngine {
         }
         teleportation_agents
             .into_iter()
-            .map(ScheduledTeleportation::into_agent)
+            .map(TeleportedAgent::into_agent)
             .collect()
     }
 
@@ -203,14 +254,13 @@ impl TeleportationEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::TeleportationEngine;
+    use super::{TeleportationEngine, TeleportedAgent};
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent::SimulationAgent;
     use crate::simulation::agents::{
         AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic, SimulationAgentState,
     };
     use crate::simulation::id::Id;
-    use crate::simulation::messaging::messages::ScheduledTeleportation;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::population::{
@@ -230,7 +280,7 @@ mod tests {
         let due_time = SimTime::from_nanos(350_000_000);
 
         engine.queue.add(
-            ScheduledTeleportation::new(agent, due_time),
+            TeleportedAgent::new(agent, due_time),
             SimTime::from_nanos(0),
         );
 
@@ -250,7 +300,7 @@ mod tests {
 
         engine.receive_remote_agent(
             Tick::new(3),
-            ScheduledTeleportation::new(agent, sender_end_time),
+            TeleportedAgent::new(agent, sender_end_time),
             1,
             2,
         );
@@ -269,10 +319,7 @@ mod tests {
                 let mut engine = TeleportationEngine::new(Default::default(), clock);
                 engine.receive_remote_agent(
                     Tick::new(receive_tick),
-                    ScheduledTeleportation::new(
-                        create_generic_route_agent(id),
-                        SimTime::from_secs(4),
-                    ),
+                    TeleportedAgent::new(create_generic_route_agent(id), SimTime::from_secs(4)),
                     1,
                     2,
                 );
@@ -295,7 +342,7 @@ mod tests {
 
         for agent in [agent_3, agent_1, agent_2] {
             engine.enqueue(
-                ScheduledTeleportation::new(agent, SimTime::from_secs(10)),
+                TeleportedAgent::new(agent, SimTime::from_secs(10)),
                 SimTime::default(),
             );
         }
@@ -326,7 +373,7 @@ mod tests {
         let mut engine = TeleportationEngine::new(Default::default(), clock);
         engine.receive_remote_agent(
             Tick::new(2),
-            ScheduledTeleportation::new(agent, SimTime::from_secs(4)),
+            TeleportedAgent::new(agent, SimTime::from_secs(4)),
             1,
             2,
         );

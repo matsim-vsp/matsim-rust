@@ -10,6 +10,7 @@ use crate::simulation::framework_events::{
 };
 use crate::simulation::io::proto::proto_events::ProtoEventsWriter;
 use crate::simulation::io::xml::events::XmlEventsWriter;
+use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
 use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::population::agent_source::DynAgentSource;
@@ -93,11 +94,12 @@ impl ExternalServices {
 pub struct ThreadLocalComputationalEnvironment {
     #[builder(default)]
     services: ExternalServices,
-    // The value is of type Rc as this is a thread-local events manager.
     #[builder(default)]
     events_manager: Rc<RefCell<EventsManager>>,
     mobsim_events_manager: Rc<RefCell<MobsimEventsManager>>,
     partition_events_manager: Rc<RefCell<PartitionEventsManager>>,
+    #[builder(default)]
+    partition_migration_extensions_manager: Rc<RefCell<PartitionChangeExtensionsManager>>,
 }
 
 #[cfg(test)]
@@ -108,6 +110,9 @@ impl Default for ThreadLocalComputationalEnvironment {
             events_manager: Rc::new(RefCell::new(EventsManager::new())),
             mobsim_events_manager: Rc::new(RefCell::new(MobsimEventsManager::default())),
             partition_events_manager: Rc::new(RefCell::new(PartitionEventsManager::default())),
+            partition_migration_extensions_manager: Rc::new(RefCell::new(
+                PartitionChangeExtensionsManager::default(),
+            )),
         }
     }
 }
@@ -142,6 +147,12 @@ impl ThreadLocalComputationalEnvironment {
 
     pub fn partition_event_bus(&self) -> Rc<RefCell<PartitionEventsManager>> {
         self.partition_events_manager.clone()
+    }
+
+    pub fn partition_migration_extensions_manager_borrow_mut(
+        &mut self,
+    ) -> RefMut<'_, PartitionChangeExtensionsManager> {
+        self.partition_migration_extensions_manager.borrow_mut()
     }
 
     pub fn reset_iteration(&mut self, iteration: u32) {
@@ -373,6 +384,7 @@ impl MobsimWorker {
         let mut events = EventsManager::new();
         let mut mobsim_events = MobsimEventsManager::for_partition(rank, 0);
         let mut partition_events = PartitionEventsManager::for_partition(rank, 0);
+        let mut partition_changes = PartitionChangeExtensionsManager::new();
 
         if config.output().write_events != WriteEvents::None {
             assert!(
@@ -390,7 +402,12 @@ impl MobsimWorker {
         }
 
         for subscriber in additional_subscribers {
-            subscriber(&mut events, &mut mobsim_events, &mut partition_events);
+            subscriber(
+                &mut events,
+                &mut mobsim_events,
+                &mut partition_events,
+                &mut partition_changes,
+            );
         }
 
         let comp_env = ThreadLocalComputationalEnvironmentBuilder::default()
@@ -398,6 +415,7 @@ impl MobsimWorker {
             .events_manager(Rc::new(RefCell::new(events)))
             .mobsim_events_manager(Rc::new(RefCell::new(mobsim_events)))
             .partition_events_manager(Rc::new(RefCell::new(partition_events)))
+            .partition_migration_extensions_manager(Rc::new(RefCell::new(partition_changes)))
             .build()
             .unwrap();
 
@@ -774,7 +792,7 @@ mod tests {
         let completed_iterations = Arc::new(Mutex::new(Vec::new()));
         let completed_for_registration = completed_iterations.clone();
         let completion_listener: Box<WorkerListenerRegisterFunction> =
-            Box::new(move |_, mobsim, _| {
+            Box::new(move |_, mobsim, _, _| {
                 mobsim.on_event(move |event| {
                     if matches!(&event.payload, MobsimEvent::BeforeCleanup) {
                         completed_for_registration

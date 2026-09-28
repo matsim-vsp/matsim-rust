@@ -1,6 +1,10 @@
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_leave_events_for_vehicle;
+use crate::simulation::messaging::messages::VehicleMessage;
+use crate::simulation::messaging::partition_change::{
+    PartitionChangeContext, PartitionChangeEntity,
+};
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::network::sim_network::SimNetworkPartition;
@@ -72,7 +76,16 @@ impl NetworkEngine {
                 to,
                 self.clock.tick_to_time(now),
             );
-            net_message_broker.add_veh(veh, now);
+            let context = PartitionChangeContext {
+                time: self.clock.tick_to_time(now),
+                from: self.network.partition(),
+                to,
+            };
+            let attachments = self
+                .comp_env
+                .partition_migration_extensions_manager_borrow_mut()
+                .send(PartitionChangeEntity::Vehicle(&veh), &context);
+            net_message_broker.add_veh(VehicleMessage::with_attachments(veh, attachments), now);
         }
 
         for cap in move_links_result.storage_cap_updates {

@@ -61,7 +61,7 @@ impl BoundaryEventTimes {
         let enters = self.enters.clone();
         let leaves = self.leaves.clone();
 
-        Box::new(move |events, _, _| {
+        Box::new(move |events, _, _, _| {
             events.on::<LinkEnterEvent, _>(move |event| {
                 if event.link.external() == "link2" {
                     enters.lock().unwrap().push(event.time);

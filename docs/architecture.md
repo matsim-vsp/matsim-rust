@@ -34,6 +34,21 @@ The shared router reads the snapshot without taking the submission lock; unobser
 iteration-reset hooks clear the collectors before the next Mobsim. No event-file output is required for travel-time
 collection.
 
+Worker extensions can observe state moving between partitions through a fourth, thread-local
+`PartitionChangeExtensionsManager` bus alongside the simulation-event, Mobsim-lifecycle, and partition-event buses.
+When a vehicle or teleporting agent leaves a partition, the bus moves one typed attachment slot per registered
+extension into the normal network message. The receiving worker installs all attachments before it emits partition
+enter events and hands the entity to its local engine. The network message broker only transports these opaque slots;
+it does not inspect or clone their contents.
+
+Experienced-plan collection uses this migration bus. Each worker creates one `BackpackingEngine` in an
+`Rc<RefCell<_>>`; its backpacks move with vehicles and teleporting agents and keep both their partial plans and any
+future scoring events. At `BeforeCleanup`, every worker converts the backpacks currently on that partition into one
+partial population and sends it to the controller over a dedicated backchannel before publishing its normal worker
+result. Consequently, all partial populations are available when the controller emits `AfterMobsim`. The scoring
+module verifies iteration and rank, merges the populations deterministically by person ID, and applies the configured
+experienced-plan writing interval. Backpacks do not return to an initial or "home" partition.
+
 ### External Services
 
 As a next step, we integrated the ability to communicate to external services. They are intended to be used during the

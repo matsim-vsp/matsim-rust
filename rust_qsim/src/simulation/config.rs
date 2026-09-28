@@ -747,7 +747,7 @@ pub struct Scoring {
 impl Default for Scoring {
     fn default() -> Self {
         Self {
-            write_experienced_plans: false,
+            write_experienced_plans: true,
             activity_params: Vec::new(),
             mode_params: vec![
                 ModeParameter::default_for_mode("car"),
@@ -1862,7 +1862,7 @@ mod tests {
         assert_eq!(
             config.scoring(),
             &Scoring {
-                write_experienced_plans: false,
+                write_experienced_plans: true,
                 activity_params: Vec::new(),
                 mode_params: vec![
                     ModeParameter::default_for_mode("car"),

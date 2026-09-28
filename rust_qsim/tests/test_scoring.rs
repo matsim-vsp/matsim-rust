@@ -29,9 +29,16 @@ fn backpacking_produces_partition_independent_experienced_plans() {
 
 fn run_and_load(config_path: &str) -> Population {
     let config = Config::from_args(CommandLineArgs::new_with_path(config_path));
-    let output_dir = io::resolve_path(config.context(), &config.output().output_dir);
+    run_config_and_load(config)
+}
 
+fn run_config_and_load(config: Config) -> Population {
+    let output_dir = io::resolve_path(config.context(), &config.output().output_dir);
     let scenario = Scenario::load(config);
+    run_scenario_and_load(scenario, output_dir)
+}
+
+fn run_scenario_and_load(scenario: Scenario, output_dir: PathBuf) -> Population {
     ControllerBuilder::default_with_scenario(scenario)
         .build()
         .unwrap()
