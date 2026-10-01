@@ -16,12 +16,16 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 
 pub mod backpacking;
+mod charypar_nagel_scoring_function;
+mod only_travel_time_dependent_scoring;
 pub mod partial_plans;
 mod plan_scorer;
 
 use crate::simulation::id::Id;
 use crate::simulation::scoring::backpacking::backpack::PersonExperience;
-pub(crate) use plan_scorer::PlanScorer;
+pub use charypar_nagel_scoring_function::CharyparNagelScoringFunction;
+pub use only_travel_time_dependent_scoring::OnlyTravelTimeDependentScoring;
+pub use plan_scorer::PlanScorer;
 
 pub type WorkerListenerRegistrations = IntMap<QSimId, Vec<Box<WorkerListenerRegisterFunction>>>;
 
@@ -184,7 +188,7 @@ pub(crate) fn create_registrations(
 pub(crate) fn score_population(
     experiences: &mut Vec<PersonExperiences>,
     population: &mut Population,
-    plan_scorer: &PlanScorer,
+    plan_scorer: &dyn PlanScorer,
 ) {
     let scores: Vec<_> = experiences
         .par_iter_mut()
@@ -197,9 +201,6 @@ pub(crate) fn score_population(
                     person_id,
                     person.subpopulation().external(),
                     experience.plan(),
-                    person
-                        .selected_plan()
-                        .expect("Mobsim person has no selected plan."),
                 )
                 .unwrap_or_else(|error| panic!("{error}"));
 

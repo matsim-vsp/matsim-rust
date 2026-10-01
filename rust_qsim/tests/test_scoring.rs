@@ -8,6 +8,7 @@ use rust_qsim::simulation::scenario::population::{
     InternalLeg, InternalPlan, InternalPlanElement, InternalRoute, Population,
 };
 use rust_qsim::simulation::scenario::vehicles::Garage;
+use rust_qsim::simulation::scoring::OnlyTravelTimeDependentScoring;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -25,6 +26,44 @@ fn backpacking_produces_partition_independent_experienced_plans() {
         assert_eq!(person.plans().len(), 1);
         check_plan_integrity(&person.plans()[0], &network);
     }
+}
+
+#[deterministic_id_test(rust_qsim)]
+fn controller_builder_uses_custom_travel_time_scorer() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/equil/equil-config-1-scoring.yml",
+    ));
+    config.controller_mut().last_iteration = 0;
+    config.output_mut().output_dir = "./test_output/simulation/scoring_travel_time_override".into();
+    let output_dir = io::resolve_path(config.context(), &config.output().output_dir);
+    let scenario = Scenario::load(config);
+    ControllerBuilder::default_with_scenario(scenario)
+        .scoring_function(Box::new(OnlyTravelTimeDependentScoring))
+        .build()
+        .unwrap()
+        .run();
+
+    let experienced = load_population(&output_dir.join("output_experienced_plans.xml.zst"));
+    let selected = load_population(&output_dir.join("output_plans.xml.zst"));
+    assert!(!experienced.persons.is_empty());
+
+    let mut has_trip = false;
+    for (person_id, person) in &experienced.persons {
+        let score = person.selected_plan().unwrap().score.unwrap();
+        assert!(score <= 0.0);
+        has_trip |= score < 0.0;
+        assert_eq!(
+            Some(score),
+            selected
+                .persons
+                .get(person_id)
+                .unwrap()
+                .selected_plan()
+                .unwrap()
+                .score
+        );
+    }
+    assert!(has_trip, "Expected at least one completed trip");
 }
 
 fn run_and_load(config_path: &str) -> Population {

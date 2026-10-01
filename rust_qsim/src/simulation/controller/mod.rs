@@ -18,7 +18,9 @@ use crate::simulation::replanning::routing::TripRouter;
 use crate::simulation::replanning::{StrategyManager, replan_population};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::{MobsimInput, ScenarioCore};
-use crate::simulation::scoring::{PersonExperiences, PlanScorer, score_population};
+use crate::simulation::scoring::{
+    CharyparNagelScoringFunction, PersonExperiences, PlanScorer, score_population,
+};
 use crate::simulation::simulation::{Simulation, SimulationBuilder};
 use crate::simulation::{io, logging};
 use derive_builder::Builder;
@@ -527,7 +529,7 @@ pub(crate) struct ReplanningPool {
 
 pub(crate) struct ScoringPool {
     pool: Option<rayon::ThreadPool>,
-    plan_scorer: PlanScorer,
+    plan_scorer: Box<dyn PlanScorer>,
 }
 
 impl ReplanningPool {
@@ -599,7 +601,10 @@ impl ReplanningPool {
 }
 
 impl ScoringPool {
-    pub(crate) fn new(scenario_core: &ScenarioCore) -> Self {
+    pub(crate) fn new(
+        scenario_core: &ScenarioCore,
+        plan_scorer: Option<Box<dyn PlanScorer>>,
+    ) -> Self {
         let pool = Some(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(scenario_core.config.computational_setup().scoring_threads as usize)
@@ -609,10 +614,12 @@ impl ScoringPool {
         );
         Self {
             pool,
-            plan_scorer: PlanScorer::new(
-                scenario_core.config.as_ref(),
-                scenario_core.network.clone(),
-            ),
+            plan_scorer: plan_scorer.unwrap_or_else(|| {
+                Box::new(CharyparNagelScoringFunction::new(
+                    scenario_core.config.as_ref(),
+                    scenario_core.network.clone(),
+                ))
+            }),
         }
     }
 
@@ -622,10 +629,10 @@ impl ScoringPool {
         population: &mut Population,
     ) {
         match &self.pool {
-            Some(pool) => {
-                pool.install(|| score_population(experienced_plans, population, &self.plan_scorer))
-            }
-            None => score_population(experienced_plans, population, &self.plan_scorer),
+            Some(pool) => pool.install(|| {
+                score_population(experienced_plans, population, self.plan_scorer.as_ref())
+            }),
+            None => score_population(experienced_plans, population, self.plan_scorer.as_ref()),
         }
     }
 }

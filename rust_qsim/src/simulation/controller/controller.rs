@@ -25,7 +25,7 @@ use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
-use crate::simulation::scoring::PersonExperiences;
+use crate::simulation::scoring::{PersonExperiences, PlanScorer};
 use crate::simulation::{id, io};
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
@@ -56,6 +56,8 @@ pub struct Controller {
     trip_router: TripRouter,
     #[debug(skip)]
     experienced_plan_collection: scoring::ExperiencedPlansCollection,
+    #[debug(skip)]
+    scoring_function: Option<Box<dyn PlanScorer>>,
 }
 
 pub struct ControllerBuilder {
@@ -66,6 +68,7 @@ pub struct ControllerBuilder {
     external_services: ExternalServices,
     global_barrier: Option<Arc<Barrier>>,
     adapter_handles: Vec<AdapterHandle>,
+    scoring_function: Option<Box<dyn PlanScorer>>,
 }
 
 impl ControllerBuilder {
@@ -78,6 +81,7 @@ impl ControllerBuilder {
             external_services: ExternalServices::default(),
             global_barrier: None,
             adapter_handles: Vec::new(),
+            scoring_function: None,
         }
     }
 
@@ -157,6 +161,7 @@ impl ControllerBuilder {
             adapter_handles: self.adapter_handles,
             trip_router: router,
             experienced_plan_collection: experienced_plans,
+            scoring_function: self.scoring_function,
         })
     }
 
@@ -170,6 +175,11 @@ impl ControllerBuilder {
 
     pub fn agent_source(mut self, source: impl IntoDynAgentSource) -> Self {
         self.agent_source = source.into_dyn_agent_source();
+        self
+    }
+
+    pub fn scoring_function(mut self, scoring_function: Box<dyn PlanScorer>) -> Self {
+        self.scoring_function = Some(scoring_function);
         self
     }
 
@@ -297,7 +307,7 @@ impl Controller {
         }
 
         let mut mobsim_workers = self.start_mobsim_workers();
-        let scoring_pool = ScoringPool::new(&self.scenario.core);
+        let scoring_pool = ScoringPool::new(&self.scenario.core, self.scoring_function.take());
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
 
         for iteration in first_iteration..=last_iteration {
