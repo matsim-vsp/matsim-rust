@@ -23,6 +23,8 @@ struct ModeScoringParams {
     marginal_utility_of_traveling_s: f64,
     marginal_utility_of_distance_m: f64,
     monetary_distance_cost_rate: f64,
+    daily_money_constant: f64,
+    daily_utility_constant: f64,
     constant: f64,
 }
 
@@ -73,6 +75,8 @@ impl CharyparNagelScoringFunction {
                             / SECONDS_PER_HOUR,
                         marginal_utility_of_distance_m: params.marginal_utility_of_distance,
                         monetary_distance_cost_rate: params.monetary_distance_cost_rate,
+                        daily_money_constant: params.daily_money_constant,
+                        daily_utility_constant: params.daily_utility_constant,
                         constant: params.constant,
                     },
                 )
@@ -230,12 +234,13 @@ impl CharyparNagelScoringFunction {
         agent_params: &AgentScoringParams,
     ) -> Result<f64, String> {
         let mut score = 0.0;
+        let mut seen_modes_in_plan = BTreeSet::new();
 
         for (trip_index, trip) in get_trip_spans_default(&plan.elements)
             .into_iter()
             .enumerate()
         {
-            let mut seen_modes = BTreeSet::new();
+            let mut seen_modes_in_trip = BTreeSet::new();
             for (leg_index, leg) in trip.legs(&plan.elements).enumerate() {
                 score += self.score_leg(
                     person_id,
@@ -243,7 +248,8 @@ impl CharyparNagelScoringFunction {
                     leg_index,
                     leg,
                     agent_params,
-                    &mut seen_modes,
+                    &mut seen_modes_in_trip,
+                    &mut seen_modes_in_plan,
                 )?;
             }
         }
@@ -258,7 +264,8 @@ impl CharyparNagelScoringFunction {
         leg_index: usize,
         leg: &InternalLeg,
         agent_params: &AgentScoringParams,
-        seen_modes: &mut BTreeSet<String>,
+        seen_modes_in_trip: &mut BTreeSet<String>,
+        seen_modes_in_plan: &mut BTreeSet<String>,
     ) -> Result<f64, String> {
         let mode = leg.mode.external();
         let params = self.mode_params.get(mode).ok_or_else(|| {
@@ -281,6 +288,8 @@ impl CharyparNagelScoringFunction {
                 params.monetary_distance_cost_rate,
             ),
             ("mode constant", params.constant),
+            ("daily money constant", params.daily_money_constant),
+            ("daily utility constant", params.daily_utility_constant),
         ] {
             if !value.is_finite() {
                 return Err(format!(
@@ -318,8 +327,21 @@ impl CharyparNagelScoringFunction {
                 * params.monetary_distance_cost_rate
                 * agent_params.marginal_utility_of_money;
         }
-        if seen_modes.insert(mode.to_string()) {
+        if seen_modes_in_trip.insert(mode.to_string()) {
             score += params.constant;
+        }
+        // Daily constants apply once per mode across all trips in this scoring call.
+        if seen_modes_in_plan.insert(mode.to_string()) {
+            let mut daily_score = params.daily_utility_constant;
+            if params.daily_money_constant != 0.0 {
+                require_finite(
+                    person_id,
+                    agent_params.marginal_utility_of_money,
+                    "marginal utility of money",
+                )?;
+                daily_score += params.daily_money_constant * agent_params.marginal_utility_of_money;
+            }
+            score += daily_score;
         }
 
         Ok(score)
@@ -538,8 +560,8 @@ mod tests {
     #[deterministic_id_test]
     fn scores_trip_modes_and_constants_once_per_trip() {
         let mut car = mode("car", -6.0, -0.01, -0.1, 2.0);
-        car.daily_money_constant = 100.0;
-        car.daily_utility_constant = 100.0;
+        car.daily_money_constant = 10.0;
+        car.daily_utility_constant = 10.0;
         let walk = mode("walk", -3.0, 0.0, 0.0, 1.0);
         let scorer = make_scorer(
             vec![
@@ -568,7 +590,7 @@ mod tests {
             8.0 * SECONDS_PER_HOUR,
             6.0 / SECONDS_PER_HOUR,
         );
-        let car_score = -6.0 + 300.0 * -0.01 + 300.0 * -0.1 * 1.0 + 2.0;
+        let car_score = -6.0 + 300.0 * -0.01 + 300.0 * -0.1 * 1.0 + 2.0 + 20.0;
         let walk_score = -0.5 + 1.0;
         assert_approx_eq(
             activities + car_score + walk_score,
@@ -593,6 +615,78 @@ mod tests {
             time_only_scorer
                 .score_trips(&person, &two_trips, params)
                 .unwrap(),
+        );
+    }
+
+    #[deterministic_id_test]
+    fn scores_daily_constants_once_per_mode_across_trips() {
+        let mgn_utility_money = 2.5;
+        let car_daily_money_constant = -4.0;
+        let car_daily_utility_constant = 3.0;
+        let car_constant = 2.0;
+        let walk_daily_money_constant = 2.0;
+        let walk_daily_utility_constant = -1.0;
+        let walk_constant = 1.0;
+
+        let mut car = mode("car", 0.0, 0.0, 0.0, car_constant);
+        car.daily_money_constant = car_daily_money_constant;
+        car.daily_utility_constant = car_daily_utility_constant;
+        let mut walk = mode("walk", 0.0, 0.0, 0.0, walk_constant);
+        walk.daily_money_constant = walk_daily_money_constant;
+        walk.daily_utility_constant = walk_daily_utility_constant;
+
+        let mut unused = mode("bike", 0.0, 0.0, 0.0, 100.0);
+        unused.daily_money_constant = 100.0;
+        unused.daily_utility_constant = 100.0;
+
+        let mut scorer = make_scorer(
+            vec![("home", SECONDS_PER_DAY), ("work", SECONDS_PER_DAY)],
+            vec![car, walk, unused],
+            Network::new(),
+        );
+        scorer
+            .agent_params
+            .get_mut("person")
+            .unwrap()
+            .marginal_utility_of_money = mgn_utility_money;
+        let person = Id::create("person");
+        let trip_plan = plan(vec![
+            activity("home", None, Some(0)),
+            generic_leg("car", 0, None),
+            activity("car interaction", Some(0), Some(0)),
+            generic_leg("car", 0, None),
+            generic_leg("walk", 0, None),
+            activity("work", Some(0), Some(0)),
+            generic_leg("walk", 0, None),
+            activity("walk interaction", Some(0), Some(0)),
+            generic_leg("walk", 0, None),
+            generic_leg("car", 0, None),
+            activity("home", Some(0), None),
+        ]);
+
+        // Both modes occur in both trips, but their daily constants apply only once.
+        let trip_constants = 2.0 * (car_constant + walk_constant);
+        let daily_constants = (car_daily_utility_constant
+            + car_daily_money_constant * mgn_utility_money)
+            + (walk_daily_utility_constant + walk_daily_money_constant * mgn_utility_money);
+        let agent_params = scorer.agent_params.get("person").unwrap();
+        assert_approx_eq(
+            trip_constants + daily_constants,
+            scorer
+                .score_trips(&person, &trip_plan, agent_params)
+                .unwrap(),
+        );
+        let activity_score = scorer
+            .score_activities(&person, &trip_plan, false, agent_params)
+            .unwrap();
+        let expected = activity_score + trip_constants + daily_constants;
+        assert_approx_eq(
+            expected,
+            scorer.score(&person, "person", &trip_plan).unwrap(),
+        );
+        assert_approx_eq(
+            expected,
+            scorer.score(&person, "person", &trip_plan).unwrap(),
         );
     }
 
