@@ -211,15 +211,23 @@ impl XmlEventsWriter {
                 ev.relative_position
             )
         } else if let Some(stuck) = e.as_any().downcast_ref::<PersonStuckEvent>() {
-            format!(
-                "<event time=\"{}\" type=\"{}\" person=\"{}\" link=\"{}\" legMode=\"{}\" reason=\"{}\"/>\n",
+            let mut result = format!(
+                "<event time=\"{}\" type=\"{}\" person=\"{}\"",
                 stuck.time().format_decimal_seconds(),
                 stuck.type_(),
                 stuck.person,
-                stuck.link,
-                stuck.leg_mode,
-                stuck.reason
-            )
+            );
+            if let Some(link) = &stuck.link {
+                result.push_str(&format!(" link=\"{link}\""));
+            }
+            if let Some(leg_mode) = &stuck.leg_mode {
+                result.push_str(&format!(" legMode=\"{leg_mode}\""));
+            }
+            if let Some(reason) = &stuck.reason {
+                result.push_str(&format!(" reason=\"{reason}\""));
+            }
+            result.push_str("/>\n");
+            result
         } else {
             panic!("Unknown event type");
         }
@@ -549,11 +557,9 @@ fn handle_link_leave(attr: Vec<OwnedAttribute>) -> Box<dyn EventTrait> {
 fn handle_person_stuck(attr: Vec<OwnedAttribute>) -> Box<dyn EventTrait> {
     let time = SimTime::parse_decimal_seconds(value_from_name(&attr, "time").unwrap()).unwrap();
     let person: Id<InternalPerson> = Id::create(value_from_name(&attr, "person").unwrap());
-    let link: Id<Link> = Id::create(value_from_name(&attr, "link").unwrap());
-    let leg_mode: Id<String> = Id::create(value_from_name(&attr, "legMode").unwrap());
-    let reason = value_from_name(&attr, "reason")
-        .cloned()
-        .unwrap_or_default();
+    let link = value_from_name(&attr, "link").map(|value| Id::<Link>::create(value));
+    let leg_mode = value_from_name(&attr, "legMode").map(|value| Id::<String>::create(value));
+    let reason = value_from_name(&attr, "reason").cloned();
     Box::new(
         PersonStuckEventBuilder::default()
             .time(time)
@@ -575,7 +581,10 @@ fn value_from_name<'a>(attr: &'a Vec<OwnedAttribute>, name: &str) -> Option<&'a 
 #[cfg(test)]
 mod tests {
     use super::{XmlEventsReader, XmlEventsWriter};
-    use crate::simulation::events::{ActivityStartEvent, ActivityStartEventBuilder, EventTrait};
+    use crate::simulation::events::{
+        ActivityStartEvent, ActivityStartEventBuilder, EventTrait, PersonStuckEvent,
+        PersonStuckEventBuilder,
+    };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::time::SimTime;
@@ -583,6 +592,53 @@ mod tests {
     use std::fs;
     use std::io::Read;
     use std::path::PathBuf;
+
+    #[deterministic_id_test]
+    fn person_stuck_xml_round_trip_preserves_optional_attributes() {
+        let output_dir = PathBuf::from("./test_output/io/xml_events/person_stuck_round_trip");
+        fs::create_dir_all(&output_dir).unwrap();
+        let path = output_dir.join("events.xml");
+        let time = SimTime::from_secs(42);
+
+        let with_optional_attributes = PersonStuckEventBuilder::default()
+            .time(time)
+            .person(Id::create("person-with-details"))
+            .link(Some(Id::create("link-1")))
+            .leg_mode(Some(Id::create("car")))
+            .reason(Some("mobsim end".to_string()))
+            .build()
+            .unwrap();
+        let without_optional_attributes = PersonStuckEventBuilder::default()
+            .time(time)
+            .person(Id::create("person-without-details"))
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            "<event time=\"42\" type=\"stuckAndAbort\" person=\"person-with-details\" link=\"link-1\" legMode=\"car\" reason=\"mobsim end\"/>\n",
+            XmlEventsWriter::event_2_string(&with_optional_attributes)
+        );
+        assert_eq!(
+            "<event time=\"42\" type=\"stuckAndAbort\" person=\"person-without-details\"/>\n",
+            XmlEventsWriter::event_2_string(&without_optional_attributes)
+        );
+
+        let writer = XmlEventsWriter::new(&path);
+        writer.on_any(&with_optional_attributes);
+        writer.on_any(&without_optional_attributes);
+        writer.finish();
+
+        let mut reader = XmlEventsReader::new(&path);
+        for expected in [&with_optional_attributes, &without_optional_attributes] {
+            let (parsed_time, parsed_event) = reader.read_next().unwrap();
+            assert_eq!(time, parsed_time);
+            let parsed_event = parsed_event
+                .as_any()
+                .downcast_ref::<PersonStuckEvent>()
+                .unwrap();
+            assert_eq!(expected, parsed_event);
+        }
+    }
 
     #[deterministic_id_test]
     fn xml_event_round_trip_preserves_nanoseconds() {

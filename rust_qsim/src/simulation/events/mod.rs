@@ -567,9 +567,12 @@ impl PtTeleportationArrivalEvent {
 pub struct PersonStuckEvent {
     pub time: SimTime,
     pub person: Id<InternalPerson>,
-    pub link: Id<Link>,
-    pub leg_mode: Id<String>,
-    pub reason: String,
+    #[builder(default)]
+    pub link: Option<Id<Link>>,
+    #[builder(default)]
+    pub leg_mode: Option<Id<String>>,
+    #[builder(default)]
+    pub reason: Option<String>,
     #[builder(default)]
     pub attributes: InternalAttributes,
 }
@@ -582,9 +585,24 @@ impl PersonStuckEvent {
         PersonStuckEventBuilder::default()
             .time(time)
             .person(Id::create(&event.attributes["person"].as_string()))
-            .leg_mode(Id::create(&event.attributes["mode"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .reason(event.attributes["reason"].as_string())
+            .leg_mode(
+                event
+                    .attributes
+                    .get("leg_mode")
+                    .map(|value| Id::create(&value.as_string())),
+            )
+            .link(
+                event
+                    .attributes
+                    .get("link")
+                    .map(|value| Id::create(&value.as_string())),
+            )
+            .reason(
+                event
+                    .attributes
+                    .get("reason")
+                    .map(|value| value.as_string()),
+            )
             .attributes(attrs)
             .build()
             .unwrap()

@@ -1,14 +1,16 @@
-use crate::simulation::agents::SimulationAgentLogic;
+use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
+use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
+use crate::simulation::events::PersonStuckEventBuilder;
 use crate::simulation::framework_events::MobsimEvent;
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::population::agent_source::DynAgentSource;
 use crate::simulation::scenario::{MobsimInput, MobsimScenarioPartition};
-use crate::simulation::time::{SimClock, Tick};
+use crate::simulation::time::{SimClock, SimTime, Tick};
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use tracing::info;
@@ -70,12 +72,49 @@ where
             now = now.next();
         }
 
-        self.activity_engine
+        let agents = self
+            .activity_engine
             .drain()
             .into_iter()
             .chain(self.leg_engine.drain())
             .chain(agents_changing_engine)
-            .collect()
+            .collect::<Vec<_>>();
+
+        // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
+        self.emit_stuck_events(self.clock.tick_to_time(self.end_tick), &agents);
+        agents
+    }
+
+    fn emit_stuck_events(&mut self, time: SimTime, agents: &[SimulationAgent]) {
+        let mut events = agents
+            .iter()
+            .filter_map(|agent| match agent.state() {
+                SimulationAgentState::ACTIVITY if agent.next_leg().is_none() => None,
+                SimulationAgentState::LEG => Some(
+                    PersonStuckEventBuilder::default()
+                        .time(time)
+                        .person(agent.id().clone())
+                        .link(agent.curr_link_id().cloned())
+                        .leg_mode(Some(agent.curr_leg().mode.clone()))
+                        .build()
+                        .unwrap(),
+                ),
+                SimulationAgentState::ACTIVITY | SimulationAgentState::STUCK => Some(
+                    PersonStuckEventBuilder::default()
+                        .time(time)
+                        .person(agent.id().clone())
+                        .build()
+                        .unwrap(),
+                ),
+            })
+            .collect::<Vec<_>>();
+
+        // Sort for deterministic results
+        events.sort_unstable_by_key(|event| event.person.internal());
+        let mut events_manager = self.comp_env.events_manager_borrow_mut();
+        for event in &events {
+            events_manager.process_event(event);
+        }
     }
 
     /// Performs a sim step for the activity engine and the leg engine.

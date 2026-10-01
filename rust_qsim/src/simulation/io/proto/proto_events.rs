@@ -319,18 +319,18 @@ impl From<&PersonStuckEvent> for GenericEvent {
             "person".to_string(),
             AttributeValue::from(value.person.external()),
         );
-        attributes.insert(
-            "link".to_string(),
-            AttributeValue::from(value.link.external()),
-        );
-        attributes.insert(
-            "leg_mode".to_string(),
-            AttributeValue::from(value.leg_mode.external()),
-        );
-        attributes.insert(
-            "reason".to_string(),
-            AttributeValue::from(value.reason.to_string()),
-        );
+        if let Some(link) = &value.link {
+            attributes.insert("link".to_string(), AttributeValue::from(link.external()));
+        }
+        if let Some(leg_mode) = &value.leg_mode {
+            attributes.insert(
+                "leg_mode".to_string(),
+                AttributeValue::from(leg_mode.external()),
+            );
+        }
+        if let Some(reason) = &value.reason {
+            attributes.insert("reason".to_string(), AttributeValue::from(reason.as_str()));
+        }
         GenericEvent {
             r#type: value.type_().to_string(),
             attributes,
@@ -590,16 +590,70 @@ mod tests {
     use crate::simulation::InternalAttributes;
     use crate::simulation::events::{
         ActivityEndEvent, ActivityEndEventBuilder, ActivityStartEvent, ActivityStartEventBuilder,
-        EventTrait, GenericEventBuilder,
+        EventTrait, GenericEventBuilder, PersonStuckEvent, PersonStuckEventBuilder,
     };
     use crate::simulation::id::Id;
-    use crate::simulation::io::proto::proto_events::{ProtoEventsReader, ProtoEventsWriter};
+    use crate::simulation::io::proto::proto_events::{
+        ProtoEventsReader, ProtoEventsWriter, event_from_proto, event_to_proto,
+    };
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
+
+    #[deterministic_id_test]
+    fn person_stuck_proto_round_trip_preserves_optional_attributes() {
+        let time = SimTime::from_secs(42);
+        let with_optional_attributes = PersonStuckEventBuilder::default()
+            .time(time)
+            .person(Id::create("person-with-details"))
+            .link(Some(Id::create("link-1")))
+            .leg_mode(Some(Id::create("car")))
+            .reason(Some("mobsim end".to_string()))
+            .build()
+            .unwrap();
+        let without_optional_attributes = PersonStuckEventBuilder::default()
+            .time(time)
+            .person(Id::create("person-without-details"))
+            .build()
+            .unwrap();
+
+        let with_optional_proto = event_to_proto(&with_optional_attributes);
+        assert_eq!("link-1", with_optional_proto.attributes["link"].as_string());
+        assert_eq!(
+            "car",
+            with_optional_proto.attributes["leg_mode"].as_string()
+        );
+        assert_eq!(
+            "mobsim end",
+            with_optional_proto.attributes["reason"].as_string()
+        );
+
+        let without_optional_proto = event_to_proto(&without_optional_attributes);
+        assert_eq!(1, without_optional_proto.attributes.len());
+        assert!(without_optional_proto.attributes.contains_key("person"));
+        assert!(!without_optional_proto.attributes.contains_key("link"));
+        assert!(!without_optional_proto.attributes.contains_key("leg_mode"));
+        assert!(!without_optional_proto.attributes.contains_key("reason"));
+
+        for (expected, proto) in [
+            (&with_optional_attributes, &with_optional_proto),
+            (&without_optional_attributes, &without_optional_proto),
+        ] {
+            let parsed_event = event_from_proto(time, proto);
+            let parsed_event = parsed_event
+                .as_any()
+                .downcast_ref::<PersonStuckEvent>()
+                .unwrap();
+            assert_eq!(expected.time, parsed_event.time);
+            assert_eq!(expected.person, parsed_event.person);
+            assert_eq!(expected.link, parsed_event.link);
+            assert_eq!(expected.leg_mode, parsed_event.leg_mode);
+            assert_eq!(expected.reason, parsed_event.reason);
+        }
+    }
 
     #[deterministic_id_test]
     fn write_read_single() {
