@@ -105,9 +105,9 @@ mod tests {
             &PersonStuckEventBuilder::default()
                 .time(SimTime::from_secs(20))
                 .person(person)
-                .link(link)
-                .leg_mode(Id::create("car"))
-                .reason("test abort".to_string())
+                .link(Some(link))
+                .leg_mode(Some(Id::create("car")))
+                .reason(Some("test abort".to_string()))
                 .build()
                 .unwrap(),
         );

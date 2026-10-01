@@ -71,13 +71,10 @@ impl PartialPlan {
             // if the current activity is not ended, we mark it as aborted.
             act.aborted = true;
         } else if self.current_leg.is_none() {
-            // if also leg is none, we are in between an activity and a leg. This is counted as an aborted activity.
-            if let Activity(act) = self.elements.last_mut().unwrap() {
-                act.attributes.add("aborted", true);
-            } else {
-                panic!(
-                    "Illegal state: Person is stuck while not doing an activity or leg, but the last plan element is not an activity!"
-                );
+            // If neither activity nor leg is active, mark the last completed element as aborted.
+            match self.elements.last_mut().unwrap() {
+                Activity(act) => act.attributes.insert("aborted", true),
+                Leg(leg) => leg.attributes.insert("aborted", true),
             }
         }
     }
@@ -474,13 +471,16 @@ impl PartialRoute {
 mod tests {
     use super::PartialPlan;
     use crate::simulation::events::{
-        ActivityEndEventBuilder, LinkEnterEventBuilder, PersonArrivalEventBuilder,
-        PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
-        PtTeleportationArrivalEventBuilder,
+        ActivityEndEventBuilder, ActivityStartEventBuilder, LinkEnterEventBuilder,
+        PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
+        PersonStuckEventBuilder, PtTeleportationArrivalEventBuilder,
+        TeleportationArrivalEventBuilder,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
-    use crate::simulation::scenario::population::{InternalPlanElement, InternalRoute};
+    use crate::simulation::scenario::population::{
+        InternalPlan, InternalPlanElement, InternalRoute,
+    };
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
 
@@ -508,6 +508,168 @@ mod tests {
                 .build()
                 .unwrap(),
         );
+    }
+
+    fn arrive(plan: &mut PartialPlan) {
+        plan.handle_event(
+            &TeleportationArrivalEventBuilder::default()
+                .time(SimTime::from_secs(30))
+                .person(Id::create("person"))
+                .mode(Id::create("walk"))
+                .distance(123.0)
+                .build()
+                .unwrap(),
+        );
+        plan.handle_event(
+            &PersonArrivalEventBuilder::default()
+                .time(SimTime::from_secs(30))
+                .person(Id::create("person"))
+                .link(Id::create("end"))
+                .leg_mode(Id::create("walk"))
+                .build()
+                .unwrap(),
+        );
+    }
+
+    fn start_activity(plan: &mut PartialPlan) {
+        plan.handle_event(
+            &ActivityStartEventBuilder::default()
+                .time(SimTime::from_secs(30))
+                .person(Id::create("person"))
+                .link(Id::create("end"))
+                .act_type(Id::create("work"))
+                .coordinate(Coordinate::new_2d(3.0, 4.0))
+                .build()
+                .unwrap(),
+        );
+    }
+
+    fn stuck(plan: &mut PartialPlan) {
+        plan.handle_event(
+            &PersonStuckEventBuilder::default()
+                .time(SimTime::from_secs(60))
+                .person(Id::create("person"))
+                .build()
+                .unwrap(),
+        );
+    }
+
+    fn assert_only_last_element_aborted(plan: &InternalPlan) {
+        assert!(!plan.elements.is_empty());
+        for (index, element) in plan.elements.iter().enumerate() {
+            let aborted = match element {
+                InternalPlanElement::Activity(act) => act.attributes.get::<bool>("aborted"),
+                InternalPlanElement::Leg(leg) => leg.attributes.get::<bool>("aborted"),
+            };
+            assert_eq!(
+                aborted,
+                (index == plan.elements.len() - 1).then_some(true),
+                "Unexpected aborted attribute on plan element {index}"
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn stuck_between_activity_end_and_departure_marks_last_activity() {
+        let mut partial = PartialPlan::default();
+        finish_initial_activity(&mut partial);
+        depart(&mut partial, "walk");
+        arrive(&mut partial);
+        start_activity(&mut partial);
+        partial.handle_event(
+            &ActivityEndEventBuilder::default()
+                .time(SimTime::from_secs(50))
+                .person(Id::create("person"))
+                .link(Id::create("end"))
+                .act_type(Id::create("work"))
+                .coordinate(Coordinate::new_2d(3.0, 4.0))
+                .build()
+                .unwrap(),
+        );
+        let completed_elements = partial.elements.clone();
+
+        stuck(&mut partial);
+        let plan = partial.finish();
+
+        assert_eq!(plan.elements.len(), 3);
+        assert_only_last_element_aborted(&plan);
+        assert_eq!(plan.elements[..2], completed_elements[..2]);
+        let InternalPlanElement::Activity(mut expected) = completed_elements[2].clone() else {
+            panic!("Expected completed activity");
+        };
+        assert_eq!(expected.start_time, Some(SimTime::from_secs(30)));
+        assert_eq!(expected.end_time, Some(SimTime::from_secs(50)));
+        expected.attributes.insert("aborted", true);
+        assert_eq!(plan.elements[2], InternalPlanElement::Activity(expected));
+    }
+
+    #[deterministic_id_test]
+    fn stuck_between_arrival_and_activity_start_marks_last_leg() {
+        let mut partial = PartialPlan::default();
+        finish_initial_activity(&mut partial);
+        depart(&mut partial, "walk");
+        arrive(&mut partial);
+        let completed_elements = partial.elements.clone();
+
+        stuck(&mut partial);
+        let plan = partial.finish();
+
+        assert_eq!(plan.elements.len(), 2);
+        assert_only_last_element_aborted(&plan);
+        assert_eq!(plan.elements[0], completed_elements[0]);
+        let InternalPlanElement::Leg(mut expected) = completed_elements[1].clone() else {
+            panic!("Expected completed leg");
+        };
+        assert_eq!(expected.dep_time, Some(SimTime::from_secs(10)));
+        assert_eq!(expected.trav_time, Some(std::time::Duration::from_secs(20)));
+        assert!(matches!(expected.route, Some(InternalRoute::Generic(_))));
+        expected.attributes.insert("aborted", true);
+        assert_eq!(plan.elements[1], InternalPlanElement::Leg(expected));
+    }
+
+    #[deterministic_id_test]
+    fn stuck_during_activity_marks_current_activity() {
+        let mut partial = PartialPlan::default();
+        finish_initial_activity(&mut partial);
+        depart(&mut partial, "walk");
+        arrive(&mut partial);
+        start_activity(&mut partial);
+        let completed_elements = partial.elements.clone();
+
+        stuck(&mut partial);
+        let plan = partial.finish();
+
+        assert_eq!(plan.elements.len(), 3);
+        assert_only_last_element_aborted(&plan);
+        assert_eq!(plan.elements[..2], completed_elements);
+        let InternalPlanElement::Activity(act) = &plan.elements[2] else {
+            panic!("Expected current activity");
+        };
+        assert_eq!(act.act_type.external(), "work");
+        assert_eq!(act.start_time, Some(SimTime::from_secs(30)));
+        assert_eq!(act.end_time, None);
+    }
+
+    #[deterministic_id_test]
+    fn stuck_during_leg_marks_current_leg() {
+        let mut partial = PartialPlan::default();
+        finish_initial_activity(&mut partial);
+        depart(&mut partial, "walk");
+        let completed_elements = partial.elements.clone();
+
+        stuck(&mut partial);
+        let plan = partial.finish();
+
+        assert_eq!(plan.elements.len(), 2);
+        assert_only_last_element_aborted(&plan);
+        assert_eq!(plan.elements[..1], completed_elements);
+        let InternalPlanElement::Leg(leg) = &plan.elements[1] else {
+            panic!("Expected current leg");
+        };
+        assert_eq!(leg.mode.external(), "walk");
+        assert_eq!(leg.dep_time, Some(SimTime::from_secs(10)));
+        assert_eq!(leg.trav_time, None);
+        assert_eq!(leg.route, None);
     }
 
     #[deterministic_id_test]

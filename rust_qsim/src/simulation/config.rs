@@ -773,7 +773,7 @@ register_override!("scoring.write_experienced_plans", |config, value| {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActivityParameter {
     pub activity_type: String,
-    #[serde(default)]
+    #[serde(default = "f64_value_1_0")]
     pub typical_duration_s: f64,
 }
 
@@ -781,7 +781,7 @@ impl ActivityParameter {
     pub fn default_for_activity_type(activity_type: &str) -> Self {
         Self {
             activity_type: activity_type.to_string(),
-            typical_duration_s: 0.0,
+            typical_duration_s: 1.0,
         }
     }
 }
@@ -1450,6 +1450,10 @@ impl MetisOptions {
 
 fn f32_value_0_03() -> f32 {
     0.03
+}
+
+fn f64_value_1_0() -> f64 {
+    1.0
 }
 
 fn edge_weight_constant() -> EdgeWeight {
@@ -2330,10 +2334,10 @@ modules:
         let mut config = base_config();
         config.apply_overrides(&[(
             "scoring.write_experienced_plans".to_string(),
-            "true".to_string(),
+            "false".to_string(),
         )]);
 
-        assert!(config.scoring().write_experienced_plans);
+        assert!(!config.scoring().write_experienced_plans);
     }
 
     #[test]

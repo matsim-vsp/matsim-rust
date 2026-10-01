@@ -202,9 +202,9 @@ impl CharyparNagelScoringFunction {
                 activity.act_type.external()
             ));
         }
-        if !params.typical_duration_s.is_finite() || params.typical_duration_s < 0.0 {
+        if !params.typical_duration_s.is_finite() || params.typical_duration_s <= 0.0 {
             return Err(format!(
-                "Cannot score person {} activity {}: typical duration must be finite and non-negative, got {}.",
+                "Cannot score person {} activity {}: typical duration must be finite and positive, got {}.",
                 person_id.external(),
                 activity.act_type.external(),
                 params.typical_duration_s
