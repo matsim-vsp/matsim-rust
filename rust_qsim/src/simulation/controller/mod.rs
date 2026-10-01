@@ -742,8 +742,7 @@ impl IterationEventsWriter {
     }
 
     fn should_write(&self, iteration: u32) -> bool {
-        iteration == self.last_iteration
-            || (iteration != 0 && iteration % self.write_events_interval == 0)
+        iteration == self.last_iteration || iteration % self.write_events_interval == 0
     }
 
     fn on_any(&self, event: &dyn EventTrait) {

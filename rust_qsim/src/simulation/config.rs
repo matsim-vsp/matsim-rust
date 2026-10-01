@@ -894,7 +894,7 @@ pub struct Controller {
 
 impl Controller {
     pub fn should_write_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
-        is_last_iteration || (iteration != 0 && iteration % self.write_plans_interval == 0)
+        is_last_iteration || iteration % self.write_plans_interval == 0
     }
 }
 

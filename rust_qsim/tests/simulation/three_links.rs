@@ -58,7 +58,7 @@ struct StuckEvents {
 impl StuckEvents {
     fn register_fn(&self) -> Box<WorkerListenerRegisterFunction> {
         let events = self.events.clone();
-        Box::new(move |event_manager, _, _| {
+        Box::new(move |event_manager, _, _, _| {
             event_manager.on::<PersonStuckEvent, _>(move |event| {
                 events.lock().unwrap().push(event.clone());
             });
