@@ -255,15 +255,6 @@ pub struct InternalPerson {
     attributes: InternalAttributes,
 }
 
-impl InternalPerson {
-    pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
-        self.plans
-            .iter_mut()
-            .find(|plan| plan.selected)
-            .expect("No selected plan found")
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub struct InternalPopulation {
     pub persons: Vec<InternalPerson>,
@@ -307,8 +298,40 @@ impl InternalPerson {
         self.plans.iter().find(|&plan| plan.selected)
     }
 
-    pub(crate) fn attributes(&self) -> &InternalAttributes {
+    pub fn attributes(&self) -> &InternalAttributes {
         &self.attributes
+    }
+
+    pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
+        self.plans
+            .iter_mut()
+            .find(|plan| plan.selected)
+            .expect("No selected plan found")
+    }
+
+    pub fn add_new_plan_as_selected(&mut self, plan: InternalPlan) -> usize {
+        // Deselect all existing plans
+        for p in &mut self.plans {
+            p.selected = false;
+        }
+        // Add the new plan and mark it as selected
+        let mut new_plan = plan;
+        new_plan.selected = true;
+        self.plans.push(new_plan);
+        self.plans().len() - 1
+    }
+
+    pub fn mark_plan_as_selected(&mut self, plan_index: usize) {
+        if plan_index >= self.plans.len() {
+            panic!(
+                "Plan index {} is out of bounds for person {}",
+                plan_index,
+                self.id.external()
+            );
+        }
+        for (i, p) in self.plans.iter_mut().enumerate() {
+            p.selected = i == plan_index;
+        }
     }
 }
 

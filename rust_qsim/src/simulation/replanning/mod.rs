@@ -346,20 +346,18 @@ impl PlanStrategy for GenericPlanStrategy {
 
     fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext) {
         let plan_index = self.selector.select(person, context);
+        person.mark_plan_as_selected(plan_index);
+
         if self.modules.is_empty() {
             return;
         }
-        let mut new_plan = person
+
+        let new_plan = person
             .plans()
             .get(plan_index)
             .cloned()
             .unwrap_or_else(|| panic!("Selected plan index {plan_index} does not exist."));
-        for plan in person.plans_mut() {
-            plan.selected = false;
-        }
-        new_plan.selected = true;
-        person.plans_mut().push(new_plan);
-        let new_plan_index = person.plans().len() - 1;
+        let new_plan_index = person.add_new_plan_as_selected(new_plan);
 
         for module in &self.modules {
             module.handle(person, new_plan_index);
