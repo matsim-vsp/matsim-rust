@@ -3,6 +3,7 @@ use rust_qsim::simulation::config::Config;
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::events::utils::compare_event_folder;
 use rust_qsim::simulation::scenario::Scenario;
+use rust_qsim::simulation::scoring::OnlyTravelTimeDependentScoring;
 use std::path::PathBuf;
 
 #[deterministic_id_test(rust_qsim)]
@@ -26,6 +27,7 @@ fn test_berlin(parts: u32) {
 
     let scenario = Scenario::load(config);
     let controller = ControllerBuilder::default_with_scenario(scenario)
+        .scoring_function(Box::new(OnlyTravelTimeDependentScoring))
         .build()
         .unwrap();
     controller.run();
