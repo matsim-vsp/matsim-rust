@@ -3,33 +3,76 @@ use crate::simulation::framework_events::{
     WorkerListenerRegisterFunction,
 };
 use crate::simulation::scenario::ControllerScenario;
-use crate::simulation::scenario::population::Population;
+use crate::simulation::scenario::population::{InternalPerson, Population};
 use crate::simulation::scoring::backpacking::backpacking_engine::{
     BackpackingEngine, BackpackingWorkerResult,
 };
-use crate::simulation::{config, io};
+use ahash::HashMapExt;
 use nohash_hasher::IntMap;
+use rayon::iter::ParallelIterator;
+use rayon::prelude::IntoParallelRefMutIterator;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::path::Path;
 use std::rc::Rc;
-use std::sync::mpsc;
-use tracing::info;
+use std::sync::{Arc, Mutex, mpsc};
 
 pub mod backpacking;
 pub mod partial_plans;
+mod plan_scorer;
 
-pub type WorkerListenerRegistrations = HashMap<QSimId, Vec<Box<WorkerListenerRegisterFunction>>>;
+use crate::simulation::id::Id;
+use crate::simulation::scoring::backpacking::backpack::PersonExperience;
+pub(crate) use plan_scorer::PlanScorer;
+
+pub type WorkerListenerRegistrations = IntMap<QSimId, Vec<Box<WorkerListenerRegisterFunction>>>;
+
+pub(crate) type PersonExperiences = IntMap<Id<InternalPerson>, PersonExperience>;
+
+struct ExperiencedPlansResult {
+    iteration: u32,
+    plans: Vec<PersonExperiences>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ExperiencedPlansCollection {
+    result: Arc<Mutex<Option<ExperiencedPlansResult>>>,
+}
+
+impl ExperiencedPlansCollection {
+    fn store(&self, iteration: u32, plans: Vec<PersonExperiences>) {
+        let mut result = self.result.lock().unwrap();
+        assert!(
+            result.is_none(),
+            "Previous experienced-plan result was not consumed before iteration {iteration}."
+        );
+        *result = Some(ExperiencedPlansResult { iteration, plans });
+    }
+
+    pub(crate) fn take(&self, iteration: u32) -> Vec<PersonExperiences> {
+        let result = self
+            .result
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| panic!("No experienced-plan result for iteration {iteration}."));
+        assert_eq!(
+            result.iteration, iteration,
+            "Experienced-plan result belongs to iteration {}, expected {iteration}.",
+            result.iteration
+        );
+        result.plans
+    }
+}
 
 /// Creates the complete backpacking setup for the configured number of partitions.
 ///
 /// The worker registrations collect experienced plans locally. The controller registration
-/// synchronizes all collectors after mobsim, merges their results, and writes configured output.
-pub(crate) fn crate_registrations(
+/// synchronizes all collectors after mobsim, and stores their deterministically merged result.
+pub(crate) fn create_registrations(
     scenario: &ControllerScenario,
 ) -> (
     WorkerListenerRegistrations,
     Box<ControllerListenerRegisterFn>,
+    ExperiencedPlansCollection,
 ) {
     let num_parts = scenario.core.config.partitioning().num_parts;
     let mut home_person_ids = vec![Vec::new(); num_parts as usize];
@@ -79,12 +122,15 @@ pub(crate) fn crate_registrations(
         ));
     }
 
-    let config = scenario.core.config.clone();
-    let output_path = io::resolve_path(config.context(), &config.output().output_dir);
+    let experienced_plans = ExperiencedPlansCollection::default();
+    let callback_experienced_plans = experienced_plans.clone();
     let controller_registration = Box::new(move |events: &mut ControllerEventsManager| {
         events.on_event(move |event| match &event.payload {
-            ControllerEvent::AfterMobsim(controller_event) => {
-                let mut populations_by_rank: IntMap<QSimId, Population> = IntMap::default();
+            ControllerEvent::AfterMobsim(_) => {
+                let mut populations_by_rank: IntMap<
+                    QSimId,
+                    IntMap<Id<InternalPerson>, PersonExperience>,
+                > = IntMap::default();
                 for _ in 0..num_parts {
                     let result = result_receiver.recv().unwrap_or_else(|error| {
                         panic!(
@@ -102,7 +148,8 @@ pub(crate) fn crate_registrations(
                         "Received backpacking result from invalid rank {}.",
                         result.rank
                     );
-                    let previous = populations_by_rank.insert(result.rank, result.population);
+                    let previous =
+                        populations_by_rank.insert(result.rank, result.experienced_plans);
                     assert!(
                         previous.is_none(),
                         "Received duplicate backpacking result from rank {} in iteration {}.",
@@ -110,7 +157,7 @@ pub(crate) fn crate_registrations(
                         event.meta.iteration
                     );
                 }
-                let populations = (0..num_parts)
+                let plans = (0..num_parts)
                     .map(|rank| {
                         populations_by_rank.remove(&rank).unwrap_or_else(|| {
                             panic!(
@@ -120,68 +167,55 @@ pub(crate) fn crate_registrations(
                         })
                     })
                     .collect();
-                let population = merge_partition_populations(populations);
-
-                if config
-                    .controller()
-                    .should_write_plans(event.meta.iteration, controller_event.last_iteration)
-                {
-                    write_experienced_population(
-                        &population,
-                        &config,
-                        &output_path,
-                        event.meta.iteration,
-                        controller_event.last_iteration,
-                    );
-                }
+                callback_experienced_plans.store(event.meta.iteration, plans);
             }
             _ => {}
         });
     });
 
-    (worker_registrations, controller_registration)
+    (
+        worker_registrations,
+        controller_registration,
+        experienced_plans,
+    )
 }
 
-fn merge_partition_populations(populations: Vec<Population>) -> Population {
-    let mut persons: Vec<_> = populations
-        .into_iter()
-        .flat_map(|population| population.persons)
-        .collect();
-    persons.sort_by(|(left, _), (right, _)| left.cmp(right));
-
-    let mut merged = Population::new();
-    for (person_id, person) in persons {
-        let previous = merged.persons.insert(person_id.clone(), person);
-        assert!(
-            previous.is_none(),
-            "Person {} was returned by more than one backpacking partition.",
-            person_id.external()
-        );
-    }
-    merged
-}
-
-fn write_experienced_population(
-    population: &Population,
-    config: &config::Config,
-    output_path: &Path,
-    iteration: u32,
-    is_last_iteration: bool,
+/// Performs multithreaded scoring of the population. Rayon pool is started in the controller.
+pub(crate) fn score_population(
+    experiences: &mut Vec<PersonExperiences>,
+    population: &mut Population,
+    plan_scorer: &PlanScorer,
 ) {
-    let filename = config
-        .controller()
-        .compression_type
-        .with_extension("output_experienced_plans");
-    let iteration_path = output_path
-        .join("ITERS")
-        .join(format!("it.{iteration}"))
-        .join(&filename);
-    info!("Writing experienced plans to {}", iteration_path.display());
-    population.to_file(&iteration_path);
+    let scores: Vec<_> = experiences
+        .par_iter_mut()
+        .flat_map_iter(|experience| experience.iter_mut())
+        .map(|(person_id, experience)| {
+            let person = population.persons.get(person_id).unwrap();
 
-    if is_last_iteration {
-        let root_path = output_path.join(filename);
-        info!("Writing experienced plans to {}", root_path.display());
-        population.to_file(&root_path);
+            let score = plan_scorer
+                .score(
+                    person_id,
+                    person.subpopulation().external(),
+                    experience.plan(),
+                    person
+                        .selected_plan()
+                        .expect("Mobsim person has no selected plan."),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
+
+            experience.plan_mut().score = Some(score);
+
+            (person_id.clone(), score)
+        })
+        .collect();
+
+    // setting the person scores in a separate loop to avoid mutable borrow issues
+    for (person_id, score) in scores {
+        population
+            .persons
+            .get_mut(&person_id)
+            .unwrap()
+            .selected_plan_mut()
+            .score = Some(score);
     }
 }

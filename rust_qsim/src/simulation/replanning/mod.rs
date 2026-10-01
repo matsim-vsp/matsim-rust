@@ -102,8 +102,6 @@ pub(crate) fn replan_population(
 ) -> Population {
     let persons = population
         .persons
-        .into_iter()
-        .collect::<Vec<_>>()
         .into_par_iter()
         .map(|(id, mut person)| {
             strategy_manager.run(iteration, base_seed, innovation_disabled, &mut person);

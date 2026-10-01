@@ -19,7 +19,7 @@ pub trait DynEq: Any {
     fn dyn_eq(&self, other: &dyn DynEq) -> bool;
 }
 
-pub trait EventTrait: Debug + DynEq + Send {
+pub trait EventTrait: Debug + DynEq + Send + Sync {
     //This can't be a const, because traits with const fields are not dyn compatible.
     fn type_(&self) -> &'static str;
     // fn as_any(&self) -> &dyn Any;

@@ -2,7 +2,7 @@ use crate::external_services::AdapterHandle;
 use crate::simulation::config::{Config, Logging, OverwriteFiles, WriteEvents, write_config};
 use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
-    create_output_filename,
+    ScoringPool, create_output_filename,
 };
 use crate::simulation::framework_events::{
     ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn,
@@ -25,9 +25,11 @@ use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
+use crate::simulation::scoring::PersonExperiences;
 use crate::simulation::{id, io};
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
+use itertools::Itertools;
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,6 +54,8 @@ pub struct Controller {
     global_barrier: Arc<Barrier>,
     adapter_handles: Vec<AdapterHandle>,
     trip_router: TripRouter,
+    #[debug(skip)]
+    experienced_plan_collection: scoring::ExperiencedPlansCollection,
 }
 
 pub struct ControllerBuilder {
@@ -102,17 +106,15 @@ impl ControllerBuilder {
         let scenario: ControllerScenario = self.scenario.into();
         let config = scenario.core.config.clone();
 
-        if config.scoring().write_experienced_plans {
-            let (worker_registrations, controller_registration) =
-                scoring::crate_registrations(&scenario);
-            for (rank, registrations) in worker_registrations {
-                self.worker_listener_register_fn
-                    .entry(rank)
-                    .or_default()
-                    .extend(registrations);
-            }
-            controller_registration(&mut controller_event_manager);
+        let (worker_registrations, controller_registration, experienced_plans) =
+            scoring::create_registrations(&scenario);
+        for (rank, registrations) in worker_registrations {
+            self.worker_listener_register_fn
+                .entry(rank)
+                .or_default()
+                .extend(registrations);
         }
+        controller_registration(&mut controller_event_manager);
 
         let global_ttc = Arc::new(GlobalTravelTimeCalculator::new(
             num_parts as usize,
@@ -154,6 +156,7 @@ impl ControllerBuilder {
             global_barrier: barrier,
             adapter_handles: self.adapter_handles,
             trip_router: router,
+            experienced_plan_collection: experienced_plans,
         })
     }
 
@@ -294,6 +297,7 @@ impl Controller {
         }
 
         let mut mobsim_workers = self.start_mobsim_workers();
+        let scoring_pool = ScoringPool::new(&self.scenario.core);
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
 
         for iteration in first_iteration..=last_iteration {
@@ -304,6 +308,7 @@ impl Controller {
                 iteration,
                 last_iteration,
                 &mut mobsim_workers,
+                &scoring_pool,
                 &replanning_pool,
                 &iters_path,
             );
@@ -338,6 +343,7 @@ impl Controller {
         iteration: u32,
         end_iter: u32,
         mobsim_workers: &mut MobsimWorkerPool,
+        scoring_pool: &ScoringPool,
         replanning_pool: &ReplanningPool,
         iters_path: impl AsRef<Path>,
     ) {
@@ -348,7 +354,8 @@ impl Controller {
             .process_event(ControllerEvent::iteration_starts(is_last_iteration));
 
         let population = self.run_mobsim_phase(iteration, is_last_iteration, mobsim_workers);
-        let population = self.run_scoring_phase(iteration, is_last_iteration, population);
+        let population =
+            self.run_scoring_phase(iteration, is_last_iteration, scoring_pool, population);
 
         if self
             .config
@@ -400,6 +407,7 @@ impl Controller {
         &mut self,
         iteration: u32,
         is_last_iteration: bool,
+        scoring_pool: &ScoringPool,
         mut population: Population,
     ) -> Population {
         info!("Starting scoring phase for iteration {iteration}");
@@ -407,12 +415,36 @@ impl Controller {
         self.controller_events_manager
             .process_event(ControllerEvent::scoring(is_last_iteration));
 
-        // Dummy impl: set scores to 1.0 for all persons.
-        population
-            .persons
-            .values_mut()
-            .flat_map(|p| p.plans_mut())
-            .for_each(|p| p.score = Some(1.0));
+        let mut experienced_plans = self.experienced_plan_collection.take(iteration);
+        assert_eq!(
+            population.persons.len(),
+            experienced_plans.iter().map(|e| e.len()).sum::<usize>(),
+            "Experienced population size differs from the mobsim population in iteration {iteration}."
+        );
+
+        info!(
+            "Scoring population of {} persons in iteration {iteration}",
+            population.persons.len()
+        );
+        scoring_pool.score_population(&mut experienced_plans, &mut population);
+        info!("Finished scoring population in iteration {iteration}");
+
+        if self.config.scoring().write_experienced_plans
+            && self
+                .config
+                .controller()
+                .should_write_plans(iteration, is_last_iteration)
+        {
+            let output_path =
+                io::resolve_path(self.config.context(), &self.config.output().output_dir);
+            write_experienced_population(
+                experienced_plans,
+                &self.config,
+                &output_path,
+                iteration,
+                is_last_iteration,
+            );
+        }
 
         population
     }
@@ -575,6 +607,38 @@ fn prepare_output_directory(
     })?;
 
     Ok(())
+}
+
+pub(crate) fn write_experienced_population(
+    experienced_plans: Vec<PersonExperiences>,
+    config: &Config,
+    output_path: &Path,
+    iteration: u32,
+    is_last_iteration: bool,
+) {
+    let persons: Vec<_> = experienced_plans
+        .into_iter()
+        .flat_map(|e| e.into_values())
+        .map(|e| e.convert_to_person())
+        .sorted_by(|a, b| a.id().cmp(&b.id()))
+        .collect();
+    let filename = config
+        .controller()
+        .compression_type
+        .with_extension("output_experienced_plans");
+    let iteration_path = output_path
+        .join("ITERS")
+        .join(format!("it.{iteration}"))
+        .join(&filename);
+    info!("Writing experienced plans to {}", iteration_path.display());
+    let population = Population::from_persons(persons);
+    population.to_file(&iteration_path);
+
+    if is_last_iteration {
+        let root_path = output_path.join(filename);
+        info!("Writing experienced plans to {}", root_path.display());
+        population.to_file(&root_path);
+    }
 }
 
 #[cfg(test)]

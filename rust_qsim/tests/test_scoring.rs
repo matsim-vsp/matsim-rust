@@ -59,6 +59,19 @@ fn run_scenario_and_load(scenario: Scenario, output_dir: PathBuf) -> Population 
     let root_population = load_population(&root_file);
     let iteration_population = load_population(&iteration_file);
     assert_eq!(root_population, iteration_population);
+    let output_population = load_population(&output_dir.join("output_plans.xml.zst"));
+    for (person_id, experienced_person) in &root_population.persons {
+        assert_eq!(
+            experienced_person.selected_plan().unwrap().score,
+            output_population
+                .persons
+                .get(person_id)
+                .unwrap()
+                .selected_plan()
+                .unwrap()
+                .score
+        );
+    }
     root_population
 }
 
@@ -68,7 +81,7 @@ fn load_population(path: &PathBuf) -> Population {
 
 fn check_plan_integrity(plan: &InternalPlan, network: &Network) {
     assert!(!plan.elements.is_empty(), "Experienced plan is empty");
-    assert!(plan.score.is_none());
+    assert!(plan.score.is_some_and(f64::is_finite));
     assert!(matches!(
         plan.elements.first(),
         Some(InternalPlanElement::Activity(activity)) if activity.start_time.is_none()

@@ -1,4 +1,11 @@
 modules:
+  scoring:
+    type: Scoring
+    activity_params:
+      - activity_type: h
+        typical_duration_s: 43200.0
+      - activity_type: w
+        typical_duration_s: 28800.0
   network:
     type: Network
     path: ./assets/equil/equil-network.xml

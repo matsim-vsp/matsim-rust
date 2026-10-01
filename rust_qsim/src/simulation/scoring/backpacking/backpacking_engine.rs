@@ -4,10 +4,12 @@ use crate::simulation::events::{
 use crate::simulation::framework_events::{MobsimEvent, MobsimEventsManager, QSimId};
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
-use crate::simulation::scenario::population::{InternalPerson, Population};
+use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scoring::backpacking::backpack::PersonExperience;
 use crate::simulation::scoring::backpacking::backpacking_data_collector::{
     BackpackingAttachment, BackpackingDataCollector,
 };
+use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
@@ -15,7 +17,7 @@ use std::sync::mpsc::Sender;
 pub(crate) struct BackpackingWorkerResult {
     pub(crate) rank: QSimId,
     pub(crate) iteration: u32,
-    pub(crate) population: Population,
+    pub(crate) experienced_plans: IntMap<Id<InternalPerson>, PersonExperience>,
 }
 
 pub struct BackpackingEngine {
@@ -63,12 +65,12 @@ impl BackpackingEngine {
 
         mobsim_events.on_event(move |event| {
             if event.payload == MobsimEvent::BeforeCleanup {
-                let population = engine.borrow_mut().finish();
+                let backpacks = engine.borrow_mut().finish();
                 result_sender
                     .send(BackpackingWorkerResult {
                         rank,
                         iteration: event.meta.iteration,
-                        population,
+                        experienced_plans: backpacks,
                     })
                     .unwrap_or_else(|error| {
                         panic!(
@@ -113,7 +115,7 @@ impl BackpackingEngine {
         });
     }
 
-    fn finish(&mut self) -> Population {
+    fn finish(&mut self) -> IntMap<Id<InternalPerson>, PersonExperience> {
         self.backpacking_data_collector.finish()
     }
 }

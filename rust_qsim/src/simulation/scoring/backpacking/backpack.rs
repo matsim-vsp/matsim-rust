@@ -1,16 +1,22 @@
 use crate::simulation::events::EventTrait;
 use crate::simulation::id::Id;
-use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::population::{InternalPerson, InternalPlan};
 use crate::simulation::scoring::partial_plans::PartialPlan;
 
 /// Backpacks store the Events as well as a partial plan ([BackpackPlan]) for each agent.
 /// The Backpack is not managed by the agent itself but by the [BackpackDataCollector], which exists
 /// once for each partition. If an agent leaves the current partition, the Backpack is transmitted
 /// to the partition the agent is currently entering.
-pub struct Backpack {
+pub(crate) struct Backpack {
     person_id: Id<InternalPerson>,
     events: Vec<Box<dyn EventTrait>>,
     backpack_plan: PartialPlan,
+}
+
+#[allow(dead_code)]
+pub(crate) struct PersonExperience {
+    dummy_person: InternalPerson,
+    events: Vec<Box<dyn EventTrait>>,
 }
 
 impl Backpack {
@@ -22,18 +28,12 @@ impl Backpack {
         }
     }
 
-    #[allow(unused)]
-    fn relevant_event_for_scoring(event: &dyn EventTrait) -> Option<Box<dyn EventTrait>> {
+    fn relevant_event_for_scoring(_: &dyn EventTrait) -> Option<Box<dyn EventTrait>> {
         /*
-        Currently, this function is not needed, as there are no relevant events for scoring.
-        However, I implemented it so that future relevant events can be simply added to the Backpack.
-        An example implementation for LinkEnterEvent is given below.
+        Keep scoring-only events in the backpack so they migrate with the affected person.
+        Additional event types can be added here without coupling them to partial-plan creation.
         (aleks May'26)
          */
-
-        // if let Some(e) = event.as_any().downcast_ref::<LinkEnterEvent>() {
-        //     return Some(Box::new(e.clone()))
-        // }
         None
     }
 
@@ -44,12 +44,78 @@ impl Backpack {
     pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
         if let Some(e) = Self::relevant_event_for_scoring(event) {
             self.events.push(e);
+            return;
         }
 
         self.backpack_plan.handle_event(event);
     }
 
-    pub(crate) fn finish(self) -> InternalPerson {
-        InternalPerson::new(self.person_id, self.backpack_plan.finish())
+    pub(crate) fn finish(mut self) -> PersonExperience {
+        PersonExperience {
+            dummy_person: InternalPerson::new(self.person_id, self.backpack_plan.finish()),
+            events: std::mem::take(&mut self.events),
+        }
+    }
+}
+
+impl PersonExperience {
+    pub(crate) fn plan(&self) -> &InternalPlan {
+        &self.dummy_person.selected_plan().unwrap()
+    }
+
+    pub(crate) fn plan_mut(&mut self) -> &mut InternalPlan {
+        self.dummy_person.selected_plan_mut()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn events(&self) -> &[Box<dyn EventTrait>] {
+        &self.events
+    }
+
+    pub(crate) fn convert_to_person(self) -> InternalPerson {
+        self.dummy_person
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::events::{ActivityEndEventBuilder, PersonStuckEventBuilder};
+    use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::population::InternalPlanElement;
+    use crate::simulation::time::SimTime;
+    use macros::deterministic_id_test;
+
+    #[deterministic_id_test]
+    fn stuck_event_marks_the_reconstructed_plan_as_aborted() {
+        let person = Id::create("person");
+        let link = Id::create("link");
+        let mut backpack = Backpack::new(person.clone());
+        backpack.handle_event(
+            &ActivityEndEventBuilder::default()
+                .time(SimTime::from_secs(10))
+                .person(person.clone())
+                .link(link.clone())
+                .coordinate(Coordinate::default())
+                .act_type(Id::create("home"))
+                .build()
+                .unwrap(),
+        );
+        backpack.handle_event(
+            &PersonStuckEventBuilder::default()
+                .time(SimTime::from_secs(20))
+                .person(person)
+                .link(link)
+                .leg_mode(Id::create("car"))
+                .reason("test abort".to_string())
+                .build()
+                .unwrap(),
+        );
+
+        let experienced_plan = backpack.finish();
+        let InternalPlanElement::Activity(activity) = &experienced_plan.plan().elements[0] else {
+            panic!("Expected reconstructed activity");
+        };
+        assert_eq!(activity.attributes.get::<bool>("aborted"), Some(true));
     }
 }

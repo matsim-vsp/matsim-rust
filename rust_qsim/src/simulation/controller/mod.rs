@@ -18,6 +18,7 @@ use crate::simulation::replanning::routing::TripRouter;
 use crate::simulation::replanning::{StrategyManager, replan_population};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::{MobsimInput, ScenarioCore};
+use crate::simulation::scoring::{PersonExperiences, PlanScorer, score_population};
 use crate::simulation::simulation::{Simulation, SimulationBuilder};
 use crate::simulation::{io, logging};
 use derive_builder::Builder;
@@ -524,6 +525,11 @@ pub(crate) struct ReplanningPool {
     innovation_disable_fraction: f64,
 }
 
+pub(crate) struct ScoringPool {
+    pool: Option<rayon::ThreadPool>,
+    plan_scorer: PlanScorer,
+}
+
 impl ReplanningPool {
     pub(crate) fn new(scenario_core: &ScenarioCore, trip_router: TripRouter) -> Self {
         let config = scenario_core.config.as_ref();
@@ -589,6 +595,38 @@ impl ReplanningPool {
             iteration.saturating_sub(self.first_iteration) as f64 / total_iterations as f64
         };
         progress >= self.innovation_disable_fraction
+    }
+}
+
+impl ScoringPool {
+    pub(crate) fn new(scenario_core: &ScenarioCore) -> Self {
+        let pool = Some(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(scenario_core.config.computational_setup().scoring_threads as usize)
+                .thread_name(|i| format!("scoring-{i}"))
+                .build()
+                .expect("Failed to build scoring thread pool."),
+        );
+        Self {
+            pool,
+            plan_scorer: PlanScorer::new(
+                scenario_core.config.as_ref(),
+                scenario_core.network.clone(),
+            ),
+        }
+    }
+
+    pub(crate) fn score_population(
+        &self,
+        experienced_plans: &mut Vec<PersonExperiences>,
+        population: &mut Population,
+    ) {
+        match &self.pool {
+            Some(pool) => {
+                pool.install(|| score_population(experienced_plans, population, &self.plan_scorer))
+            }
+            None => score_population(experienced_plans, population, &self.plan_scorer),
+        }
     }
 }
 

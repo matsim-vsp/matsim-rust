@@ -1,6 +1,6 @@
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
-    PersonDepartureEvent, PersonEntersVehicleEvent, PtTeleportationArrivalEvent,
+    PersonDepartureEvent, PersonEntersVehicleEvent, PersonStuckEvent, PtTeleportationArrivalEvent,
     TeleportationArrivalEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
@@ -17,7 +17,6 @@ use std::time::Duration;
 
 pub struct PartialPlan {
     elements: Vec<InternalPlanElement>,
-
     current_activity: Option<PartialActivity>,
     current_leg: Option<PartialLeg>,
 }
@@ -63,12 +62,31 @@ impl PartialPlan {
             panic!("Illegal state: Person ends activity while not doing an activity!");
         }
 
-        self.elements.push(Activity(
-            self.current_activity.take().unwrap().finish(false),
-        ))
+        self.elements
+            .push(Activity(self.current_activity.take().unwrap().finish()))
+    }
+
+    fn handle_stuck(&mut self) {
+        if let Some(act) = &mut self.current_activity {
+            // if the current activity is not ended, we mark it as aborted.
+            act.aborted = true;
+        } else if self.current_leg.is_none() {
+            // if also leg is none, we are in between an activity and a leg. This is counted as an aborted activity.
+            if let Activity(act) = self.elements.last_mut().unwrap() {
+                act.attributes.add("aborted", true);
+            } else {
+                panic!(
+                    "Illegal state: Person is stuck while not doing an activity or leg, but the last plan element is not an activity!"
+                );
+            }
+        }
     }
 
     pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
+        if let Some(_) = event.as_any().downcast_ref::<PersonStuckEvent>() {
+            self.handle_stuck();
+            return;
+        }
         if let Some(_) = event.as_any().downcast_ref::<PersonDepartureEvent>() {
             self.handle_person_departure();
         } else if let Some(_) = event.as_any().downcast_ref::<ActivityStartEvent>() {
@@ -95,10 +113,12 @@ impl PartialPlan {
 
     pub(crate) fn finish(mut self) -> InternalPlan {
         if let Some(activity) = self.current_activity.take() {
+            // if there was an aborted activity before,
             if activity.is_initialized() {
-                self.elements.push(Activity(activity.finish(true)));
+                self.elements.push(Activity(activity.finish()));
             }
         } else if let Some(leg) = self.current_leg.take() {
+            // a plan can never end with a leg, so we mark it as aborted and finish it
             self.elements.push(Leg(leg.finish_incomplete()));
         }
 
@@ -116,7 +136,7 @@ struct PartialActivity {
     pub coordinate: Option<Coordinate>,
     pub start_time: Option<SimTime>,
     pub end_time: Option<SimTime>,
-    // pub max_dur: Option<u32>, (not meant to be set in the experienced plans)
+    pub aborted: bool,
 }
 
 impl Default for PartialActivity {
@@ -127,17 +147,14 @@ impl Default for PartialActivity {
             coordinate: None,
             start_time: None,
             end_time: None,
+            aborted: false,
         }
     }
 }
 
 impl PartialActivity {
     fn is_initialized(&self) -> bool {
-        self.act_type.is_some()
-            || self.link_id.is_some()
-            || self.coordinate.is_some()
-            || self.start_time.is_some()
-            || self.end_time.is_some()
+        self.act_type.is_some() && self.link_id.is_some()
     }
 
     fn handle_activity_start(&mut self, event: &ActivityStartEvent) {
@@ -163,7 +180,7 @@ impl PartialActivity {
     }
 
     /// Consuming function turning PartialActivity into an InternalActivity
-    fn finish(self, aborted: bool) -> InternalActivity {
+    fn finish(self) -> InternalActivity {
         let mut activity = InternalActivity::new(
             self.coordinate,
             self.act_type
@@ -175,7 +192,7 @@ impl PartialActivity {
             self.end_time,
             None,
         );
-        if aborted {
+        if self.aborted {
             activity.attributes.insert("aborted", true);
         }
         activity

@@ -46,8 +46,11 @@ Experienced-plan collection uses this migration bus. Each worker creates one `Ba
 future scoring events. At `BeforeCleanup`, every worker converts the backpacks currently on that partition into one
 partial population and sends it to the controller over a dedicated backchannel before publishing its normal worker
 result. Consequently, all partial populations are available when the controller emits `AfterMobsim`. The scoring
-module verifies iteration and rank, merges the populations deterministically by person ID, and applies the configured
-experienced-plan writing interval. Backpacks do not return to an initial or "home" partition.
+module verifies iteration and rank and merges the populations deterministically by person ID. The controller then
+scores each reconstructed experienced plan and copies the result to exactly the selected original plan. Experienced
+plans receive the same score and are written only when `scoring.write_experienced_plans` and the configured plan
+writing interval allow it. Collection and scoring always run, even when experienced-plan output is disabled, so
+replanning can consume the updated selected-plan scores. Backpacks do not return to an initial or "home" partition.
 
 ### External Services
 

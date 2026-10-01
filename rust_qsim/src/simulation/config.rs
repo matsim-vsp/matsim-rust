@@ -748,7 +748,13 @@ impl Default for Scoring {
     fn default() -> Self {
         Self {
             write_experienced_plans: true,
-            activity_params: Vec::new(),
+            activity_params: vec![
+                ActivityParameter::default_for_activity_type("home"),
+                ActivityParameter::default_for_activity_type("work"),
+                ActivityParameter::default_for_activity_type("leisure"),
+                ActivityParameter::default_for_activity_type("shop"),
+                ActivityParameter::default_for_activity_type("errands"),
+            ],
             mode_params: vec![
                 ModeParameter::default_for_mode("car"),
                 ModeParameter::default_for_mode("walk"),
@@ -767,6 +773,17 @@ register_override!("scoring.write_experienced_plans", |config, value| {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActivityParameter {
     pub activity_type: String,
+    #[serde(default)]
+    pub typical_duration_s: f64,
+}
+
+impl ActivityParameter {
+    pub fn default_for_activity_type(activity_type: &str) -> Self {
+        Self {
+            activity_type: activity_type.to_string(),
+            typical_duration_s: 0.0,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -811,6 +828,7 @@ pub struct AgentParameter {
     pub performing: f64,                // utils/hour
     pub waiting: f64,                   // utils/hour
     pub marginal_utility_of_money: f64, // utils/money
+    pub aborted_plan_score: f64,        // utils/hour
 }
 
 impl Default for AgentParameter {
@@ -822,6 +840,7 @@ impl Default for AgentParameter {
             performing: 6.0,
             waiting: -0.0,
             marginal_utility_of_money: 1.0,
+            aborted_plan_score: -18.0,
         }
     }
 }
@@ -977,6 +996,7 @@ pub struct ComputationalSetup {
     pub adapter_worker_threads: u32,
     /// The number of threads to be used by the replanning pool. 0 uses Rayon's default.
     pub replanning_threads: u32,
+    pub scoring_threads: u32,
     pub retry_time_seconds: u64,
     pub random_seed: u64,
 }
@@ -990,6 +1010,10 @@ register_override!(
 
 register_override!("computational_setup.replanning_threads", |config, value| {
     config.computational_setup_mut().replanning_threads = value.parse().unwrap();
+});
+
+register_override!("computational_setup.scoring_threads", |config, value| {
+    config.computational_setup_mut().scoring_threads = value.parse().unwrap();
 });
 
 register_override!("computational_setup.global_sync", |config, value| {
@@ -1006,6 +1030,7 @@ impl Default for ComputationalSetup {
             global_sync: false,
             adapter_worker_threads: 3,
             replanning_threads: 0,
+            scoring_threads: 0,
             retry_time_seconds: 600,
             random_seed: DEFAULT_RANDOM_SEED,
         }
@@ -1486,6 +1511,7 @@ mod tests {
             global_sync: true,
             adapter_worker_threads: 42,
             replanning_threads: 7,
+            scoring_threads: 0,
             retry_time_seconds: 41,
             random_seed: config::DEFAULT_RANDOM_SEED,
         };
@@ -1798,6 +1824,7 @@ mod tests {
             write_experienced_plans: true
             activity_params:
               - activity_type: home
+                typical_duration_s: 43200.0
             mode_params:
               - mode: car
                 marginal_utility_of_traveling: -0.001
@@ -1813,6 +1840,7 @@ mod tests {
                 performing: 4.0
                 waiting: -3.0
                 marginal_utility_of_money: 2.0
+                aborted_plan_score: -24.0
         "#;
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
@@ -1820,6 +1848,7 @@ mod tests {
             write_experienced_plans: true,
             activity_params: vec![ActivityParameter {
                 activity_type: "home".to_string(),
+                typical_duration_s: 43_200.0,
             }],
             mode_params: vec![ModeParameter {
                 mode: "car".to_string(),
@@ -1837,6 +1866,7 @@ mod tests {
                 performing: 4.0,
                 waiting: -3.0,
                 marginal_utility_of_money: 2.0,
+                aborted_plan_score: -24.0,
             }],
         };
         assert_eq!(config.scoring(), &expected);
@@ -1859,20 +1889,7 @@ mod tests {
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
 
-        assert_eq!(
-            config.scoring(),
-            &Scoring {
-                write_experienced_plans: true,
-                activity_params: Vec::new(),
-                mode_params: vec![
-                    ModeParameter::default_for_mode("car"),
-                    ModeParameter::default_for_mode("walk"),
-                    ModeParameter::default_for_mode("ride"),
-                    ModeParameter::default_for_mode("freight"),
-                ],
-                agent_params: vec![AgentParameter::default()],
-            }
-        );
+        assert_eq!(config.scoring(), &Scoring::default());
     }
 
     #[test]

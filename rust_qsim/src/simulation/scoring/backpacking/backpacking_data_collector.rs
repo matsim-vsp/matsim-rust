@@ -1,15 +1,15 @@
 use crate::simulation::Identifiable;
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
-    PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
+    PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
     PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeEntity;
-use crate::simulation::scenario::population::{InternalPerson, Population};
+use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
-use crate::simulation::scoring::backpacking::backpack::Backpack;
+use crate::simulation::scoring::backpacking::backpack::{Backpack, PersonExperience};
 use nohash_hasher::{IntMap, IntSet};
 
 pub(crate) struct BackpackingAttachment {
@@ -84,6 +84,8 @@ impl BackpackingDataCollector {
         } else if let Some(event) = event.as_any().downcast_ref::<PersonEntersVehicleEvent>() {
             vec![event.person.clone()]
         } else if let Some(event) = event.as_any().downcast_ref::<PersonLeavesVehicleEvent>() {
+            vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
             vec![event.person.clone()]
         } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
             self.vehicle_id2person_ids
@@ -185,13 +187,11 @@ impl BackpackingDataCollector {
         }
     }
 
-    pub(crate) fn finish(&mut self) -> Population {
-        let persons = self
-            .person_id2backpack
+    pub(crate) fn finish(&mut self) -> IntMap<Id<InternalPerson>, PersonExperience> {
+        self.person_id2backpack
             .drain()
             .map(|(person_id, backpack)| (person_id, backpack.finish()))
-            .collect();
-        Population { persons }
+            .collect()
     }
 }
 
