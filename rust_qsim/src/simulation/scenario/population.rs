@@ -1042,6 +1042,7 @@ mod tests {
             }),
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),
@@ -1057,6 +1058,7 @@ mod tests {
             attributes: None,
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),

@@ -58,6 +58,9 @@ pub struct Controller {
     experienced_plan_collection: scoring::ExperiencedPlansCollection,
     #[debug(skip)]
     scoring_function: Option<Box<dyn PlanScorer>>,
+    // Retain the actual router/worker calculator for post-run checks in private tests.
+    #[cfg(test)]
+    travel_time_calculator: Arc<GlobalTravelTimeCalculator>,
 }
 
 pub struct ControllerBuilder {
@@ -162,6 +165,8 @@ impl ControllerBuilder {
             trip_router: router,
             experienced_plan_collection: experienced_plans,
             scoring_function: self.scoring_function,
+            #[cfg(test)]
+            travel_time_calculator: global_ttc,
         })
     }
 
@@ -650,6 +655,10 @@ pub(crate) fn write_experienced_population(
         population.to_file(&root_path);
     }
 }
+
+#[cfg(test)]
+#[path = "travel_time_tests.rs"]
+mod travel_time_tests;
 
 #[cfg(test)]
 mod tests {

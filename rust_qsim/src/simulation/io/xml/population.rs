@@ -277,6 +277,8 @@ impl From<&InternalPlanElement> for IOPlanElement {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct IOPlan {
+    #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<IOAttributes>,
     #[serde(
         rename = "@selected",
         deserialize_with = "bool_from_yes_no",
@@ -301,6 +303,7 @@ impl From<&InternalPlan> for IOPlan {
         }
 
         IOPlan {
+            attributes: None,
             selected,
             score: internal_plan.score,
             elements: io_plan_elements,
@@ -396,6 +399,8 @@ pub struct IOPerson {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "population")]
 pub struct IOPopulation {
+    #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<IOAttributes>,
     #[serde(rename = "person", default)]
     pub persons: Vec<IOPerson>,
 }
@@ -447,6 +452,7 @@ impl From<&Population> for IOPopulation {
         }
 
         IOPopulation {
+            attributes: None,
             persons: io_persons,
         }
     }
@@ -612,12 +618,14 @@ mod tests {
     #[test]
     fn writes_plan_score_only_when_present() {
         let with_score = to_string(&IOPlan {
+            attributes: None,
             selected: true,
             score: Some(7.25),
             elements: Vec::new(),
         })
         .unwrap();
         let without_score = to_string(&IOPlan {
+            attributes: None,
             selected: true,
             score: None,
             elements: Vec::new(),
@@ -652,6 +660,7 @@ mod tests {
             }),
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),
