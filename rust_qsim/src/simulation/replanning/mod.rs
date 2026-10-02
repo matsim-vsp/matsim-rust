@@ -2,6 +2,7 @@ use crate::simulation::config;
 use crate::simulation::id::Id;
 use crate::simulation::random::get_rng;
 use crate::simulation::replanning::routing::TripRouter;
+use crate::simulation::replanning::selectors::RandomSelector;
 use crate::simulation::scenario::ScenarioCore;
 use crate::simulation::scenario::population::{DEFAULT_SUBPOPULATION, InternalPerson, Population};
 use crate::simulation::scenario::prepare_for_sim::{
@@ -14,7 +15,7 @@ use derive_builder::Builder;
 use nohash_hasher::IntMap;
 use rand::RngExt;
 use rayon::prelude::*;
-use selectors::{DefaultSelector, KeepLastSelector, WorstScoreSelector};
+use selectors::{DefaultSelector, WorstScoreSelector};
 use std::fmt;
 use std::str::FromStr;
 
@@ -68,7 +69,7 @@ impl DefaultStrategy {
         match self {
             Self::ReRoute => Box::new(GenericPlanStrategy {
                 name: Id::create(self.as_str()),
-                selector: Box::new(KeepLastSelector),
+                selector: Box::new(RandomSelector),
                 modules: vec![Box::new(ReRouteModule::new(trip_router, scenario_core))],
             }),
         }
@@ -160,10 +161,11 @@ impl StrategyManager {
             innovation_disabled,
         };
 
+        self.remove_plans_if_needed(person, &context);
+
         if let Some(strategy) = self.choose_strategy(&context, person) {
             strategy.handle(person, &context);
         }
-        self.remove_plans_if_needed(person, &context);
     }
 
     /// Chooses a strategy and runs it.

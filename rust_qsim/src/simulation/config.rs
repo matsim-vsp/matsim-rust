@@ -996,6 +996,7 @@ pub struct ComputationalSetup {
     pub adapter_worker_threads: u32,
     /// The number of threads to be used by the replanning pool. 0 uses Rayon's default.
     pub replanning_threads: u32,
+    /// The number of threads to be used by the scoring pool. 0 uses Rayon's default.
     pub scoring_threads: u32,
     pub retry_time_seconds: u64,
     pub random_seed: u64,
