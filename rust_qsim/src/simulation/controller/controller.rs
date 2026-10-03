@@ -449,6 +449,7 @@ impl Controller {
                 io::resolve_path(self.config.context(), &self.config.output().output_dir);
             write_experienced_population(
                 experienced_plans,
+                &population,
                 &self.config,
                 &output_path,
                 iteration,
@@ -621,6 +622,7 @@ fn prepare_output_directory(
 
 pub(crate) fn write_experienced_population(
     experienced_plans: Vec<PersonExperiences>,
+    original_population: &Population,
     config: &Config,
     output_path: &Path,
     iteration: u32,
@@ -628,8 +630,19 @@ pub(crate) fn write_experienced_population(
 ) {
     let persons: Vec<_> = experienced_plans
         .into_iter()
-        .flat_map(|e| e.into_values())
-        .map(|e| e.convert_to_person())
+        .flat_map(|e| e.into_iter())
+        .map(|(person_id, experience)| {
+            let original = original_population
+                .persons
+                .get(&person_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No original person {} is available for experienced-plan output.",
+                        person_id.external()
+                    )
+                });
+            experience.convert_to_person(original)
+        })
         .sorted_by(|a, b| a.id().cmp(&b.id()))
         .collect();
     let filename = config

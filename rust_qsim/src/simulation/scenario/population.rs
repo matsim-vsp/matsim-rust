@@ -307,6 +307,11 @@ impl InternalPerson {
         &mut self.attributes
     }
 
+    pub(crate) fn copy_metadata_from(&mut self, original: &Self) {
+        self.subpopulation = original.subpopulation.clone();
+        self.attributes = original.attributes.clone();
+    }
+
     pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
         self.plans
             .iter_mut()
