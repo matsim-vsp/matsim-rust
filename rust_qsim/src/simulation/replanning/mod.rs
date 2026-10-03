@@ -394,6 +394,13 @@ impl PlanStrategyModule for ReRouteModule {
         // Route complete trips so access/egress legs and stage activities change together.
         // Recompute spans after each replacement because routing can change their lengths.
         for trip_index in 0..trip_count {
+            let pplan = &person.plans()[plan_index];
+            let sspan = get_trip_spans_default(&pplan.elements)[trip_index];
+            let string = identify_main_mode(sspan.trip_elements(&pplan.elements)).unwrap();
+            if string.eq("pt") || string.eq("bike") || string.eq("ride") {
+                continue;
+            }
+
             let (span, new_elements) = {
                 let plan = &person.plans()[plan_index];
                 let span = get_trip_spans_default(&plan.elements)[trip_index];
@@ -944,7 +951,6 @@ mod tests {
             score,
             selected,
             elements: Vec::new(),
-            attributes: Default::default(),
         }
     }
 
