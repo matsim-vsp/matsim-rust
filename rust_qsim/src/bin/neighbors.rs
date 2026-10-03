@@ -55,8 +55,11 @@ fn main() {
                 .expect("Failed to write entry.");
         }
     }
-    writer.flush().unwrap();
-    info!("Finished writing output file to: {:?}", args.output)
+
+    match writer.flush() {
+        Ok(_) => info!("Finished writing output file to: {:?}", args.output),
+        Err(e) => panic!("Failed to flush writer: {}", e),
+    }
 }
 
 #[derive(Parser, Debug)]

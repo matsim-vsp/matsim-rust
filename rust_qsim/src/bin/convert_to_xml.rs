@@ -36,7 +36,7 @@ fn main() {
         let net = Network::from_file_path(&net_path, 1, &PartitionMethod::None);
 
         info!("Converting network to XML format");
-        net.to_file(&replace_filename(net_path));
+        net.to_file(&net_path.with_extension(".xml.gz"));
     }
 
     let mut veh = if let Some(veh_path) = veh_path {
@@ -44,7 +44,7 @@ fn main() {
         let veh = Garage::from_file(&veh_path);
 
         info!("Converting vehicles to XML format");
-        veh.to_file(&replace_filename(veh_path));
+        veh.to_file(&veh_path.with_extension(".xml.gz"));
         Some(veh)
     } else {
         None
@@ -58,14 +58,6 @@ fn main() {
                 .expect("Vehicles must be provided if population is provided."),
         );
         info!("Converting population to XML format");
-        pop.to_file(&replace_filename(pop_path))
+        pop.to_file(&pop_path.with_extension(".xml.gz"))
     }
-}
-
-fn replace_filename(path: PathBuf) -> PathBuf {
-    let file_name = path.file_name().unwrap().to_str().unwrap();
-    let stripped = file_name.strip_suffix(".binpb");
-    let new_file_name = format!("{}.xml.gz", stripped.unwrap());
-    info!("New file name: {}", new_file_name);
-    path.parent().unwrap().join(new_file_name)
 }

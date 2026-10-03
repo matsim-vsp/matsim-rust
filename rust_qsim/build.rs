@@ -29,5 +29,5 @@ fn main() {
     tonic_build::configure()
         .build_client(true)
         .compile_protos_with_config(config, &proto_files, &["src/"])
-        .unwrap();
+        .expect("Should be able to compile protobuf files.");
 }

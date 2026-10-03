@@ -63,9 +63,13 @@ fn compute_computational_weights(pop: &Population) -> IntMap<Id<Link>, u32> {
     let result: IntMap<Id<Link>, u32> = pop
         .persons
         .values()
-        .flat_map(|p| p.selected_plan().as_ref().unwrap().legs())
-        .filter(|leg| leg.route.is_some())
-        .filter_map(|leg| leg.route.as_ref()?.as_network())
+        .flat_map(|p| {
+            p.selected_plan()
+                .expect("Person should have InternalPlan.")
+                .legs()
+        })
+        .filter_map(|leg| leg.route.as_ref())
+        .filter_map(|route| route.as_network())
         .flat_map(|n| n.route().iter())
         .fold(IntMap::new(), |mut map, link_id| {
             map.entry(link_id.clone())

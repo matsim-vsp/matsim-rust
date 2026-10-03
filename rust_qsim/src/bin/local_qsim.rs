@@ -19,9 +19,8 @@ fn main() {
     let scenario = Scenario::load(config);
 
     // Create and run simulation
-    let controller = ControllerBuilder::default_with_scenario(scenario)
-        .build()
-        .unwrap();
-
-    controller.run()
+    match ControllerBuilder::default_with_scenario(scenario).build() {
+        Ok(controller) => controller.run(),
+        Err(e) => panic!("Failed to build controller: {}", e),
+    }
 }

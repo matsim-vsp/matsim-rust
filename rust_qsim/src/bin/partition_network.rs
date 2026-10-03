@@ -21,27 +21,22 @@ fn main() {
     }
 
     //let input_path = PathBuf::from(&args.in_path);
-    let folder = args.net_path.parent().unwrap();
-    let mut name_parts: Vec<&str> = args
+    let current_extension = args
         .net_path
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split('.')
-        .collect();
-    let num_parts_string = args.num_parts.to_string();
-    name_parts.insert(name_parts.len() - 1, num_parts_string.as_str());
-    let out_path = folder.join(name_parts.join("."));
+        .extension()
+        .expect("Population path should have extension.");
+    let out_path = args
+        .net_path
+        .with_extension(args.num_parts.to_string())
+        .with_added_extension(current_extension);
     //info!("Writing to {:?}", out_path);
     //name_parts.insert(name_parts.len() - 3, "internal-ids");
     // let out_path_internal = folder.join(name_parts.join("."));
     //info!("Writing to {:?}", out_path_internal);
 
     info!(
-        "Partition network: {} into {} parts.",
-        args.net_path.to_str().unwrap(),
-        args.num_parts
+        "Partition network: {:?} into {} parts.",
+        args.net_path, args.num_parts
     );
 
     let net1 = Network::from_file_path(

@@ -24,18 +24,14 @@ fn main() {
         }
     });
 
-    let folder = args.pop_path.parent().unwrap();
-    let mut name_parts: Vec<&str> = args
+    let current_extension = args
         .pop_path
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split('.')
-        .collect();
-    let num_parts_string = args.num_pop.to_string();
-    name_parts.insert(name_parts.len() - 1, num_parts_string.as_str());
-    let out_path = folder.join(name_parts.join("."));
+        .extension()
+        .expect("Population path should have extension.");
+    let out_path = args
+        .pop_path
+        .with_extension(args.num_pop.to_string())
+        .with_added_extension(current_extension);
 
     population.to_file(&out_path);
 }

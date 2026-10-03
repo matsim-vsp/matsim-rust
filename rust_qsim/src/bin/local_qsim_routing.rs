@@ -51,13 +51,15 @@ fn main() {
     let (router_handle, send, send_sd) = executor.spawn_thread("router", factory);
 
     // Creating the adapter handle. This is necessary for regulated shutdown of the adapter thread. Otherwise, the adapter might be stuck in a loop.
-    let adapters = vec![
-        AdapterHandleBuilder::default()
-            .shutdown_sender(send_sd)
-            .handle(router_handle)
-            .build()
-            .unwrap(),
-    ];
+    let handle = AdapterHandleBuilder::default()
+        .shutdown_sender(send_sd)
+        .handle(router_handle)
+        .build();
+
+    let adapters = match handle {
+        Ok(handle) => vec![handle],
+        Err(e) => panic!("Failed to build adapter handle: {}", e),
+    };
 
     // The request sender is passed to the controller.
     let mut services = ExternalServices::default();
@@ -72,9 +74,11 @@ fn main() {
         .agent_source(PreplanningHorizonAgentSource)
         .global_barrier(barrier)
         .adapter_handles(adapters)
-        .build()
-        .unwrap();
+        .build();
 
     // Run controller
-    controller.run();
+    match controller {
+        Ok(controller) => controller.run(),
+        Err(e) => panic!("Failed to build controller: {}", e),
+    }
 }

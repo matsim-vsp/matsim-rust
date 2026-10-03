@@ -41,7 +41,9 @@ fn main() {
     info!("Starting to read events files.");
     while !readers.is_empty() {
         readers.sort_by(|a, b| a.curr_time_step.cmp(&b.curr_time_step));
-        let reader = readers.first_mut().unwrap();
+        let reader = readers
+            .first_mut()
+            .expect("Reader vec should be non-empty.");
         match reader.reader.read_next() {
             None => {
                 readers.remove(0);
