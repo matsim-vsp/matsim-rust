@@ -261,7 +261,6 @@ mod tests {
     #[deterministic_id_test]
     fn activity_end_time_along_plan_uses_previous_elements_to_compute_start() {
         let plan = InternalPlan {
-            attributes: Default::default(),
             score: None,
             selected: true,
             elements: vec![
@@ -283,7 +282,6 @@ mod tests {
     fn activity_end_time_along_plan_uses_configured_simulation_start() {
         let time_interpretation = TimeInterpretation::new(SimTime::from_secs(10));
         let plan = InternalPlan {
-            attributes: Default::default(),
             score: None,
             selected: true,
             elements: vec![
@@ -304,7 +302,6 @@ mod tests {
     #[deterministic_id_test]
     fn activity_end_time_along_plan_returns_none_for_activity_not_in_plan() {
         let plan = InternalPlan {
-            attributes: Default::default(),
             score: None,
             selected: true,
             elements: vec![InternalPlanElement::Activity(activity(

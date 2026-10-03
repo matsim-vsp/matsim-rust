@@ -422,7 +422,6 @@ mod tests {
             score: Some(42.5),
             selected: true,
             elements: Vec::new(),
-            attributes: Default::default(),
         };
 
         let wire = Plan::from(&plan);

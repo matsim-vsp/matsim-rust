@@ -944,7 +944,6 @@ mod tests {
             score,
             selected,
             elements: Vec::new(),
-            attributes: Default::default(),
         }
     }
 
