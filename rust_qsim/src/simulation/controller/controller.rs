@@ -233,8 +233,7 @@ impl ControllerBuilder {
 
         let access_egress_mode = Id::create(&config.routing().access_egress_mode);
 
-        // for every main mode, create the corresponding router.
-        for mode in &config.qsim().main_modes {
+        for mode in &config.routing().network_modes {
             let id = Id::create(mode);
             let Some(access_egress) = routers.get(&access_egress_mode).cloned() else {
                 return Err(format!(
@@ -475,11 +474,13 @@ impl Controller {
         self.controller_events_manager
             .process_event(ControllerEvent::replanning(false));
 
-        replanning_pool.replan(
+        let res = replanning_pool.replan(
             population,
             iteration,
             self.config.computational_setup().random_seed,
-        )
+        );
+        info!("Ending replanning phase for iteration {iteration}");
+        res
     }
 
     fn start_mobsim_workers(&mut self) -> MobsimWorkerPool {

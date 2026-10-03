@@ -1,3 +1,4 @@
+use crate::simulation::InternalAttributes;
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
     PersonDepartureEvent, PersonEntersVehicleEvent, PersonStuckEvent, PtTeleportationArrivalEvent,
@@ -120,6 +121,7 @@ impl PartialPlan {
         }
 
         InternalPlan {
+            attributes: InternalAttributes::default(),
             score: None,
             selected: true,
             elements: self.elements,
