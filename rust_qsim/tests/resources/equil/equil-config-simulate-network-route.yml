@@ -26,6 +26,7 @@ modules:
   routing:
     type: Routing
     mode: UsePlans
+    network_modes: [ "car" ]
   simulation:
     type: Simulation
     last_iteration: 0

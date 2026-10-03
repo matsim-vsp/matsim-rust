@@ -22,6 +22,7 @@ modules:
   routing:
     type: Routing
     mode: UsePlans
+    network_modes: [ "car" ]
   controller:
     type: Controller
     last_iteration: 1
