@@ -110,8 +110,6 @@ impl<C: SimCommunicator> LegEngine<C> {
     ) -> Vec<SimulationAgent> {
         self.receive_agents(now, agents);
 
-        let teleported_vehicles = self.teleportation_engine.do_step(now);
-
         self.network_engine.move_nodes(now);
         let network_vehicles = self
             .network_engine
@@ -160,6 +158,8 @@ impl<C: SimCommunicator> LegEngine<C> {
                     .receive_remote_agent(now, teleportation.into(), from, to);
             }
         }
+
+        let teleported_vehicles = self.teleportation_engine.do_step(now);
 
         let mut agents = vec![];
         agents.extend(self.publish_vehicular_end_events(now, network_vehicles));
