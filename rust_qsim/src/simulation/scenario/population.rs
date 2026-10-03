@@ -242,10 +242,10 @@ pub enum InternalPlanElement {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalPlan {
-    pub attributes: InternalAttributes,
     pub score: Option<f64>,
     pub selected: bool,
     pub elements: Vec<InternalPlanElement>,
+    pub attributes: InternalAttributes,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -793,12 +793,7 @@ impl From<IOActivity> for InternalActivity {
         InternalActivity {
             act_type: Id::create(&io.r#type),
             link_id: Id::create(&io.link.expect("Activity must have a link id")),
-            coord: io.x.map(|x| {
-                Coordinate::new_2d(
-                    x,
-                    io.y.expect("y coordinate should be given when x coord is given"),
-                )
-            }),
+            coord: io.x.zip(io.y).map(|(x, y)| Coordinate::new_2d(x, y)),
             start_time: parse_time_opt(&io.start_time),
             end_time: parse_time_opt(&io.end_time),
             max_dur: parse_duration_opt(&io.max_dur),
@@ -815,11 +810,9 @@ impl From<Activity> for InternalActivity {
         InternalActivity {
             act_type: Id::get_from_ext(&value.act_type),
             link_id: Id::get_from_ext(&value.link_id),
-            coord: Some(Coordinate::new_3d(
-                value.coordinate.as_ref().unwrap().x,
-                value.coordinate.as_ref().unwrap().y,
-                value.coordinate.as_ref().unwrap().z,
-            )),
+            coord: value
+                .coordinate
+                .map(|coord| Coordinate::new_3d(coord.x, coord.y, coord.z)),
             start_time: value.start_time_ns.map(SimTime::from_nanos),
             end_time: value.end_time_ns.map(SimTime::from_nanos),
             max_dur: value.max_dur_ns.map(Duration::from_nanos),
@@ -973,13 +966,13 @@ impl FromIOPerson<IOPlan> for InternalPlan {
 }
 
 impl From<Plan> for InternalPlan {
-    fn from(io: Plan) -> Self {
-        let acts = io
+    fn from(plan: Plan) -> Self {
+        let acts = plan
             .acts
             .into_iter()
             .map(InternalActivity::from)
             .collect::<Vec<_>>();
-        let legs = io
+        let legs = plan
             .legs
             .into_iter()
             .map(InternalLeg::from)
@@ -1002,9 +995,9 @@ impl From<Plan> for InternalPlan {
         }
 
         InternalPlan {
-            attributes: InternalAttributes::from(&io.attributes),
-            score: io.score,
-            selected: io.selected,
+            attributes: InternalAttributes::from(&plan.attributes),
+            score: plan.score,
+            selected: plan.selected,
             elements,
         }
     }
@@ -1015,7 +1008,7 @@ mod tests {
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
-    use crate::simulation::io::xml::population::{IOLeg, IOPerson, IOPlan, IORoute};
+    use crate::simulation::io::xml::population::{IOActivity, IOLeg, IOPerson, IOPlan, IORoute};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
@@ -1028,6 +1021,35 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[deterministic_id_test]
+    fn activity_from_xml_accepts_missing_or_partial_coordinates() {
+        for (xml, expected_coord) in [
+            (
+                r#"<activity type="home" link="1" x="10" y="20" />"#,
+                Some(Coordinate::new_2d(10.0, 20.0)),
+            ),
+            (r#"<activity type="home" link="1" />"#, None),
+            (r#"<activity type="home" link="1" x="10" />"#, None),
+            (r#"<activity type="home" link="1" y="20" />"#, None),
+        ] {
+            let io_activity = quick_xml::de::from_str::<IOActivity>(xml).unwrap();
+            let activity = InternalActivity::from(io_activity);
+
+            assert_eq!(expected_coord, activity.coord, "input: {xml}");
+            assert_eq!(Id::<Link>::get_from_ext("1"), activity.link_id);
+        }
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Activity must have a link id")]
+    fn activity_from_xml_still_requires_link_id() {
+        let io_activity =
+            quick_xml::de::from_str::<IOActivity>(r#"<activity type="home" x="10" y="20" />"#)
+                .unwrap();
+
+        let _ = InternalActivity::from(io_activity);
+    }
 
     #[deterministic_id_test]
     fn cmp_end_time_uses_bounded_open_ended_sentinel() {

@@ -703,6 +703,16 @@ pub struct StrategySetting {
     pub subpopulation: String,
 }
 
+impl StrategySetting {
+    pub fn new(name: String, weight: f64, subpopulation: String) -> Self {
+        Self {
+            name,
+            weight,
+            subpopulation,
+        }
+    }
+}
+
 register_override!(
     "replanning.fraction_of_iterations_to_disable_innovation",
     |config, value| {
