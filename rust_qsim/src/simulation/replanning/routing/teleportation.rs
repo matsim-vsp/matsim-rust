@@ -46,7 +46,7 @@ impl RoutingModule for TeleportationRoutingModule {
             request.vehicle.map(|v| v.id().clone()),
         ));
 
-        let leg = InternalLeg::new(route, mode, trav_time, dep_time);
+        let leg = InternalLeg::new(route, mode, mode, trav_time, dep_time);
         Ok(vec![InternalPlanElement::Leg(leg)])
     }
 

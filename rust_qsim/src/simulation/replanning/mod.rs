@@ -2,6 +2,7 @@ use crate::simulation::config;
 use crate::simulation::id::Id;
 use crate::simulation::random::get_rng;
 use crate::simulation::replanning::routing::TripRouter;
+use crate::simulation::replanning::selectors::RandomSelector;
 use crate::simulation::scenario::ScenarioCore;
 use crate::simulation::scenario::population::{DEFAULT_SUBPOPULATION, InternalPerson, Population};
 use crate::simulation::scenario::prepare_for_sim::{
@@ -14,7 +15,7 @@ use derive_builder::Builder;
 use nohash_hasher::IntMap;
 use rand::RngExt;
 use rayon::prelude::*;
-use selectors::{DefaultSelector, KeepLastSelector, WorstScoreSelector};
+use selectors::{DefaultSelector, WorstScoreSelector};
 use std::fmt;
 use std::str::FromStr;
 
@@ -68,7 +69,7 @@ impl DefaultStrategy {
         match self {
             Self::ReRoute => Box::new(GenericPlanStrategy {
                 name: Id::create(self.as_str()),
-                selector: Box::new(KeepLastSelector),
+                selector: Box::new(RandomSelector),
                 modules: vec![Box::new(ReRouteModule::new(trip_router, scenario_core))],
             }),
         }
@@ -102,8 +103,6 @@ pub(crate) fn replan_population(
 ) -> Population {
     let persons = population
         .persons
-        .into_iter()
-        .collect::<Vec<_>>()
         .into_par_iter()
         .map(|(id, mut person)| {
             strategy_manager.run(iteration, base_seed, innovation_disabled, &mut person);
@@ -162,10 +161,11 @@ impl StrategyManager {
             innovation_disabled,
         };
 
+        self.remove_plans_if_needed(person, &context);
+
         if let Some(strategy) = self.choose_strategy(&context, person) {
             strategy.handle(person, &context);
         }
-        self.remove_plans_if_needed(person, &context);
     }
 
     /// Chooses a strategy and runs it.
@@ -348,20 +348,18 @@ impl PlanStrategy for GenericPlanStrategy {
 
     fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext) {
         let plan_index = self.selector.select(person, context);
+        person.mark_plan_as_selected(plan_index);
+
         if self.modules.is_empty() {
             return;
         }
-        let mut new_plan = person
+
+        let new_plan = person
             .plans()
             .get(plan_index)
             .cloned()
             .unwrap_or_else(|| panic!("Selected plan index {plan_index} does not exist."));
-        for plan in person.plans_mut() {
-            plan.selected = false;
-        }
-        new_plan.selected = true;
-        person.plans_mut().push(new_plan);
-        let new_plan_index = person.plans().len() - 1;
+        let new_plan_index = person.add_new_plan_as_selected(new_plan);
 
         for module in &self.modules {
             module.handle(person, new_plan_index);
@@ -821,7 +819,13 @@ mod tests {
                     Some(17.0),
                     None,
                 ));
-                plan.add_leg(InternalLeg::new(route, mode, Duration::from_secs(10), None));
+                plan.add_leg(InternalLeg::new(
+                    route,
+                    mode,
+                    mode,
+                    Duration::from_secs(10),
+                    None,
+                ));
             }
         }
         plan
@@ -863,6 +867,7 @@ mod tests {
                     None,
                 )),
                 "walk",
+                "walk",
                 one_second,
                 Some(request.departure_time()),
             ));
@@ -886,6 +891,7 @@ mod tests {
                     vec![from.clone(), to.clone()],
                 )),
                 "car",
+                "car",
                 two_seconds,
                 None,
             ));
@@ -905,6 +911,7 @@ mod tests {
                     Some(0.0),
                     None,
                 )),
+                "walk",
                 "walk",
                 one_second,
                 None,
@@ -933,6 +940,7 @@ mod tests {
 
     fn plan(score: Option<f64>, selected: bool) -> InternalPlan {
         InternalPlan {
+            attributes: Default::default(),
             score,
             selected,
             elements: Vec::new(),

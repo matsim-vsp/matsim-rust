@@ -1232,6 +1232,7 @@ mod tests {
             let access = InternalPlanElement::Leg(InternalLeg::new(
                 access_route,
                 "walk",
+                "walk",
                 one_second,
                 Some(request.departure_time()),
             ));
@@ -1255,8 +1256,13 @@ mod tests {
                 network_generic,
                 vec![from.clone(), to.clone()],
             ));
-            let network_leg =
-                InternalPlanElement::Leg(InternalLeg::new(network_route, "car", two_seconds, None));
+            let network_leg = InternalPlanElement::Leg(InternalLeg::new(
+                network_route,
+                "car",
+                "car",
+                two_seconds,
+                None,
+            ));
             let egress_interaction = InternalPlanElement::Activity(InternalActivity::new(
                 Some(request.to().coord().clone()),
                 "car interaction",
@@ -1272,8 +1278,13 @@ mod tests {
                 Some(0.0),
                 None,
             ));
-            let egress =
-                InternalPlanElement::Leg(InternalLeg::new(egress_route, "walk", one_second, None));
+            let egress = InternalPlanElement::Leg(InternalLeg::new(
+                egress_route,
+                "walk",
+                "walk",
+                one_second,
+                None,
+            ));
 
             Ok(vec![
                 access,
