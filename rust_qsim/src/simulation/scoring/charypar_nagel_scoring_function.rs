@@ -841,6 +841,7 @@ mod tests {
             score: None,
             selected: true,
             elements,
+            attributes: Default::default(),
         }
     }
 
