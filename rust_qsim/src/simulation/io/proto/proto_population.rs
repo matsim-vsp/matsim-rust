@@ -94,7 +94,7 @@ impl Person {
         Self {
             id: value.id().external().to_string(),
             plan: value.plans().iter().map(Plan::from).collect(),
-            attributes: Default::default(),
+            attributes: value.attributes().as_cloned_map(),
             subpopulation: Some(value.subpopulation().external().to_string()),
         }
     }
@@ -103,6 +103,7 @@ impl Person {
 impl Plan {
     fn from(value: &InternalPlan) -> Self {
         Self {
+            attributes: value.attributes.as_cloned_map(),
             selected: value.selected,
             legs: value.legs().iter().map(|p| Leg::from(p)).collect(),
             acts: value.acts().iter().map(|l| Activity::from(l)).collect(),
@@ -206,6 +207,7 @@ mod tests {
     use crate::generated::population::Activity;
     use crate::generated::population::{Leg, Person, Plan, PtRouteDescription};
     use crate::simulation::id::Id;
+    use crate::simulation::io::xml::population::{IOPlan, IOPopulation};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::{
@@ -215,8 +217,133 @@ mod tests {
     use crate::simulation::scenario::vehicles::Garage;
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
+    use prost::Message;
+    use quick_xml::{de::from_str, se::to_string};
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[deterministic_id_test]
+    fn person_and_plan_attributes_survive_xml_and_proto_round_trip() {
+        let typed = r#"
+            <attribute name="integer" class="java.lang.Integer">-7</attribute>
+            <attribute name="long" class="java.lang.Long">9223372036854775807</attribute>
+            <attribute name="double" class="java.lang.Double">-3.25</attribute>
+            <attribute name="boolean" class="java.lang.Boolean">true</attribute>
+            <attribute name="empty" class="java.lang.String"></attribute>
+            <attribute name="escaped" class="java.lang.String">a &amp; &lt;b&gt;</attribute>
+        "#;
+        let xml = format!(
+            r#"
+            <population>
+                <person id="attribute-person">
+                    <attributes>
+                        {typed}
+                        <attribute name="subpopulation" class="java.lang.String">freight</attribute>
+                        <attribute name="label" class="java.lang.String">person</attribute>
+                    </attributes>
+                    <plan selected="yes" score="-12.5">
+                        <attributes>
+                            {typed}
+                            <attribute name="label" class="java.lang.String">plan</attribute>
+                        </attributes>
+                        <activity type="home" link="start" x="0" y="0">
+                            <attributes>
+                                <attribute name="label" class="java.lang.String">activity</attribute>
+                            </attributes>
+                        </activity>
+                    </plan>
+                </person>
+            </population>
+        "#
+        );
+        let io_population: IOPopulation = from_str(&xml).unwrap();
+        let mut persons: Vec<_> = io_population
+            .persons
+            .into_iter()
+            .map(InternalPerson::from)
+            .collect();
+        let person = &mut persons[0];
+        person.attributes_mut().insert("added", "programmatic");
+        let plan = &person.plans()[0];
+        for attributes in [person.attributes(), &plan.attributes] {
+            assert_eq!(attributes.get::<i64>("integer"), Some(-7));
+            assert_eq!(attributes.get::<i64>("long"), Some(i64::MAX));
+            assert_eq!(attributes.get::<f64>("double"), Some(-3.25));
+            assert_eq!(attributes.get::<bool>("boolean"), Some(true));
+            assert_eq!(attributes.get::<String>("empty").as_deref(), Some(""));
+            assert_eq!(
+                attributes.get::<String>("escaped").as_deref(),
+                Some("a & <b>")
+            );
+        }
+        assert_eq!(
+            person.attributes().get::<String>("label").as_deref(),
+            Some("person")
+        );
+        assert_eq!(person.subpopulation().external(), "freight");
+        assert_eq!(
+            plan.attributes.get::<String>("label").as_deref(),
+            Some("plan")
+        );
+        assert_eq!(plan.score, Some(-12.5));
+        assert!(plan.selected);
+        assert_eq!(plan.elements.len(), 1);
+        assert_eq!(
+            plan.elements[0]
+                .as_activity()
+                .unwrap()
+                .attributes
+                .get::<String>("label")
+                .as_deref(),
+            Some("activity")
+        );
+
+        let proto_persons = persons
+            .iter()
+            .map(|person| {
+                let bytes = Person::from(person).encode_to_vec();
+                let decoded = Person::decode(bytes.as_slice()).unwrap();
+                let round_trip = InternalPerson::from(decoded);
+                assert_eq!(&round_trip, person);
+                round_trip
+            })
+            .collect();
+        let population = Population::from_persons(proto_persons);
+        let written = to_string(&IOPopulation::from(&population)).unwrap();
+        let reread: IOPopulation = from_str(&written).unwrap();
+        assert_eq!(reread.persons.len(), persons.len());
+        for io_person in reread.persons {
+            let round_trip = InternalPerson::from(io_person);
+            let original = persons
+                .iter()
+                .find(|person| person.id() == round_trip.id())
+                .unwrap();
+            // XML output always includes subpopulation, even when absent in the input.
+            let mut expected = original.clone();
+            let subpopulation = expected.subpopulation().external().to_string();
+            expected
+                .attributes_mut()
+                .insert("subpopulation", subpopulation);
+            assert_eq!(round_trip, expected);
+        }
+    }
+
+    #[test]
+    fn legacy_proto_plan_without_attributes_defaults_to_empty() {
+        // The legacy schema encodes selected=true at field 1 and has no field 5.
+        let wire = Plan::decode(&[0x08, 0x01][..]).unwrap();
+        assert!(wire.attributes.is_empty());
+        let plan = InternalPlan::from(wire);
+        assert!(plan.selected);
+        assert_eq!(plan.attributes, Default::default());
+    }
+
+    #[test]
+    fn empty_plan_attributes_are_omitted_from_xml() {
+        let plan = InternalPlan::default();
+        let xml = to_string(&IOPlan::from(&plan)).unwrap();
+        assert!(!xml.contains("<attributes"));
+    }
 
     #[deterministic_id_test]
     fn activity_coordinate_round_trip_preserves_none_z() {
@@ -289,6 +416,7 @@ mod tests {
     #[test]
     fn plan_round_trip_preserves_score() {
         let plan = InternalPlan {
+            attributes: Default::default(),
             score: Some(42.5),
             selected: true,
             elements: Vec::new(),

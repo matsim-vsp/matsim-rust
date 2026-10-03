@@ -242,6 +242,7 @@ pub enum InternalPlanElement {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalPlan {
+    pub attributes: InternalAttributes,
     pub score: Option<f64>,
     pub selected: bool,
     pub elements: Vec<InternalPlanElement>,
@@ -302,6 +303,10 @@ impl InternalPerson {
         &self.attributes
     }
 
+    pub fn attributes_mut(&mut self) -> &mut InternalAttributes {
+        &mut self.attributes
+    }
+
     pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
         self.plans
             .iter_mut()
@@ -338,6 +343,7 @@ impl InternalPerson {
 impl Default for InternalPlan {
     fn default() -> Self {
         Self {
+            attributes: InternalAttributes::default(),
             score: None,
             selected: true,
             elements: Vec::new(),
@@ -946,6 +952,10 @@ impl InternalPlanElement {
 impl FromIOPerson<IOPlan> for InternalPlan {
     fn from_io(io: IOPlan, id: Id<InternalPerson>) -> Self {
         InternalPlan {
+            attributes: io
+                .attributes
+                .map(InternalAttributes::from)
+                .unwrap_or_default(),
             score: io.score,
             selected: io.selected,
             elements: io
@@ -987,6 +997,7 @@ impl From<Plan> for InternalPlan {
         }
 
         InternalPlan {
+            attributes: InternalAttributes::from(&io.attributes),
             score: io.score,
             selected: io.selected,
             elements,
@@ -1042,6 +1053,7 @@ mod tests {
             }),
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),
@@ -1057,6 +1069,7 @@ mod tests {
             attributes: None,
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),

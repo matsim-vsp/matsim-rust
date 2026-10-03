@@ -149,6 +149,7 @@ mod tests {
 
     fn plan(elements: Vec<InternalPlanElement>) -> InternalPlan {
         InternalPlan {
+            attributes: Default::default(),
             score: None,
             selected: true,
             elements,
