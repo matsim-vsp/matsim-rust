@@ -358,7 +358,9 @@ mod tests {
         );
 
         let wire = Activity::from(&activity);
-        let round_trip = InternalActivity::from(wire);
+        let encoded = wire.encode_to_vec();
+        let decoded = Activity::decode(encoded.as_slice()).unwrap();
+        let round_trip = InternalActivity::from(decoded);
 
         assert_eq!(10.0, round_trip.coord.as_ref().unwrap().x);
         assert_eq!(20.0, round_trip.coord.as_ref().unwrap().y);
@@ -420,6 +422,7 @@ mod tests {
             score: Some(42.5),
             selected: true,
             elements: Vec::new(),
+            attributes: Default::default(),
         };
 
         let wire = Plan::from(&plan);
