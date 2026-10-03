@@ -132,7 +132,7 @@ impl TeleportationEngine {
             .clock
             .time_to_tick(teleported_agent.end_time(self.clock.tick_to_time(now)));
         assert!(
-            now < due_tick,
+            now <= due_tick,
             "Remote teleportation for agent {} from partition {} to partition {} arrived at tick {} after its queue-processing deadline: end time {}, due tick {}. This might happen\
             if teleportation messages are received one time step later than expected. To mitigate this problem, you might enable the global sync.",
             teleported_agent.agent().id().external(),
@@ -312,21 +312,35 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn remote_agent_received_at_or_after_due_tick_panics() {
-        for (id, receive_tick) in [(1, 4), (2, 5)] {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let clock = SimClock::new(1);
-                let mut engine = TeleportationEngine::new(Default::default(), clock);
-                engine.receive_remote_agent(
-                    Tick::new(receive_tick),
-                    TeleportedAgent::new(create_generic_route_agent(id), SimTime::from_secs(4)),
-                    1,
-                    2,
-                );
-            }));
+    fn remote_agent_received_after_due_tick_panics() {
+        let id = 1;
+        let receive_tick = 5;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let clock = SimClock::new(1);
+            let mut engine = TeleportationEngine::new(Default::default(), clock);
+            engine.receive_remote_agent(
+                Tick::new(receive_tick),
+                TeleportedAgent::new(create_generic_route_agent(id), SimTime::from_secs(4)),
+                1,
+                2,
+            );
+        }));
 
-            assert!(result.is_err(), "receive tick {receive_tick} must panic");
-        }
+        assert!(result.is_err(), "receive tick {receive_tick} must panic");
+    }
+
+    #[deterministic_id_test]
+    fn remote_agent_received_at_due_tick_does_not_panic() {
+        let id = 1;
+        let receive_tick = 4;
+        let clock = SimClock::new(1);
+        let mut engine = TeleportationEngine::new(Default::default(), clock);
+        engine.receive_remote_agent(
+            Tick::new(receive_tick),
+            TeleportedAgent::new(create_generic_route_agent(id), SimTime::from_secs(4)),
+            1,
+            2,
+        );
     }
 
     #[deterministic_id_test]

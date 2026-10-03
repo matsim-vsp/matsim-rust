@@ -12,4 +12,3 @@ that the ID store is empty before the test starts and (2) run the test in serial
 
 If you need a test to be run exclusively in serial, it should be an integration test. This is also the case for tests
 where the logger is set during the test. As a convention, each integration test should be an `[deterministic_id_test]`.
-

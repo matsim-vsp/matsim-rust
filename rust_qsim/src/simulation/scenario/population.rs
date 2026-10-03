@@ -303,6 +303,15 @@ impl InternalPerson {
         &self.attributes
     }
 
+    pub fn attributes_mut(&mut self) -> &mut InternalAttributes {
+        &mut self.attributes
+    }
+
+    pub(crate) fn copy_metadata_from(&mut self, original: &Self) {
+        self.subpopulation = original.subpopulation.clone();
+        self.attributes = original.attributes.clone();
+    }
+
     pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
         self.plans
             .iter_mut()
@@ -986,7 +995,7 @@ impl From<Plan> for InternalPlan {
         }
 
         InternalPlan {
-            attributes: InternalAttributes::default(),
+            attributes: InternalAttributes::from(&plan.attributes),
             score: plan.score,
             selected: plan.selected,
             elements,

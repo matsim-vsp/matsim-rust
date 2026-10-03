@@ -32,6 +32,7 @@ modules:
   routing:
     type: Routing
     mode: AdHoc
+    network_modes: [ "car" ]
   simulation:
     type: Simulation
     last_iteration: 0

@@ -303,7 +303,7 @@ impl From<&InternalPlan> for IOPlan {
         }
 
         IOPlan {
-            attributes: None,
+            attributes: IOAttributes::from_internal_none_if_empty(&internal_plan.attributes),
             selected,
             score: internal_plan.score,
             elements: io_plan_elements,
@@ -399,8 +399,6 @@ pub struct IOPerson {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "population")]
 pub struct IOPopulation {
-    #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
-    pub attributes: Option<IOAttributes>,
     #[serde(rename = "person", default)]
     pub persons: Vec<IOPerson>,
 }
@@ -452,7 +450,6 @@ impl From<&Population> for IOPopulation {
         }
 
         IOPopulation {
-            attributes: None,
             persons: io_persons,
         }
     }

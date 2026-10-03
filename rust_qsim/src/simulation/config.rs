@@ -770,6 +770,7 @@ impl Default for Scoring {
                 ModeParameter::default_for_mode("walk"),
                 ModeParameter::default_for_mode("ride"),
                 ModeParameter::default_for_mode("freight"),
+                ModeParameter::default_for_mode("bike"),
             ],
             agent_params: vec![AgentParameter::default()],
         }
