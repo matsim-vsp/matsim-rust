@@ -128,10 +128,7 @@ pub fn read_events(
     path: impl AsRef<Path>,
 ) -> Result<(), FileTypeError> {
     info!("Reading events from file: {}", path.as_ref().display());
-    let file_extension = path
-        .as_ref()
-        .extension()
-        .ok_or_else(|| FileTypeError::NotGiven)?;
+    let file_extension = path.as_ref().extension().ok_or(FileTypeError::NotGiven)?;
 
     let mut reader: Box<dyn StatefulReader> = match file_extension
         .to_str()
@@ -204,7 +201,7 @@ pub fn read_partitioned_events(
     info!("Starting to read files.");
     let mut last_reported_time_step = 0;
     while !readers.is_empty() {
-        readers.sort_by(|a, b| a.get_preloaded_time().cmp(&b.get_preloaded_time()));
+        readers.sort_by_key(|a| a.get_preloaded_time());
 
         // get the reader with the smallest curr time step and process its events
         let reader = readers.first_mut().unwrap();
@@ -508,7 +505,7 @@ mod test {
         // handler above and fill the event_string_collection vector
         read_partitioned_events(
             &mut events_mgr,
-            &PathBuf::from(&resource_folder),
+            PathBuf::from(&resource_folder),
             "expected_events",
             num_parts,
             "xml",

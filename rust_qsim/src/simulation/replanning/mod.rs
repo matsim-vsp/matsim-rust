@@ -266,7 +266,8 @@ fn default_strategies(
             selector.as_generic_plan_strategy(),
         );
     }
-    for strategy in [DefaultStrategy::ReRoute] {
+    {
+        let strategy = DefaultStrategy::ReRoute;
         strategies.insert(
             Id::create(strategy.as_str()),
             strategy.as_generic_plan_strategy(trip_router.clone(), scenario_core.clone()),

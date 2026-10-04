@@ -158,8 +158,7 @@ fn run_stuck_scenario(
         .unwrap();
     controller.run();
 
-    let events = stuck_events.events.lock().unwrap().clone();
-    events
+    stuck_events.events.lock().unwrap().clone()
 }
 
 #[derive(Clone, Default)]

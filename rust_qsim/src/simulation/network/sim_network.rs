@@ -222,7 +222,7 @@ impl SimNetworkPartition {
             .map(|n| {
                 (
                     n.clone(),
-                    random::get_rng(base_seed, "network.node", n.external().as_ref()),
+                    random::get_rng(base_seed, "network.node", n.external()),
                 )
             })
             .collect();

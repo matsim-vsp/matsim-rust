@@ -121,8 +121,8 @@ where
     /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
     fn do_sim_step(&mut self, now: Tick, agents: Vec<SimulationAgent>) -> Vec<SimulationAgent> {
         let agents_act_to_leg = self.activity_engine.do_step(now, agents);
-        let agents_leg_to_act = self.leg_engine.do_step(now, agents_act_to_leg);
-        agents_leg_to_act
+
+        self.leg_engine.do_step(now, agents_act_to_leg)
     }
 
     pub(crate) fn is_local_route(

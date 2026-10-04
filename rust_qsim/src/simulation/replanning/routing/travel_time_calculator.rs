@@ -247,13 +247,13 @@ impl PartitionTravelTimeCollector {
     }
 
     fn assign_vehicle_mode(&mut self, vehicle: &Id<InternalVehicle>, mode: &Id<String>) {
-        if let Some(previous_mode) = self.vehicle_modes.insert(vehicle.clone(), mode.clone()) {
-            if previous_mode != *mode {
-                panic!(
-                    "Vehicle {} changed mode from {} to {}",
-                    vehicle, previous_mode, mode
-                )
-            }
+        if let Some(previous_mode) = self.vehicle_modes.insert(vehicle.clone(), mode.clone())
+            && previous_mode != *mode
+        {
+            panic!(
+                "Vehicle {} changed mode from {} to {}",
+                vehicle, previous_mode, mode
+            )
         }
     }
 
@@ -384,10 +384,11 @@ impl GlobalTravelTimeCalculator {
             None => travel_time_from_speed(link.length, link.freespeed),
         };
 
-        if let Some(vehicle) = vehicle {
-            if vehicle.max_v.is_finite() && vehicle.max_v > 0.0 {
-                return observed.max(travel_time_from_speed(link.length, vehicle.max_v));
-            }
+        if let Some(vehicle) = vehicle
+            && vehicle.max_v.is_finite()
+            && vehicle.max_v > 0.0
+        {
+            return observed.max(travel_time_from_speed(link.length, vehicle.max_v));
         }
         observed
     }

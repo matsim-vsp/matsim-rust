@@ -198,7 +198,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                     .unwrap(),
             );
             for passenger in veh.passengers() {
-                self.publish_person_arrival(now_time.clone(), passenger);
+                self.publish_person_arrival(now_time, passenger);
             }
 
             agents.extend(veh.into_agents());
@@ -214,7 +214,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         let now_time = self.clock.tick_to_time(now);
         let mut ret_agents = Vec::with_capacity(agents.len());
         for agent in agents {
-            self.publish_person_arrival(now_time.clone(), &agent);
+            self.publish_person_arrival(now_time, &agent);
             ret_agents.push(agent);
         }
         ret_agents

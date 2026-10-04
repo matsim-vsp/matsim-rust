@@ -278,9 +278,9 @@ impl Display for SimTime {
     }
 }
 
-impl Into<Duration> for SimTime {
-    fn into(self) -> Duration {
-        self.as_duration()
+impl From<SimTime> for Duration {
+    fn from(val: SimTime) -> Self {
+        val.as_duration()
     }
 }
 

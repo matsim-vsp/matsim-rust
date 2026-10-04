@@ -334,8 +334,8 @@ mod tests {
         store.create_id::<String>("string-id");
 
         serialize_to_file(&store, &file, IdCompression::LZ4);
-        let mut result = IdStore::new();
-        deserialize_from_file(&mut result, &file);
+        let result = IdStore::new();
+        deserialize_from_file(&result, &file);
 
         println!("{result:?}");
 
@@ -361,8 +361,8 @@ mod tests {
         store.create_id::<String>("string-id");
 
         serialize_to_file(&store, &file, IdCompression::None);
-        let mut result = IdStore::new();
-        deserialize_from_file(&mut result, &file);
+        let result = IdStore::new();
+        deserialize_from_file(&result, &file);
 
         println!("{result:?}");
 
@@ -394,8 +394,8 @@ mod tests {
         println!("{serialized_bytes:?}");
 
         let mut vec_reader = BufReader::new(Cursor::new(serialized_bytes));
-        let mut result = IdStore::new();
-        deserialize(&mut result, &mut vec_reader);
+        let result = IdStore::new();
+        deserialize(&result, &mut vec_reader);
 
         println!("{result:?}");
 
@@ -434,7 +434,7 @@ mod tests {
             "/Users/janek/Documents/rust_qsim/input/rvr.vehicles.xml",
         ));
         let pop = Population::from_file(
-            &PathBuf::from("/Users/janek/Documents/rust_qsim/input/rvr-10pct.plans.xml.gz"),
+            PathBuf::from("/Users/janek/Documents/rust_qsim/input/rvr-10pct.plans.xml.gz"),
             &mut garage,
         );
 
@@ -466,16 +466,16 @@ mod tests {
 
         println!("Starting to read id store uncompressed");
         let start = Instant::now();
-        let mut result_uncompressed = IdStore::new();
-        deserialize_from_file(&mut result_uncompressed, &folder.join("ids.raw.pbf"));
+        let result_uncompressed = IdStore::new();
+        deserialize_from_file(&result_uncompressed, &folder.join("ids.raw.pbf"));
         let end = Instant::now();
         let duration = end.sub(start).as_millis();
         println!("reading uncompressed took: {duration}ms");
 
         println!("Starting to read id store compressed");
         let start = Instant::now();
-        let mut result_compressed = IdStore::new();
-        deserialize_from_file(&mut result_compressed, &folder.join("ids.lz4.pbf"));
+        let result_compressed = IdStore::new();
+        deserialize_from_file(&result_compressed, &folder.join("ids.lz4.pbf"));
         let end = Instant::now();
         let duration = end.sub(start).as_millis();
         println!("reading compressed took: {duration}ms");

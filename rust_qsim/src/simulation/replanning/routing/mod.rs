@@ -43,7 +43,7 @@ impl TripRouter {
     ) -> Result<Vec<InternalPlanElement>, RoutingError> {
         let mut elements = self
             .modules
-            .get(&mode)
+            .get(mode)
             .ok_or_else(|| RoutingError::MissingModule {
                 mode: mode.external().to_string(),
             })?

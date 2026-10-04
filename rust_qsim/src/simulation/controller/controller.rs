@@ -451,7 +451,7 @@ impl Controller {
     fn write_output_network(&mut self, output_path: PathBuf) {
         let net_out_path = create_output_filename(
             &output_path,
-            &PathBuf::from(
+            PathBuf::from(
                 self.config
                     .controller()
                     .compression_type
@@ -469,7 +469,7 @@ impl Controller {
     fn write_output_population(&mut self, output_path: impl AsRef<Path>) {
         let pop_out_path = create_output_filename(
             &output_path,
-            &PathBuf::from(
+            PathBuf::from(
                 self.config
                     .controller()
                     .compression_type
@@ -522,7 +522,8 @@ impl Controller {
 
     fn should_write_iteration_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
         is_last_iteration
-            || (iteration != 0 && iteration % self.config.controller().write_plans_interval == 0)
+            || (iteration != 0
+                && iteration.is_multiple_of(self.config.controller().write_plans_interval))
     }
 }
 

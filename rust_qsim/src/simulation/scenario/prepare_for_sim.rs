@@ -152,10 +152,10 @@ fn prepare_person(
     issues
 }
 
-fn prepare_plan<'a>(
+fn prepare_plan(
     context: &PrepareForSimContext<'_>,
     person: &InternalPerson,
-    plan: &'a InternalPlan,
+    plan: &InternalPlan,
     trip_router: &TripRouter,
 ) -> Result<Option<InternalPlan>, IndexedTripFailure> {
     // `Cow` works as follows: borrow the plan and if it needs to be mutated, clone it.
@@ -195,7 +195,7 @@ fn check_and_adapt_trip(
         return Ok(());
     };
 
-    let new_elements = route_trip(context, person, &working_plan, span, &mode, trip_router)?;
+    let new_elements = route_trip(context, person, working_plan, span, &mode, trip_router)?;
 
     span.replace_trip_elements(&mut working_plan.to_mut().elements, new_elements);
     Ok(())

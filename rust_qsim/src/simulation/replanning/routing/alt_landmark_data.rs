@@ -100,7 +100,7 @@ impl AltLandmarkData {
                     // collect into ForwardBackwardTravelDisutility objects
                     Ok(forward_disutilities
                         .into_iter()
-                        .zip(backward_disutilities.into_iter())
+                        .zip(backward_disutilities)
                         .collect::<Vec<ForwardBackwardTravelDisutility>>())
                 },
             )
@@ -131,7 +131,7 @@ impl AltLandmarkData {
             .build()
             .unwrap();
 
-        let disutilities_result = match a_star_core(a_star_request) {
+        match a_star_core(a_star_request) {
             // some graph error occurred in A* (link or node not found). Return it.
             Err(e) => Err(e),
             // everything fine, A* returned a disutility vector; use it
@@ -141,9 +141,7 @@ impl AltLandmarkData {
                 "A* with LandmarkCalcAStarActions should return DisutilityToAllWithoutParents \
                 result."
             ),
-        };
-
-        disutilities_result
+        }
     }
 }
 

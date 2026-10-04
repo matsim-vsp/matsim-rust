@@ -37,6 +37,9 @@ impl PartialEq for dyn DynEq {
     }
 }
 
+// The `x == x` comparisons below are the point of this example: they demonstrate that `dyn_eq`
+// dispatches on the concrete type and stays reflexive. `clippy::eq_op` cannot see that intent.
+#[allow(clippy::eq_op)]
 fn main() {
     // link enter event
     let le: Box<dyn EventTrait> = Box::new(LinkEnterEvent {

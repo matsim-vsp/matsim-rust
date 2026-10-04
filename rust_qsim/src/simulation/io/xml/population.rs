@@ -218,7 +218,7 @@ pub struct IOLeg {
 impl From<&InternalLeg> for IOLeg {
     fn from(leg: &InternalLeg) -> Self {
         // get internal attributes from leg, possibly with added routing mode if currently missing
-        let verified_internal_attrs = verify_internal_attrs(&leg);
+        let verified_internal_attrs = verify_internal_attrs(leg);
 
         IOLeg {
             mode: leg.mode.external().to_string(),
@@ -746,7 +746,7 @@ mod tests {
         let mut garage = Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"));
 
         let persons = load_from_xml(
-            &PathBuf::from("./assets/equil/equil-plans.xml.gz"),
+            PathBuf::from("./assets/equil/equil-plans.xml.gz"),
             &mut garage,
         );
         assert_eq!(persons.len(), 100);
@@ -771,7 +771,7 @@ mod tests {
             .attributes;
         assert_eq!(attributes.len(), 2);
         assert_eq!(
-            attributes.get(0).unwrap(),
+            attributes.first().unwrap(),
             &IOAttribute::new_with_class(
                 String::from("initialEndTime"),
                 String::from("java.lang.Double"),

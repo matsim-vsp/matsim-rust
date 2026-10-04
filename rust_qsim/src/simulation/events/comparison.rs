@@ -462,8 +462,7 @@ fn compare_sources(
     reader2.join().unwrap();
     comparator.join().unwrap();
 
-    let result = comparison_result.lock().unwrap().clone();
-    result
+    comparison_result.lock().unwrap().clone()
 }
 
 fn publish_batch(

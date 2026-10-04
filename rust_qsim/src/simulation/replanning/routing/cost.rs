@@ -96,14 +96,14 @@ impl ScoringBasedTravelTimeAndDisutility {
             .collect::<IntMap<_, _>>();
 
         let min_performing = params_per_subpopulation
-            .iter()
-            .map(|(_, params)| params.performing)
+            .values()
+            .map(|params| params.performing)
             .reduce(f64::min)
             .unwrap();
 
         let min_marginal_utility_of_money = params_per_subpopulation
-            .iter()
-            .map(|(_, params)| params.marginal_utility_of_money)
+            .values()
+            .map(|params| params.marginal_utility_of_money)
             .reduce(f64::min)
             .unwrap();
 

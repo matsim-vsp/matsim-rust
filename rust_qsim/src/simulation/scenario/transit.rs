@@ -589,12 +589,7 @@ fn find_duration_attr(attributes: &Option<IOAttributes>, name: &str) -> Option<D
             .parse::<u64>()
             .ok()
             .map(Duration::from_secs)
-            .or_else(|| {
-                value
-                    .parse::<f64>()
-                    .ok()
-                    .map(|v| Duration::from_secs_f64(v))
-            })
+            .or_else(|| value.parse::<f64>().ok().map(Duration::from_secs_f64))
     })
 }
 

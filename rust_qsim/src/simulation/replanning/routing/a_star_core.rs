@@ -465,7 +465,7 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
         }
 
         // check if the target node has been reached, if applicable, in that case return early
-        if request.options.reached_end(current_id) == true {
+        if request.options.reached_end(current_id) {
             // this chooses the correct result enum variant automatically
             return Ok(request.options.build_result(
                 Some(current_disutility),
@@ -581,9 +581,9 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
     // this case: either, the to_node was reached and the function returned already, or the
     // to_node is unreachable, in which case, at some point the smallest disutility in the queue
     // will be infinity or NaN and the function will also return.
-    return Ok(request
+    Ok(request
         .options
-        .build_result(None, request.departure_time, disutilities));
+        .build_result(None, request.departure_time, disutilities))
 }
 
 /// Initialize the priority queue and Disutilities vector for A* search. The from-node gets

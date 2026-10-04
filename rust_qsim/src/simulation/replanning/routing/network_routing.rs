@@ -97,7 +97,7 @@ impl NetworkRoutingModule {
         })?;
         result.extend(access);
         let interaction_activity =
-            self.create_interaction_activity(coord, &original_request.from.link());
+            self.create_interaction_activity(coord, original_request.from.link());
         result.push(interaction_activity);
 
         Ok(now)

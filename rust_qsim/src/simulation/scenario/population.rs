@@ -474,7 +474,7 @@ impl InternalRoute {
             Id::create(io.start_link.expect("Route must have start link").as_str()),
             Id::create(io.end_link.expect("Route must have end link").as_str()),
             parse_duration_opt(&io.trav_time),
-            Option::from(io.distance),
+            io.distance,
             Some(Id::create(&external)),
         );
 
@@ -1074,7 +1074,7 @@ mod tests {
         let _net = Network::from_file_as_is(&PathBuf::from("./assets/equil/equil-network.xml"));
         let mut garage = Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"));
         let pop = Population::from_file(
-            &PathBuf::from("./assets/equil/equil-1-plan.xml"),
+            PathBuf::from("./assets/equil/equil-1-plan.xml"),
             &mut garage,
         );
 
@@ -1121,8 +1121,7 @@ mod tests {
     fn from_io_multi_mode() {
         let _net = Network::from_file_as_is(&PathBuf::from("./assets/3-links/3-links-network.xml"));
         let mut garage = Garage::from_file(&PathBuf::from("./assets/3-links/vehicles.xml"));
-        let pop =
-            Population::from_file(&PathBuf::from("./assets/3-links/3-agent.xml"), &mut garage);
+        let pop = Population::from_file(PathBuf::from("./assets/3-links/3-agent.xml"), &mut garage);
 
         // check that we have all three vehicle types
         let expected_veh_types = HashSet::from(["car", "bike", "walk"]);
@@ -1199,7 +1198,7 @@ mod tests {
         );
         let mut garage = Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"));
         let population = Population::from_file(
-            &PathBuf::from("./assets/equil/equil-plans.xml.gz"),
+            PathBuf::from("./assets/equil/equil-plans.xml.gz"),
             &mut garage,
         );
 

@@ -894,11 +894,11 @@ mod tests {
             AltHeuristic::from_graph(&graph, &FreeOrMaxSpeedTravelTimeAndDisutility).unwrap();
 
         // Test heuristic estimates for various node pairs
-        let test_pairs = vec![("1", "2"), ("2", "3"), ("1", "3"), ("2", "1")];
+        let test_pairs = [("1", "2"), ("2", "3"), ("1", "3"), ("2", "1")];
 
         // These are the true disutilities between the node pairs based on the triangle test graph
         // and free speed travel disutilities.
-        let test_pair_true_disutilities_freespeed = vec![1.0, 4.0, 2.0, 6.0];
+        let test_pair_true_disutilities_freespeed = [1.0, 4.0, 2.0, 6.0];
 
         for (i, (from_str, to_str)) in test_pairs.iter().enumerate() {
             let heuristic_estimate =

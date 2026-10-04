@@ -34,7 +34,7 @@ fn main() {
 
     read_partitioned_events(
         &mut manager,
-        &PathBuf::from(args.path),
+        PathBuf::from(args.path),
         "events",
         args.num_parts,
         "binpb",

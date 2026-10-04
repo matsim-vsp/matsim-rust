@@ -25,7 +25,7 @@ fn load_files_from_url_have_content() {
     );
 
     // Load population and check if there is at least one person
-    let pop = Population::from_file(&input_dir.join("1-agent-full-leg.xml"), &mut garage);
+    let pop = Population::from_file(input_dir.join("1-agent-full-leg.xml"), &mut garage);
     assert!(
         !pop.persons.is_empty(),
         "Population should contain at least one person"

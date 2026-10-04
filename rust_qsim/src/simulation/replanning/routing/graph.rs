@@ -249,14 +249,14 @@ impl ForwardBackwardRoutingGraph {
     pub(crate) fn get_node_id(&self, idx: NodeIndex) -> Result<Id<Node>, GraphError> {
         self.node_id_by_index
             .get(idx)
-            .ok_or_else(|| GraphError::NodeIndexNotFound(idx))
+            .ok_or(GraphError::NodeIndexNotFound(idx))
             .cloned()
     }
 
     pub(crate) fn get_link_id(&self, idx: LinkIndex) -> Result<Id<Link>, GraphError> {
         self.forward_link_id_by_index
             .get(idx)
-            .ok_or_else(|| GraphError::LinkIndexNotFound(idx))
+            .ok_or(GraphError::LinkIndexNotFound(idx))
             .cloned()
     }
 
@@ -273,7 +273,7 @@ impl ForwardBackwardRoutingGraph {
         // convert back to backward link index
         self.backward_link_id_pos()
             .get(&link_id)
-            .ok_or_else(|| GraphError::LinkIdNotFound(link_id))
+            .ok_or(GraphError::LinkIdNotFound(link_id))
             .cloned()
     }
 }
@@ -282,13 +282,13 @@ impl Graph for ForwardBackwardRoutingGraph {
     fn node(&self, id: Id<Node>) -> Result<&Node, GraphError> {
         self.nodes_by_node_ids()
             .get(&id)
-            .ok_or_else(|| GraphError::NodeIdNotFound(id))
+            .ok_or(GraphError::NodeIdNotFound(id))
     }
 
     fn edge(&self, id: Id<Link>) -> Result<&Link, GraphError> {
         self.links_by_link_ids()
             .get(&id)
-            .ok_or_else(|| GraphError::LinkIdNotFound(id))
+            .ok_or(GraphError::LinkIdNotFound(id))
     }
 
     fn outgoing_edges(&self, node: Id<Node>) -> Result<&[Id<Link>], GraphError> {
@@ -302,7 +302,7 @@ impl Graph for ForwardBackwardRoutingGraph {
 
         self.forward_link_ids()
             .get(link_indices.clone())
-            .ok_or_else(|| GraphError::LinkRangeNotFound(link_indices))
+            .ok_or(GraphError::LinkRangeNotFound(link_indices))
     }
 
     fn incoming_edges(&self, node: Id<Node>) -> Result<&[Id<Link>], GraphError> {
@@ -316,7 +316,7 @@ impl Graph for ForwardBackwardRoutingGraph {
 
         self.backward_link_ids()
             .get(link_indices.clone())
-            .ok_or_else(|| GraphError::LinkRangeNotFound(link_indices))
+            .ok_or(GraphError::LinkRangeNotFound(link_indices))
     }
 
     fn num_nodes(&self) -> usize {
@@ -327,7 +327,7 @@ impl Graph for ForwardBackwardRoutingGraph {
         // find index of link (in self.forward_head())
         let link_id_index = self.get_link_idx_from_id(link_id)?;
         // get node index of end node
-        let node_idx = self.forward_head().get(link_id_index).unwrap().clone();
+        let node_idx = *self.forward_head().get(link_id_index).unwrap();
         // convert node index to node id and return
         Ok(self.node_id_by_index[node_idx].clone())
     }
@@ -342,7 +342,7 @@ impl Graph for ForwardBackwardRoutingGraph {
         let start_node_idx = self
             .backward_head()
             .get(backward_link_index)
-            .ok_or_else(|| GraphError::LinkIndexNotFound(backward_link_index))
+            .ok_or(GraphError::LinkIndexNotFound(backward_link_index))
             .copied()?;
 
         // finally convert the found node index into node id
@@ -402,7 +402,7 @@ impl IndexableGraph for ForwardBackwardRoutingGraph {
     fn get_end_node_as_idx(&self, edge: LinkIndex) -> Result<NodeIndex, GraphError> {
         self.forward_head()
             .get(edge)
-            .ok_or_else(|| GraphError::LinkIndexNotFound(edge))
+            .ok_or(GraphError::LinkIndexNotFound(edge))
             .copied()
     }
     fn get_start_node_as_idx(&self, edge: LinkIndex) -> Result<NodeIndex, GraphError> {
@@ -412,7 +412,7 @@ impl IndexableGraph for ForwardBackwardRoutingGraph {
         // look up start node (= end node in the backward graph) in backward_head()
         self.backward_head()
             .get(backward_link_index)
-            .ok_or_else(|| GraphError::LinkIndexNotFound(backward_link_index))
+            .ok_or(GraphError::LinkIndexNotFound(backward_link_index))
             .copied()
     }
 }
@@ -667,7 +667,7 @@ pub(crate) mod tests {
         let network = get_triangle_test_network();
         let graph = net_to_graph(&network);
 
-        let true_end_node_indices = vec![vec![], vec![2, 3], vec![2, 3], vec![1, 2]];
+        let true_end_node_indices = [vec![], vec![2, 3], vec![2, 3], vec![1, 2]];
 
         // For all outgoing edges, get_end_node_as_idx should not panic, since they are all valid (exist in the graph)
         for node_idx in 0..graph.num_nodes() {

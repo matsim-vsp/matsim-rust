@@ -140,7 +140,7 @@ fn get_links<'net>(
         .sorted_by_key(|&l| l.internal())
         .map(|l| network.get_link(l))
         // if mode is None, include all links. Otherwise, only include links that allow the given mode
-        .filter(|&l| mode.as_ref().map_or(true, |m| l.contains_mode(m)))
+        .filter(|&l| mode.as_ref().is_none_or(|m| l.contains_mode(m)))
         .collect::<Vec<&Link>>()
 }
 
