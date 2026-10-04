@@ -1,3 +1,5 @@
+#[path = "simulation/automatic_analysis.rs"]
+mod automatic_analysis;
 #[path = "simulation/berlin.rs"]
 pub mod berlin;
 #[path = "simulation/empty.rs"]

@@ -478,60 +478,61 @@ impl<R: Read + Seek> ProtoEventsReader<R> {
         }
     }
 
-    fn read_delim(&mut self) -> Option<usize> {
-        // read the delimiter of the message. Prost says delimiter is between 1 and 10 bytes
-        // so, read the first 10 bytes of the buffer
-        let mut delim_buffer: [u8; 10] = [0; 10];
-
-        // this could crash
-        match self.reader.read_exact(&mut delim_buffer) {
-            Ok(_) => {} // go on.
-            Err(e) => match e.kind() {
-                ErrorKind::UnexpectedEof => return None,
-                _ => {
-                    panic!("Error while reading file: {}", e);
-                }
-            },
+    fn read_delim(&mut self) -> std::io::Result<Option<usize>> {
+        let mut delim_buffer = [0; 10];
+        if self.reader.read(&mut delim_buffer[..1])? == 0 {
+            return Ok(None);
         }
-        let delimiter = prost::decode_length_delimiter(delim_buffer.as_slice())
-            .expect("error reading delimiter");
-
-        // since the delimiter is a varint figure out how many bytes the delimiter was actually taking
-        // up in the buffer. Set the buffers position to the first byte after the delimiter, which
-        // should be the start of the TimeStep message
-        let delim_encoded_len = prost::encoding::encoded_len_varint(delimiter as u64) as i64;
-        let offset = delim_encoded_len - (delim_buffer.len() as i64);
-        self.reader
-            .seek_relative(offset)
-            .expect("Seeking relative failed");
-
-        Some(delimiter)
+        let mut length = 1;
+        while delim_buffer[length - 1] & 0x80 != 0 {
+            if length == delim_buffer.len() {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidData,
+                    "protobuf length delimiter exceeds 10 bytes",
+                ));
+            }
+            self.reader
+                .read_exact(&mut delim_buffer[length..length + 1])?;
+            length += 1;
+        }
+        let delimiter = prost::decode_length_delimiter(&delim_buffer[..length])
+            .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error))?;
+        Ok(Some(delimiter))
     }
 
-    fn read_time_step(&mut self, delimiter: usize) -> TimeStep {
+    fn read_time_step(&mut self, delimiter: usize) -> std::io::Result<TimeStep> {
         // allocate a buffer with the message length and read into it
         let mut msg_buffer: Vec<u8> = vec![0; delimiter];
-        self.reader
-            .read_exact(&mut msg_buffer)
-            .expect("Error reading msg buffer");
+        self.reader.read_exact(&mut msg_buffer)?;
 
         // then decode it.
-        TimeStep::decode(msg_buffer.as_slice()).expect("Could not decode TimeStep message")
+        TimeStep::decode(msg_buffer.as_slice())
+            .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error))
     }
 
-    fn read_events(&mut self, time_step: TimeStep) -> Vec<GenericEvent> {
+    fn read_events(&mut self, time_step: TimeStep) -> std::io::Result<Vec<GenericEvent>> {
         let data_len = time_step.data.len() as u64;
 
         let mut cursor = Cursor::new(time_step.data);
         let mut result = Vec::new();
 
         while cursor.position() < data_len {
-            let event =
-                GenericEvent::decode_length_delimited(&mut cursor).expect("Error decoding event");
+            let event = GenericEvent::decode_length_delimited(&mut cursor)
+                .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error))?;
             result.push(event);
         }
 
-        result
+        Ok(result)
+    }
+
+    pub fn try_next(&mut self) -> std::io::Result<Option<(SimTime, Vec<GenericEvent>)>> {
+        let Some(delimiter) = self.read_delim()? else {
+            return Ok(None);
+        };
+        let time_step = self.read_time_step(delimiter)?;
+        let time = SimTime::from_nanos(time_step.time_ns);
+        let events = self.read_events(time_step)?;
+        Ok(Some((time, events)))
     }
 }
 
@@ -539,12 +540,8 @@ impl<R: Read + Seek> Iterator for ProtoEventsReader<R> {
     type Item = (SimTime, Vec<GenericEvent>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let delimiter = self.read_delim()?;
-        let time_step = self.read_time_step(delimiter);
-        let time = SimTime::from_nanos(time_step.time_ns);
-        let events = self.read_events(time_step);
-
-        Some((time, events))
+        self.try_next()
+            .unwrap_or_else(|error| panic!("Failed to read protobuf events: {error}"))
     }
 }
 
