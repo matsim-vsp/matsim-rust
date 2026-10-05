@@ -2,6 +2,8 @@
 mod automatic_analysis;
 #[path = "simulation/berlin.rs"]
 pub mod berlin;
+#[path = "simulation/daily_patterns.rs"]
+mod daily_patterns;
 #[path = "simulation/empty.rs"]
 mod empty;
 #[path = "simulation/equil.rs"]

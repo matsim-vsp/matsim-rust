@@ -558,6 +558,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
     let metadata = AnalysisRunMetadata::from_run(
         1,
         1.0,
+        WINDOW_START_SECONDS,
         &Garage::default(),
         rust_qsim::simulation::analysis::capture_expected_travel(&population),
         AnalysisInputPaths::default(),
@@ -873,7 +874,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 20] = [
+    const TABLES: [&str; 28] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -894,6 +895,14 @@ fn metric_catalog_names_match_the_exported_columns() {
         "link_hourly_by_class.csv",
         "link_speed_by_class.csv",
         "cross_run_comparison.csv",
+        "activity_durations.csv",
+        "activity_patterns.csv",
+        "activity_type_summary.csv",
+        "activity_pattern_summary.csv",
+        "zone_od.csv",
+        "zone_flows.csv",
+        "zone_summary.csv",
+        "urban_area_summary.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1051,6 +1060,10 @@ fn capacity_row(csv: &str, link_id: &str, interval_start_seconds: u64) -> HashMa
 ///
 /// The vehicles are what the analysis weights volumes with, so a test that wants a
 /// weighted volume has to put the vehicle in this catalog.
+/// The recorded window opens at the start of the day in these fixtures, which is what makes
+/// the first observed activity of a person left-censored.
+const WINDOW_START_SECONDS: u32 = 0;
+
 fn run_metadata(
     random_seed: u64,
     sample_size: f64,
@@ -1081,6 +1094,7 @@ fn run_metadata(
     AnalysisRunMetadata::from_run(
         random_seed,
         sample_size,
+        WINDOW_START_SECONDS,
         &garage,
         Vec::new(),
         AnalysisInputPaths::default(),
@@ -1281,7 +1295,14 @@ fn boundary_classification_counts_arithmetic_edge_coordinates_as_inside() {
         1,
         CompressionType::None,
         3600,
-        &AnalysisRunMetadata::from_run(1, 1.0, &garage, Vec::new(), AnalysisInputPaths::default()),
+        &AnalysisRunMetadata::from_run(
+            1,
+            1.0,
+            0,
+            &garage,
+            Vec::new(),
+            AnalysisInputPaths::default(),
+        ),
         &network,
         &Analysis {
             enabled: true,
@@ -1352,8 +1373,14 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         ));
     }
     let garage = Garage::default();
-    let metadata =
-        AnalysisRunMetadata::from_run(1, 1.0, &garage, Vec::new(), AnalysisInputPaths::default());
+    let metadata = AnalysisRunMetadata::from_run(
+        1,
+        1.0,
+        WINDOW_START_SECONDS,
+        &garage,
+        Vec::new(),
+        AnalysisInputPaths::default(),
+    );
     let mut labels: std::collections::BTreeMap<String, LinkLabels> = [
         ("outer-road", Some("other"), Some("__METRICS__")),
         ("cross-road", Some("expressway"), Some("large")),
@@ -1401,6 +1428,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             observed_data: None,
             comparison_runs: Vec::new(),
             excess_delay_clip_seconds: None,
+            zone_system: Default::default(),
         },
     )
     .unwrap();
@@ -1504,6 +1532,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             observed_data: None,
             comparison_runs: Vec::new(),
             excess_delay_clip_seconds: None,
+            zone_system: Default::default(),
         },
     )
     .unwrap();

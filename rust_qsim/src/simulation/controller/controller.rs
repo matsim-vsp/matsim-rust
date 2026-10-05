@@ -366,6 +366,9 @@ impl Controller {
                 self.config.computational_setup().random_seed,
                 // The report scales observed volumes up by the reciprocal of this.
                 self.config.qsim().sample_size,
+                // The event files only hold events from the window onwards, so the report
+                // cannot recover when the window opened.
+                self.config.qsim().start_time,
                 &self.scenario.core.garage,
                 // The run has finished, so the snapshot moves into the report instead of copied.
                 std::mem::take(&mut self.expected_travel),

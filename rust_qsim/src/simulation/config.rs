@@ -612,6 +612,37 @@ pub struct Analysis {
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
+
+    /// Zone system the geographic reports are built from.
+    pub zone_system: ZoneSystem,
+}
+
+/// Zone system supplied to the analysis, keyed by the external identifiers the recorded
+/// events carry.
+///
+/// Two independent geographies are accepted, because a location can be described by either:
+/// `link_zones` locates the links that journey origins, journey destinations and activities
+/// are reported on, and `person_zones` locates the people themselves. A location without an
+/// entry is reported as `unmapped` rather than dropped, so a partial zone system still
+/// accounts for every observed trip.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct ZoneSystem {
+    /// Identifier of the supplied zone system, recorded in the manifest and the report so a
+    /// reader knows which definition the reported zones came from.
+    pub name: Option<String>,
+    /// External link ID to zone ID.
+    pub link_zones: std::collections::BTreeMap<String, String>,
+    /// External person ID to zone ID.
+    pub person_zones: std::collections::BTreeMap<String, String>,
+}
+
+impl ZoneSystem {
+    /// A zone system only becomes usable once it maps at least one location; an empty one
+    /// leaves the geographic modules unavailable instead of reporting a single `unmapped` zone.
+    pub fn is_empty(&self) -> bool {
+        self.link_zones.is_empty() && self.person_zones.is_empty()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -634,6 +665,8 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
 
             excess_delay_clip_seconds: None,
+
+            zone_system: ZoneSystem::default(),
         }
     }
 }
