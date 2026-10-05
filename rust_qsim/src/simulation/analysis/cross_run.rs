@@ -1,7 +1,7 @@
 //! Comparisons between reports from completed runs.
 
 use super::report::escape_html;
-use super::{AnalysisError, Manifest, TableSpec, csv, read_json};
+use super::{AnalysisError, CompensatedSum, Manifest, TableSpec, csv, read_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -249,12 +249,39 @@ fn write_comparison(
                     {
                         continue;
                     }
-                    if spec.file == "person_daily.csv" {
-                        let person = serde_json::from_str::<Vec<String>>(&key)
-                            .ok()
-                            .and_then(|parts| parts.first().cloned());
-                        if !person.is_some_and(|person| common_complete_people.contains(&person)) {
-                            continue;
+                    if matches!(spec.file, "person_daily.csv" | "economic_appraisal.csv") {
+                        let parts = serde_json::from_str::<Vec<String>>(&key).ok();
+                        let person = parts.as_ref().and_then(|parts| match spec.file {
+                            "person_daily.csv" => parts.first(),
+                            _ if parts.first().is_some_and(|scope| scope == "person") => {
+                                parts.get(1)
+                            }
+                            _ => None,
+                        });
+                        if spec.file == "person_daily.csv" || person.is_some() {
+                            if !person.is_some_and(|person| common_complete_people.contains(person))
+                            {
+                                if spec.file == "economic_appraisal.csv" && person.is_some() {
+                                    let before = left.get(&key).copied();
+                                    let after = right.get(&key).copied();
+                                    if before.is_some() || after.is_some() {
+                                        writeln!(
+                                            file,
+                                            "{},{},{},{},{},{},{},{},,,,,,excluded_incomplete_or_missing_travel",
+                                            csv(&alternative.path.display().to_string()),
+                                            spec.file,
+                                            catalog_name,
+                                            metric.unit,
+                                            csv(&metric.aggregation_key),
+                                            csv(&key),
+                                            number(before),
+                                            number(after)
+                                        )
+                                        .map_err(io_error)?;
+                                    }
+                                }
+                                continue;
+                            }
                         }
                     }
                     let (mut before, mut after) =
@@ -801,7 +828,7 @@ fn read_rows(
         .filter_map(|key| headers.iter().position(|h| h == *key))
         .collect::<Vec<_>>();
     let status_index = headers.iter().position(|h| h == "completion_status");
-    let mut rows = BTreeMap::new();
+    let mut rows = BTreeMap::<String, CompensatedSum>::new();
     for row in reader.records() {
         let row = row.map_err(io_error)?;
         if status_index.is_some_and(|index| row.get(index) != Some("complete")) {
@@ -819,9 +846,25 @@ fn read_rows(
             .map(|index| row.get(*index).unwrap_or_default())
             .collect::<Vec<_>>();
         let key = serde_json::to_string(&key).map_err(io_error)?;
-        rows.insert(key, value);
+        if file == "economic_appraisal.csv" {
+            // A key can repeat across supplied records, and an unrepresentable sum must not be
+            // published as a comparable difference.
+            rows.entry(key).or_default().add(value);
+        } else {
+            let mut total = CompensatedSum::default();
+            total.add(value);
+            rows.insert(key, total);
+        }
     }
-    Ok(rows)
+    // A sum that stopped being finite cannot be compared, so it fails the comparison rather
+    // than being reported as a missing or zero observation.
+    rows.into_iter()
+        .map(|(key, total)| {
+            total.value().map(|value| (key, value)).ok_or_else(|| {
+                AnalysisError::new("economic metric overflowed while aggregating duplicate rows")
+            })
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -1040,6 +1083,10 @@ const CORE_TABLES: &[super::TableSpec] = &[
             "daily_mean_completed_travel_burden",
             "mean_completed_leg_duration_sum_seconds",
         )],
+    },
+    TableSpec {
+        file: "economic_appraisal.csv",
+        metrics: &[("value", "value"), ("money_equivalent", "money_equivalent")],
     },
     TableSpec {
         file: "link_capacity.csv",
@@ -1564,6 +1611,53 @@ mod tests {
         assert!(differences.contains(
             "0.500000,0.750000,0.250000,50.000000,0.500000,8.000000,8.000000,comparable"
         ));
+    }
+
+    #[test]
+    fn compares_supplied_economic_group_benefits() {
+        let temp = tempfile::tempdir().unwrap();
+        let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
+        let alternative = run(temp.path(), "alternative", 1.0, "l1,0,10,0\n");
+        for (output, benefit) in [(&baseline, 10), (&alternative, 15)] {
+            let analysis = output.join("analysis");
+            fs::write(
+                analysis.join("metric_catalog.json"),
+                r#"[{"name":"money_equivalent","unit":"declared_money_unit","aggregation_key":"scope,entity_id,group,account,money_unit"}]"#,
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("economic_appraisal.csv"),
+                format!("scope,entity_id,group,account,value,unit,money_equivalent,money_unit,transfer_id,boundary,source,status\ngroup,workers,workers,traveler_utility_money_equivalent,{},USD,{},USD,,traveler welfare valuation,study,available\ngroup,workers,workers,traveler_utility_money_equivalent,{},USD,{},USD,,traveler welfare valuation,study,available\nperson,p1,workers,traveler_utility_money_equivalent,{},USD,{},USD,,traveler welfare valuation,study,available\nperson,p2,workers,traveler_utility_money_equivalent,{},USD,{},USD,,traveler welfare valuation,study,available\n", benefit / 2, benefit / 2, benefit - benefit / 2, benefit - benefit / 2, benefit / 3, benefit / 3, benefit * 2 / 3, benefit * 2 / 3),
+            )
+            .unwrap();
+            let status = if output == &baseline {
+                "incomplete"
+            } else {
+                "complete"
+            };
+            fs::write(
+                analysis.join("person_daily.csv"),
+                format!("person_id,expected_legs,departed_legs,completed_legs,completed_duration_sum_seconds,completed_duration_mean_seconds,completion_status\np1,1,1,1,10,10,complete\np2,1,1,0,0,,{status}\n"),
+            )
+            .unwrap();
+        }
+        let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
+        let differences =
+            fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
+        let mut differences = csv::Reader::from_reader(differences.as_bytes());
+        let rows = differences
+            .records()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        assert!(rows.iter().any(|row| {
+            row.get(2) == Some("money_equivalent")
+                && row.get(5).is_some_and(|key| key.contains("workers"))
+                && row.get(8) == Some("5.000000")
+        }));
+        assert!(rows.iter().any(|row| {
+            row.get(5).is_some_and(|key| key.contains("p2"))
+                && row.get(13) == Some("excluded_incomplete_or_missing_travel")
+        }));
     }
 
     #[test]

@@ -616,6 +616,8 @@ pub struct Analysis {
     /// Optional CSV of observed boardings and alightings for the transit validation. Relative
     /// paths are resolved against the configured output directory.
     pub transit_observed_data: Option<PathBuf>,
+    /// Optional CSV of supplied utility and monetary appraisal inputs.
+    pub economic_inputs: Option<PathBuf>,
 
     /// Optional modeled emission-event records CSV. Relative paths resolve from the output dir.
     pub emissions: Option<EmissionsInputs>,
@@ -809,6 +811,7 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            economic_inputs: None,
             emissions: None,
             noise: None,
 

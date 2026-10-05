@@ -18,6 +18,7 @@ pub(super) fn publish_failure(
         None,
         None,
         None,
+        None,
         &TransitOutcome::default(),
         None,
         None,

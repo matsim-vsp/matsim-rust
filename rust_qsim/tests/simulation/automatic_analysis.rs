@@ -256,6 +256,10 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert!(html.contains("id=\"cross-run\""));
     assert!(html.contains("csvTable('#cross-run'"));
     assert!(
+        html.contains("Economic appraisal is unavailable: No economic input CSV is configured.")
+    );
+    assert!(!html.contains("Traveler utility is converted"));
+    assert!(
         html.contains(
             "[\"hour_start_seconds,eligible_links,used_links,unused_links,used_percent\","
         )
@@ -976,6 +980,7 @@ fn metric_catalog_names_match_the_exported_columns() {
         "transit_availability.csv",
         "transit_validation_summary.csv",
         "transit_validation_matches.csv",
+        "economic_appraisal.csv",
         "emissions_hourly.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
@@ -1505,6 +1510,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            economic_inputs: None,
             emissions: None,
             noise: None,
             excess_delay_clip_seconds: None,
@@ -1618,6 +1624,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            economic_inputs: None,
             emissions: None,
             noise: None,
             excess_delay_clip_seconds: None,

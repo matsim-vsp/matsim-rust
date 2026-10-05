@@ -6,6 +6,7 @@ mod agent_profile;
 pub mod capacity;
 mod cross_run;
 mod demographic;
+mod economic;
 mod emissions;
 mod ensemble;
 mod link_speed;
@@ -108,6 +109,7 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("service_performance", None),
     ("modeled_emissions", None),
     ("noise_exposure", None),
+    ("economic_appraisal", None),
 ];
 
 const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
@@ -212,6 +214,7 @@ pub struct Manifest {
     #[serde(default)]
     transit_observed_data: Option<String>,
     #[serde(default)]
+    economic_inputs: Option<String>,
     emissions: Option<EmissionsInputs>,
     #[serde(default)]
     noise: Option<NoiseInputs>,
@@ -789,6 +792,10 @@ pub fn analyze_final_iteration(
             .transit_observed_data
             .as_ref()
             .map(|path| path.display().to_string()),
+        economic_inputs: settings
+            .economic_inputs
+            .as_ref()
+            .map(|path| path.display().to_string()),
         emissions: settings.emissions.clone(),
         noise: settings.noise.clone(),
         person_group_attributes: settings.person_group_attributes.clone(),
@@ -920,6 +927,7 @@ pub fn reanalyze_completed_run(
         zone_system: recorded.zone_system.clone(),
         service: recorded.service.clone(),
         transit_observed_data: recorded.transit_observed_data.as_ref().map(PathBuf::from),
+        economic_inputs: recorded.economic_inputs.as_ref().map(PathBuf::from),
         emissions: recorded.emissions.clone(),
         noise: recorded.noise.clone(),
         person_group_attributes: recorded.person_group_attributes.clone(),
@@ -1469,6 +1477,12 @@ fn publish_complete(
     if survey.as_ref().is_none_or(Result::is_err) {
         survey::write_empty(&staging)?;
     }
+    let economic = settings.economic_inputs.as_ref().map(|source| {
+        economic::write(&staging, Some(source), output_dir).map_err(|error| error.to_string())
+    });
+    if economic.as_ref().is_none_or(Result::is_err) {
+        economic::write_empty(&staging)?;
+    }
     let comparison = (!settings.comparison_runs.is_empty()).then(|| {
         cross_run::write(output_dir, &staging, &settings.comparison_runs)
             .map_err(|error| error.to_string())
@@ -1548,6 +1562,7 @@ fn publish_complete(
         zone_tables,
         accessibility.as_ref(),
         service.as_ref(),
+        economic.as_ref(),
         demographics.as_ref(),
         &TransitOutcome {
             has_service_records: transit_summary.has_service_records,
@@ -1856,6 +1871,7 @@ fn module_statuses(
     zones: ZoneTables,
     accessibility: Option<&Result<(), String>>,
     service: Option<&Result<(), String>>,
+    economic: Option<&Result<(), String>>,
     demographics: Option<&Result<(), String>>,
     transit: &TransitOutcome<'_>,
     survey: Option<&Result<(), String>>,
@@ -1957,6 +1973,14 @@ fn module_statuses(
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No journey survey dataset is configured".to_owned()),
+                )),
+            },
+            "economic_appraisal" => match economic {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No economic input CSV is configured".to_owned()),
                 )),
             },
             "modeled_emissions" => match emissions {
@@ -3024,6 +3048,18 @@ fn metrics(include_clipped_delay: bool, include_accessibility: bool) -> Vec<Metr
     } else {
         Vec::new()
     })
+    .chain([
+        Metric {
+            name: "value",
+            unit: "declared_input_unit",
+            aggregation_key: "scope,entity_id,group,account,unit",
+        },
+        Metric {
+            name: "money_equivalent",
+            unit: "declared_money_unit",
+            aggregation_key: "scope,entity_id,group,account,money_unit",
+        },
+    ])
     .chain(
         include_accessibility
             .then(accessibility_metrics)
@@ -4796,6 +4832,26 @@ fn write_report(
             ),
         ],
     );
+    let economic = csv_for_script(&path.join("economic_summary.csv"))?;
+    let economic_status = statuses
+        .iter()
+        .find(|status| status.module == "economic_appraisal");
+    let economic_note = match economic_status {
+        Some(status) if status.status == STATUS_COMPLETE => "Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate; group and run net values require utility and all three costs at the same scope and currency. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.".to_owned(),
+        Some(status) if status.status == STATUS_FAILED => format!(
+            "Economic appraisal failed: {}. See module_status.json for details.",
+            report::escape_html(status.reason.as_deref().unwrap_or("unspecified error"))
+        ),
+        Some(status) => format!(
+            "Economic appraisal is unavailable: {}.",
+            report::escape_html(status.reason.as_deref().unwrap_or("no input data was configured"))
+        ),
+        None => "Economic appraisal status is unavailable.".to_owned(),
+    };
+    let economic_section = format!(
+        "<h2>Economic appraisal</h2><p>{economic_note}</p><div id=\"economic-summary\"></div><p><a href=\"economic_appraisal.csv\">Appraisal ledger</a> · <a href=\"economic_summary.csv\">Appraisal summary</a></p><script>csvTable('#economic-summary',{economic});</script>"
+    );
+    let html = html.replace("</body>", &format!("{economic_section}</body>"));
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
 
@@ -4875,6 +4931,41 @@ fn io_error(error: std::io::Error) -> AnalysisError {
     AnalysisError(error.to_string())
 }
 
+/// Accumulated sum of supplied amounts, with Neumaier compensation so a small contribution
+/// survives next to a much larger one. A sum that stops being finite stays unavailable rather
+/// than being reported as a number.
+#[derive(Default)]
+struct CompensatedSum {
+    sum: f64,
+    correction: f64,
+    count: usize,
+    overflowed: bool,
+}
+
+impl CompensatedSum {
+    fn add(&mut self, value: f64) {
+        self.count += 1;
+        let next = self.sum + value;
+        if next.is_finite() {
+            self.correction += if self.sum.abs() >= value.abs() {
+                (self.sum - next) + value
+            } else {
+                (value - next) + self.sum
+            };
+        }
+        if !next.is_finite() || !self.correction.is_finite() {
+            self.overflowed = true;
+            return;
+        }
+        self.sum = next;
+    }
+
+    fn value(&self) -> Option<f64> {
+        let value = self.sum + self.correction;
+        (!self.overflowed && value.is_finite()).then_some(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4882,6 +4973,22 @@ mod tests {
     use crate::simulation::events::{PersonArrivalEvent, PersonDepartureEvent};
     use crate::simulation::id::Id;
     use macros::deterministic_id_test;
+
+    #[test]
+    fn compensated_sum_keeps_small_contributions_and_refuses_overflow() {
+        let mut total = CompensatedSum::default();
+        total.add(1e16);
+        total.add(1.0);
+        total.add(-1e16);
+        assert_eq!(total.value().unwrap(), 1.0);
+        assert_eq!(total.count, 3);
+
+        let mut overflow = CompensatedSum::default();
+        overflow.add(f64::MAX);
+        assert_eq!(overflow.value().unwrap(), f64::MAX);
+        overflow.add(f64::MAX);
+        assert_eq!(overflow.value(), None);
+    }
 
     #[test]
     fn analysis_main_mode_collapses_access_walk_and_transit_transfers() {
@@ -5202,6 +5309,11 @@ mod tests {
                 vehicles: None,
             },
         );
+        fs::write(
+            dir.path().join("economic.csv"),
+            "scope,entity_id,group,account,value,unit,marginal_utility_of_money,money_unit,transfer_id,source\nperson,traveler,workers,utility,10,utils,2,USD,,survey\n",
+        )
+        .unwrap();
         metadata.vehicles.push(VehiclePce {
             vehicle_id: "emission-vehicle".to_owned(),
             vehicle_type_id: "vehicle-type".to_owned(),
@@ -5223,6 +5335,7 @@ mod tests {
             &Analysis {
                 enabled: true,
                 interval_seconds: 3600,
+                economic_inputs: Some("economic.csv".into()),
                 emissions: Some(EmissionsInputs {
                     records: PathBuf::from("emissions.csv"),
                     vehicle_categories: BTreeMap::from([(
@@ -5276,9 +5389,38 @@ mod tests {
         let summary = fs::read_to_string(output.join("daily_summary.csv")).unwrap();
         assert!(summary.contains("all_complete_persons,3,3.333333"));
         assert!(summary.contains("travelers,2,5.000000"));
+        let economic_ledger = fs::read_to_string(output.join("economic_appraisal.csv")).unwrap();
+        let mut economic_rows = csv::Reader::from_reader(economic_ledger.as_bytes());
+        assert!(economic_rows.records().map(Result::unwrap).any(|row| {
+            row.get(1) == Some("traveler")
+                && row.get(3) == Some("traveler_utility_money_equivalent")
+                && row.get(4) == Some("5.000000")
+                && row.get(6) == Some("5.000000")
+        }));
+        let economic_summary = fs::read_to_string(output.join("economic_summary.csv")).unwrap();
+        let mut economic_summary = csv::Reader::from_reader(economic_summary.as_bytes());
+        assert!(economic_summary.records().map(Result::unwrap).any(|row| {
+            row.get(3) == Some("traveler_utility_money_equivalent")
+                && row.get(4) == Some("USD")
+                && row.get(6) == Some("5.000000")
+        }));
+        let manifest: Manifest = read_json(&output.join(MANIFEST_FILE)).unwrap();
+        assert_eq!(manifest.economic_inputs.as_deref(), Some("economic.csv"));
+        let statuses: serde_json::Value = read_json(&output.join(MODULE_STATUS_FILE)).unwrap();
+        let economic_status = statuses
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|status| status["module"] == "economic_appraisal")
+            .unwrap();
+        assert_eq!(economic_status["status"], STATUS_COMPLETE);
         // The local report presents the agent-travel tables, not only the CSVs.
         let report_html = fs::read_to_string(output.join("index.html")).unwrap();
         assert!(report_html.contains("<h2>Agent travel</h2>"));
+        assert!(report_html.contains("<h2>Economic appraisal</h2>"));
+        assert!(report_html.contains("economic_appraisal.csv"));
+        assert!(report_html.contains("Operating, investment, and external costs stay separate"));
+        assert!(report_html.contains("traveler_utility_money_equivalent"));
         assert!(report_html.contains("<h2>Modeled emissions</h2>"));
         assert!(report_html.contains("emissions-network-map"));
         assert!(report_html.contains("csvTable('#emissions'"));
