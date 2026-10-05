@@ -83,6 +83,8 @@ struct Request {
 }
 
 struct Association {
+    /// Row of the passenger record, kept for diagnostics.
+    row: usize,
     vehicle: String,
     pickup: f64,
     dropoff: f64,
@@ -304,6 +306,7 @@ pub(super) fn write(
                     associations.insert(
                         id,
                         Association {
+                            row,
                             vehicle: passenger.vehicle_id,
                             pickup: passenger.pickup_seconds,
                             dropoff: passenger.dropoff_seconds,
@@ -325,6 +328,10 @@ pub(super) fn write(
             }
             let bounds = match (vehicle.service_start_seconds, vehicle.service_end_seconds) {
                 (Some(start), Some(end)) if end > start => Some((start, end)),
+                (Some(_), Some(_)) => {
+                    diagnostics.add("fleet", row, "invalid_service_window", &vehicle.vehicle_id);
+                    None
+                }
                 _ => None,
             };
             let entry = Vehicle {
@@ -341,16 +348,24 @@ pub(super) fn write(
             }
         }
     }
+    // With a fleet supplied, any other vehicle is reported once at its first record, but still
+    // listed so its served requests and distance are not dropped.
+    let fleet_ids: BTreeSet<String> = vehicles.keys().cloned().collect();
     if supplied.fleet {
-        let unknown: BTreeSet<_> = associations
-            .values()
-            .map(|association| association.vehicle.as_str())
-            .filter(|vehicle| !vehicles.contains_key(*vehicle))
-            .collect();
-        for vehicle in unknown {
-            diagnostics.add("passengers", 0, "unknown_vehicle", vehicle);
+        let mut unknown: BTreeMap<&str, usize> = BTreeMap::new();
+        for association in associations.values() {
+            if !fleet_ids.contains(&association.vehicle) {
+                let first = unknown
+                    .entry(association.vehicle.as_str())
+                    .or_insert(association.row);
+                *first = (*first).min(association.row);
+            }
+        }
+        for (vehicle, row) in unknown {
+            diagnostics.add("passengers", row, "unknown_vehicle", vehicle);
         }
     }
+    let mut unknown_in_schedule = BTreeSet::new();
     // Passengers by vehicle, so a drive task only looks at its own vehicle's riders.
     let mut riders: BTreeMap<&str, Vec<(f64, f64, u64)>> = BTreeMap::new();
     for (id, association) in &associations {
@@ -382,6 +397,12 @@ pub(super) fn write(
             if end < start {
                 diagnostics.add("schedule", row, "end_before_start", &task.vehicle_id);
                 continue;
+            }
+            if supplied.fleet
+                && !fleet_ids.contains(&task.vehicle_id)
+                && unknown_in_schedule.insert(task.vehicle_id.clone())
+            {
+                diagnostics.add("schedule", row, "unknown_vehicle", &task.vehicle_id);
             }
             let vehicle = vehicles.entry(task.vehicle_id.clone()).or_default();
             let busy = if task.task_type == "stay" {
@@ -430,14 +451,23 @@ pub(super) fn write(
                     vehicle.exceeded += 1;
                 }
             }
-            *load_meters.entry(load).or_default() += distance;
+            // Without rider records every task would read as empty, so no load is reported.
+            if supplied.passengers {
+                *load_meters.entry(load).or_default() += distance;
+            }
         }
     }
     write_requests_and_summary(report_dir, &requests, &associations, supplied, inputs)?;
     write_vehicles(report_dir, &vehicles, supplied)?;
     write_occupancy(report_dir, &load_meters)?;
     write_constraints(report_dir, inputs, &vehicles)?;
-    write_availability(report_dir, inputs, supplied)?;
+    write_availability(
+        report_dir,
+        inputs,
+        supplied,
+        vehicles.values().any(|v| v.window.is_some()),
+        vehicles.values().any(|v| v.capacity.is_some()),
+    )?;
     let mut writer = table_writer(report_dir, "service_diagnostics.csv")?;
     writeln!(writer, "{DIAGNOSTICS_HEADER}").map_err(io_error)?;
     for [source, row, reason, detail] in &diagnostics.0 {
@@ -741,6 +771,8 @@ fn write_availability(
     report_dir: &Path,
     inputs: &ServiceInputs,
     supplied: Supplied,
+    has_window: bool,
+    has_capacity: bool,
 ) -> Result<(), AnalysisError> {
     let mut table = table_writer(report_dir, "service_availability.csv")?;
     writeln!(table, "{AVAILABILITY_HEADER}").map_err(io_error)?;
@@ -761,12 +793,15 @@ fn write_availability(
         ),
         (
             "utilization",
-            vec![("fleet", supplied.fleet), ("schedule", supplied.schedule)],
+            vec![
+                ("fleet service windows", has_window),
+                ("schedule", supplied.schedule),
+            ],
         ),
         (
             "load_factor",
             vec![
-                ("fleet", supplied.fleet),
+                ("fleet capacities", has_capacity),
                 ("passengers", supplied.passengers),
                 ("schedule", supplied.schedule),
             ],

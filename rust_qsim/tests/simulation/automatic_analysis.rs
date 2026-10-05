@@ -1774,7 +1774,10 @@ fn service_performance_leaves_metrics_without_inputs_unavailable() {
     assert!(summary.contains("total,\"\",2,,1,,,0.500000,,,,,,,,,,,,,,"));
     let availability = fs::read_to_string(dir.join("service_availability.csv")).unwrap();
     assert!(availability.contains("request_outcomes,unavailable,\"missing input: passengers\""));
-    assert!(availability.contains("utilization,unavailable,\"missing input: fleet, schedule\""));
+    assert!(
+        availability
+            .contains("utilization,unavailable,\"missing input: fleet service windows, schedule\"")
+    );
     assert!(availability.contains("coverage,unavailable,\"missing input: service_area\""));
 
     // A missing request file fails only this module; the rest of the report is intact.
@@ -1846,4 +1849,143 @@ fn service_performance_rejects_invalid_inputs_in_its_own_module() {
     let mut bad_wait = service(&ok, None);
     bad_wait.max_wait_seconds = Some(-1.0);
     assert!(failed_reason(bad_wait).contains("max_wait_seconds"));
+}
+
+#[deterministic_id_test(rust_qsim)]
+fn service_performance_flags_inconsistent_records_and_overloaded_vehicles() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = temp.path();
+    fs::write(
+        output.join("requests.csv"),
+        "request_id,submission_seconds,origin_link,destination_link,party_size\n\
+         q1,100,in,in,2\nq2,0,in,missing-link,\nq3,0,in,in,\nq4,500,in,in,\nq5,0,in,in,\n",
+    )
+    .unwrap();
+    fs::write(
+        output.join("passengers.csv"),
+        "request_id,vehicle_id,pickup_seconds,dropoff_seconds\n\
+         q1,v1,200,600\nq3,v1,10,20\nq3,v1,30,40\nq4,v1,400,500\nq5,v1,300,200\nq2,vx,10,20\n",
+    )
+    .unwrap();
+    fs::write(
+        output.join("fleet.csv"),
+        "vehicle_id,capacity,service_start_seconds,service_end_seconds\nv1,1,100,700\nv2,2,500,500\n",
+    )
+    .unwrap();
+    // The second drive of v1 carries a party of two in a one-seat vehicle, and only half of the
+    // first drive's busy time lies inside the service window.
+    fs::write(
+        output.join("schedule.csv"),
+        "vehicle_id,task_type,start_seconds,end_seconds,distance_meters\n\
+         v1,drive,0,300,1000\nv1,drive,250,550,2000\nv9,stop,0,10,\nv9,stop,20,30,\n",
+    )
+    .unwrap();
+    let service = ServiceInputs {
+        requests: PathBuf::from("requests.csv"),
+        passengers: Some(PathBuf::from("passengers.csv")),
+        fleet: Some(PathBuf::from("fleet.csv")),
+        schedule: Some(PathBuf::from("schedule.csv")),
+        service_area: Some(vec![[-1.0, -1.0], [2.0, -1.0], [2.0, 2.0], [-1.0, 2.0]]),
+        max_wait_seconds: None,
+    };
+    let report = service_report(output, Some(service.clone()));
+    let dir = report.parent().unwrap();
+    let table = |name: &str| fs::read_to_string(dir.join(name)).unwrap();
+    assert_eq!(
+        module_status(dir, "service_performance")["status"],
+        "complete"
+    );
+
+    let diagnostics = table("service_diagnostics.csv");
+    for expected in [
+        "\"passengers\",4,\"duplicate_association\",\"q3\"",
+        "\"passengers\",5,\"pickup_before_submission\",\"q4\"",
+        "\"passengers\",6,\"dropoff_before_pickup\",\"q5\"",
+        "\"passengers\",7,\"unknown_vehicle\",\"vx\"",
+        "\"fleet\",3,\"invalid_service_window\",\"v2\"",
+        "\"schedule\",4,\"unknown_vehicle\",\"v9\"",
+    ] {
+        assert!(diagnostics.contains(expected), "missing {expected}");
+    }
+    // The unknown vehicle is reported once, not once per stop.
+    assert_eq!(diagnostics.matches("\"v9\"").count(), 1);
+
+    // A link missing from the network leaves the request outside any verdict, not outside.
+    let summary = table("service_summary.csv");
+    assert!(summary.contains(",4,0,1,0.800000"), "{summary}");
+    assert!(table("service_requests.csv").contains("\"q2\",\"\",\"unknown\",served,\"vx\""));
+    // Rejected-looking records stay unserved: only q1, q2 and q3 hold a valid association.
+    assert!(summary.contains("total,\"\",5,3,0,2,"));
+
+    // The party of two is 4000 passenger-metres in a one-seat vehicle, and only the window
+    // overlap counts: 200 s of the first drive plus all 300 s of the second.
+    let vehicles = table("service_vehicles.csv");
+    assert!(vehicles.contains("vehicle,\"v1\",1,600.000000,600.000000,0.833333,3000.000000,2000.000000,1000.000000,0.333333,4000.000000,1.333333,1.333333,1,2"), "{vehicles}");
+    let occupancy = table("service_occupancy.csv");
+    assert!(occupancy.contains("0,1000.000000,0.333333"));
+    assert!(occupancy.contains("2,2000.000000,0.666667"));
+
+    // Without rider records every task would look empty, so no occupancy is reported at all.
+    let without_passengers = service_report(
+        output,
+        Some(ServiceInputs {
+            passengers: None,
+            ..service.clone()
+        }),
+    );
+    let dir = without_passengers.parent().unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("service_occupancy.csv"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    let availability = fs::read_to_string(dir.join("service_availability.csv")).unwrap();
+    assert!(availability.contains("occupancy_distance,unavailable"));
+    assert!(availability.contains("utilization,available,"));
+
+    // Fleet records without any service window leave utilization unavailable.
+    fs::write(output.join("fleet.csv"), "vehicle_id,capacity\nv1,1\n").unwrap();
+    let dir = service_report(output, Some(service.clone()));
+    let availability =
+        fs::read_to_string(dir.parent().unwrap().join("service_availability.csv")).unwrap();
+    assert!(
+        availability.contains("utilization,unavailable,\"missing input: fleet service windows\"")
+    );
+
+    // A repeated vehicle or an unknown task type is an input error, not a silent guess.
+    fs::write(
+        output.join("fleet.csv"),
+        "vehicle_id,capacity\nv1,1\nv1,2\n",
+    )
+    .unwrap();
+    let dir = service_report(output, Some(service.clone()));
+    let status = module_status(dir.parent().unwrap(), "service_performance");
+    assert_eq!(status["status"], "failed");
+    assert!(
+        status["reason"]
+            .as_str()
+            .unwrap()
+            .contains("repeats vehicle_id v1")
+    );
+    fs::write(
+        output.join("schedule.csv"),
+        "vehicle_id,task_type,start_seconds,end_seconds,distance_meters\nv1,fly,0,1,\n",
+    )
+    .unwrap();
+    let dir = service_report(
+        output,
+        Some(ServiceInputs {
+            fleet: None,
+            ..service
+        }),
+    );
+    let status = module_status(dir.parent().unwrap(), "service_performance");
+    assert!(
+        status["reason"]
+            .as_str()
+            .unwrap()
+            .contains("unknown task_type")
+    );
 }
