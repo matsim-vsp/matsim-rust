@@ -208,8 +208,10 @@ cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-con
 
 ## Reanalyze a completed run
 
-A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. The
-`analyze` binary regenerates that report from the run's saved outputs without rerunning QSim:
+A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. It
+covers link volumes and coverage, link classification, per-interval link speeds, and agent travel;
+see `docs/analysis.md` for the conventions. The `analyze` binary regenerates that report from the
+run's saved outputs without rerunning QSim:
 
 ```shell
 cargo run --release --bin analyze -- --run-dir /path/to/output
@@ -242,7 +244,8 @@ a required module fails, the diagnostics -- including their own `index.html` -- 
 never mistaken for a completed one. Rerunning after fixing the inputs republishes the complete
 report and removes the failure directory. Optional modules that are not implemented or whose inputs
 are not configured are reported as `unavailable` in `module_status.json` rather than failing;
-`module_status.json` marks each entry `required` or not.
+`module_status.json` marks each entry `required` or not. The computed optional modules `link_speed`
+and `agent_travel` follow the run's outcome, so a failed run never lists them as complete.
 
 A rerun exits non-zero and logs a diagnostic on failure. If a previous run was interrupted while
 publishing, its backup is reclaimed on the next rerun so the last good report is never stranded.

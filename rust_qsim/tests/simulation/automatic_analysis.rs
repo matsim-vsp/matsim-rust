@@ -601,12 +601,16 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 9] = [
+    const TABLES: [&str; 13] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
         "vc_histogram.csv",
         "group_coverage.csv",
+        "link_speed_hourly.csv",
+        "link_speed_summary.csv",
+        "link_speed_histogram.csv",
+        "link_speed_diagnostics.csv",
         "leg_hourly.csv",
         "person_daily.csv",
         "daily_summary.csv",
@@ -922,7 +926,7 @@ fn capacity_report_until(
 
 #[deterministic_id_test(rust_qsim)]
 fn protobuf_partition_replay_matches_compressed_xml_report() {
-    let run = |config_path: &str, output_dir: &str| {
+    let run = |config_path: &str, output_dir: &str, table: &str| {
         let mut config = Config::from_args(CommandLineArgs::new_with_path(config_path));
         config.controller_mut().last_iteration = 1;
         config.output_mut().output_dir = output_dir.into();
@@ -932,22 +936,34 @@ fn protobuf_partition_replay_matches_compressed_xml_report() {
             .build()
             .unwrap();
         controller.run();
-        [
-            fs::read_to_string(output.join("analysis/link_hourly.csv")).unwrap(),
-            fs::read_to_string(output.join("analysis/link_capacity.csv")).unwrap(),
-            fs::read_to_string(output.join("analysis/vc_histogram.csv")).unwrap(),
-        ]
+        fs::read_to_string(output.join("analysis").join(table)).unwrap()
     };
 
-    let xml = run(
-        "./tests/resources/3-links/3-links-config-1.yml",
-        "./test_output/simulation/analysis_xml_equivalence",
-    );
-    let protobuf = run(
-        "./tests/resources/3-links/3-links-config-2.yml",
-        "./test_output/simulation/analysis_proto_equivalence",
-    );
-    assert_eq!(xml, protobuf);
+    // Link speeds are reconstructed from the replayed events, and the PCE volumes and V/C
+    // histograms from the same replay, so all of them have to agree across the event formats
+    // just like the vehicle counts they are derived from.
+    for table in [
+        "link_hourly.csv",
+        "coverage.csv",
+        "link_capacity.csv",
+        "vc_histogram.csv",
+        "link_speed_hourly.csv",
+        "link_speed_summary.csv",
+        "link_speed_histogram.csv",
+        "link_speed_diagnostics.csv",
+    ] {
+        let xml = run(
+            "./tests/resources/3-links/3-links-config-1.yml",
+            "./test_output/simulation/analysis_xml_equivalence",
+            table,
+        );
+        let protobuf = run(
+            "./tests/resources/3-links/3-links-config-2.yml",
+            "./test_output/simulation/analysis_proto_equivalence",
+            table,
+        );
+        assert_eq!(xml, protobuf, "{table} differs between event formats");
+    }
 }
 
 #[deterministic_id_test(rust_qsim)]
