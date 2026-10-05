@@ -8,6 +8,7 @@ mod demographic;
 mod emissions;
 mod ensemble;
 mod link_speed;
+mod report;
 mod service;
 pub use cross_run::compare_completed_runs;
 pub use demographic::PersonDemographic;
@@ -21,9 +22,6 @@ pub use transit::TransitMetadata;
 mod network_distance;
 mod noise;
 mod publication;
-mod report;
-
-use report::{CSV_TABLE_SCRIPT, REPORT_STYLE, csv_preview_for_script, escape_html};
 
 use crate::simulation::config::{
     Accessibility, Analysis, CompressionType, EmissionsInputs, LinkLabels, NoiseInputs,
@@ -53,7 +51,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 use transit::TransitCollector;
@@ -129,8 +127,6 @@ const PERSON_DEMOGRAPHIC_PREVIEW_ROWS: usize = 200;
 const EXPRESSWAY: &str = "expressway";
 /// Leg rows embedded in the local report before it defers to the full `legs.csv`.
 const LEGS_PREVIEW_ROWS: usize = 200;
-/// Rows of each accessibility table embedded in the local report. The CSVs hold every row.
-const ACCESSIBILITY_PREVIEW_ROWS: usize = 500;
 /// Dimensions every accessibility row is grouped by, as the catalog declares them.
 const ACCESSIBILITY_AGGREGATION_KEY: &str =
     "origin_zone,category,mode,departure_period_start_seconds,threshold_seconds";
@@ -981,7 +977,7 @@ pub fn compare_latest_run_reports(
             reason: None,
         }],
     )?;
-    write_cross_run_report(&staging)?;
+    report::write_cross_run_report(&staging)?;
     publication::publish(
         &staging,
         &output_dir.join("cross_run_comparison"),
@@ -1011,14 +1007,6 @@ fn latest_output_iteration(run_dir: &Path) -> Result<u32, AnalysisError> {
                 run_dir.display()
             ))
         })
-}
-
-fn write_cross_run_report(path: &Path) -> Result<(), AnalysisError> {
-    let rows = csv_for_script(&path.join("journey_mode_share.csv"))?;
-    let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Cross-run journey comparison</title><style>{REPORT_STYLE}</style></head><body><h1>Cross-run journey mode shares</h1><p>Each row comes from the latest completed iteration report of its run. Shares are grouped by departure interval, purpose, distance class, and main mode.</p><div id=\"comparison\"></div><p><a href=\"journey_mode_share.csv\">CSV table</a> · <a href=\"manifest.json\">run iterations</a> · <a href=\"metric_catalog.json\">metric catalog</a></p><script>{CSV_TABLE_SCRIPT}csvTable('#comparison',{rows});</script></body></html>"
-    );
-    fs::write(path.join("index.html"), html).map_err(io_error)
 }
 
 /// Record a failed attempt and hand the original error back to the caller. The module error is
@@ -4193,21 +4181,6 @@ fn number_opt(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.6}"))
 }
 
-fn csv_for_script(path: &Path) -> Result<String, AnalysisError> {
-    let csv = fs::read_to_string(path).map_err(io_error)?;
-    json_for_script(&csv.lines().collect::<Vec<_>>())
-}
-
-fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, AnalysisError> {
-    serde_json::to_string(value)
-        .map(|json| {
-            json.replace('&', "\\u0026")
-                .replace('<', "\\u003c")
-                .replace('>', "\\u003e")
-        })
-        .map_err(|e| AnalysisError(e.to_string()))
-}
-
 /// Opens one of the exported CSV tables for writing.
 fn table_writer(path: &Path, name: &str) -> Result<BufWriter<File>, AnalysisError> {
     Ok(BufWriter::new(
@@ -4218,6 +4191,7 @@ fn table_writer(path: &Path, name: &str) -> Result<BufWriter<File>, AnalysisErro
 fn csv(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
+
 fn io_error(error: std::io::Error) -> AnalysisError {
     AnalysisError(error.to_string())
 }

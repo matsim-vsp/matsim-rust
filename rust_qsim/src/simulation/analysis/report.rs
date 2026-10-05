@@ -1,4 +1,7 @@
 use super::*;
+use std::io::{BufRead, BufReader};
+
+const ACCESSIBILITY_PREVIEW_ROWS: usize = 500;
 
 pub(super) const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
 
@@ -497,6 +500,21 @@ fn render_template(template: &str, replacements: &[(&str, &str)]) -> String {
     output
 }
 
+pub(super) fn csv_for_script(path: &Path) -> Result<String, AnalysisError> {
+    let csv = fs::read_to_string(path).map_err(io_error)?;
+    json_for_script(&csv.lines().collect::<Vec<_>>())
+}
+
+fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, AnalysisError> {
+    serde_json::to_string(value)
+        .map(|json| {
+            json.replace('&', "\\u0026")
+                .replace('<', "\\u003c")
+                .replace('>', "\\u003e")
+        })
+        .map_err(|error| AnalysisError::new(error.to_string()))
+}
+
 /// Embeds at most `rows` lines, header included, without reading the whole file.
 /// Reports whether the file had more lines than were embedded.
 pub(super) fn csv_preview_for_script(
@@ -526,6 +544,14 @@ pub(super) fn write_failure_report(
     let html = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis failed</title><style>{REPORT_STYLE}</style></head><body><h1>Analysis failed</h1><p>The required <code>{REQUIRED_MODULE}</code> module did not complete for final iteration {iteration}, so no completed report was published. The previously published report in <code>{ANALYSIS_DIR}</code> is unchanged.</p><h2>Failure</h2><pre>{reason}</pre><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"manifest.json\">failure manifest</a>, <a href=\"module_status.json\">module status</a>, <a href=\"failure.txt\">error text</a>.</p><script>const m={modules};{MODULE_TABLE_SCRIPT}</script></body></html>",
         iteration = manifest.iteration,
+    );
+    fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
+pub(super) fn write_cross_run_report(path: &Path) -> Result<(), AnalysisError> {
+    let rows = csv_for_script(&path.join("journey_mode_share.csv"))?;
+    let html = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Cross-run journey comparison</title><style>{REPORT_STYLE}</style></head><body><h1>Cross-run journey mode shares</h1><p>Each row comes from the latest completed iteration report of its run. Shares are grouped by departure interval, purpose, distance class, and main mode.</p><div id=\"comparison\"></div><p><a href=\"journey_mode_share.csv\">CSV table</a> · <a href=\"manifest.json\">run iterations</a> · <a href=\"metric_catalog.json\">metric catalog</a></p><script>{CSV_TABLE_SCRIPT}csvTable('#comparison',{rows});</script></body></html>"
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }

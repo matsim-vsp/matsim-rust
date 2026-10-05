@@ -1,6 +1,7 @@
 //! Comparisons between reports from completed runs.
 
-use super::{AnalysisError, Manifest, TableSpec, csv, escape_html, read_json};
+use super::report::escape_html;
+use super::{AnalysisError, Manifest, TableSpec, csv, read_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -988,7 +989,7 @@ fn read_column(path: &Path, name: &str) -> Result<BTreeSet<String>, AnalysisErro
         .collect()
 }
 
-fn table_specs() -> Vec<&'static TableSpec> {
+fn table_specs() -> Vec<&'static super::TableSpec> {
     CORE_TABLES
         .iter()
         .chain(super::transit::COMPARISON_TABLES)
@@ -999,7 +1000,7 @@ fn table_specs() -> Vec<&'static TableSpec> {
         .collect()
 }
 
-const CORE_TABLES: &[TableSpec] = &[
+const CORE_TABLES: &[super::TableSpec] = &[
     TableSpec {
         file: "link_hourly.csv",
         metrics: &[
