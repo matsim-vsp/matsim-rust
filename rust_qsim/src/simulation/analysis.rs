@@ -343,6 +343,8 @@ pub struct AnalysisRuntimeMetadata {
     pub available_logical_cpus: Option<usize>,
     pub operating_system: Option<String>,
     pub architecture: Option<String>,
+    pub cpu_model: Option<String>,
+    pub host_memory_bytes: Option<u64>,
     pub software_name: Option<String>,
     pub software_version: Option<String>,
     pub network_links: Option<usize>,
@@ -4007,6 +4009,9 @@ fn write_runtime_tables(
             row(field, value.to_owned(), "", "build metadata")?;
         }
     }
+    if let Some(value) = &runtime.cpu_model {
+        row("cpu_model", value.clone(), "", "host query")?;
+    }
     for (field, value, unit, source) in [
         (
             "network_links",
@@ -4032,6 +4037,9 @@ fn write_runtime_tables(
             row(field, value.to_string(), unit, source)?;
         }
     }
+    if let Some(value) = runtime.host_memory_bytes {
+        row("host_memory", value.to_string(), "bytes", "host query")?;
+    }
     if let Some(value) = runtime.peak_memory_bytes {
         row(
             "peak_memory",
@@ -4056,6 +4064,49 @@ pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
                 .ok()
         })
         .and_then(|kilobytes| kilobytes.checked_mul(1024))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn host_cpu_model() -> Option<String> {
+    fs::read_to_string("/proc/cpuinfo")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            ["model name", "Hardware", "Processor"]
+                .iter()
+                .find_map(|field| {
+                    line.strip_prefix(field)
+                        .and_then(|value| value.split_once(':'))
+                        .map(|(_, value)| value.trim())
+                })
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn host_cpu_model() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn host_memory_bytes() -> Option<u64> {
+    fs::read_to_string("/proc/meminfo")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("MemTotal:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+        })
+        .and_then(|kilobytes| kilobytes.checked_mul(1024))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn host_memory_bytes() -> Option<u64> {
+    None
 }
 
 #[cfg(not(target_os = "linux"))]

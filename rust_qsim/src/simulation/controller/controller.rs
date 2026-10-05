@@ -395,6 +395,8 @@ impl Controller {
                 available_logical_cpus: std::thread::available_parallelism().ok().map(usize::from),
                 operating_system: Some(std::env::consts::OS.to_owned()),
                 architecture: Some(std::env::consts::ARCH.to_owned()),
+                cpu_model: crate::simulation::analysis::host_cpu_model(),
+                host_memory_bytes: crate::simulation::analysis::host_memory_bytes(),
                 software_name: Some(env!("CARGO_PKG_NAME").to_owned()),
                 software_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
                 network_links: Some(self.scenario.core.network.links().len()),

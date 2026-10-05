@@ -98,6 +98,8 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         worker_count: Some(2),
         operating_system: Some("test-os".to_owned()),
         architecture: Some("test-arch".to_owned()),
+        cpu_model: Some("test-cpu".to_owned()),
+        host_memory_bytes: Some(64000),
         software_name: Some("rust_qsim".to_owned()),
         software_version: Some("test-version".to_owned()),
         network_links: Some(200),
@@ -174,6 +176,8 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert_eq!(runtime_json["phase_seconds"]["mobsim"], 8.0);
     assert_eq!(runtime_json["worker_count"], 2);
     assert_eq!(runtime_json["network_links"], 200);
+    assert_eq!(runtime_json["cpu_model"], "test-cpu");
+    assert_eq!(runtime_json["host_memory_bytes"], 64000);
     assert!(runtime_json["analysis_seconds"].as_f64().is_some());
     assert!(runtime_json["peak_memory_bytes"].is_null());
     let runtime_csv = fs::read_to_string(runtime_dir.join("runtime.csv")).unwrap();
@@ -181,6 +185,8 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         runtime_csv.contains("\"simulation_runtime\",\"12.5\",\"seconds\",\"measured wall clock\"")
     );
     assert!(runtime_csv.contains("\"worker_count\",\"2\",\"workers\",\"configured partitions\""));
+    assert!(runtime_csv.contains("\"cpu_model\",\"test-cpu\",\"\",\"host query\""));
+    assert!(runtime_csv.contains("\"host_memory\",\"64000\",\"bytes\",\"host query\""));
     assert!(!runtime_csv.contains("peak_memory"));
     let html = fs::read_to_string(&report).unwrap();
     assert!(html.contains("Execution context"));
