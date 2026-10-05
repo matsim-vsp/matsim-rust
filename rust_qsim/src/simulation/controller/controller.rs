@@ -375,6 +375,10 @@ impl Controller {
                     population: self.config.population().path.as_deref(),
                     vehicles: self.config.vehicles().path.as_deref(),
                 },
+            )
+            .with_transit(
+                &self.scenario.core.transit_schedule,
+                &self.scenario.core.garage,
             );
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
