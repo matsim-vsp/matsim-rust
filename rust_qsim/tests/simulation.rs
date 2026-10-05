@@ -14,5 +14,7 @@ mod iterations;
 mod link_speed_analysis;
 #[path = "simulation/pt.rs"]
 mod pt;
+#[path = "simulation/standalone_analysis.rs"]
+mod standalone_analysis;
 #[path = "simulation/three_links.rs"]
 mod three_links;
