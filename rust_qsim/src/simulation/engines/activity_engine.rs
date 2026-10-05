@@ -532,6 +532,7 @@ mod tests {
                 None,
             )),
             "mode",
+            "mode",
             Duration::from_secs(1),
             Some(SimTime::from_secs(2)),
         ));

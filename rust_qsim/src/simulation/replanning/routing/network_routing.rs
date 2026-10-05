@@ -211,6 +211,7 @@ impl NetworkRoutingModule {
             return InternalPlanElement::Leg(InternalLeg::new(
                 InternalRoute::Network(net_route),
                 mode.external(),
+                mode.external(),
                 Duration::from_secs(0),
                 Some(now),
             ));
@@ -253,7 +254,13 @@ impl NetworkRoutingModule {
 
         let net_route = InternalNetworkRoute::new(generic, route);
         let route = InternalRoute::Network(net_route);
-        let leg = InternalLeg::new(route, mode.external(), trav_time, Some(now));
+        let leg = InternalLeg::new(
+            route,
+            mode.external(),
+            mode.external(),
+            trav_time,
+            Some(now),
+        );
         InternalPlanElement::Leg(leg)
     }
 
@@ -279,6 +286,7 @@ mod tests {
     use crate::simulation::InternalAttributes;
     use crate::simulation::config::Config;
     use crate::simulation::id::Id;
+    use crate::simulation::network::signals::Signals;
     use crate::simulation::replanning::routing::a_star::Alt;
     use crate::simulation::replanning::routing::cost::FreeSpeedTravelTimeAndDisutility;
     use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
@@ -472,6 +480,7 @@ mod tests {
                     crate::simulation::scenario::transit::TransitSchedule::default(),
                 ),
                 config: Arc::new(Config::default()),
+                signals: Arc::new(Signals::default()),
             },
         );
 

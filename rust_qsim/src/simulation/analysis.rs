@@ -3406,6 +3406,7 @@ mod tests {
                 leg("walk", 800.0),
                 activity("work"),
             ],
+            attributes: InternalAttributes::default(),
         };
         let overflow_plan = InternalPlan {
             score: None,
@@ -3417,6 +3418,7 @@ mod tests {
                 leg("walk", f64::MAX),
                 activity("work"),
             ],
+            attributes: InternalAttributes::default(),
         };
         let population = Population::from_persons(vec![
             InternalPerson::new(Id::create("person"), plan),

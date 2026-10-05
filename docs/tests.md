@@ -1,7 +1,7 @@
 # Testing
 
-By default, every test in Rust is executed in parallel. This may cause problems with some tests that have global state (
-e.g. a global ID store or a global logger).
+By default, every test in Rust is executed in parallel. This may cause problems with some tests that have global state (e.g. a global ID
+store or a global logger).
 
 You might use the `[serial]` attribute to mark a test as serial. But note that this only makes sure that all such marked
 tests are executed sequentially. Any other test not being marked as serial will still be executed in parallel and there

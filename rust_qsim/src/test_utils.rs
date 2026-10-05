@@ -35,6 +35,7 @@ pub fn create_agent(id: u64, route: Vec<&str>) -> SimulationAgent {
     let leg = InternalLeg::new(
         InternalRoute::Network(net_route),
         "car",
+        "car",
         Duration::default(),
         None,
     );
@@ -87,6 +88,7 @@ pub fn qsim_config() -> config::QSim {
         sample_size: 1.0,
         stuck_threshold: u32::MAX,
         main_modes: vec![String::from("car")],
+        signals: config::SignalFilesConfig::default(),
     }
 }
 

@@ -106,8 +106,6 @@ pub(crate) fn replan_population(
 ) -> Population {
     let persons = population
         .persons
-        .into_iter()
-        .collect::<Vec<_>>()
         .into_par_iter()
         .map(|(id, mut person)| {
             tracing::dispatcher::with_default(dispatch, || {
@@ -425,20 +423,16 @@ impl PlanStrategy for GenericPlanStrategy {
 
     fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext) {
         let plan_index = self.selector.select(person, context);
+        person.mark_plan_as_selected(plan_index);
         if self.modules.is_empty() {
             return;
         }
-        let mut new_plan = person
+        let new_plan = person
             .plans()
             .get(plan_index)
             .cloned()
             .unwrap_or_else(|| panic!("Selected plan index {plan_index} does not exist."));
-        for plan in person.plans_mut() {
-            plan.selected = false;
-        }
-        new_plan.selected = true;
-        person.plans_mut().push(new_plan);
-        let new_plan_index = person.plans().len() - 1;
+        let new_plan_index = person.add_new_plan_as_selected(new_plan);
 
         for module in &self.modules {
             module.handle(person, new_plan_index);
@@ -925,7 +919,13 @@ mod tests {
                     Some(17.0),
                     None,
                 ));
-                plan.add_leg(InternalLeg::new(route, mode, Duration::from_secs(10), None));
+                plan.add_leg(InternalLeg::new(
+                    route,
+                    mode,
+                    mode,
+                    Duration::from_secs(10),
+                    None,
+                ));
             }
         }
         plan
@@ -967,6 +967,7 @@ mod tests {
                     None,
                 )),
                 "walk",
+                "walk",
                 one_second,
                 Some(request.departure_time()),
             ));
@@ -990,6 +991,7 @@ mod tests {
                     vec![from.clone(), to.clone()],
                 )),
                 "car",
+                "car",
                 two_seconds,
                 None,
             ));
@@ -1009,6 +1011,7 @@ mod tests {
                     Some(0.0),
                     None,
                 )),
+                "walk",
                 "walk",
                 one_second,
                 None,
@@ -1040,6 +1043,7 @@ mod tests {
             score,
             selected,
             elements: Vec::new(),
+            attributes: Default::default(),
         }
     }
 

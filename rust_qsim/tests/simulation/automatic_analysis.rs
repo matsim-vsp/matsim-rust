@@ -410,6 +410,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
             leg("car", 7000.0),
             activity("home"),
         ],
+        attributes: Default::default(),
     };
     let walking_plan = InternalPlan {
         score: None,
@@ -421,6 +422,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
             leg("car", 7000.0),
             activity("home"),
         ],
+        attributes: Default::default(),
     };
     let from = Facility::ActivityFacility(ActivityFacility {
         id: Id::create("from"),
@@ -456,6 +458,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
         score: None,
         selected: true,
         elements: teleported_elements,
+        attributes: Default::default(),
     };
     let population = Population::from_persons(vec![
         InternalPerson::new(Id::create("p"), plan),
