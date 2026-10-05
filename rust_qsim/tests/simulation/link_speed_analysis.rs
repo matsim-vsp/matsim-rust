@@ -328,7 +328,7 @@ fn link_speed_reports_representative_and_vehicle_speed_metrics() {
     );
     assert!(catalog.contains("\"unit\": \"m/s\""), "{catalog}");
     let html = &tables["index.html"];
-    assert!(html.contains("Hourly link speeds"), "{html}");
+    assert!(html.contains("Interval link speeds"), "{html}");
     assert!(
         html.contains("const linkSpeeds=[\"link_id,hour_start_seconds,observations"),
         "{html}"
