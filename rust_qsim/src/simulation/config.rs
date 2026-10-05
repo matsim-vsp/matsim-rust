@@ -598,8 +598,10 @@ pub struct Analysis {
     /// Explicit per-link labels. Missing or blank labels are reported as `unknown`.
     pub link_labels: std::collections::BTreeMap<String, LinkLabels>,
     /// Optional polygon in the same coordinate system as network node coordinates.
-    /// A link is inner when both endpoints are inside, outer when both are outside,
-    /// and cross_boundary when exactly one endpoint is inside.
+    /// A link is inner when both endpoints are inside, outer when both are outside
+    /// and the segment misses the polygon, and cross_boundary when one endpoint is
+    /// inside or the segment crosses the polygon. When set, this determines
+    /// `urban_area` instead of the per-link label of the same name.
     pub urban_boundary: Option<Vec<[f64; 2]>>,
 }
 

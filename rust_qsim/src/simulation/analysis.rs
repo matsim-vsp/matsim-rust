@@ -1,6 +1,6 @@
 //! Final-iteration link coverage reporting.
 
-use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
+use crate::simulation::config::{Analysis, CompressionType};
 use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
@@ -27,6 +27,11 @@ impl std::fmt::Display for AnalysisError {
 }
 
 impl std::error::Error for AnalysisError {}
+
+/// Reported category for a link whose label is absent or only whitespace.
+const UNKNOWN: &str = "unknown";
+/// Road-type label the coverage map renders as a dashed expressway.
+const EXPRESSWAY: &str = "expressway";
 
 #[derive(Serialize)]
 struct Metric<'a> {
@@ -235,22 +240,6 @@ pub fn analyze_final_iteration(
         fs::remove_dir_all(&staging).map_err(io_error)?;
     }
     fs::create_dir_all(&staging).map_err(io_error)?;
-    write_tables(
-        &staging,
-        &ordered_links,
-        &counts,
-        settings.interval_seconds,
-        simulation_end_time,
-    )?;
-    write_classification(&staging, &ordered_links, &classifications)?;
-    let grouped_coverage = write_group_coverage(
-        &staging,
-        &ordered_links,
-        &classifications,
-        &counts,
-        settings.interval_seconds,
-        simulation_end_time,
-    )?;
     let link_hourly = link_hourly_metrics(
         &ordered_links,
         &classifications,
@@ -258,6 +247,23 @@ pub fn analyze_final_iteration(
         settings.interval_seconds,
         simulation_end_time,
     );
+    write_tables(
+        &staging,
+        &ordered_links,
+        &counts,
+        settings.interval_seconds,
+        simulation_end_time,
+        &link_hourly,
+    )?;
+    write_classification(&staging, &ordered_links, &classifications)?;
+    write_group_coverage(
+        &staging,
+        &ordered_links,
+        &classifications,
+        &counts,
+        settings.interval_seconds,
+        simulation_end_time,
+    )?;
     write_network_map(&staging, &ordered_links, network, &classifications, &counts)?;
     let manifest = Manifest {
         status: "complete",
@@ -405,7 +411,8 @@ pub fn analyze_final_iteration(
         &staging,
         iteration,
         ordered_links.len(),
-        &grouped_coverage,
+        &metrics,
+        &statuses,
         &link_hourly,
     )?;
     let published = output_dir.join("analysis");
@@ -504,18 +511,42 @@ fn accumulate(
     }
 }
 
-type ClassifiedGroups = BTreeMap<String, LinkLabels>;
-
+/// A link's three classification dimensions, always populated.
+///
+/// `classify_links` resolves blank and missing labels to `unknown` once, so the
+/// exporters and the report never repeat that fallback and cannot disagree about
+/// which group a link belongs to.
 #[derive(Serialize)]
-struct GroupCoverage {
-    dimension: String,
-    category: String,
-    hour_start_seconds: u64,
-    eligible_links: usize,
-    used_links: usize,
-    unused_links: usize,
-    used_percent: f64,
+struct ClassifiedLink {
+    urban_area: String,
+    road_type: String,
+    road_size: String,
 }
+
+impl ClassifiedLink {
+    /// Dimension key and value pairs, in `FILTER_DIMENSIONS` order.
+    fn dimensions(&self) -> [(&'static str, &str); FILTER_DIMENSIONS.len()] {
+        [
+            ("urban_area", self.urban_area.as_str()),
+            ("road_type", self.road_type.as_str()),
+            ("road_size", self.road_size.as_str()),
+        ]
+    }
+}
+
+/// Classified dimensions for every eligible link, keyed by external link ID.
+type LinkClassifications = BTreeMap<String, ClassifiedLink>;
+
+/// The report's classification dimensions, with their column and filter headings.
+///
+/// This is the single list the CSV exporters group by and the HTML filters
+/// offer, so a dimension cannot be exported without also being filterable. The
+/// report test asserts the same keys appear in every emitted artefact.
+const FILTER_DIMENSIONS: [(&str, &str); 3] = [
+    ("urban_area", "Urban area"),
+    ("road_type", "Road type"),
+    ("road_size", "Road size"),
+];
 
 #[derive(Serialize)]
 struct LinkHourlyMetric {
@@ -528,50 +559,40 @@ struct LinkHourlyMetric {
     road_size: String,
 }
 
-fn classification_dimensions(labels: &LinkLabels) -> [(&'static str, &str); 3] {
-    [
-        (
-            "urban_area",
-            labels.urban_area.as_deref().unwrap_or("unknown"),
-        ),
-        (
-            "road_type",
-            labels.road_type.as_deref().unwrap_or("unknown"),
-        ),
-        (
-            "road_size",
-            labels.road_size.as_deref().unwrap_or("unknown"),
-        ),
-    ]
-}
-
-fn intervals(counts: &LinkVolumesByHour, interval: u32, simulation_end_time: u32) -> BTreeSet<u64> {
+/// Start second of every reported interval: the buckets that carry traffic, the
+/// empty ones up to the simulation end, and zero.
+fn interval_starts(
+    counts: &LinkVolumesByHour,
+    interval: u32,
+    simulation_end_time: u32,
+) -> BTreeSet<u64> {
     let mut hours: BTreeSet<_> = counts.keys().map(|key| key.hour_start_seconds).collect();
     hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
     hours.insert(0);
     hours
 }
 
-fn classify_links(links: &[&Link], network: &Network, settings: &Analysis) -> ClassifiedGroups {
+fn classify_links(links: &[&Link], network: &Network, settings: &Analysis) -> LinkClassifications {
     links
         .iter()
         .map(|link| {
             let supplied = settings.link_labels.get(link.id.external());
-            let urban_area = if let Some(boundary) = &settings.urban_boundary {
-                let from = network.nodes_with_ids().get(&link.from);
-                let to = network.nodes_with_ids().get(&link.to);
-                match (from, to) {
-                    (Some(from), Some(to)) => {
-                        Some(classify_link_to_boundary(from, to, boundary).to_owned())
+            let urban_area = match &settings.urban_boundary {
+                Some(boundary) => {
+                    let from = network.nodes_with_ids().get(&link.from);
+                    let to = network.nodes_with_ids().get(&link.to);
+                    match (from, to) {
+                        (Some(from), Some(to)) => {
+                            classify_link_to_boundary(from, to, boundary).to_owned()
+                        }
+                        _ => UNKNOWN.to_owned(),
                     }
-                    _ => Some("unknown".to_owned()),
                 }
-            } else {
-                label(supplied.and_then(|labels| labels.urban_area.as_deref()))
+                None => label(supplied.and_then(|labels| labels.urban_area.as_deref())),
             };
             (
                 link.id.external().to_owned(),
-                LinkLabels {
+                ClassifiedLink {
                     urban_area,
                     road_type: label(supplied.and_then(|labels| labels.road_type.as_deref())),
                     road_size: label(supplied.and_then(|labels| labels.road_size.as_deref())),
@@ -581,13 +602,13 @@ fn classify_links(links: &[&Link], network: &Network, settings: &Analysis) -> Cl
         .collect()
 }
 
-fn label(value: Option<&str>) -> Option<String> {
-    Some(
-        value
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("unknown")
-            .to_owned(),
-    )
+/// A supplied label, or `unknown` when it is absent or only whitespace. Resolved
+/// once here so that grouping, the exports and the report filters agree.
+fn label(value: Option<&str>) -> String {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(UNKNOWN)
+        .to_owned()
 }
 
 fn classify_link_to_boundary(from: &Node, to: &Node, polygon: &[[f64; 2]]) -> &'static str {
@@ -602,7 +623,46 @@ fn classify_link_to_boundary(from: &Node, to: &Node, polygon: &[[f64; 2]]) -> &'
     }
 }
 
+/// Relative tolerance for calling a point collinear with a segment.
+///
+/// Boundary assignment is report metadata, so a node that lands on the polygon
+/// edge only up to floating-point rounding still counts as on it. The bound is
+/// scaled by the coordinates involved, which keeps it far below any real link
+/// length in both metres and degrees while absorbing the rounding of a
+/// coordinate that was itself computed from an arithmetic expression.
+const BOUNDARY_TOLERANCE: f64 = 1e-9;
+
+fn orientation(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+}
+
+/// Distance tolerance for `point` against segment `a`-`b`, scaled to the
+/// coordinates involved so it means the same thing in any unit.
+fn boundary_tolerance(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> f64 {
+    BOUNDARY_TOLERANCE
+        * [a[0], a[1], b[0], b[1], point[0], point[1]]
+            .iter()
+            .map(|coordinate| coordinate.abs())
+            .fold(1.0_f64, f64::max)
+}
+
+fn collinear(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> bool {
+    let tolerance = boundary_tolerance(a, b, point);
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    if dx == 0.0 && dy == 0.0 {
+        // A degenerate segment only contains its own endpoints.
+        return (point[0] - a[0]).abs() <= tolerance && (point[1] - a[1]).abs() <= tolerance;
+    }
+    // Divide the cross-product area by the segment length to compare a distance
+    // rather than an area, so the same tolerance reads the same in any unit.
+    orientation(a, b, point).abs() / dx.hypot(dy) <= tolerance
+}
+
 fn point_in_polygon(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
+    // Crossing-number test: a horizontal ray from the point toggles `inside` once
+    // per edge it passes through, and only edges that straddle the point's y can
+    // pass through that ray. The `first[1] != second[1]` gap implied by the
+    // straddle test is what keeps the x-intercept division below well defined.
     let mut inside = false;
     let mut previous = polygon.len() - 1;
     for current in 0..polygon.len() {
@@ -634,47 +694,63 @@ fn segment_crosses_polygon(from: &Node, to: &Node, polygon: &[[f64; 2]]) -> bool
 }
 
 fn point_on_segment(point: [f64; 2], first: [f64; 2], second: [f64; 2]) -> bool {
-    let cross = (point[0] - first[0]) * (second[1] - first[1])
-        - (point[1] - first[1]) * (second[0] - first[0]);
-    cross == 0.0
-        && point[0] >= first[0].min(second[0])
-        && point[0] <= first[0].max(second[0])
-        && point[1] >= first[1].min(second[1])
-        && point[1] <= first[1].max(second[1])
+    // Collinearity alone is not enough: an infinite line has to be clipped to the
+    // segment's bounding box before the point counts as lying on it. The clamp
+    // uses the same tolerance, because a point that misses the edge by a rounding
+    // step misses the bounding box by that same step.
+    let tolerance = boundary_tolerance(first, second, point);
+    collinear(first, second, point)
+        && point[0] >= first[0].min(second[0]) - tolerance
+        && point[0] <= first[0].max(second[0]) + tolerance
+        && point[1] >= first[1].min(second[1]) - tolerance
+        && point[1] <= first[1].max(second[1]) + tolerance
 }
 
 fn segments_intersect(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
-    fn orientation(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
-        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-    }
+    // Either an endpoint of one segment lies on the other (touching or collinear
+    // overlap), or the two segments strictly straddle each other's supporting
+    // line. Both are needed: collinear overlap leaves the sign test below
+    // unsatisfied, and a strict crossing satisfies none of the endpoint tests.
     let ab_c = orientation(a, b, c);
     let ab_d = orientation(a, b, d);
     let cd_a = orientation(c, d, a);
     let cd_b = orientation(c, d, b);
-    (ab_c == 0.0 && point_on_segment(c, a, b))
-        || (ab_d == 0.0 && point_on_segment(d, a, b))
-        || (cd_a == 0.0 && point_on_segment(a, c, d))
-        || (cd_b == 0.0 && point_on_segment(b, c, d))
+    point_on_segment(c, a, b)
+        || point_on_segment(d, a, b)
+        || point_on_segment(a, c, d)
+        || point_on_segment(b, c, d)
         || ((ab_c > 0.0) != (ab_d > 0.0) && (cd_a > 0.0) != (cd_b > 0.0))
 }
 
 fn write_classification(
     path: &Path,
     links: &[&Link],
-    classifications: &ClassifiedGroups,
+    classifications: &LinkClassifications,
 ) -> Result<(), AnalysisError> {
     let mut file =
         BufWriter::new(File::create(path.join("link_classification.csv")).map_err(io_error)?);
-    writeln!(file, "link_id,urban_area,road_type,road_size").map_err(io_error)?;
+    writeln!(
+        file,
+        "link_id,{}",
+        FILTER_DIMENSIONS
+            .iter()
+            .map(|(key, _)| csv(key))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+    .map_err(io_error)?;
     for link in links {
-        let labels = &classifications[link.id.external()];
+        let classified = &classifications[link.id.external()];
         writeln!(
             file,
-            "{},{},{},{}",
+            "{},{}",
             csv(link.id.external()),
-            csv(labels.urban_area.as_deref().unwrap_or("unknown")),
-            csv(labels.road_type.as_deref().unwrap_or("unknown")),
-            csv(labels.road_size.as_deref().unwrap_or("unknown")),
+            classified
+                .dimensions()
+                .iter()
+                .map(|(_, value)| csv(value))
+                .collect::<Vec<_>>()
+                .join(",")
         )
         .map_err(io_error)?;
     }
@@ -684,23 +760,27 @@ fn write_classification(
 fn write_group_coverage(
     path: &Path,
     links: &[&Link],
-    classifications: &ClassifiedGroups,
+    classifications: &LinkClassifications,
     counts: &LinkVolumesByHour,
     interval: u32,
     simulation_end_time: u32,
-) -> Result<Vec<GroupCoverage>, AnalysisError> {
+) -> Result<(), AnalysisError> {
     let mut eligible = BTreeMap::<(String, String), usize>::new();
     for link in links {
-        let labels = &classifications[link.id.external()];
-        for (dimension, category) in classification_dimensions(labels) {
+        let classified = &classifications[link.id.external()];
+        for (dimension, category) in classified.dimensions() {
             *eligible
                 .entry((dimension.to_owned(), category.to_owned()))
                 .or_default() += 1;
         }
     }
-    let hours = intervals(counts, interval, simulation_end_time);
-    let mut rows = Vec::new();
-    for hour in hours {
+    let mut file = BufWriter::new(File::create(path.join("group_coverage.csv")).map_err(io_error)?);
+    writeln!(
+        file,
+        "dimension,category,hour_start_seconds,eligible_links,used_links,unused_links,used_percent"
+    )
+    .map_err(io_error)?;
+    for hour in interval_starts(counts, interval, simulation_end_time) {
         let mut used = BTreeMap::<(String, String), usize>::new();
         for link in links {
             if counts
@@ -710,59 +790,39 @@ fn write_group_coverage(
                 })
                 .is_some_and(|volumes| volumes.entries + volumes.exits > 0)
             {
-                let labels = &classifications[link.id.external()];
-                for (dimension, category) in classification_dimensions(labels) {
+                let classified = &classifications[link.id.external()];
+                for (dimension, category) in classified.dimensions() {
                     *used
                         .entry((dimension.to_owned(), category.to_owned()))
                         .or_default() += 1;
                 }
             }
         }
+        // Eligible denominators stay fixed per category; only the used count varies by hour.
         for ((dimension, category), total) in &eligible {
             let used = used
                 .get(&(dimension.clone(), category.clone()))
                 .copied()
                 .unwrap_or_default();
             let percent = used as f64 * 100.0 / *total as f64;
-            rows.push(GroupCoverage {
-                dimension: dimension.clone(),
-                category: category.clone(),
-                hour_start_seconds: hour,
-                eligible_links: *total,
-                used_links: used,
-                unused_links: total - used,
-                used_percent: percent,
-            });
+            writeln!(
+                file,
+                "{},{},{hour},{total},{used},{},{percent:.6}",
+                csv(dimension),
+                csv(category),
+                total - used,
+            )
+            .map_err(io_error)?;
         }
     }
-    let mut file = BufWriter::new(File::create(path.join("group_coverage.csv")).map_err(io_error)?);
-    writeln!(
-        file,
-        "dimension,category,hour_start_seconds,eligible_links,used_links,unused_links,used_percent"
-    )
-    .map_err(io_error)?;
-    for row in &rows {
-        writeln!(
-            file,
-            "{},{},{},{},{},{},{:.6}",
-            csv(&row.dimension),
-            csv(&row.category),
-            row.hour_start_seconds,
-            row.eligible_links,
-            row.used_links,
-            row.unused_links,
-            row.used_percent,
-        )
-        .map_err(io_error)?;
-    }
-    Ok(rows)
+    Ok(())
 }
 
 fn write_network_map(
     path: &Path,
     links: &[&Link],
     network: &Network,
-    classifications: &ClassifiedGroups,
+    classifications: &LinkClassifications,
     counts: &LinkVolumesByHour,
 ) -> Result<(), AnalysisError> {
     let nodes = network.nodes();
@@ -795,7 +855,7 @@ fn write_network_map(
         .map(|(key, _)| key.link_id.as_str())
         .collect();
     let mut file = BufWriter::new(File::create(path.join("network_map.svg")).map_err(io_error)?);
-    writeln!(file, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 600\" role=\"img\" aria-label=\"Classified network map\"><rect width=\"800\" height=\"600\" fill=\"white\"/>").map_err(io_error)?;
+    writeln!(file, "<svg id=\"network-map\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 600\" role=\"img\" aria-label=\"Classified network map\" style=\"width:100%;height:auto;max-height:600px\"><rect width=\"800\" height=\"600\" fill=\"white\"/>").map_err(io_error)?;
     for link in links {
         let (Some(from), Some(to)) = (
             network.nodes_with_ids().get(&link.from),
@@ -805,11 +865,15 @@ fn write_network_map(
         };
         let (x1, y1) = project(from);
         let (x2, y2) = project(to);
-        let labels = &classifications[link.id.external()];
-        let road_type = labels.road_type.as_deref().unwrap_or("unknown");
+        // A non-finite node coordinate projects to `NaN`, which browsers drop,
+        // leaving a silently absent link. Skip it rather than emit broken markup.
+        if ![x1, y1, x2, y2].into_iter().all(f64::is_finite) {
+            continue;
+        }
+        let classified = &classifications[link.id.external()];
         let used = used_links.contains(link.id.external());
         let color = if used { "#287a3d" } else { "#c8ccd0" };
-        let road_style = if road_type == "expressway" {
+        let road_style = if classified.road_type == EXPRESSWAY {
             " stroke-dasharray=\"8 3\""
         } else {
             ""
@@ -817,28 +881,38 @@ fn write_network_map(
         let title = format!(
             "{} | {} | {} | {} | {}",
             link.id.external(),
-            labels.urban_area.as_deref().unwrap_or("unknown"),
-            road_type,
-            labels.road_size.as_deref().unwrap_or("unknown"),
+            classified.urban_area,
+            classified.road_type,
+            classified.road_size,
             if used { "used" } else { "unused" },
         );
-        writeln!(file, "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"{color}\" stroke-width=\"3\"{road_style}><title>{}</title></line>", xml_escape(&title)).map_err(io_error)?;
+        // One `data-` attribute per dimension, so the report's filters can hide
+        // links without re-parsing the title text.
+        let data_attributes = FILTER_DIMENSIONS
+            .iter()
+            .zip(classified.dimensions())
+            .map(|((key, _), (_, value))| {
+                format!("data-{}=\"{}\"", key.replace('_', "-"), xml_escape(value))
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        writeln!(file, "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" {data_attributes} stroke=\"{color}\" stroke-width=\"3\"{road_style}><title>{}</title></line>", xml_escape(&title)).map_err(io_error)?;
     }
     writeln!(file, "</svg>").map_err(io_error)
 }
 
 fn link_hourly_metrics(
     links: &[&Link],
-    classifications: &ClassifiedGroups,
+    classifications: &LinkClassifications,
     counts: &LinkVolumesByHour,
     interval: u32,
     simulation_end_time: u32,
 ) -> Vec<LinkHourlyMetric> {
-    intervals(counts, interval, simulation_end_time)
+    interval_starts(counts, interval, simulation_end_time)
         .into_iter()
         .flat_map(|hour| {
             links.iter().map(move |link| {
-                let labels = &classifications[link.id.external()];
+                let classified = &classifications[link.id.external()];
                 let volumes = counts
                     .get(&LinkHour {
                         hour_start_seconds: hour,
@@ -851,9 +925,9 @@ fn link_hourly_metrics(
                     hour_start_seconds: hour,
                     entry_vehicles: volumes.entries,
                     exit_vehicles: volumes.exits,
-                    urban_area: labels.urban_area.as_deref().unwrap_or("unknown").to_owned(),
-                    road_type: labels.road_type.as_deref().unwrap_or("unknown").to_owned(),
-                    road_size: labels.road_size.as_deref().unwrap_or("unknown").to_owned(),
+                    urban_area: classified.urban_area.clone(),
+                    road_type: classified.road_type.clone(),
+                    road_size: classified.road_size.clone(),
                 }
             })
         })
@@ -875,6 +949,7 @@ fn write_tables(
     counts: &LinkVolumesByHour,
     interval: u32,
     simulation_end_time: u32,
+    link_hourly: &[LinkHourlyMetric],
 ) -> Result<(), AnalysisError> {
     let mut hourly = BufWriter::new(File::create(path.join("link_hourly.csv")).map_err(io_error)?);
     writeln!(
@@ -882,26 +957,16 @@ fn write_tables(
         "link_id,hour_start_seconds,entry_vehicles,exit_vehicles"
     )
     .map_err(io_error)?;
-    let hours = intervals(counts, interval, simulation_end_time);
-    for hour in &hours {
-        let hour = *hour;
-        for link in links {
-            let volumes = counts
-                .get(&LinkHour {
-                    hour_start_seconds: hour,
-                    link_id: link.id.external().to_owned(),
-                })
-                .copied()
-                .unwrap_or_default();
-            writeln!(
-                hourly,
-                "{},{hour},{},{}",
-                csv(link.id.external()),
-                volumes.entries,
-                volumes.exits,
-            )
-            .map_err(io_error)?;
-        }
+    for row in link_hourly {
+        writeln!(
+            hourly,
+            "{},{},{},{}",
+            csv(&row.link_id),
+            row.hour_start_seconds,
+            row.entry_vehicles,
+            row.exit_vehicles,
+        )
+        .map_err(io_error)?;
     }
     let mut coverage = BufWriter::new(File::create(path.join("coverage.csv")).map_err(io_error)?);
     writeln!(
@@ -909,7 +974,7 @@ fn write_tables(
         "hour_start_seconds,eligible_links,used_links,unused_links,used_percent"
     )
     .map_err(io_error)?;
-    for hour in hours {
+    for hour in interval_starts(counts, interval, simulation_end_time) {
         let used = links
             .iter()
             .filter(|link| {
@@ -941,28 +1006,64 @@ fn write_report(
     path: &Path,
     iteration: u32,
     links: usize,
-    grouped_coverage: &[GroupCoverage],
+    metrics: &[Metric<'_>],
+    statuses: &[ModuleStatus<'_>],
     link_hourly: &[LinkHourlyMetric],
 ) -> Result<(), AnalysisError> {
     let coverage = fs::read_to_string(path.join("coverage.csv")).map_err(io_error)?;
     let coverage = json_for_script(&coverage.lines().collect::<Vec<_>>())?;
-    let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
-    let metrics = fs::read(path.join("metric_catalog.json")).map_err(io_error)?;
-    let metrics: serde_json::Value =
-        serde_json::from_slice(&metrics).map_err(|error| AnalysisError(error.to_string()))?;
-    let metrics = json_for_script(&metrics)?;
-    let grouped_coverage = json_for_script(grouped_coverage)?;
+    let metrics = json_for_script(metrics)?;
+    let modules = json_for_script(statuses)?;
+    // The filter list comes from the same constant the CSV exporters group by, so a
+    // dimension cannot be exported without also being offered as a filter.
+    let dimensions = json_for_script(&FILTER_DIMENSIONS)?;
     let link_hourly = json_for_script(link_hourly)?;
-    let html = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}img{max-width:100%;border:1px solid #ccd}label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><img src="network_map.svg" alt="Network coverage map"><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const g=__GROUPS__;const a=__METRICS__;const m=__MODULES__;function table(root,headers,rows){const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)});const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(x=>{const cell=tr.insertCell();cell.textContent=x});body.appendChild(tr)});root.replaceChildren(t)}table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],g.map(x=>[x.dimension,x.category,x.hour_start_seconds,x.eligible_links,x.used_links,x.unused_links,x.used_percent]));table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']));const selectors=[];[['urban_area','Urban area'],['road_type','Road type'],['road_size','Road size']].forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All','__all__'));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function renderHourly(){const rows=d.filter(row=>selectors.every(([key,select])=>select.value==='__all__'||row[key]===select.value)).map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]);table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows)}renderHourly()</script></body></html>"#;
-    let html = html
-        .replace("__ITERATION__", &iteration.to_string())
-        .replace("__LINKS__", &links.to_string())
-        .replace("__LINK_HOURLY__", &link_hourly)
-        .replace("__COVERAGE__", &coverage)
-        .replace("__GROUPS__", &grouped_coverage)
-        .replace("__METRICS__", &metrics)
-        .replace("__MODULES__", &modules);
+    let network_map = fs::read_to_string(path.join("network_map.svg")).map_err(io_error)?;
+    let template = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const m=__MODULES__;function table(root,headers,rows){const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)});const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(x=>{const cell=tr.insertCell();cell.textContent=x});body.appendChild(tr)});root.replaceChildren(t)}table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']));const selectors=[];__DIMENSIONS__.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>[['urban_area',row.urban_area],['road_type',row.road_type],['road_size',row.road_size]].forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()</script></body></html>"#;
+    let html = substitute_template(
+        template,
+        &[
+            ("__ITERATION__", &iteration.to_string()),
+            ("__LINKS__", &links.to_string()),
+            ("__NETWORK_MAP__", &network_map),
+            ("__DIMENSIONS__", &dimensions),
+            ("__LINK_HOURLY__", &link_hourly),
+            ("__COVERAGE__", &coverage),
+            ("__METRICS__", &metrics),
+            ("__MODULES__", &modules),
+        ],
+    );
     fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
+/// Fill `template` by scanning it once, left to right.
+///
+/// A chained `str::replace` would rescan text it had already substituted, so a
+/// replacement value that happens to contain another token (a link label reading
+/// `__METRICS__`, say) would be rewritten by a later step and corrupt the
+/// payload. Advancing past the token after one substitution leaves inserted text
+/// untouched. Byte indexing is safe here because the cursor only ever lands on a
+/// `char` boundary.
+fn substitute_template(template: &str, replacements: &[(&str, &str)]) -> String {
+    let mut output = String::with_capacity(template.len());
+    let mut cursor = 0;
+    while cursor < template.len() {
+        if let Some((token, value)) = replacements
+            .iter()
+            .find(|(token, _)| template[cursor..].starts_with(token))
+        {
+            output.push_str(value);
+            cursor += token.len();
+        } else {
+            let character = template[cursor..]
+                .chars()
+                .next()
+                .expect("cursor is within the template");
+            output.push(character);
+            cursor += character.len_utf8();
+        }
+    }
+    output
 }
 
 fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, AnalysisError> {
