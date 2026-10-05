@@ -174,6 +174,58 @@ Relative paths are resolved from the current run's output directory. A missing o
 comparison report marks only the cross-run comparison module failed.
 
 
+## DRT and taxi service performance
+
+Set `output.analysis.service` to analyse supplied DRT or taxi records. Nothing is simulated: the
+module only reads CSV files, so it needs no service engine. Relative paths are resolved from the
+run's output directory and the settings are recorded in the manifest for standalone reanalysis.
+
+```yaml
+output:
+  analysis:
+    service:
+      requests: requests.csv          # required
+      passengers: passengers.csv      # optional
+      fleet: fleet.csv                # optional
+      schedule: schedule.csv          # optional
+      max_wait_seconds: 600           # optional constraint
+      service_area: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]  # optional polygon
+```
+
+- `requests.csv`: `request_id,submission_seconds,origin_link,destination_link` plus optional
+  `person_id,status,group,direct_travel_seconds,party_size`. `status` is empty/`submitted` or
+  `rejected`. **A request is rejected only if its request record says so**; it is never inferred
+  from missing legs. A non-rejected request without a passenger record is `unserved`.
+- `passengers.csv`: `request_id,vehicle_id,pickup_seconds,dropoff_seconds`, one association per
+  served request. Rows for unknown or rejected requests, duplicates, and impossible times are
+  excluded and listed in `service_diagnostics.csv`.
+- `fleet.csv`: `vehicle_id,capacity,service_start_seconds,service_end_seconds`.
+- `schedule.csv`: `vehicle_id,task_type,start_seconds,end_seconds,distance_meters` where
+  `task_type` is `drive`, `stop` or `stay`. Only `drive` rows carry distance.
+
+Wait is pickup minus submission; the detour ratio is in-vehicle time divided by
+`direct_travel_seconds` and is blank without it. Distributions use the mean, population standard
+deviation, median and 90th percentile, taken at index `ceil((n - 1) * q)` of the sorted values
+(the same helper as the journey tables, so the median of an even count is the upper middle value). Pickups and drop-offs happen at stops, so a drive task is occupied by the
+served requests on board at its midpoint; its load is the sum of `party_size` on board, so shared
+rides and groups both count. Empty distance is driven distance
+with load zero, which includes relocation. Mean occupancy is passenger-metres over driven metres,
+load factor divides passenger-metres by capacity-metres (for this ratio only vehicles with a
+fleet capacity contribute to either side), and utilization is non-`stay` task time clipped to each vehicle's fleet
+service window over that window.
+
+Coverage is the share of requests whose origin and destination links are entirely inside
+`service_area`; links crossing the border or absent from the network count as outside or
+`area_unknown`. Group rows appear in `service_summary.csv` only when requests carry `group`
+labels; blank labels are grouped as `unknown`. Configured wait and fleet capacity constraints are
+recorded in `service_constraints.csv` and checked as `wait_limit_exceeded` and
+`capacity_exceeded_tasks`. A metric whose input was not supplied is blank, and
+`service_availability.csv` names the missing input. Invalid input fails only the
+`service_performance` module. Cross-run comparison of these tables is not provided.
+
+Tables: `service_summary.csv`, `service_requests.csv`, `service_vehicles.csv` (a `fleet` total row
+first), `service_occupancy.csv`, `service_constraints.csv`, `service_availability.csv`,
+`service_diagnostics.csv` (which also lists non-positive `direct_travel_seconds`, vehicles missing from a supplied fleet, and fleet windows that end before they start). All appear in the local report.
 ## Travel survey comparison
 
 Set `output.analysis.journey_survey` to a weighted journey-record CSV. Relative paths are
