@@ -132,7 +132,7 @@ For exact changes, compare costs, routes, determinism, and vehicle events. For e
 
 ### Repeatable local runs
 
-`scripts/routing_experiment.py` runs a release `local_qsim` binary repeatedly with a warm-up, stable seed, worker counts, separate output directories, and elapsed-time / RSS ceilings. It writes `experiment.json` plus one captured log per attempt. Use the same scenario, capacity scaling, output settings, seed, and worker counts for baseline and optimized binaries; only the binary/revision should differ in an exact comparison. For adaptive comparisons, use independent seeds and report transport outcomes as well as resource use. Use separate configs and output directories for fixed-plan and route-active workloads. A route-active run is interpretable only when routing profile output records nonzero searches.
+`scripts/routing_experiment.py` runs a release `local_qsim` binary repeatedly with a warm-up, stable seed, worker counts, separate output directories, and elapsed-time / RSS ceilings. It writes `experiment.json` plus one captured log per attempt. Use the same scenario, capacity scaling, output settings, seed, and worker counts for baseline and optimized binaries; only the binary/revision should differ in an exact comparison. For adaptive comparisons, use independent seeds and report transport outcomes as well as resource use. Use separate configs and output directories for fixed-plan and route-active workloads. Route-active and adaptive runs require CSV routing profiling, and the runner fails validation if no A* search rows are recorded; the report includes search and expansion counts.
 
 Example on Linux after building the binary:
 
@@ -147,11 +147,12 @@ python3 scripts/routing_experiment.py \\
   --demand-provenance 'Bundled Berlin v6.4 filtered 0.1% population' \\
   --seed 4711 --qsim-workers 2 --replanning-workers 2 \\
   --build-profile release --build-settings 'cargo build --release; RUSTFLAGS=unset' \\
+  --build-toolchain 'rustc 1.94.0' \\
   --warmups 1 --runs 3 --max-seconds 600 --max-rss-kib 8388608 \\
   --set controller.last_iteration=1
 ```
 
-The `--input` paths must cover the full input bundle; files and directory contents are hashed. The worker option maps to `partitioning.num_parts` (QSim workers); replanning threads are set separately. RSS and CPU values are sampled from Linux `/proc` at 100 ms intervals and may miss brief peaks or the final CPU fraction. For a formal result, also retain kernel-level process accounting and the generated routing profile outputs. The driver records config/input/binary hashes, source revision/dirty state, Rust toolchain, declared build settings, hardware, command lines, run logs, declared workload dimensions, and resource ceilings. It does not generate population sizes or verify declared build/workload metadata: provide a matching input/config per ladder rung and verify declarations. Set elapsed/RSS ceilings according to the machine allocation; the script does not prescribe a feasibility threshold.
+The `--input` paths must cover the full input bundle; files and directory contents are hashed. Symlinked subdirectories are rejected so their contents cannot be omitted silently. The worker option maps to `partitioning.num_parts` (QSim workers); replanning threads are set separately. RSS and CPU values are sampled from Linux `/proc` at 100 ms intervals and may miss brief peaks or the final CPU fraction. For a formal result, also retain kernel-level process accounting and the generated routing profile outputs. The driver records config/input/binary hashes, source revision/dirty state, declared build toolchain/settings, the runner environment's Rust compiler version, hardware, command lines, run logs, declared workload dimensions, and resource ceilings. The runner cannot verify which toolchain built an arbitrary supplied binary. It does not generate population sizes or verify declared build/workload metadata: provide a matching input/config per ladder rung and verify declarations. Set elapsed/RSS ceilings according to the machine allocation; the script does not prescribe a feasibility threshold.
 
 ## Initial runtime baseline
 

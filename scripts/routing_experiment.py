@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -54,7 +55,11 @@ def hash_input(path: Path) -> dict[str, str]:
             for chunk in iter(lambda: content.read(1024 * 1024), b""):
                 digest.update(chunk)
     elif path.is_dir():
-        for child in sorted(item for item in path.rglob("*") if item.is_file()):
+        children = sorted(path.rglob("*"))
+        for child in children:
+            if child.is_symlink() and child.is_dir():
+                raise ValueError(f"input directory contains unsupported symlink directory: {child}")
+        for child in (item for item in children if item.is_file()):
             relative_path = str(child.relative_to(path)).encode()
             file_digest = hashlib.sha256()
             file_size = child.stat().st_size
@@ -68,6 +73,22 @@ def hash_input(path: Path) -> dict[str, str]:
     else:
         raise ValueError(f"input does not exist: {path}")
     return {"path": str(path), "sha256": digest.hexdigest()}
+
+
+def routing_profile_summary(output_dir: Path) -> dict[str, int | bool | list[str]]:
+    profile_paths = sorted((output_dir / "instrument").glob("routing_process_*.csv"))
+    search_count = 0
+    nodes_expanded = 0
+    for profile_path in profile_paths:
+        with profile_path.open(newline="", encoding="utf-8") as profile:
+            for row in csv.DictReader(profile):
+                search_count += 1
+                nodes_expanded += int(row.get("nodes_expanded") or 0)
+    return {
+        "files": [str(path) for path in profile_paths],
+        "search_count": search_count,
+        "nodes_expanded": nodes_expanded,
+    }
 
 
 def run_one(command: list[str], log_path: Path, timeout: float, rss_limit_kib: int | None):
@@ -135,6 +156,7 @@ def main() -> int:
     parser.add_argument("--replanning-workers", required=True, type=int)
     parser.add_argument("--build-profile", choices=["release", "debug", "custom"], default="release")
     parser.add_argument("--build-settings", default="unspecified", help="declared build command, RUSTFLAGS, and relevant feature flags")
+    parser.add_argument("--build-toolchain", default="unspecified", help="declared Rust toolchain used to build --binary")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--max-seconds", type=float, required=True)
@@ -183,8 +205,22 @@ def main() -> int:
             args.max_rss_kib,
         )
         result.update({"index": index, "warmup": index < 0, "command": command})
+        if args.workload in {"route-active", "adaptive"} and result["exit_code"] == 0:
+            run_output_dir = args.output_dir.resolve() / f"run-{index}"
+            route_profile = routing_profile_summary(run_output_dir)
+            route_profile["verified"] = route_profile["search_count"] > 0
+            result["routing_profile"] = route_profile
+            if not route_profile["verified"]:
+                result["route_validation_error"] = (
+                    "No A* search rows found. Enable CSV routing profiling and confirm the workload routes."
+                )
         runs.append(result)
-        if result["timed_out"] or result["rss_limit_reached"] or result["exit_code"] != 0:
+        if (
+            result["timed_out"]
+            or result["rss_limit_reached"]
+            or result["exit_code"] != 0
+            or result.get("route_validation_error")
+        ):
             break
 
     measured = [run for run in runs if not run["warmup"]]
@@ -210,7 +246,14 @@ def main() -> int:
         "build": {
             "declared_profile": args.build_profile,
             "declared_settings": args.build_settings,
-            "rustc_version": subprocess.run(["rustc", "--version", "--verbose"], capture_output=True, text=True, check=False).stdout.strip() or None,
+            "declared_toolchain": args.build_toolchain,
+            "runner_environment_rustc_version": subprocess.run(
+                ["rustc", "--version", "--verbose"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+            or None,
         },
         "config_overrides": config_overrides,
         "qsim_workers": args.qsim_workers,
@@ -243,7 +286,13 @@ def main() -> int:
     report_path = args.output_dir / "experiment.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(report_path)
-    return 1 if any(r["exit_code"] != 0 or r["timed_out"] or r["rss_limit_reached"] for r in runs) else 0
+    return 1 if any(
+        r["exit_code"] != 0
+        or r["timed_out"]
+        or r["rss_limit_reached"]
+        or r.get("route_validation_error")
+        for r in runs
+    ) else 0
 
 
 if __name__ == "__main__":
