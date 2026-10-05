@@ -609,6 +609,9 @@ pub struct Analysis {
     pub observed_data: Option<PathBuf>,
     /// Run directories whose latest published analysis reports are included in a comparison.
     pub comparison_runs: Vec<PathBuf>,
+    /// Optional CSV of observed boardings and alightings for the transit validation. Relative
+    /// paths are resolved against the configured output directory.
+    pub transit_observed_data: Option<PathBuf>,
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
@@ -632,6 +635,7 @@ impl Default for Analysis {
 
             observed_data: None,
             comparison_runs: Vec::new(),
+            transit_observed_data: None,
 
             excess_delay_clip_seconds: None,
         }

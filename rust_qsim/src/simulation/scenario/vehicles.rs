@@ -4,7 +4,8 @@ use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_vehicles::{load_from_proto, write_to_proto};
 use crate::simulation::io::xml::vehicles::{
-    IOVehicle, IOVehicleDefinitions, IOVehicleType, load_from_xml, write_to_xml,
+    IOCapacity, IOPersons, IOVehicle, IOVehicleDefinitions, IOVehicleType, load_from_xml,
+    write_to_xml,
 };
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::vehicles::SimulationVehicle;
@@ -42,6 +43,45 @@ pub fn to_file(garage: &Garage, path: &Path) {
     }
 }
 
+/// Passenger capacity declared by a vehicle type. A type that declares none has no capacity at
+/// all, so consumers cannot mistake a missing declaration for a vehicle that carries nobody.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct VehicleCapacity {
+    pub seats: u32,
+    pub standing_room: u32,
+}
+
+impl VehicleCapacity {
+    /// Persons the vehicle can carry, seated and standing.
+    pub fn persons(&self) -> u32 {
+        self.seats.saturating_add(self.standing_room)
+    }
+
+    /// A `<capacity>` element declares a capacity only if it names seats or standing room; an
+    /// omitted one of the two carries nobody.
+    pub(crate) fn from_io(io: Option<&IOCapacity>) -> Option<Self> {
+        let io = io?;
+        if io.seats.is_none() && io.standing_room.is_none() {
+            return None;
+        }
+        Some(Self {
+            seats: io.seats.as_ref().map_or(0, |seats| seats.persons),
+            standing_room: io.standing_room.as_ref().map_or(0, |room| room.persons),
+        })
+    }
+
+    pub(crate) fn to_io(self) -> IOCapacity {
+        IOCapacity {
+            seats: Some(IOPersons {
+                persons: self.seats,
+            }),
+            standing_room: Some(IOPersons {
+                persons: self.standing_room,
+            }),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalVehicleType {
     pub id: Id<InternalVehicleType>,
@@ -51,6 +91,7 @@ pub struct InternalVehicleType {
     pub pce: f64,
     pub fef: f64,
     pub net_mode: Id<String>,
+    pub capacity: Option<VehicleCapacity>,
     pub attributes: InternalAttributes,
 }
 
@@ -73,6 +114,7 @@ impl From<IOVehicleType> for InternalVehicleType {
             pce: io.passenger_car_equivalents.unwrap_or_default().pce,
             fef: io.flow_efficiency_factor.unwrap_or_default().factor,
             net_mode: Id::create(&io.network_mode.unwrap_or_default().network_mode),
+            capacity: VehicleCapacity::from_io(io.capacity.as_ref()),
             attributes: io.attributes.map(Into::into).unwrap_or_default(),
         }
     }
@@ -88,6 +130,13 @@ impl From<VehicleType> for InternalVehicleType {
             pce: value.pce,
             fef: value.fef,
             net_mode: Id::get(value.net_mode),
+            capacity: match (value.seats, value.standing_room) {
+                (None, None) => None,
+                (seats, standing_room) => Some(VehicleCapacity {
+                    seats: seats.unwrap_or_default(),
+                    standing_room: standing_room.unwrap_or_default(),
+                }),
+            },
             attributes: InternalAttributes::default(),
         }
     }
@@ -184,6 +233,7 @@ fn add_io_veh_type(garage: &mut Garage, io_veh_type: IOVehicleType) {
             .unwrap_or_default()
             .factor,
         net_mode,
+        capacity: VehicleCapacity::from_io(io_veh_type.capacity.as_ref()),
         attributes: io_veh_type.attributes.map(Into::into).unwrap_or_default(),
     };
     garage.add_veh_type(veh_type);

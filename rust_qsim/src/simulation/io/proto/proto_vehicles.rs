@@ -64,6 +64,8 @@ impl VehicleType {
             pce: vehicle.pce,
             fef: vehicle.fef,
             net_mode: vehicle.net_mode.internal(),
+            seats: vehicle.capacity.map(|capacity| capacity.seats),
+            standing_room: vehicle.capacity.map(|capacity| capacity.standing_room),
         }
     }
 }
@@ -73,7 +75,9 @@ mod tests {
     use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
     use crate::simulation::scenario::vehicles::Garage;
-    use crate::simulation::scenario::vehicles::{InternalVehicleType, from_file, to_file};
+    use crate::simulation::scenario::vehicles::{
+        InternalVehicleType, VehicleCapacity, from_file, to_file,
+    };
     use macros::deterministic_id_test;
     use std::path::PathBuf;
 
@@ -92,6 +96,10 @@ mod tests {
             pce: 20.0,
             fef: 0.3,
             net_mode: Id::<String>::create("some network type 🚕"),
+            capacity: Some(VehicleCapacity {
+                seats: 50,
+                standing_room: 30,
+            }),
             attributes: InternalAttributes::default(),
         });
         garage.add_veh_by_type(&Id::create("some-person"), &Id::get_from_ext("some-type"));
@@ -118,6 +126,7 @@ mod tests {
             pce: 20.0,
             fef: 0.3,
             net_mode: Id::<String>::create("some-network-type"),
+            capacity: None,
             attributes: InternalAttributes::default(),
         });
         garage.add_veh_by_type(&Id::create("some-person"), &Id::get_from_ext("some-type"));

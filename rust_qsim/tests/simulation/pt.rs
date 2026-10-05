@@ -30,6 +30,35 @@ fn pt_tutorial_matches_expected_events() {
 }
 
 #[deterministic_id_test(rust_qsim)]
+fn pt_tutorial_transit_analysis_reports_teleported_service() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_tutorial/pt_tutorial_config.yml",
+    ));
+    config.output_mut().output_dir = "./test_output/simulation/pt_tutorial_analysis".into();
+    config.output_mut().analysis.enabled = true;
+    let output_dir = config.output().output_dir.clone();
+
+    let scenario = Scenario::load(config);
+    ControllerBuilder::default_with_scenario(scenario)
+        .build()
+        .unwrap()
+        .run();
+
+    let report = output_dir.join("analysis");
+    let trips = std::fs::read_to_string(report.join("transit_trips.csv")).unwrap();
+    // Person 102 waits 412 s for the 07:50 departure and rides 541 s, one second behind schedule.
+    assert!(trips.contains("\"102\",\"pt\",teleported,boarded,\"Blue Line\",\"1to3\",\"1\",\"3\",27788.000000,28200.000000,28741.000000,412.000000,541.000000,28740.000000,1.000000,\"11\",\"tr_1\""), "{trips}");
+    // The tutorial's vehicle file declares no transit vehicles, so no load factor exists.
+    let availability = std::fs::read_to_string(report.join("transit_availability.csv")).unwrap();
+    assert!(availability.contains("\"load_factor\",unavailable,"));
+    assert!(
+        std::fs::read_to_string(report.join("index.html"))
+            .unwrap()
+            .contains("<h2>Public transport</h2>")
+    );
+}
+
+#[deterministic_id_test(rust_qsim)]
 #[ignore]
 fn pt_adaptive_with_access_egress() {
     test_pt_adaptive(PathBuf::from(
