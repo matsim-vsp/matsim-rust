@@ -38,15 +38,18 @@ link-1,0,3600,all,speed,km/h,36,holdout
 ```
 
 `link_id` is the external network link ID. Periods must match the configured analysis interval
-exactly. `vehicle_class` accepts `all` for aggregate results or a vehicle type ID from the run's
+exactly, and each split may contain only one row per link, period, class, and metric.
+`vehicle_class` accepts `all` for aggregate results or a vehicle type ID from the run's
 vehicle definitions. Class-specific count and speed tables are exported alongside aggregate link
 tables. The class name `all` is reserved for aggregate observations. `metric` accepts `count` or
 `speed`; count units are `vehicles`, `vehicle`, or
 `veh`, and speed units are `m/s`, `mps`, `km/h`, or `kph`. Counts are expanded by the reciprocal
-of `qsim.sample_size`, while speeds are not expanded. `split` is `calibration` or `holdout`.
+of `qsim.sample_size`, while speeds are not expanded. `split` is `calibration` or `holdout`. An
+optional `source` column can identify a station or data source; the path, label, and source row
+are carried into matched and unmatched exports.
 
-The report exports matched rows, unmatched input rows, and per-split bias, MAE, RMSE, and count
-GEH in CSV. GEH scales matched count intervals to hourly rates before applying the formula, so
+The report exports matched rows, unmatched input rows, and bias, MAE, RMSE, and count GEH in CSV,
+grouped by split, metric, and vehicle class. GEH scales matched count intervals to hourly rates before applying the formula, so
 its thresholds remain comparable when `interval_seconds` differs from 3600. Relative error is
 blank when the observed reference is zero. It also writes separate
 calibration and holdout scatterplots by metric, time profiles, and residual maps. These plots use

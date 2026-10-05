@@ -2,7 +2,7 @@
 
 use super::{AnalysisError, csv, io_error, table_writer};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -10,13 +10,14 @@ use std::path::Path;
 #[derive(Debug, Deserialize)]
 struct Observation {
     link_id: String,
-    period_start_seconds: u64,
-    period_end_seconds: u64,
+    period_start_seconds: String,
+    period_end_seconds: String,
     vehicle_class: String,
     metric: String,
     unit: String,
-    value: f64,
+    value: String,
     split: String,
+    source: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,9 +37,34 @@ struct Match {
 
 struct UnmatchedObservation {
     source_row: usize,
+    link_id: String,
+    period_start_seconds: String,
+    period_end_seconds: String,
+    vehicle_class: String,
     split: String,
     metric: String,
+    unit: String,
+    value: String,
+    source: Option<String>,
     reason: String,
+}
+
+impl UnmatchedObservation {
+    fn new(observation: &Observation, source_row: usize, reason: &str) -> Self {
+        Self {
+            source_row,
+            link_id: observation.link_id.clone(),
+            period_start_seconds: observation.period_start_seconds.clone(),
+            period_end_seconds: observation.period_end_seconds.clone(),
+            vehicle_class: observation.vehicle_class.clone(),
+            split: observation.split.clone(),
+            metric: observation.metric.clone(),
+            unit: observation.unit.clone(),
+            value: observation.value.clone(),
+            source: observation.source.clone(),
+            reason: reason.to_owned(),
+        }
+    }
 }
 
 /// Match exact link/period/class/metric keys and report aggregate residual statistics.
@@ -97,6 +123,7 @@ pub(super) fn write(
     let mut reader = csv::Reader::from_reader(file);
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
+    let mut seen_observations = BTreeSet::new();
     for (row_index, record) in reader.deserialize::<Observation>().enumerate() {
         let observation = record.map_err(|error| {
             AnalysisError::new(format!(
@@ -104,73 +131,84 @@ pub(super) fn write(
                 row_index + 2
             ))
         })?;
-        let reason = if !observation.value.is_finite()
-            || (observation.metric == "count" && observation.value < 0.0)
-            || (observation.metric == "speed" && observation.value <= 0.0)
-        {
+        let period_start = observation.period_start_seconds.parse::<u64>().ok();
+        let period_end = observation.period_end_seconds.parse::<u64>().ok();
+        let value = observation.value.parse::<f64>().ok();
+        let reason = if value.is_none_or(|value| !value.is_finite())
+            || value.is_some_and(|value| {
+                (observation.metric == "count" && value < 0.0)
+                    || (observation.metric == "speed" && value <= 0.0)
+            }) {
             Some("invalid_observation_value")
+        } else if observation.metric != "count" && observation.metric != "speed" {
+            Some("unsupported_metric")
         } else if observation.split != "calibration" && observation.split != "holdout" {
             Some("invalid_split")
         } else if observation.vehicle_class != "all"
             && !vehicle_classes.contains(observation.vehicle_class.as_str())
         {
             Some("vehicle_class_unavailable")
-        } else if observation
-            .period_start_seconds
-            .checked_add(u64::from(interval_seconds))
-            != Some(observation.period_end_seconds)
-        {
-            Some("period_mismatch")
+        } else if let (Some(start), Some(end)) = (period_start, period_end) {
+            if start.checked_add(u64::from(interval_seconds)) != Some(end) {
+                Some("period_mismatch")
+            } else if !seen_observations.insert((
+                observation.split.clone(),
+                observation.vehicle_class.clone(),
+                observation.link_id.clone(),
+                start,
+                observation.metric.clone(),
+            )) {
+                Some("duplicate_observation_key")
+            } else {
+                None
+            }
         } else {
-            None
+            Some("invalid_period")
         };
         if let Some(reason) = reason {
-            unmatched.push(UnmatchedObservation {
-                source_row: row_index + 2,
-                split: observation.split,
-                metric: observation.metric,
-                reason: reason.to_owned(),
-            });
+            unmatched.push(UnmatchedObservation::new(
+                &observation,
+                row_index + 2,
+                reason,
+            ));
             continue;
         }
+        let period_start = period_start.expect("valid observation periods were checked above");
+        let observed_value = value.expect("valid observation values were checked above");
         let Some((simulated_value, expansion_factor)) = simulated.get(&(
             observation.vehicle_class.clone(),
             observation.link_id.clone(),
-            observation.period_start_seconds,
+            period_start,
             observation.metric.clone(),
         )) else {
-            unmatched.push(UnmatchedObservation {
-                source_row: row_index + 2,
-                split: observation.split,
-                metric: observation.metric,
-                reason: "no_simulation_match".to_owned(),
-            });
+            unmatched.push(UnmatchedObservation::new(
+                &observation,
+                row_index + 2,
+                "no_simulation_match",
+            ));
             continue;
         };
-        let Some(observed_value) =
-            convert(&observation.metric, &observation.unit, observation.value)
+        let Some(observed_value) = convert(&observation.metric, &observation.unit, observed_value)
         else {
-            unmatched.push(UnmatchedObservation {
-                source_row: row_index + 2,
-                split: observation.split,
-                metric: observation.metric,
-                reason: "unsupported_unit".to_owned(),
-            });
+            unmatched.push(UnmatchedObservation::new(
+                &observation,
+                row_index + 2,
+                "unsupported_unit",
+            ));
             continue;
         };
         let expanded_simulated = simulated_value * expansion_factor;
         if !expanded_simulated.is_finite() {
-            unmatched.push(UnmatchedObservation {
-                source_row: row_index + 2,
-                split: observation.split,
-                metric: observation.metric,
-                reason: "non_finite_simulated_value".to_owned(),
-            });
+            unmatched.push(UnmatchedObservation::new(
+                &observation,
+                row_index + 2,
+                "non_finite_simulated_value",
+            ));
             continue;
         }
         matched.push(Match {
             link_id: observation.link_id,
-            period_start_seconds: observation.period_start_seconds,
+            period_start_seconds: period_start,
             vehicle_class: observation.vehicle_class,
             metric: observation.metric,
             split: observation.split,
@@ -178,7 +216,10 @@ pub(super) fn write(
             simulated: *simulated_value,
             expanded_simulated,
             expansion_factor: *expansion_factor,
-            provenance: source.display().to_string(),
+            provenance: observation.source.as_deref().map_or_else(
+                || source.display().to_string(),
+                |source_label| format!("{}:{source_label}", source.display()),
+            ),
             source_row: row_index + 2,
         });
     }
@@ -303,14 +344,22 @@ fn write_matches(path: &Path, rows: &[Match]) -> Result<(), AnalysisError> {
 
 fn write_unmatched(path: &Path, rows: &[UnmatchedObservation]) -> Result<(), AnalysisError> {
     let mut writer = table_writer(path, "validation_unmatched.csv")?;
-    writeln!(writer, "source_row,split,metric,reason").map_err(io_error)?;
+    writeln!(writer, "source_row,link_id,period_start_seconds,period_end_seconds,vehicle_class,split,metric,unit,value,source,reason")
+        .map_err(io_error)?;
     for row in rows {
         writeln!(
             writer,
-            "{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             row.source_row,
+            csv(&row.link_id),
+            row.period_start_seconds,
+            row.period_end_seconds,
+            csv(&row.vehicle_class),
             csv(&row.split),
             csv(&row.metric),
+            csv(&row.unit),
+            csv(&row.value),
+            csv(row.source.as_deref().unwrap_or_default()),
             csv(&row.reason)
         )
         .map_err(io_error)?;
@@ -324,20 +373,22 @@ fn write_summary(
     unmatched: &[UnmatchedObservation],
     interval_seconds: u32,
 ) -> Result<(), AnalysisError> {
-    let mut grouped: BTreeMap<(&str, &str), Vec<&Match>> = BTreeMap::new();
+    let mut grouped: BTreeMap<(&str, &str, &str), Vec<&Match>> = BTreeMap::new();
     for row in matches {
         grouped
-            .entry((&row.split, &row.metric))
+            .entry((&row.split, &row.metric, &row.vehicle_class))
             .or_default()
             .push(row);
     }
     for row in unmatched {
-        grouped.entry((&row.split, &row.metric)).or_default();
+        grouped
+            .entry((&row.split, &row.metric, &row.vehicle_class))
+            .or_default();
     }
     let mut writer = table_writer(path, "validation_summary.csv")?;
-    writeln!(writer, "split,metric,sample_size,bias,mae,rmse,geh_mean,geh_count,unmatched_observations,undefined_relative_errors")
+    writeln!(writer, "split,metric,vehicle_class,sample_size,bias,mae,rmse,geh_mean,geh_count,unmatched_observations,undefined_relative_errors")
         .map_err(io_error)?;
-    for ((split, metric), rows) in grouped {
+    for ((split, metric, vehicle_class), rows) in grouped {
         let mut errors = Vec::new();
         let mut geh = Vec::new();
         for row in &rows {
@@ -370,6 +421,7 @@ fn write_summary(
         let rmse = if n == 0.0 {
             String::new()
         } else {
+            // `hypot` accumulates the error-vector norm without squaring large residuals directly.
             format_number(errors.iter().fold(0.0_f64, |sum, error| sum.hypot(*error)) / n.sqrt())
         };
         let geh_mean = if geh.is_empty() {
@@ -384,11 +436,13 @@ fn write_summary(
         let undefined_relative = rows.iter().filter(|row| row.observed == 0.0).count();
         let unmatched_count = unmatched
             .iter()
-            .filter(|row| row.split == split && row.metric == metric)
+            .filter(|row| {
+                row.split == split && row.metric == metric && row.vehicle_class == vehicle_class
+            })
             .count();
         writeln!(
             writer,
-            "{split},{metric},{},{bias},{mae},{rmse},{geh_mean},{},{unmatched_count},{undefined_relative}",
+            "{split},{metric},{vehicle_class},{},{bias},{mae},{rmse},{geh_mean},{},{unmatched_count},{undefined_relative}",
             rows.len(),
             geh.len()
         )
@@ -413,13 +467,13 @@ fn write_plot(path: &Path, matches: &[Match]) -> Result<(), AnalysisError> {
             let points = rows
                 .iter()
                 .map(|row| {
-                    let x = 40.0 + (row.observed / max) * 580.0;
+                    let x = 40.0 + (row.observed / max) * 520.0;
                     let y = 560.0 - (row.expanded_simulated / max) * 520.0;
                     format!("<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"3\"/>")
                 })
                 .collect::<String>();
             let svg = format!(
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\" viewBox=\"0 0 700 600\"><rect width=\"100%\" height=\"100%\" fill=\"white\"/><path d=\"M40 560H640 M40 560V40 M40 560L640 40\" stroke=\"#333\"/><g fill=\"#1769aa\">{points}</g><text x=\"300\" y=\"590\">Observed {metric}</text><text transform=\"translate(15 320) rotate(-90)\">Simulated {metric}</text></svg>"
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\" viewBox=\"0 0 700 600\"><rect width=\"100%\" height=\"100%\" fill=\"white\"/><path d=\"M40 560H640 M40 560V40 M40 560L560 40\" stroke=\"#333\"/><g fill=\"#1769aa\">{points}</g><text x=\"300\" y=\"590\">Observed {metric}</text><text transform=\"translate(15 320) rotate(-90)\">Simulated {metric}</text></svg>"
             );
             std::fs::write(
                 path.join(format!("validation_scatter_{metric}_{split}.svg")),
@@ -446,6 +500,7 @@ fn write_residual_map(path: &Path, matches: &[Match]) -> Result<(), AnalysisErro
         {
             let total = residual_totals.entry(&row.link_id).or_default();
             total.1 += 1;
+            // Updating the running mean avoids storing every link-period residual.
             total.0 += ((row.expanded_simulated - row.observed) - total.0) / total.1 as f64;
         }
         let residuals: BTreeMap<_, _> = residual_totals
@@ -497,6 +552,7 @@ fn write_time_profile(path: &Path, matches: &[Match]) -> Result<(), AnalysisErro
         {
             let values = periods.entry(row.period_start_seconds).or_default();
             values.2 += 1;
+            // These incremental means aggregate links without retaining a per-link buffer.
             values.0 += (row.observed - values.0) / values.2 as f64;
             values.1 += (row.expanded_simulated - values.1) / values.2 as f64;
         }
@@ -585,6 +641,9 @@ mod tests {
              link-a,0,3600,bus,count,vehicles,5,calibration\n\
              link-a,0,1800,all,count,vehicles,5,calibration\n\
              missing,0,3600,all,count,vehicles,5,calibration\n\
+             link-a,0,3600,all,count,vehicles,9,calibration\n\
+             link-a,invalid,3600,all,count,vehicles,1,calibration\n\
+             link-a,0,3600,all,count,vehicles,invalid,calibration\n\
              link-a,0,3600,all,count,vehicles,0,holdout\n",
         )
         .unwrap();
@@ -608,10 +667,23 @@ mod tests {
         assert!(unmatched.contains("vehicle_class_unavailable"));
         assert!(unmatched.contains("period_mismatch"));
         assert!(unmatched.contains("no_simulation_match"));
+        assert!(unmatched.contains("duplicate_observation_key"));
+        assert!(unmatched.contains("invalid_period"));
+        assert!(unmatched.contains("invalid_observation_value"));
         let summary = std::fs::read_to_string(report.join("validation_summary.csv")).unwrap();
-        assert!(summary.contains("calibration,count,2,8.000000,8.000000,8.944272,"));
-        assert!(summary.contains("holdout,count,1,20.000000,20.000000,20.000000,6.324555,1,0,1"));
-        assert!(summary.contains("holdout,speed,2,0.000000,0.000000,0.000000,,0,0,0"));
+        assert!(
+            summary
+                .contains("calibration,count,all,1,12.000000,12.000000,12.000000,3.207135,1,5,0")
+        );
+        assert!(
+            summary.contains("calibration,count,car,1,4.000000,4.000000,4.000000,1.632993,1,0,0")
+        );
+        assert!(summary.contains("calibration,count,bus,0,,,,,0,1,0"));
+        assert!(
+            summary.contains("holdout,count,all,1,20.000000,20.000000,20.000000,6.324555,1,0,1")
+        );
+        assert!(summary.contains("holdout,speed,all,1,0.000000,0.000000,0.000000,,0,0,0"));
+        assert!(summary.contains("holdout,speed,car,1,0.000000,0.000000,0.000000,,0,0,0"));
         let calibration_profile =
             std::fs::read_to_string(report.join("validation_time_profiles_calibration.svg"))
                 .unwrap();
@@ -646,7 +718,8 @@ mod tests {
         let summary =
             std::fs::read_to_string(directory.path().join("validation_summary.csv")).unwrap();
         assert!(
-            summary.contains("calibration,count,1,10.000000,10.000000,10.000000,3.651484,1,0,0")
+            summary
+                .contains("calibration,count,all,1,10.000000,10.000000,10.000000,3.651484,1,0,0")
         );
     }
 }
