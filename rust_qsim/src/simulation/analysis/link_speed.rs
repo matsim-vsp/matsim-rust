@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-use super::{csv, hour_start_seconds, io_error, link_visit, table_writer};
+use super::{TableSpec, csv, hour_start_seconds, io_error, link_visit, table_writer};
 
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 /// Width of one fixed link-speed histogram bin in m/s.
@@ -548,3 +548,44 @@ fn optional_number(value: Option<f64>) -> String {
         None => String::new(),
     }
 }
+
+/// Metrics from this module that completed-run comparison can compare.
+pub(super) const COMPARISON_TABLES: &[TableSpec] = &[
+    TableSpec {
+        file: "link_speed_hourly.csv",
+        metrics: &[
+            ("link_speed_traversals", "observations"),
+            ("link_total_distance", "total_distance_meters"),
+            ("link_total_duration", "total_duration_seconds"),
+            ("link_representative_speed", "representative_speed_mps"),
+            ("link_vehicle_speed_mean", "vehicle_speed_mean_mps"),
+            (
+                "link_vehicle_speed_population_std",
+                "vehicle_speed_population_std_mps",
+            ),
+        ],
+    },
+    TableSpec {
+        file: "link_speed_summary.csv",
+        metrics: &[
+            ("links_with_speed", "links_with_speed"),
+            ("hourly_link_speed_traversals", "observations"),
+            ("hourly_mean_link_speed", "mean_link_speed_mps"),
+            (
+                "hourly_link_speed_population_std",
+                "population_std_link_speed_mps",
+            ),
+        ],
+    },
+    TableSpec {
+        file: "link_speed_histogram.csv",
+        metrics: &[
+            ("speed_histogram_link_count", "link_count"),
+            ("speed_histogram_observation_count", "observation_count"),
+        ],
+    },
+    TableSpec {
+        file: "link_speed_diagnostics.csv",
+        metrics: &[],
+    },
+];
