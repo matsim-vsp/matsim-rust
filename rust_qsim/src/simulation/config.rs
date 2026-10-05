@@ -617,6 +617,9 @@ pub struct Analysis {
     /// paths are resolved against the configured output directory.
     pub transit_observed_data: Option<PathBuf>,
 
+    /// Optional modeled receiver sound/exposure records and affected population data.
+    pub noise: Option<NoiseInputs>,
+
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
 
@@ -652,6 +655,17 @@ pub struct ServiceInputs {
     pub max_wait_seconds: Option<f64>,
 }
 
+/// Supplied noise model outputs. Analysis never invents receiver locations or exposure.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NoiseInputs {
+    /// Receiver/time records with receiver_id, period_start_seconds, period_end_seconds,
+    /// metric, unit and value columns. Sound levels use dB and energy averaging.
+    pub records: PathBuf,
+    /// Optional receiver/time affected-population rows.
+    #[serde(default)]
+    pub affected_population: Option<PathBuf>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct LinkLabels {
@@ -673,6 +687,7 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            noise: None,
 
             excess_delay_clip_seconds: None,
 

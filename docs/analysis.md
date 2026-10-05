@@ -178,6 +178,32 @@ Relative paths are resolved from the current run's output directory. A missing o
 comparison report marks only the cross-run comparison module failed.
 
 
+## Modeled noise and exposure
+
+Set `output.analysis.noise` to analyze supplied receiver records; this reads model outputs and
+does not add a noise simulation engine.
+
+```yaml
+output:
+  analysis:
+    noise:
+      records: noise.csv
+      affected_population: affected_population.csv  # optional
+```
+
+`noise.csv` has `receiver_id,period_start_seconds,period_end_seconds,metric,unit,value` columns;
+optional `x,y` columns give receiver coordinates in the supplied map coordinate system.
+Metrics named `source_sound` and `exposure` require `dB` and are combined by energy mean when
+multiple records share a receiver, period and metric. A supplied `damage` metric is summed in its
+input unit; no monetized damage is calculated. Other supplied metrics use an arithmetic mean.
+`affected_population.csv` has `receiver_id,period_start_seconds,period_end_seconds,affected_population`;
+values join only on the exact receiver and period, and duplicate rows sum. Receiver maps are
+written per sound/exposure metric and exact period only when coordinates are supplied; `noise_maps.csv`
+indexes them. Without that file the
+population column stays blank and availability says unavailable. Summary and availability tables
+are exported and included in the local report. Cross-run comparison reads the latest report's
+noise summary.
+
 ## DRT and taxi service performance
 
 Set `output.analysis.service` to analyse supplied DRT or taxi records. Nothing is simulated: the
