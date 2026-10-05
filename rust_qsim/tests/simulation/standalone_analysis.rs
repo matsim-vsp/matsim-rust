@@ -79,7 +79,9 @@ fn standalone_rerun_matches_automatic_metrics_and_preserves_raw_outputs() {
 
     let raw_before = snapshot(&output.join("ITERS"));
     let network_before = fs::read(output.join("output_network.xml.zst")).unwrap();
-
+    let runtime_file = report_dir.join("runtime_metadata.json");
+    let runtime_before: serde_json::Value =
+        serde_json::from_slice(&fs::read(&runtime_file).unwrap()).unwrap();
     let report = reanalyze_completed_run(&output, None).unwrap();
     assert_eq!(report, report_dir.join("index.html"));
     // The same recorded iteration, metadata and interval produce the automatic run's metrics.
@@ -107,6 +109,45 @@ fn standalone_rerun_matches_automatic_metrics_and_preserves_raw_outputs() {
     assert_eq!(
         fs::read(output.join("output_network.xml.zst")).unwrap(),
         network_before
+    );
+    let runtime_after: serde_json::Value =
+        serde_json::from_slice(&fs::read(&runtime_file).unwrap()).unwrap();
+    assert_eq!(
+        runtime_after["simulation_seconds"],
+        runtime_before["simulation_seconds"]
+    );
+    assert_eq!(
+        runtime_after["worker_count"],
+        runtime_before["worker_count"]
+    );
+    assert_eq!(
+        runtime_after["peak_memory_bytes"],
+        runtime_before["peak_memory_bytes"]
+    );
+    assert!(runtime_after["analysis_seconds"].as_f64().is_some());
+    let runtime_csv = fs::read_to_string(report_dir.join("runtime.csv")).unwrap();
+    assert!(runtime_csv.contains("\"analysis_runtime\""));
+    assert_eq!(
+        runtime_csv.contains("\"peak_memory\""),
+        runtime_after["peak_memory_bytes"].as_u64().is_some()
+    );
+    assert!(
+        fs::read_to_string(&report)
+            .unwrap()
+            .contains("analysis_runtime")
+    );
+
+    // Older reports have no measured simulation context; reanalysis must leave it unknown.
+    fs::remove_file(&runtime_file).unwrap();
+    reanalyze_completed_run(&output, None).unwrap();
+    let legacy_runtime: serde_json::Value =
+        serde_json::from_slice(&fs::read(&runtime_file).unwrap()).unwrap();
+    assert!(legacy_runtime["network_links"].is_null());
+    assert!(legacy_runtime["software_version"].is_null());
+    assert!(
+        !fs::read_to_string(report_dir.join("runtime.csv"))
+            .unwrap()
+            .contains("network_links")
     );
     assert!(!output.join(".analysis-staging").exists());
     assert!(!output.join(".analysis-backup").exists());
