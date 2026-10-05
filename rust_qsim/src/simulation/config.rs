@@ -612,6 +612,91 @@ pub struct Analysis {
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
+
+    /// Reachability of supplied opportunities from the run's zones and people.
+    pub accessibility: Accessibility,
+}
+
+/// Inputs of the accessibility-to-opportunities measure, and the thresholds it reports.
+///
+/// The three files form one input: the module stays unavailable until all of them are
+/// configured, and configuring only some of them is an error rather than a partial
+/// measure. Relative paths are resolved against the configured output directory.
+///
+/// Accessibility is defined on *potential* destinations, so `travel_costs` has to be a
+/// supplied cost table. A realized trip duration says how long one person actually
+/// took, which says nothing about how long anyone else *could* take, so observed
+/// journey tables are never a substitute for these costs.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Accessibility {
+    /// Opportunity locations, one row per location, with its weight and category.
+    pub opportunities: Option<PathBuf>,
+    /// Zone centroids. They are the explicit coordinate/zone correspondence used to
+    /// place both opportunity locations and person home locations.
+    pub zones: Option<PathBuf>,
+    /// Potential-destination travel costs between zones, by mode and departure period.
+    pub travel_costs: Option<PathBuf>,
+    /// Cumulative-opportunity thresholds in seconds. Must be non-empty, and every entry
+    /// must be finite and non-negative.
+    pub thresholds_seconds: Vec<f64>,
+}
+
+impl Accessibility {
+    /// The three files are one input, so a partially configured module cannot run.
+    pub fn is_configured(&self) -> bool {
+        self.opportunities.is_some() || self.zones.is_some() || self.travel_costs.is_some()
+    }
+
+    /// `Ok` when the configured set can produce a measure, otherwise the reason it cannot.
+    pub fn validate(&self) -> Result<(), String> {
+        let missing: Vec<&str> = [
+            ("opportunities", self.opportunities.is_none()),
+            ("zones", self.zones.is_none()),
+            ("travel_costs", self.travel_costs.is_none()),
+        ]
+        .into_iter()
+        .filter_map(|(name, absent)| absent.then_some(name))
+        .collect();
+        if !missing.is_empty() {
+            return Err(format!(
+                "output.analysis.accessibility needs {}, because all three inputs are required together",
+                missing.join(", ")
+            ));
+        }
+        if self.thresholds_seconds.is_empty() {
+            return Err(
+                "output.analysis.accessibility.thresholds_seconds must not be empty".to_owned(),
+            );
+        }
+        if let Some(threshold) = self
+            .thresholds_seconds
+            .iter()
+            .find(|threshold| !threshold.is_finite() || **threshold < 0.0)
+        {
+            return Err(format!(
+                "output.analysis.accessibility.thresholds_seconds must hold non-negative finite values, got {threshold}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for Accessibility {
+    fn default() -> Self {
+        Self {
+            opportunities: None,
+            zones: None,
+            travel_costs: None,
+            // 45 minutes is the conventional accessibility cutoff, so a run that supplies
+            // the three files without naming a threshold still reports a usable measure.
+            thresholds_seconds: default_accessibility_thresholds_seconds(),
+        }
+    }
+}
+
+fn default_accessibility_thresholds_seconds() -> Vec<f64> {
+    vec![2700.0]
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -634,6 +719,8 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
 
             excess_delay_clip_seconds: None,
+
+            accessibility: Accessibility::default(),
         }
     }
 }
@@ -681,6 +768,62 @@ register_override!(
     |config, value| match value.parse::<f64>() {
         Ok(limit) => config.output_mut().analysis.excess_delay_clip_seconds = Some(limit),
         Err(_) => warn!("Ignoring invalid excess delay clip '{value}': expected seconds"),
+    }
+);
+
+// The accessibility inputs are file paths, so each is reachable from the command line as well
+// as from YAML. `register_override!` stores a plain function pointer, so these are written out
+// rather than generated from a helper that would have to capture a setter.
+register_override!(
+    "output.analysis.accessibility.opportunities",
+    |config, value| {
+        if value.is_empty() {
+            warn!("Ignoring empty output.analysis.accessibility.opportunities");
+            return;
+        }
+        config.output_mut().analysis.accessibility.opportunities = Some(PathBuf::from(value));
+    }
+);
+
+register_override!("output.analysis.accessibility.zones", |config, value| {
+    if value.is_empty() {
+        warn!("Ignoring empty output.analysis.accessibility.zones");
+        return;
+    }
+    config.output_mut().analysis.accessibility.zones = Some(PathBuf::from(value));
+});
+
+register_override!(
+    "output.analysis.accessibility.travel_costs",
+    |config, value| {
+        if value.is_empty() {
+            warn!("Ignoring empty output.analysis.accessibility.travel_costs");
+            return;
+        }
+        config.output_mut().analysis.accessibility.travel_costs = Some(PathBuf::from(value));
+    }
+);
+
+register_override!(
+    "output.analysis.accessibility.thresholds_seconds",
+    |config, value| {
+        let thresholds: std::result::Result<Vec<f64>, _> = value
+            .split(',')
+            .map(|threshold| threshold.trim().parse::<f64>())
+            .collect();
+        match thresholds {
+            Ok(thresholds) if !thresholds.is_empty() => {
+                config
+                    .output_mut()
+                    .analysis
+                    .accessibility
+                    .thresholds_seconds = thresholds;
+            }
+            Ok(_) => warn!("Ignoring empty accessibility threshold list '{value}'"),
+            Err(_) => warn!(
+                "Ignoring invalid accessibility thresholds '{value}': expected comma-separated seconds"
+            ),
+        }
     }
 );
 

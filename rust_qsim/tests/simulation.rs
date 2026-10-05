@@ -1,3 +1,5 @@
+#[path = "simulation/accessibility_analysis.rs"]
+mod accessibility_analysis;
 #[path = "simulation/automatic_analysis.rs"]
 mod automatic_analysis;
 #[path = "simulation/berlin.rs"]
