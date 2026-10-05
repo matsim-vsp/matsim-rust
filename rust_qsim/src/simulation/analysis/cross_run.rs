@@ -1,6 +1,6 @@
 //! Comparisons between reports from completed runs.
 
-use super::{AnalysisError, Manifest, csv, escape_html, read_json};
+use super::{AnalysisError, Manifest, TableSpec, csv, escape_html, read_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -37,19 +37,20 @@ pub fn compare_completed_runs(
     let staging = baseline_dir.join("analysis/.comparison-staging");
     let published = baseline_dir.join("analysis/comparison");
     let backup = baseline_dir.join("analysis/.comparison-backup");
-    super::reclaim_backup(&published, &backup)?;
+    super::publication::reclaim_backup(&published, &backup)?;
     let baseline = read_run(baseline_dir)?;
     let runs = alternative_dirs
         .iter()
         .map(|path| read_run(path))
         .collect::<Result<Vec<_>, _>>()?;
-    super::reset_staging(&staging)?;
+    super::publication::reset_staging(&staging)?;
     let result = write_comparison(&staging, &baseline, &runs);
     if let Err(error) = result {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
-    super::publish(&staging, &published, &backup).map(|published| published.join("index.html"))
+    super::publication::publish(&staging, &published, &backup)
+        .map(|published| published.join("index.html"))
 }
 
 fn read_run(path: &Path) -> Result<Run, AnalysisError> {
@@ -979,264 +980,95 @@ fn read_column(path: &Path, name: &str) -> Result<BTreeSet<String>, AnalysisErro
         .collect()
 }
 
-struct TableSpec {
-    file: &'static str,
-    metrics: &'static [(&'static str, &'static str)],
+fn table_specs() -> Vec<&'static TableSpec> {
+    CORE_TABLES
+        .iter()
+        .chain(super::transit::COMPARISON_TABLES)
+        .chain(super::service::COMPARISON_TABLES)
+        .chain(super::link_speed::COMPARISON_TABLES)
+        .collect()
 }
-fn table_specs() -> &'static [TableSpec] {
-    &[
-        TableSpec {
-            file: "link_hourly.csv",
-            metrics: &[
-                ("entry_vehicles", "entry_vehicles"),
-                ("exit_vehicles", "exit_vehicles"),
-            ],
-        },
-        TableSpec {
-            file: "group_coverage.csv",
-            metrics: &[
-                ("group_eligible_links", "eligible_links"),
-                ("group_used_links", "used_links"),
-                ("group_unused_links", "unused_links"),
-                ("group_used_link_percent", "used_percent"),
-            ],
-        },
-        TableSpec {
-            file: "coverage.csv",
-            metrics: &[
-                ("eligible_links", "eligible_links"),
-                ("used_links", "used_links"),
-                ("unused_links", "unused_links"),
-                ("used_percent", "used_percent"),
-            ],
-        },
-        TableSpec {
-            file: "leg_hourly.csv",
-            metrics: &[
-                ("leg_departures", "departures"),
-                ("departing_persons", "departing_persons"),
-                ("leg_duration_mean", "mean_duration_seconds"),
-            ],
-        },
-        TableSpec {
-            file: "daily_summary.csv",
-            metrics: &[(
-                "daily_mean_completed_travel_burden",
-                "mean_completed_leg_duration_sum_seconds",
-            )],
-        },
-        TableSpec {
-            file: "transit_trips.csv",
-            metrics: &[
-                ("wait_seconds", "wait_seconds"),
-                ("in_vehicle_seconds", "in_vehicle_seconds"),
-                ("arrival_delay_seconds", "arrival_delay_seconds"),
-            ],
-        },
-        TableSpec {
-            file: "transit_stop_hourly.csv",
-            metrics: &[
-                ("boardings_sample", "boardings_sample"),
-                ("alightings_sample", "alightings_sample"),
-                ("boardings", "boardings"),
-                ("alightings", "alightings"),
-            ],
-        },
-        TableSpec {
-            file: "transit_line_summary.csv",
-            metrics: &[
-                ("trips_sample", "trips_sample"),
-                ("trips", "trips"),
-                ("missed_services_sample", "missed_services_sample"),
-                ("wait_observations", "wait_observations"),
-                ("mean_wait_seconds", "mean_wait_seconds"),
-                ("in_vehicle_observations", "in_vehicle_observations"),
-                ("mean_in_vehicle_seconds", "mean_in_vehicle_seconds"),
-                ("delay_observations", "delay_observations"),
-                ("mean_arrival_delay_seconds", "mean_arrival_delay_seconds"),
-            ],
-        },
-        TableSpec {
-            file: "transit_outcomes.csv",
-            metrics: &[
-                ("outcome_trips_sample", "outcome_trips_sample"),
-                ("outcome_trips", "outcome_trips"),
-            ],
-        },
-        TableSpec {
-            file: "transit_occupancy.csv",
-            metrics: &[
-                ("passengers_sample", "passengers_sample"),
-                ("passengers", "passengers"),
-                ("capacity_persons", "capacity_persons"),
-                ("load_factor", "load_factor"),
-            ],
-        },
-        TableSpec {
-            file: "transit_journeys.csv",
-            metrics: &[
-                ("transit_legs", "transit_legs"),
-                ("transfers", "transfers"),
-                ("access_seconds", "access_seconds"),
-                ("egress_seconds", "egress_seconds"),
-                ("transfer_seconds", "transfer_seconds"),
-                ("journey_wait_seconds", "journey_wait_seconds"),
-                ("journey_in_vehicle_seconds", "journey_in_vehicle_seconds"),
-            ],
-        },
-        TableSpec {
-            file: "transit_validation_matches.csv",
-            metrics: &[
-                ("transit_observed", "observed"),
-                ("transit_simulated_sample", "transit_simulated_sample"),
-                ("transit_simulated_expanded", "transit_simulated_expanded"),
-                ("transit_residual", "transit_residual"),
-                ("transit_relative_error", "transit_relative_error"),
-                (
-                    "transit_network_total_expanded",
-                    "transit_network_total_expanded",
-                ),
-            ],
-        },
-        TableSpec {
-            file: "transit_validation_summary.csv",
-            metrics: &[
-                ("transit_matched", "transit_matched"),
-                ("transit_unmatched", "transit_unmatched"),
-                ("transit_observed_total", "transit_observed_total"),
-                ("transit_simulated_total", "transit_simulated_total"),
-                ("transit_bias", "transit_bias"),
-                ("transit_mae", "transit_mae"),
-                ("transit_rmse", "transit_rmse"),
-                ("transit_relative_bias", "transit_relative_bias"),
-            ],
-        },
-        TableSpec {
-            file: "link_speed_hourly.csv",
-            metrics: &[
-                ("link_speed_traversals", "observations"),
-                ("link_total_distance", "total_distance_meters"),
-                ("link_total_duration", "total_duration_seconds"),
-                ("link_representative_speed", "representative_speed_mps"),
-                ("link_vehicle_speed_mean", "vehicle_speed_mean_mps"),
-                (
-                    "link_vehicle_speed_population_std",
-                    "vehicle_speed_population_std_mps",
-                ),
-            ],
-        },
-        TableSpec {
-            file: "link_speed_summary.csv",
-            metrics: &[
-                ("links_with_speed", "links_with_speed"),
-                ("hourly_link_speed_traversals", "observations"),
-                ("hourly_mean_link_speed", "mean_link_speed_mps"),
-                (
-                    "hourly_link_speed_population_std",
-                    "population_std_link_speed_mps",
-                ),
-            ],
-        },
-        TableSpec {
-            file: "link_speed_histogram.csv",
-            metrics: &[
-                ("speed_histogram_link_count", "link_count"),
-                ("speed_histogram_observation_count", "observation_count"),
-            ],
-        },
-        TableSpec {
-            file: "link_capacity.csv",
-            metrics: &[
-                ("capacity_pce_per_hour", "capacity_pce_per_hour"),
-                ("effective_capacity_pce", "effective_capacity_pce"),
-                ("entry_pce", "entry_pce"),
-                ("exit_pce", "exit_pce"),
-                ("entry_pce_scaled", "entry_pce_scaled"),
-                ("exit_pce_scaled", "exit_pce_scaled"),
-                ("entry_flow_pce_per_hour", "entry_flow_pce_per_hour"),
-                ("exit_flow_pce_per_hour", "exit_flow_pce_per_hour"),
-                ("entry_vc", "entry_vc"),
-                ("exit_vc", "exit_vc"),
-                ("entry_unresolved_pce", "entry_unresolved_pce"),
-                ("exit_unresolved_pce", "exit_unresolved_pce"),
-            ],
-        },
-        TableSpec {
-            file: "vc_histogram.csv",
-            metrics: &[
-                ("links", "links"),
-                ("observations", "observations"),
-                ("unavailable_links", "unavailable_links"),
-            ],
-        },
-        TableSpec {
-            file: "link_speed_diagnostics.csv",
-            metrics: &[],
-        },
-        TableSpec {
-            file: "person_daily.csv",
-            metrics: &[
-                (
-                    "person_completed_leg_duration_sum",
-                    "completed_duration_sum_seconds",
-                ),
-                (
-                    "person_completed_leg_duration_mean",
-                    "completed_duration_mean_seconds",
-                ),
-            ],
-        },
-        TableSpec {
-            file: "service_summary.csv",
-            metrics: &[
-                ("requests", "requests"),
-                ("served", "served"),
-                ("rejected", "rejected"),
-                ("unserved", "unserved"),
-                ("served_share", "served_share"),
-                ("rejected_share", "rejected_share"),
-                ("passengers_served", "passengers_served"),
-                ("wait_mean_seconds", "wait_mean_seconds"),
-                ("wait_std_seconds", "wait_std_seconds"),
-                ("wait_median_seconds", "wait_median_seconds"),
-                ("wait_p90_seconds", "wait_p90_seconds"),
-                ("detour_mean_ratio", "detour_mean_ratio"),
-                ("detour_std_ratio", "detour_std_ratio"),
-                ("detour_median_ratio", "detour_median_ratio"),
-                ("detour_p90_ratio", "detour_p90_ratio"),
-                ("wait_limit_exceeded", "wait_limit_exceeded"),
-                ("inside_area", "inside_area"),
-                ("outside_area", "outside_area"),
-                ("area_unknown", "area_unknown"),
-                ("coverage_share", "coverage_share"),
-            ],
-        },
-        TableSpec {
-            file: "service_vehicles.csv",
-            metrics: &[
-                ("service_seconds", "service_seconds"),
-                ("busy_seconds", "busy_seconds"),
-                ("utilization", "utilization"),
-                ("driven_meters", "driven_meters"),
-                ("occupied_meters", "occupied_meters"),
-                ("empty_meters", "empty_meters"),
-                ("empty_share", "empty_share"),
-                ("passenger_meters", "passenger_meters"),
-                ("mean_occupancy", "mean_occupancy"),
-                ("load_factor", "load_factor"),
-                ("capacity_exceeded_tasks", "capacity_exceeded_tasks"),
-                ("requests_served", "requests_served"),
-            ],
-        },
-        TableSpec {
-            file: "service_occupancy.csv",
-            metrics: &[
-                ("load_vehicle_meters", "load_vehicle_meters"),
-                ("load_share", "load_share"),
-            ],
-        },
-    ]
-}
+
+const CORE_TABLES: &[TableSpec] = &[
+    TableSpec {
+        file: "link_hourly.csv",
+        metrics: &[
+            ("entry_vehicles", "entry_vehicles"),
+            ("exit_vehicles", "exit_vehicles"),
+        ],
+    },
+    TableSpec {
+        file: "group_coverage.csv",
+        metrics: &[
+            ("group_eligible_links", "eligible_links"),
+            ("group_used_links", "used_links"),
+            ("group_unused_links", "unused_links"),
+            ("group_used_link_percent", "used_percent"),
+        ],
+    },
+    TableSpec {
+        file: "coverage.csv",
+        metrics: &[
+            ("eligible_links", "eligible_links"),
+            ("used_links", "used_links"),
+            ("unused_links", "unused_links"),
+            ("used_percent", "used_percent"),
+        ],
+    },
+    TableSpec {
+        file: "leg_hourly.csv",
+        metrics: &[
+            ("leg_departures", "departures"),
+            ("departing_persons", "departing_persons"),
+            ("leg_duration_mean", "mean_duration_seconds"),
+        ],
+    },
+    TableSpec {
+        file: "daily_summary.csv",
+        metrics: &[(
+            "daily_mean_completed_travel_burden",
+            "mean_completed_leg_duration_sum_seconds",
+        )],
+    },
+    TableSpec {
+        file: "link_capacity.csv",
+        metrics: &[
+            ("capacity_pce_per_hour", "capacity_pce_per_hour"),
+            ("effective_capacity_pce", "effective_capacity_pce"),
+            ("entry_pce", "entry_pce"),
+            ("exit_pce", "exit_pce"),
+            ("entry_pce_scaled", "entry_pce_scaled"),
+            ("exit_pce_scaled", "exit_pce_scaled"),
+            ("entry_flow_pce_per_hour", "entry_flow_pce_per_hour"),
+            ("exit_flow_pce_per_hour", "exit_flow_pce_per_hour"),
+            ("entry_vc", "entry_vc"),
+            ("exit_vc", "exit_vc"),
+            ("entry_unresolved_pce", "entry_unresolved_pce"),
+            ("exit_unresolved_pce", "exit_unresolved_pce"),
+        ],
+    },
+    TableSpec {
+        file: "vc_histogram.csv",
+        metrics: &[
+            ("links", "links"),
+            ("observations", "observations"),
+            ("unavailable_links", "unavailable_links"),
+        ],
+    },
+    TableSpec {
+        file: "person_daily.csv",
+        metrics: &[
+            (
+                "person_completed_leg_duration_sum",
+                "completed_duration_sum_seconds",
+            ),
+            (
+                "person_completed_leg_duration_mean",
+                "completed_duration_mean_seconds",
+            ),
+        ],
+    },
+];
 
 fn number(value: Option<f64>) -> String {
     value.map_or_else(String::new, |number| format!("{number:.6}"))
@@ -1488,6 +1320,24 @@ pub(super) fn write_empty(path: &Path) -> Result<(), AnalysisError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_comparison_table_metric_is_in_the_catalog() {
+        let catalog = super::super::metrics(false)
+            .into_iter()
+            .map(|metric| metric.name)
+            .collect::<BTreeSet<_>>();
+
+        for spec in table_specs() {
+            for (name, _) in spec.metrics {
+                assert!(
+                    catalog.contains(name),
+                    "{} is missing from the catalog",
+                    name
+                );
+            }
+        }
+    }
 
     fn run(root: &Path, name: &str, sample: f64, links: &str) -> PathBuf {
         let output = root.join(name);

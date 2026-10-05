@@ -195,13 +195,13 @@ pub fn analyze_run_ensemble(
     };
 
     let staging = output_dir.join(STAGING_DIR);
-    super::reset_staging(&staging)?;
+    super::publication::reset_staging(&staging)?;
     if let Err(error) = write_tables(&staging, &ensemble) {
         // A half-written ensemble is never published; the previous report stays as it was.
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
-    super::publish(
+    super::publication::publish(
         &staging,
         &output_dir.join(ENSEMBLE_DIR),
         &output_dir.join(BACKUP_DIR),

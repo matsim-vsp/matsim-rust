@@ -7,8 +7,8 @@
 //! stop arrivals and departures) are reported as unavailable instead of being inferred.
 
 use super::{
-    AnalysisError, ExpectedJourney, ObservedLeg, csv, hour_start_seconds, io_error, number_opt,
-    table_writer,
+    AnalysisError, ExpectedJourney, ObservedLeg, TableSpec, csv, hour_start_seconds, io_error,
+    number_opt, table_writer,
 };
 use crate::simulation::events::{
     EventTrait, PersonArrivalEvent, PersonDepartureEvent, PersonStuckEvent,
@@ -1863,3 +1863,93 @@ mod tests {
         assert!(match_schedule(&route, &record(1000.0, "b", "a")).is_none());
     }
 }
+
+/// Metrics from this module that completed-run comparison can compare.
+pub(super) const COMPARISON_TABLES: &[TableSpec] = &[
+    TableSpec {
+        file: "transit_trips.csv",
+        metrics: &[
+            ("wait_seconds", "wait_seconds"),
+            ("in_vehicle_seconds", "in_vehicle_seconds"),
+            ("arrival_delay_seconds", "arrival_delay_seconds"),
+        ],
+    },
+    TableSpec {
+        file: "transit_stop_hourly.csv",
+        metrics: &[
+            ("boardings_sample", "boardings_sample"),
+            ("alightings_sample", "alightings_sample"),
+            ("boardings", "boardings"),
+            ("alightings", "alightings"),
+        ],
+    },
+    TableSpec {
+        file: "transit_line_summary.csv",
+        metrics: &[
+            ("trips_sample", "trips_sample"),
+            ("trips", "trips"),
+            ("missed_services_sample", "missed_services_sample"),
+            ("wait_observations", "wait_observations"),
+            ("mean_wait_seconds", "mean_wait_seconds"),
+            ("in_vehicle_observations", "in_vehicle_observations"),
+            ("mean_in_vehicle_seconds", "mean_in_vehicle_seconds"),
+            ("delay_observations", "delay_observations"),
+            ("mean_arrival_delay_seconds", "mean_arrival_delay_seconds"),
+        ],
+    },
+    TableSpec {
+        file: "transit_outcomes.csv",
+        metrics: &[
+            ("outcome_trips_sample", "outcome_trips_sample"),
+            ("outcome_trips", "outcome_trips"),
+        ],
+    },
+    TableSpec {
+        file: "transit_occupancy.csv",
+        metrics: &[
+            ("passengers_sample", "passengers_sample"),
+            ("passengers", "passengers"),
+            ("capacity_persons", "capacity_persons"),
+            ("load_factor", "load_factor"),
+        ],
+    },
+    TableSpec {
+        file: "transit_journeys.csv",
+        metrics: &[
+            ("transit_legs", "transit_legs"),
+            ("transfers", "transfers"),
+            ("access_seconds", "access_seconds"),
+            ("egress_seconds", "egress_seconds"),
+            ("transfer_seconds", "transfer_seconds"),
+            ("journey_wait_seconds", "journey_wait_seconds"),
+            ("journey_in_vehicle_seconds", "journey_in_vehicle_seconds"),
+        ],
+    },
+    TableSpec {
+        file: "transit_validation_matches.csv",
+        metrics: &[
+            ("transit_observed", "observed"),
+            ("transit_simulated_sample", "transit_simulated_sample"),
+            ("transit_simulated_expanded", "transit_simulated_expanded"),
+            ("transit_residual", "transit_residual"),
+            ("transit_relative_error", "transit_relative_error"),
+            (
+                "transit_network_total_expanded",
+                "transit_network_total_expanded",
+            ),
+        ],
+    },
+    TableSpec {
+        file: "transit_validation_summary.csv",
+        metrics: &[
+            ("transit_matched", "transit_matched"),
+            ("transit_unmatched", "transit_unmatched"),
+            ("transit_observed_total", "transit_observed_total"),
+            ("transit_simulated_total", "transit_simulated_total"),
+            ("transit_bias", "transit_bias"),
+            ("transit_mae", "transit_mae"),
+            ("transit_rmse", "transit_rmse"),
+            ("transit_relative_bias", "transit_relative_bias"),
+        ],
+    },
+];
