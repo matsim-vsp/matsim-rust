@@ -1817,7 +1817,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
         let alternative = run(temp.path(), "alternative", 1.0, "l1,0,10,0\n");
-        let catalog = serde_json::to_string(&super::super::metrics(false)).unwrap();
+        let catalog = serde_json::to_string(&super::super::metrics(false, false)).unwrap();
         for (dir, served, wait, empty, loaded) in [
             (&baseline, 8, 100, 250, 700),
             (&alternative, 10, 80, 300, 900),

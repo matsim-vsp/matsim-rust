@@ -121,6 +121,7 @@ mod tests {
     use super::{AgentSet, AgentSource, DynAgentSource, IntoDynAgentSource, PopulationAgentSource};
     use crate::simulation::config::Config;
     use crate::simulation::id::Id;
+    use crate::simulation::network::signals::Signals;
     use crate::simulation::network::sim_network::SimNetworkPartition;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
@@ -196,6 +197,7 @@ mod tests {
                     crate::simulation::scenario::transit::TransitSchedule::default(),
                 ),
                 config,
+                signals: Arc::new(Signals::default()),
             },
             network_partition,
         }

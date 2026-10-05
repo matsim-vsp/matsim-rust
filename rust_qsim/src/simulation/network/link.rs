@@ -96,6 +96,19 @@ impl SimLink {
         }
     }
 
+    /// Suspends stuck accrual for a link whose front vehicle is held legitimately, such
+    /// as at a red signal. See `LocalLink::hold_stuck_timer`.
+    pub(super) fn hold_stuck_timer(&mut self, now: impl Into<Tick>) {
+        match self {
+            SimLink::Local(ll) => ll.hold_stuck_timer(now),
+            SimLink::In(il) => il.local_link.hold_stuck_timer(now),
+            SimLink::Out(_) => {
+                panic!("Out links don't offer vehicles")
+            }
+        }
+    }
+
+    /// Whether the out-link currently has room and flow capacity for another vehicle.
     pub fn is_available(&self) -> bool {
         match self {
             SimLink::Local(ll) => ll.is_available(),
@@ -521,6 +534,14 @@ impl LocalLink {
 
     pub(super) fn restart_stuck_timer(&mut self, now: impl Into<Tick>) {
         self.stuck_timer.restart(now);
+    }
+
+    /// Starts the stuck clock now, for a link holding vehicles whose hold is legitimate.
+    ///
+    /// A red signal is such a hold: the vehicle is stopped by the plan, not by a
+    /// blockage, and must not be forced through the red once `stuck_threshold` elapses.
+    pub(super) fn hold_stuck_timer(&mut self, now: impl Into<Tick>) {
+        self.restart_stuck_timer(now);
     }
 
     fn from(&self) -> &Id<Node> {

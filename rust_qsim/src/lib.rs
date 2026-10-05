@@ -9,3 +9,4 @@ pub mod external_services;
 pub mod generated;
 #[cfg(test)]
 mod test_utils;
+pub mod utilities;
