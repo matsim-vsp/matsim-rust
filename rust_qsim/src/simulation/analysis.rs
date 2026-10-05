@@ -251,7 +251,14 @@ pub fn analyze_final_iteration(
         settings.interval_seconds,
         simulation_end_time,
     )?;
-    write_network_map(&staging, &ordered_links, network, &classifications)?;
+    let link_hourly = link_hourly_metrics(
+        &ordered_links,
+        &classifications,
+        &counts,
+        settings.interval_seconds,
+        simulation_end_time,
+    );
+    write_network_map(&staging, &ordered_links, network, &classifications, &counts)?;
     let manifest = Manifest {
         status: "complete",
         iteration,
@@ -394,7 +401,13 @@ pub fn analyze_final_iteration(
         serde_json::to_vec_pretty(&statuses).map_err(|e| AnalysisError(e.to_string()))?,
     )
     .map_err(io_error)?;
-    write_report(&staging, iteration, ordered_links.len(), &grouped_coverage)?;
+    write_report(
+        &staging,
+        iteration,
+        ordered_links.len(),
+        &grouped_coverage,
+        &link_hourly,
+    )?;
     let published = output_dir.join("analysis");
     let backup = output_dir.join(".analysis-backup");
     if backup.exists() {
@@ -492,7 +505,52 @@ fn accumulate(
 }
 
 type ClassifiedGroups = BTreeMap<String, LinkLabels>;
-type GroupCoverage = (String, String, u64, usize, usize, usize, f64);
+
+#[derive(Serialize)]
+struct GroupCoverage {
+    dimension: String,
+    category: String,
+    hour_start_seconds: u64,
+    eligible_links: usize,
+    used_links: usize,
+    unused_links: usize,
+    used_percent: f64,
+}
+
+#[derive(Serialize)]
+struct LinkHourlyMetric {
+    link_id: String,
+    hour_start_seconds: u64,
+    entry_vehicles: u64,
+    exit_vehicles: u64,
+    urban_area: String,
+    road_type: String,
+    road_size: String,
+}
+
+fn classification_dimensions(labels: &LinkLabels) -> [(&'static str, &str); 3] {
+    [
+        (
+            "urban_area",
+            labels.urban_area.as_deref().unwrap_or("unknown"),
+        ),
+        (
+            "road_type",
+            labels.road_type.as_deref().unwrap_or("unknown"),
+        ),
+        (
+            "road_size",
+            labels.road_size.as_deref().unwrap_or("unknown"),
+        ),
+    ]
+}
+
+fn intervals(counts: &LinkVolumesByHour, interval: u32, simulation_end_time: u32) -> BTreeSet<u64> {
+    let mut hours: BTreeSet<_> = counts.keys().map(|key| key.hour_start_seconds).collect();
+    hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
+    hours.insert(0);
+    hours
+}
 
 fn classify_links(links: &[&Link], network: &Network, settings: &Analysis) -> ClassifiedGroups {
     links
@@ -533,8 +591,8 @@ fn label(value: Option<&str>) -> Option<String> {
 }
 
 fn classify_link_to_boundary(from: &Node, to: &Node, polygon: &[[f64; 2]]) -> &'static str {
-    let from_inside = point_in_polygon(from.coord.x, from.coord.y, polygon);
-    let to_inside = point_in_polygon(to.coord.x, to.coord.y, polygon);
+    let from_inside = point_in_polygon([from.coord.x, from.coord.y], polygon);
+    let to_inside = point_in_polygon([to.coord.x, to.coord.y], polygon);
     if from_inside && to_inside {
         "inner"
     } else if from_inside || to_inside || segment_crosses_polygon(from, to, polygon) {
@@ -544,16 +602,19 @@ fn classify_link_to_boundary(from: &Node, to: &Node, polygon: &[[f64; 2]]) -> &'
     }
 }
 
-fn point_in_polygon(x: f64, y: f64, polygon: &[[f64; 2]]) -> bool {
+fn point_in_polygon(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
     let mut inside = false;
     let mut previous = polygon.len() - 1;
     for current in 0..polygon.len() {
-        let [x1, y1] = polygon[previous];
-        let [x2, y2] = polygon[current];
-        if point_on_segment(x, y, x1, y1, x2, y2) {
+        let first = polygon[previous];
+        let second = polygon[current];
+        if point_on_segment(point, first, second) {
             return true;
         }
-        if (y1 > y) != (y2 > y) && x < (x2 - x1) * (y - y1) / (y2 - y1) + x1 {
+        if (first[1] > point[1]) != (second[1] > point[1])
+            && point[0]
+                < (second[0] - first[0]) * (point[1] - first[1]) / (second[1] - first[1]) + first[0]
+        {
             inside = !inside;
         }
         previous = current;
@@ -563,48 +624,38 @@ fn point_in_polygon(x: f64, y: f64, polygon: &[[f64; 2]]) -> bool {
 
 fn segment_crosses_polygon(from: &Node, to: &Node, polygon: &[[f64; 2]]) -> bool {
     (0..polygon.len()).any(|index| {
-        let [x1, y1] = polygon[index];
-        let [x2, y2] = polygon[(index + 1) % polygon.len()];
         segments_intersect(
-            from.coord.x,
-            from.coord.y,
-            to.coord.x,
-            to.coord.y,
-            x1,
-            y1,
-            x2,
-            y2,
+            [from.coord.x, from.coord.y],
+            [to.coord.x, to.coord.y],
+            polygon[index],
+            polygon[(index + 1) % polygon.len()],
         )
     })
 }
 
-fn point_on_segment(x: f64, y: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> bool {
-    let cross = (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1);
-    cross == 0.0 && x >= x1.min(x2) && x <= x1.max(x2) && y >= y1.min(y2) && y <= y1.max(y2)
+fn point_on_segment(point: [f64; 2], first: [f64; 2], second: [f64; 2]) -> bool {
+    let cross = (point[0] - first[0]) * (second[1] - first[1])
+        - (point[1] - first[1]) * (second[0] - first[0]);
+    cross == 0.0
+        && point[0] >= first[0].min(second[0])
+        && point[0] <= first[0].max(second[0])
+        && point[1] >= first[1].min(second[1])
+        && point[1] <= first[1].max(second[1])
 }
 
-fn segments_intersect(
-    ax: f64,
-    ay: f64,
-    bx: f64,
-    by: f64,
-    cx: f64,
-    cy: f64,
-    dx: f64,
-    dy: f64,
-) -> bool {
-    fn orientation(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64) -> f64 {
-        (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+fn segments_intersect(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    fn orientation(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
     }
-    let a = orientation(ax, ay, bx, by, cx, cy);
-    let b = orientation(ax, ay, bx, by, dx, dy);
-    let c = orientation(cx, cy, dx, dy, ax, ay);
-    let d = orientation(cx, cy, dx, dy, bx, by);
-    (a == 0.0 && point_on_segment(cx, cy, ax, ay, bx, by))
-        || (b == 0.0 && point_on_segment(dx, dy, ax, ay, bx, by))
-        || (c == 0.0 && point_on_segment(ax, ay, cx, cy, dx, dy))
-        || (d == 0.0 && point_on_segment(bx, by, cx, cy, dx, dy))
-        || ((a > 0.0) != (b > 0.0) && (c > 0.0) != (d > 0.0))
+    let ab_c = orientation(a, b, c);
+    let ab_d = orientation(a, b, d);
+    let cd_a = orientation(c, d, a);
+    let cd_b = orientation(c, d, b);
+    (ab_c == 0.0 && point_on_segment(c, a, b))
+        || (ab_d == 0.0 && point_on_segment(d, a, b))
+        || (cd_a == 0.0 && point_on_segment(a, c, d))
+        || (cd_b == 0.0 && point_on_segment(b, c, d))
+        || ((ab_c > 0.0) != (ab_d > 0.0) && (cd_a > 0.0) != (cd_b > 0.0))
 }
 
 fn write_classification(
@@ -641,28 +692,13 @@ fn write_group_coverage(
     let mut eligible = BTreeMap::<(String, String), usize>::new();
     for link in links {
         let labels = &classifications[link.id.external()];
-        for (dimension, category) in [
-            (
-                "urban_area",
-                labels.urban_area.as_deref().unwrap_or("unknown"),
-            ),
-            (
-                "road_type",
-                labels.road_type.as_deref().unwrap_or("unknown"),
-            ),
-            (
-                "road_size",
-                labels.road_size.as_deref().unwrap_or("unknown"),
-            ),
-        ] {
+        for (dimension, category) in classification_dimensions(labels) {
             *eligible
                 .entry((dimension.to_owned(), category.to_owned()))
                 .or_default() += 1;
         }
     }
-    let mut hours: BTreeSet<u64> = counts.keys().map(|key| key.hour_start_seconds).collect();
-    hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
-    hours.insert(0);
+    let hours = intervals(counts, interval, simulation_end_time);
     let mut rows = Vec::new();
     for hour in hours {
         let mut used = BTreeMap::<(String, String), usize>::new();
@@ -675,20 +711,7 @@ fn write_group_coverage(
                 .is_some_and(|volumes| volumes.entries + volumes.exits > 0)
             {
                 let labels = &classifications[link.id.external()];
-                for (dimension, category) in [
-                    (
-                        "urban_area",
-                        labels.urban_area.as_deref().unwrap_or("unknown"),
-                    ),
-                    (
-                        "road_type",
-                        labels.road_type.as_deref().unwrap_or("unknown"),
-                    ),
-                    (
-                        "road_size",
-                        labels.road_size.as_deref().unwrap_or("unknown"),
-                    ),
-                ] {
+                for (dimension, category) in classification_dimensions(labels) {
                     *used
                         .entry((dimension.to_owned(), category.to_owned()))
                         .or_default() += 1;
@@ -701,15 +724,15 @@ fn write_group_coverage(
                 .copied()
                 .unwrap_or_default();
             let percent = used as f64 * 100.0 / *total as f64;
-            rows.push((
-                dimension.clone(),
-                category.clone(),
-                hour,
-                *total,
-                used,
-                total - used,
-                percent,
-            ));
+            rows.push(GroupCoverage {
+                dimension: dimension.clone(),
+                category: category.clone(),
+                hour_start_seconds: hour,
+                eligible_links: *total,
+                used_links: used,
+                unused_links: total - used,
+                used_percent: percent,
+            });
         }
     }
     let mut file = BufWriter::new(File::create(path.join("group_coverage.csv")).map_err(io_error)?);
@@ -718,12 +741,17 @@ fn write_group_coverage(
         "dimension,category,hour_start_seconds,eligible_links,used_links,unused_links,used_percent"
     )
     .map_err(io_error)?;
-    for (dimension, category, hour, total, used, unused, percent) in &rows {
+    for row in &rows {
         writeln!(
             file,
-            "{},{},{hour},{total},{used},{unused},{percent:.6}",
-            csv(dimension),
-            csv(category)
+            "{},{},{},{},{},{},{:.6}",
+            csv(&row.dimension),
+            csv(&row.category),
+            row.hour_start_seconds,
+            row.eligible_links,
+            row.used_links,
+            row.unused_links,
+            row.used_percent,
         )
         .map_err(io_error)?;
     }
@@ -735,6 +763,7 @@ fn write_network_map(
     links: &[&Link],
     network: &Network,
     classifications: &ClassifiedGroups,
+    counts: &LinkVolumesByHour,
 ) -> Result<(), AnalysisError> {
     let nodes = network.nodes();
     let min_x = nodes
@@ -760,6 +789,11 @@ fn write_network_map(
         let y = 580.0 - (node.coord.y - min_y) / height * 560.0;
         (x, y)
     };
+    let used_links: BTreeSet<_> = counts
+        .iter()
+        .filter(|(_, volumes)| volumes.entries + volumes.exits > 0)
+        .map(|(key, _)| key.link_id.as_str())
+        .collect();
     let mut file = BufWriter::new(File::create(path.join("network_map.svg")).map_err(io_error)?);
     writeln!(file, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 600\" role=\"img\" aria-label=\"Classified network map\"><rect width=\"800\" height=\"600\" fill=\"white\"/>").map_err(io_error)?;
     for link in links {
@@ -773,21 +807,57 @@ fn write_network_map(
         let (x2, y2) = project(to);
         let labels = &classifications[link.id.external()];
         let road_type = labels.road_type.as_deref().unwrap_or("unknown");
-        let color = match road_type {
-            "expressway" => "#d94801",
-            "unknown" => "#8a8f98",
-            _ => "#1769aa",
+        let used = used_links.contains(link.id.external());
+        let color = if used { "#287a3d" } else { "#c8ccd0" };
+        let road_style = if road_type == "expressway" {
+            " stroke-dasharray=\"8 3\""
+        } else {
+            ""
         };
         let title = format!(
-            "{} | {} | {} | {}",
+            "{} | {} | {} | {} | {}",
             link.id.external(),
             labels.urban_area.as_deref().unwrap_or("unknown"),
             road_type,
             labels.road_size.as_deref().unwrap_or("unknown"),
+            if used { "used" } else { "unused" },
         );
-        writeln!(file, "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"{color}\" stroke-width=\"3\"><title>{}</title></line>", xml_escape(&title)).map_err(io_error)?;
+        writeln!(file, "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"{color}\" stroke-width=\"3\"{road_style}><title>{}</title></line>", xml_escape(&title)).map_err(io_error)?;
     }
     writeln!(file, "</svg>").map_err(io_error)
+}
+
+fn link_hourly_metrics(
+    links: &[&Link],
+    classifications: &ClassifiedGroups,
+    counts: &LinkVolumesByHour,
+    interval: u32,
+    simulation_end_time: u32,
+) -> Vec<LinkHourlyMetric> {
+    intervals(counts, interval, simulation_end_time)
+        .into_iter()
+        .flat_map(|hour| {
+            links.iter().map(move |link| {
+                let labels = &classifications[link.id.external()];
+                let volumes = counts
+                    .get(&LinkHour {
+                        hour_start_seconds: hour,
+                        link_id: link.id.external().to_owned(),
+                    })
+                    .copied()
+                    .unwrap_or_default();
+                LinkHourlyMetric {
+                    link_id: link.id.external().to_owned(),
+                    hour_start_seconds: hour,
+                    entry_vehicles: volumes.entries,
+                    exit_vehicles: volumes.exits,
+                    urban_area: labels.urban_area.as_deref().unwrap_or("unknown").to_owned(),
+                    road_type: labels.road_type.as_deref().unwrap_or("unknown").to_owned(),
+                    road_size: labels.road_size.as_deref().unwrap_or("unknown").to_owned(),
+                }
+            })
+        })
+        .collect()
 }
 
 fn xml_escape(value: &str) -> String {
@@ -812,9 +882,7 @@ fn write_tables(
         "link_id,hour_start_seconds,entry_vehicles,exit_vehicles"
     )
     .map_err(io_error)?;
-    let mut hours: BTreeSet<u64> = counts.keys().map(|key| key.hour_start_seconds).collect();
-    hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
-    hours.insert(0);
+    let hours = intervals(counts, interval, simulation_end_time);
     for hour in &hours {
         let hour = *hour;
         for link in links {
@@ -874,6 +942,7 @@ fn write_report(
     iteration: u32,
     links: usize,
     grouped_coverage: &[GroupCoverage],
+    link_hourly: &[LinkHourlyMetric],
 ) -> Result<(), AnalysisError> {
     let coverage = fs::read_to_string(path.join("coverage.csv")).map_err(io_error)?;
     let coverage = json_for_script(&coverage.lines().collect::<Vec<_>>())?;
@@ -882,12 +951,17 @@ fn write_report(
     let metrics: serde_json::Value =
         serde_json::from_slice(&metrics).map_err(|error| AnalysisError(error.to_string()))?;
     let metrics = json_for_script(&metrics)?;
-    let hourly = fs::read_to_string(path.join("link_hourly.csv")).map_err(io_error)?;
-    let hourly = json_for_script(&hourly.lines().collect::<Vec<_>>())?;
     let grouped_coverage = json_for_script(grouped_coverage)?;
-    let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}img{{max-width:100%;border:1px solid #ccd}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Classified network map</h2><img src=\"network_map.svg\" alt=\"Network links colored by road type; hover for all link classifications\"><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id=\"groups\"></div><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Tables and module status are embedded for offline viewing.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Available metrics</h2><div id=\"metrics\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_classification.csv\">link classifications (CSV)</a>, <a href=\"group_coverage.csv\">group coverage (CSV)</a>, <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const g={grouped_coverage};const a={metrics};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],g);table(document.querySelector('#hourly'),h[0].split(','),h.slice(1).map(x=>x.split(',')));table(document.querySelector('#coverage'),c[0].split(','),c.slice(1).map(x=>x.split(',')));table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
-    );
+    let link_hourly = json_for_script(link_hourly)?;
+    let html = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}img{max-width:100%;border:1px solid #ccd}label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><img src="network_map.svg" alt="Network coverage map"><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const g=__GROUPS__;const a=__METRICS__;const m=__MODULES__;function table(root,headers,rows){const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)});const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(x=>{const cell=tr.insertCell();cell.textContent=x});body.appendChild(tr)});root.replaceChildren(t)}table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],g.map(x=>[x.dimension,x.category,x.hour_start_seconds,x.eligible_links,x.used_links,x.unused_links,x.used_percent]));table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']));const selectors=[];[['urban_area','Urban area'],['road_type','Road type'],['road_size','Road size']].forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All','__all__'));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function renderHourly(){const rows=d.filter(row=>selectors.every(([key,select])=>select.value==='__all__'||row[key]===select.value)).map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]);table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows)}renderHourly()</script></body></html>"#;
+    let html = html
+        .replace("__ITERATION__", &iteration.to_string())
+        .replace("__LINKS__", &links.to_string())
+        .replace("__LINK_HOURLY__", &link_hourly)
+        .replace("__COVERAGE__", &coverage)
+        .replace("__GROUPS__", &grouped_coverage)
+        .replace("__METRICS__", &metrics)
+        .replace("__MODULES__", &modules);
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
 

@@ -25,6 +25,10 @@ Classification is report metadata only; it does not filter the eligible network.
 Group coverage reports each category's fixed eligible-link count and its used
 and unused counts for every hourly interval. The three dimensions are
 aggregated independently so links with incomplete labels remain visible.
+The report also provides independent urban-area, road-type, and road-size
+filters for the per-link hourly metrics. Its local SVG map marks links used at
+least once during the final iteration in green and unused links in gray; dashed
+lines identify expressways. Hover over a map link to see its labels and usage.
 
 For example:
 

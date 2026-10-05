@@ -112,7 +112,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     let coverage = fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap();
     assert!(coverage.contains("3600,200,5,195,2.500000"));
     let html = fs::read_to_string(&report).unwrap();
-    assert!(html.contains("const h=[\"link_id,hour_start_seconds,entry_vehicles,exit_vehicles\""));
+    assert!(html.contains("const d=["));
     let status = fs::read_to_string(report.parent().unwrap().join("module_status.json")).unwrap();
     assert!(status.contains("\"status\": \"unavailable\""));
     let run_metadata =
@@ -282,6 +282,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             0,
             1,
         ),
+        Node::new(Id::create("border"), Coordinate::new_2d(0.0, 0.5), 0, 1),
     ];
     let mut network = Network::new();
     for node in &nodes {
@@ -294,6 +295,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         ("unknown-road", 3, 4),
         ("outer-expressway", 0, 1),
         ("through-expressway", 5, 6),
+        ("border-road", 7, 2),
     ] {
         network.add_link(Link::new_with_default(
             Id::create(id),
@@ -310,12 +312,13 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         expected_travel: &[],
         garage: &garage,
     };
-    let labels = [
+    let mut labels: std::collections::BTreeMap<String, LinkLabels> = [
         ("outer-road", Some("other"), Some("small")),
         ("cross-road", Some("expressway"), Some("large")),
         ("inner-road", Some("expressway"), Some("large")),
         ("outer-expressway", Some("expressway"), Some("large")),
         ("through-expressway", Some("expressway"), Some("large")),
+        ("border-road", Some("other"), Some("medium")),
     ]
     .into_iter()
     .map(|(id, road_type, road_size)| {
@@ -329,6 +332,14 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         )
     })
     .collect();
+    labels.insert(
+        "unknown-road".to_owned(),
+        LinkLabels {
+            urban_area: Some("outer".to_owned()),
+            road_type: None,
+            road_size: None,
+        },
+    );
 
     let report = analyze_final_iteration(
         output,
@@ -341,7 +352,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
-            link_labels: labels,
+            link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
         },
     )
@@ -356,20 +367,76 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         classifications
             .contains("\"through-expressway\",\"cross_boundary\",\"expressway\",\"large\"")
     );
+    assert!(classifications.contains("\"border-road\",\"inner\",\"other\",\"medium\""));
     assert!(
         classifications.contains("\"unknown-road\",\"cross_boundary\",\"unknown\",\"unknown\"")
     );
 
     let groups = fs::read_to_string(report_dir.join("group_coverage.csv")).unwrap();
-    assert!(groups.contains("\"urban_area\",\"inner\",0,1,1,0,100.000000"));
+    assert!(groups.contains("\"urban_area\",\"inner\",0,2,1,1,50.000000"));
     assert!(groups.contains("\"urban_area\",\"outer\",0,2,2,0,100.000000"));
     assert!(groups.contains("\"urban_area\",\"cross_boundary\",0,3,0,3,0.000000"));
     assert!(groups.contains("\"road_type\",\"unknown\",0,1,0,1,0.000000"));
     assert!(groups.contains("\"road_type\",\"expressway\",0,4,2,2,50.000000"));
-    assert!(report_dir.join("network_map.svg").is_file());
+    let map = fs::read_to_string(report_dir.join("network_map.svg")).unwrap();
+    assert!(map.contains("stroke=\"#287a3d\""));
+    assert!(map.contains("stroke=\"#c8ccd0\""));
+    assert!(map.contains("stroke-dasharray=\"8 3\""));
     let html = fs::read_to_string(report).unwrap();
     assert!(html.contains("network_map.svg"));
     assert!(html.contains("group_coverage.csv"));
     assert!(html.contains("group_used_link_percent"));
     assert!(html.contains("Available metrics"));
+    assert!(html.contains("urban_area"));
+    assert!(html.contains("road_type"));
+    assert!(html.contains("road_size"));
+    assert!(html.contains("row[key]===select.value"));
+
+    let explicitly_classified = analyze_final_iteration(
+        output,
+        0,
+        1,
+        CompressionType::None,
+        3600,
+        &metadata,
+        &network,
+        &Analysis {
+            enabled: true,
+            interval_seconds: 3600,
+            link_labels: labels,
+            urban_boundary: None,
+        },
+    )
+    .unwrap();
+    let classifications = fs::read_to_string(
+        explicitly_classified
+            .parent()
+            .unwrap()
+            .join("link_classification.csv"),
+    )
+    .unwrap();
+    assert!(classifications.contains("\"unknown-road\",\"outer\",\"unknown\",\"unknown\""));
+
+    for boundary in [
+        vec![[0.0, 0.0], [1.0, 0.0]],
+        vec![[0.0, 0.0], [1.0, 0.0], [f64::NAN, 1.0]],
+    ] {
+        let error = analyze_final_iteration(
+            output,
+            0,
+            1,
+            CompressionType::None,
+            3600,
+            &metadata,
+            &network,
+            &Analysis {
+                enabled: true,
+                interval_seconds: 3600,
+                urban_boundary: Some(boundary),
+                ..Analysis::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("analysis.urban_boundary"));
+    }
 }
