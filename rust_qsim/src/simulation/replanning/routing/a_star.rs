@@ -121,8 +121,15 @@ impl AStarHeuristic for AltHeuristic {
 
         result
     }
+    /// The landmark bound never overestimates, but its consistency is not established here. The
+    /// maximum over landmarks of the two distance differences is admissible by the triangle
+    /// inequality, while consistency additionally needs the bound to move by at most the edge cost
+    /// along every edge of this directed graph. Candidate bounds and shared destination guidance
+    /// rely on that stronger property, because this search settles nodes without reopening them and
+    /// compares the bound against popped priorities. ALT therefore declines the capability and
+    /// those paths stay limited to heuristics that can state the property.
     fn supports_consistent_static_bounds(&self) -> bool {
-        true
+        false
     }
     fn create(
         graph: &dyn IndexableGraph,
@@ -370,18 +377,22 @@ impl<H: AStarHeuristic> AStar<H> {
         request: &LeastCostPathRequest,
         path: &[Id<Link>],
     ) -> Option<CandidateRoute> {
-        if !self
-            .verify_path(path, request.from.clone(), request.to.clone())
-            .ok()?
-        {
-            return None;
-        }
-
+        // Endpoint checks alone do not prove that consecutive candidate links connect.
+        let mut current_node = self
+            .graph
+            .get_node_idx_from_id(self.graph.get_end_node(request.from.clone()).ok()?);
+        let target_node = self
+            .graph
+            .get_node_idx_from_id(self.graph.get_start_node(request.to.clone()).ok()?);
         let mut arrival_time = request.departure_time;
         let mut travel_time = std::time::Duration::ZERO;
         let mut travel_disutility = 0.0;
         for link_id in path {
             let link_index = self.graph.get_link_idx_from_id(link_id.clone()).ok()?;
+            if self.graph.get_start_node_as_idx(link_index).ok()? != current_node {
+                return None;
+            }
+            current_node = self.graph.get_end_node_as_idx(link_index).ok()?;
             let link = self.graph.get_link_from_idx(link_index).ok()?;
             let link_time =
                 self.travel_time
@@ -401,6 +412,10 @@ impl<H: AStarHeuristic> AStar<H> {
             }
             travel_time = travel_time.saturating_add(link_time);
             arrival_time = arrival_time.saturating_add(link_time);
+        }
+
+        if current_node != target_node {
+            return None;
         }
 
         Some(CandidateRoute {
@@ -641,7 +656,6 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
             fallback_search = tracing::field::Empty,
         );
         search_span.record("candidate_valid", candidate_valid);
-        search_span.record("candidate_bound_used", candidate_valid);
         search_span.record("fallback_search", !candidate_valid);
         search_span.record("candidate_validation_ns", candidate_validation_ns);
         let mut nodes_expanded = 0;
@@ -657,6 +671,7 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
             )
         };
         search_span.record("nodes_expanded", nodes_expanded as u64);
+        let mut candidate_bound_used = false;
         let (optimal_disutility, associated_travel_time, searched_path) = match a_star_result {
             // Standard case: A* returned a valid result.
             Ok(AStarCoreResult::SingleDisutilWithParents(distance, time, parent_links)) => {
@@ -687,7 +702,10 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
                 };
                 (distance, time, link_path)
             }
+            // The search stopped on the candidate instead of on a settled to-node, so the candidate
+            // decided this result rather than merely bounding it.
             Ok(AStarCoreResult::SingleDisutilWithPath(distance, time, path)) => {
+                candidate_bound_used = true;
                 (distance, time, path)
             }
             // Unsuccesful case: Some error occurred in A*, e.g., a given link or node was not
@@ -704,6 +722,7 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
                 SingleDistWithParents result"
             ),
         };
+        search_span.record("candidate_bound_used", candidate_bound_used);
 
         let result = LeastCostPath {
             path: searched_path,
@@ -1214,7 +1233,7 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn routing_profile_records_candidate_bound_used() {
+    fn routing_profile_separates_candidate_validity_from_bound_use() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("routing.csv");
         let (layer, guard) = RoutingSpanDurationToFileLayer::new_csv(&path);
@@ -1222,6 +1241,8 @@ mod tests {
         let network = Arc::new(get_triangle_test_network());
         let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
         let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        // The candidate is the least-cost route, so the exact search settles the to-node itself and
+        // the bound never decides the result. A valid candidate is not evidence of a used bound.
         let request = LeastCostPathRequestBuilder::default()
             .from(Id::get_from_ext("1"))
             .to(Id::get_from_ext("2"))
@@ -1250,8 +1271,189 @@ mod tests {
             .position(|name| name == "fallback_search")
             .unwrap();
         assert_eq!(&row[candidate_valid], "true");
-        assert_eq!(&row[candidate_bound_used], "true");
+        assert_eq!(&row[candidate_bound_used], "false");
         assert_eq!(&row[fallback], "false");
+    }
+
+    /// Candidate paths and reverse guidance must not change which route is returned. Every
+    /// candidate here is a stored or guidance path for the same origin and destination, so this
+    /// exercises the bound path rather than the validation fallback.
+    #[deterministic_id_test]
+    fn candidates_and_guidance_preserve_exact_routes() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let plain = Dijkstra::new(
+            network.clone(),
+            None,
+            travel_cost.clone(),
+            travel_cost.clone(),
+        )
+        .unwrap();
+        let assisted = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+
+        // Prime the guidance tree, then compare every request with and without a candidate.
+        let prime = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .build()
+            .unwrap();
+        assisted.destination_guidance_candidate(&prime);
+        assisted.destination_guidance_candidate(&prime);
+
+        let mut requests = Vec::new();
+        for from in ["1", "2", "3", "4", "5", "6"] {
+            for to in ["1", "2", "3", "4", "5", "6"] {
+                requests.push((from, to));
+            }
+        }
+
+        let mut guidance_paths = 0;
+        for (from, to) in requests {
+            let guidance = assisted
+                .destination_guidance_candidate(
+                    &LeastCostPathRequestBuilder::default()
+                        .from(Id::get_from_ext(from))
+                        .to(Id::get_from_ext(to))
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap_or_default();
+            if !guidance.is_empty() {
+                guidance_paths += 1;
+            }
+            let without = plain
+                .calc_least_cost_path(
+                    LeastCostPathRequestBuilder::default()
+                        .from(Id::get_from_ext(from))
+                        .to(Id::get_from_ext(to))
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap();
+            let with = assisted
+                .calc_least_cost_path(
+                    LeastCostPathRequestBuilder::default()
+                        .from(Id::get_from_ext(from))
+                        .to(Id::get_from_ext(to))
+                        .candidate_path(Some(guidance))
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(without, with, "route {from} -> {to} changed");
+        }
+
+        // Guard against the comparison passing because guidance produced nothing at all.
+        assert!(
+            guidance_paths > 0,
+            "reverse guidance produced no candidates, so nothing was compared"
+        );
+    }
+
+    /// Reverse guidance is itself least-cost under the same disutility, so it cannot by itself
+    /// prove that a valid bound leaves the result alone. A stored route that is legal but costs
+    /// more than the optimum is the case that matters, because a search that returned the bound
+    /// instead of its own result would then answer with the worse route.
+    #[deterministic_id_test]
+    fn valid_but_suboptimal_candidate_never_replaces_the_cheaper_route() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        // Node 1 -> 2 -> 2 -> 3 -> 1 costs 1 + 4 + 2 = 7 s, while the least-cost route
+        // 1 -> 2 -> 3 -> 1 through links 4 and 5 costs 6 s.
+        let suboptimal = vec![
+            Id::get_from_ext("3"),
+            Id::get_from_ext("4"),
+            Id::get_from_ext("5"),
+        ];
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(suboptimal))
+            .build()
+            .unwrap();
+
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(
+            result.path,
+            vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
+        );
+        assert_eq!(result.travel_time, Duration::from_secs(6));
+        assert_eq!(result.travel_disutility, 6.0);
+    }
+
+    /// Reverse guidance is built on the second request for a destination, so which requests carry a
+    /// candidate depends on the order requests arrive. That must not reach the returned route.
+    #[deterministic_id_test]
+    fn reverse_guidance_request_order_does_not_change_routes() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let forward = Dijkstra::new(
+            network.clone(),
+            None,
+            travel_cost.clone(),
+            travel_cost.clone(),
+        )
+        .unwrap();
+        let reversed = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+
+        let mut pairs = Vec::new();
+        for from in ["1", "2", "3", "4", "5", "6"] {
+            for to in ["1", "2", "3", "4", "5", "6"] {
+                pairs.push((from, to));
+            }
+        }
+        let reversed_pairs = pairs.iter().rev().copied().collect::<Vec<_>>();
+
+        // Warm both routers so their trees are built from opposite arrival orders.
+        for (from, to) in &pairs {
+            let _ = forward.calc_least_cost_path(
+                LeastCostPathRequestBuilder::default()
+                    .from(Id::get_from_ext(from))
+                    .to(Id::get_from_ext(to))
+                    .build()
+                    .unwrap(),
+            );
+        }
+        for (from, to) in &reversed_pairs {
+            let _ = reversed.calc_least_cost_path(
+                LeastCostPathRequestBuilder::default()
+                    .from(Id::get_from_ext(from))
+                    .to(Id::get_from_ext(to))
+                    .build()
+                    .unwrap(),
+            );
+        }
+
+        for (from, to) in pairs {
+            let request = || {
+                LeastCostPathRequestBuilder::default()
+                    .from(Id::get_from_ext(from))
+                    .to(Id::get_from_ext(to))
+                    .build()
+                    .unwrap()
+            };
+            assert_eq!(
+                forward.calc_least_cost_path(request()),
+                reversed.calc_least_cost_path(request()),
+                "route {from} -> {to} depends on request order"
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn alt_heuristic_declines_consistent_static_bounds() {
+        // Candidate bounds and shared reverse guidance rely on a consistent heuristic, which the
+        // landmark bound does not state. Keep the decline explicit so a future change to the
+        // landmark search has to revisit the exactness claim with it.
+        assert!(!AltHeuristic::supports_consistent_static_bounds(
+            &AltHeuristic::from_graph(
+                &net_to_graph(&get_triangle_test_network()),
+                &FreeOrMaxSpeedTravelTimeAndDisutility
+            )
+            .unwrap()
+        ));
+        assert!(ZeroHeuristic.supports_consistent_static_bounds());
     }
 
     #[deterministic_id_test]
@@ -1271,6 +1473,31 @@ mod tests {
             result.path,
             vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
         );
+    }
+
+    #[deterministic_id_test]
+    fn disconnected_previous_route_falls_back_to_a_star() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(vec![
+                Id::get_from_ext("3"),
+                Id::get_from_ext("2"),
+                Id::get_from_ext("5"),
+            ]))
+            .build()
+            .unwrap();
+
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(
+            result.path,
+            vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
+        );
+        assert_eq!(result.travel_time, Duration::from_secs(6));
+        assert_eq!(result.travel_disutility, 6.0);
     }
 
     #[deterministic_id_test]

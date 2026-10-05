@@ -13,8 +13,8 @@ use arc_swap::ArcSwap;
 use derive_builder::Builder;
 use nohash_hasher::IntMap;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
-use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
@@ -93,7 +93,7 @@ impl TripRouter {
     }
 
     pub(crate) fn prepare_previous_route_proposals(&self, population: &Population) {
-        let mut seeds = BTreeSet::new();
+        let mut seeds = BTreeMap::<RouteProposalSeed, u64>::new();
         let mut estimated_bytes = 0;
         for person in population.persons.values() {
             for plan in person.plans() {
@@ -108,6 +108,13 @@ impl TripRouter {
                     if links.len() < 2 {
                         continue;
                     }
+                    let path_link_count = links.len() - 2;
+                    let seed_bytes = size_of::<RouteProposalSeed>()
+                        + path_link_count
+                            * size_of::<Id<crate::simulation::scenario::network::Link>>();
+                    if seed_bytes > ROUTE_PROPOSAL_MAX_BYTES {
+                        continue;
+                    }
                     let mode = leg.routing_mode.as_ref().unwrap_or(&leg.mode).clone();
                     let key = RouteProposalKey {
                         mode,
@@ -118,18 +125,19 @@ impl TripRouter {
                         key,
                         path: links[1..links.len() - 1].to_vec(),
                     };
-                    let seed_bytes = seed.path.capacity()
-                        * size_of::<Id<crate::simulation::scenario::network::Link>>();
-                    if seed_bytes > ROUTE_PROPOSAL_MAX_BYTES || !seeds.insert(seed) {
+                    if let Some(support_count) = seeds.get_mut(&seed) {
+                        *support_count = support_count.saturating_add(1);
                         continue;
                     }
+                    seeds.insert(seed, 1);
                     estimated_bytes += seed_bytes;
                     while seeds.len() > ROUTE_PROPOSAL_MAX_ENTRIES
                         || estimated_bytes > ROUTE_PROPOSAL_MAX_BYTES
                     {
-                        let largest = seeds.pop_last().expect("non-empty proposal seed set");
-                        estimated_bytes -= largest.path.capacity()
-                            * size_of::<Id<crate::simulation::scenario::network::Link>>();
+                        let (largest, _) = seeds.pop_last().expect("non-empty proposal seed set");
+                        estimated_bytes -= size_of::<RouteProposalSeed>()
+                            + largest.path.capacity()
+                                * size_of::<Id<crate::simulation::scenario::network::Link>>();
                     }
                 }
             }
@@ -138,12 +146,15 @@ impl TripRouter {
         let mut table = RouteProposalTable::default();
         let proposal_seeds = seeds.into_iter().collect::<Vec<_>>();
         for batch in proposal_seeds.chunks(256) {
-            for proposal in PreviousRouteProposalBackend.propose_batch(batch) {
+            for proposal in RouteFrequencyProposalBackend.propose_batch(batch) {
                 table
                     .by_request
-                    .entry(proposal.key)
+                    .entry(proposal.seed.key)
                     .or_default()
-                    .push(proposal.path);
+                    .push(RouteProposal {
+                        path: proposal.seed.path,
+                        support_count: proposal.support_count,
+                    });
             }
         }
         self.route_proposals.store(Arc::new(table));
@@ -159,8 +170,19 @@ struct RouteProposalKey {
 
 #[derive(Debug, Default)]
 struct RouteProposalTable {
-    by_request:
-        BTreeMap<RouteProposalKey, Vec<Vec<Id<crate::simulation::scenario::network::Link>>>>,
+    by_request: BTreeMap<RouteProposalKey, Vec<RouteProposal>>,
+}
+
+#[derive(Debug)]
+struct RouteProposal {
+    path: Vec<Id<crate::simulation::scenario::network::Link>>,
+    support_count: u64,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RouteProposalOutput {
+    seed: RouteProposalSeed,
+    support_count: u64,
 }
 
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -169,15 +191,18 @@ struct RouteProposalSeed {
     path: Vec<Id<crate::simulation::scenario::network::Link>>,
 }
 
-struct PreviousRouteProposalBackend;
+struct RouteFrequencyProposalBackend;
 
-impl PreviousRouteProposalBackend {
-    fn propose_batch(&self, batch: &[RouteProposalSeed]) -> Vec<RouteProposalSeed> {
+impl RouteFrequencyProposalBackend {
+    fn propose_batch(&self, batch: &[(RouteProposalSeed, u64)]) -> Vec<RouteProposalOutput> {
         batch
             .iter()
-            .map(|seed| RouteProposalSeed {
-                key: seed.key.clone(),
-                path: seed.path.clone(),
+            .map(|(seed, support_count)| RouteProposalOutput {
+                seed: RouteProposalSeed {
+                    key: seed.key.clone(),
+                    path: seed.path.clone(),
+                },
+                support_count: *support_count,
             })
             .collect()
     }
@@ -196,8 +221,16 @@ impl RouteProposalTable {
                 from: from.clone(),
                 to: to.clone(),
             })
-            .and_then(|paths| paths.first())
-            .cloned()
+            .and_then(|paths| {
+                // Most support wins. `b.path.cmp(&a.path)` makes the smaller stored path the
+                // greater one, so equal support falls back to the order of the table.
+                paths.iter().max_by(|a, b| {
+                    a.support_count
+                        .cmp(&b.support_count)
+                        .then_with(|| b.path.cmp(&a.path))
+                })
+            })
+            .map(|proposal| proposal.path.clone())
     }
 }
 
@@ -321,10 +354,10 @@ impl RoutingModule for TransitRoutingModule {
         let mut best: Option<(SimTime, SimTime, f64, String, String, String, String)> = None;
 
         for (access_id, access_distance) in &access_stops {
-            let Some(routes) = self.routes_by_stop.get(&access_id) else {
+            let Some(routes) = self.routes_by_stop.get(access_id) else {
                 continue;
             };
-            let access_facility = self.schedule.get_facility(&access_id);
+            let access_facility = self.schedule.get_facility(access_id);
             let access_walk_time = self.walk_time(*access_distance);
             let earliest_boarding = request.departure_time.saturating_add(access_walk_time);
 
@@ -594,7 +627,8 @@ impl TransitRoutingModule {
         destinations
             .iter()
             .map(|destination| {
-                let direct_walk = self.walk_time(Coordinate::euclidean_distance(origin, destination));
+                let direct_walk =
+                    self.walk_time(Coordinate::euclidean_distance(origin, destination));
                 self.nearest_stops(destination)
                     .into_iter()
                     .filter_map(|(stop_id, distance)| {
@@ -732,27 +766,26 @@ impl TransitRoutingModule {
                 continue;
             }
 
-            if egress_stops.contains(&stop_id) {
-                if let (Some(boarding_time), Some(route_id), Some(line_id), Some(access_id)) = (
+            if egress_stops.contains(&stop_id)
+                && let (Some(boarding_time), Some(route_id), Some(line_id), Some(access_id)) = (
                     current.first_boarding_time,
                     current.first_route_id.clone(),
                     current.first_line_id.clone(),
                     current.first_access_id.clone(),
-                ) {
-                    let facility = self.schedule.get_facility(&stop_id);
-                    let egress_distance =
-                        Coordinate::euclidean_distance(&facility.coord, destination);
-                    let final_arrival = arrival.saturating_add(self.walk_time(egress_distance));
-                    best = Some((
-                        final_arrival,
-                        boarding_time,
-                        current.distance + egress_distance * self.walk_distance_factor,
-                        route_id,
-                        line_id,
-                        access_id,
-                        stop_id.external().to_string(),
-                    ));
-                }
+                )
+            {
+                let facility = self.schedule.get_facility(&stop_id);
+                let egress_distance = Coordinate::euclidean_distance(&facility.coord, destination);
+                let final_arrival = arrival.saturating_add(self.walk_time(egress_distance));
+                best = Some((
+                    final_arrival,
+                    boarding_time,
+                    current.distance + egress_distance * self.walk_distance_factor,
+                    route_id,
+                    line_id,
+                    access_id,
+                    stop_id.external().to_string(),
+                ));
             }
 
             let Some(route_refs) = self.routes_by_stop.get(&stop_id) else {
@@ -847,36 +880,99 @@ impl Debug for dyn RoutingModule {
 #[cfg(test)]
 mod route_proposal_tests {
     use super::{
-        PreviousRouteProposalBackend, RouteProposalKey, RouteProposalSeed, RouteProposalTable,
+        RouteFrequencyProposalBackend, RouteProposal, RouteProposalKey, RouteProposalSeed,
+        RouteProposalTable,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::network::Link;
     use macros::deterministic_id_test;
 
     #[deterministic_id_test]
-    fn previous_route_batches_preserve_sorted_request_and_path_order() {
+    fn batch_proposes_most_frequent_previous_path_deterministically() {
         let mode = Id::create("car");
         let from = Id::<Link>::create("from");
         let to = Id::<Link>::create("to");
         let middle = Id::<Link>::create("middle");
-        let seed = RouteProposalSeed {
-            key: RouteProposalKey {
-                mode: mode.clone(),
-                from: from.clone(),
-                to: to.clone(),
-            },
-            path: vec![middle.clone()],
+        let alternative = Id::<Link>::create("alternative");
+        let key = RouteProposalKey {
+            mode: mode.clone(),
+            from: from.clone(),
+            to: to.clone(),
         };
-        let first = PreviousRouteProposalBackend.propose_batch(std::slice::from_ref(&seed));
-        let second = PreviousRouteProposalBackend.propose_batch(std::slice::from_ref(&seed));
+        let batch = vec![
+            (
+                RouteProposalSeed {
+                    key: key.clone(),
+                    path: vec![middle],
+                },
+                2,
+            ),
+            (
+                RouteProposalSeed {
+                    key: key.clone(),
+                    path: vec![alternative.clone()],
+                },
+                5,
+            ),
+        ];
+        let first = RouteFrequencyProposalBackend.propose_batch(&batch);
+        let second = RouteFrequencyProposalBackend.propose_batch(&batch);
         assert_eq!(first, second);
 
         let mut table = RouteProposalTable::default();
         table
             .by_request
-            .entry(seed.key)
+            .entry(key)
             .or_default()
-            .extend(first.into_iter().map(|proposal| proposal.path));
-        assert_eq!(table.candidate(&mode, &from, &to), Some(vec![middle]));
+            .extend(first.into_iter().map(|proposal| RouteProposal {
+                path: proposal.seed.path,
+                support_count: proposal.support_count,
+            }));
+        assert_eq!(table.candidate(&mode, &from, &to), Some(vec![alternative]));
+    }
+
+    #[deterministic_id_test]
+    fn equal_proposal_support_falls_back_to_stored_path_order() {
+        let mode = Id::create("car");
+        let from = Id::<Link>::create("from");
+        let to = Id::<Link>::create("to");
+        // Lexicographic order of the stored paths decides, independent of the insertion order.
+        let first = Id::<Link>::create("a");
+        let second = Id::<Link>::create("b");
+        let key = RouteProposalKey {
+            mode: mode.clone(),
+            from: from.clone(),
+            to: to.clone(),
+        };
+
+        for paths in [
+            vec![
+                RouteProposal {
+                    path: vec![second.clone()],
+                    support_count: 3,
+                },
+                RouteProposal {
+                    path: vec![first.clone()],
+                    support_count: 3,
+                },
+            ],
+            vec![
+                RouteProposal {
+                    path: vec![first.clone()],
+                    support_count: 3,
+                },
+                RouteProposal {
+                    path: vec![second.clone()],
+                    support_count: 3,
+                },
+            ],
+        ] {
+            let mut table = RouteProposalTable::default();
+            table.by_request.insert(key.clone(), paths);
+            assert_eq!(
+                table.candidate(&mode, &from, &to),
+                Some(vec![first.clone()])
+            );
+        }
     }
 }
