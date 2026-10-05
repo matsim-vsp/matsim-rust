@@ -217,6 +217,32 @@ daily-cohort aggregates are recomputed over their common complete populations. O
 link, group, capacity and speed outputs are compared by their catalog aggregation keys. The HTML
 report renders the metric and completion-status tables.
 
+## Seed uncertainty and parameter sensitivity
+
+Use `analyze --run-dir BASELINE --ensemble-manifest ensemble.json` to summarize completed runs
+without launching simulations. The manifest names a baseline scenario and each run's output
+directory and scenario; paths are relative to the manifest. Alternative runs may also declare a
+`parameters` object, whose canonical value identifies a parameter setting:
+
+```json
+{
+  "baseline_scenario": "baseline",
+  "pairing": "paired_by_seed",
+  "runs": [
+    {"run_dir": "runs/base-1", "scenario": "baseline"},
+    {"run_dir": "runs/policy-1", "scenario": "policy", "parameters": {"toll": 1.0}}
+  ]
+}
+```
+
+The report is written to `BASELINE/ensemble`. It exports the member and pair manifests, missing
+pairs, per-seed metric differences and their distributions. Differences use the shared completed-run
+comparison interface and each run's latest completed iteration. Both `paired_by_seed` and
+`difference_of_means` uncertainty assumptions are shown; the manifest's optional `pairing` chooses
+which result is marked as supplied. Equal seed numbers alone do not guarantee comparable random
+streams. Intervals are two-sided 95% Student-t intervals; one pair has no interval. Quantiles use
+the nearest-rank convention. Metrics may be restricted with an optional `metrics` array.
+
 For example:
 
 ```yaml

@@ -3,9 +3,11 @@
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
+mod ensemble;
 mod link_speed;
 
 pub use cross_run::compare_completed_runs;
+pub use ensemble::analyze_run_ensemble;
 mod network_distance;
 mod validation;
 
