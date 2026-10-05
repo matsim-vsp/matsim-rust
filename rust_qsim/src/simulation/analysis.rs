@@ -3,6 +3,7 @@
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
+mod economic;
 mod ensemble;
 mod link_speed;
 mod service;
@@ -81,6 +82,7 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("cross_run_comparison", None),
     ("service_performance", None),
     ("transit_and_research", None),
+    ("economic_appraisal", None),
 ];
 
 const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
@@ -165,6 +167,8 @@ pub struct Manifest {
     service: Option<ServiceInputs>,
     #[serde(default)]
     transit_observed_data: Option<String>,
+    #[serde(default)]
+    economic_inputs: Option<String>,
 
     excess_delay_clip_seconds: Option<f64>,
 }
@@ -627,6 +631,10 @@ pub fn analyze_final_iteration(
             .transit_observed_data
             .as_ref()
             .map(|path| path.display().to_string()),
+        economic_inputs: settings
+            .economic_inputs
+            .as_ref()
+            .map(|path| path.display().to_string()),
 
         excess_delay_clip_seconds: settings.excess_delay_clip_seconds,
     };
@@ -745,6 +753,7 @@ pub fn reanalyze_completed_run(
         comparison_runs: recorded.comparison_runs.iter().map(PathBuf::from).collect(),
         service: recorded.service.clone(),
         transit_observed_data: recorded.transit_observed_data.as_ref().map(PathBuf::from),
+        economic_inputs: recorded.economic_inputs.as_ref().map(PathBuf::from),
 
         excess_delay_clip_seconds: recorded.excess_delay_clip_seconds,
     };
@@ -1226,6 +1235,12 @@ fn publish_complete(
     if survey.as_ref().is_none_or(Result::is_err) {
         survey::write_empty(&staging)?;
     }
+    let economic = settings.economic_inputs.as_ref().map(|source| {
+        economic::write(&staging, Some(source), output_dir).map_err(|error| error.to_string())
+    });
+    if economic.as_ref().is_none_or(Result::is_err) {
+        economic::write_empty(&staging)?;
+    }
     let comparison = (!settings.comparison_runs.is_empty()).then(|| {
         cross_run::write(output_dir, &staging, &settings.comparison_runs)
             .map_err(|error| error.to_string())
@@ -1245,6 +1260,7 @@ fn publish_complete(
         validation.as_ref(),
         comparison.as_ref(),
         service.as_ref(),
+        economic.as_ref(),
         &TransitOutcome {
             has_service_records: transit_summary.has_service_records,
             validation: transit_validation.as_ref(),
@@ -1323,6 +1339,7 @@ fn publish_failure(
         None,
         None,
         None,
+        None,
         &TransitOutcome::default(),
         None,
     );
@@ -1352,6 +1369,7 @@ fn module_statuses(
     validation: Option<&Result<(), String>>,
     comparison: Option<&Result<(), String>>,
     service: Option<&Result<(), String>>,
+    economic: Option<&Result<(), String>>,
     transit: &TransitOutcome<'_>,
     survey: Option<&Result<(), String>>,
 ) -> Vec<ModuleStatus> {
@@ -1413,6 +1431,14 @@ fn module_statuses(
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No journey survey dataset is configured".to_owned()),
+                )),
+            },
+            "economic_appraisal" => match economic {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No economic input CSV is configured".to_owned()),
                 )),
             },
             _ => None,
@@ -2277,6 +2303,18 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
     } else {
         Vec::new()
     })
+    .chain([
+        Metric {
+            name: "economic_input_value",
+            unit: "declared_input_unit",
+            aggregation_key: "scope,entity_id,group,account,unit",
+        },
+        Metric {
+            name: "economic_money_equivalent",
+            unit: "declared_money_unit",
+            aggregation_key: "scope,entity_id,group,account,money_unit",
+        },
+    ])
     .collect()
 }
 
@@ -4028,6 +4066,11 @@ fn write_report(
             ("__NETWORK_ANALYSIS_SCRIPT__", &network_script),
         ],
     );
+    let economic = csv_for_script(&path.join("economic_summary.csv"))?;
+    let economic_section = format!(
+        "<h2>Economic appraisal</h2><p>Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.</p><div id=\"economic-summary\"></div><p><a href=\"economic_appraisal.csv\">Appraisal ledger</a> · <a href=\"economic_summary.csv\">Appraisal summary</a></p><script>csvTable('#economic-summary',{economic});</script>"
+    );
+    let html = html.replace("</body>", &format!("{economic_section}</body>"));
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
 
@@ -4507,6 +4550,9 @@ mod tests {
         // The local report presents the agent-travel tables, not only the CSVs.
         let report_html = fs::read_to_string(output.join("index.html")).unwrap();
         assert!(report_html.contains("<h2>Agent travel</h2>"));
+        assert!(report_html.contains("<h2>Economic appraisal</h2>"));
+        assert!(report_html.contains("economic_appraisal.csv"));
+        assert!(report_html.contains("Operating, investment, and external costs stay separate"));
         assert!(report_html.contains("href=\"legs.csv\""));
         assert!(report_html.contains("travelers,2,5.000000"));
         assert!(report_html.contains("missed_plan_leg"));

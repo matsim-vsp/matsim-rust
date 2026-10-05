@@ -3,6 +3,44 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Economic appraisal
+
+Set `output.analysis.economic_inputs` to a CSV to export explicitly supplied welfare and cost
+records. The input is read once for the latest completed iteration and recorded in the manifest
+for standalone reanalysis. No plan score is used as welfare evidence.
+
+```csv
+scope,entity_id,group,account,value,unit,marginal_utility_of_money,money_unit,transfer_id,source
+person,p1,workers,utility,10,utils,2,USD,,model
+person,p1,workers,fare,3,USD,,USD,fare-1,ticketing
+run,,,operator_operating_cost,100,USD,,USD,,accounts
+run,,,operator_investment_cost,50,USD,,USD,,capital-plan
+run,,,external_cost,20,USD,,USD,,valuation
+```
+
+`scope` is `person`, `group`, or `run`; person and group rows require `entity_id`, and run rows
+leave it blank. Supported accounts are `utility`, `fare`, `toll`, `operator_revenue`,
+`operator_operating_cost`, `operator_investment_cost`, and `external_cost`. Utility conversion is
+`value / marginal_utility_of_money`; its money unit is required. A missing or invalid conversion
+leaves utility in utils and marks its money equivalent unavailable. Fare and toll amounts create
+matching traveler-payment and operator-revenue rows with the same `transfer_id`. Both transfer
+rows are excluded from net social accounting. A separately supplied `operator_revenue` also needs
+a `transfer_id` and is excluded. Do not repeat fare or toll amounts as operator revenue. Operating,
+investment, and external costs remain separate. The summary lists accounts that were not supplied
+or could not be converted; omitted costs are not estimated.
+
+`economic_appraisal.csv` is the row-level ledger and `economic_summary.csv` groups its converted
+monetary values by entity and account. `total` preserves supplied positive cost amounts;
+`net_social_value` subtracts operating, investment, and external costs and leaves transfers blank.
+The ledger keeps the supplied marginal utility of money beside both the utility and converted rows.
+Repeated records are summed by their person/group/run, account, and money unit in the comparison.
+The summary marks each account included in net social accounting. Do not add person, group, and run
+rows together because they may describe the same costs at different aggregation levels. The
+cross-run comparison reports alternative minus baseline from each run's latest completed report.
+Person rows use people with complete travel records in both runs; group and run rows retain the
+supplied denominators. Monetary units are part of comparison keys, so different currencies do not
+compare as if they shared a unit.
+
 ## Journeys and travel distributions
 
 The final-iteration replay exports observed legs in `legs.csv` and planned journeys in

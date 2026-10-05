@@ -239,12 +239,20 @@ fn write_comparison(
                     {
                         continue;
                     }
-                    if spec.file == "person_daily.csv" {
-                        let person = serde_json::from_str::<Vec<String>>(&key)
-                            .ok()
-                            .and_then(|parts| parts.first().cloned());
-                        if !person.is_some_and(|person| common_complete_people.contains(&person)) {
-                            continue;
+                    if matches!(spec.file, "person_daily.csv" | "economic_appraisal.csv") {
+                        let parts = serde_json::from_str::<Vec<String>>(&key).ok();
+                        let person = parts.as_ref().and_then(|parts| match spec.file {
+                            "person_daily.csv" => parts.first(),
+                            _ if parts.first().is_some_and(|scope| scope == "person") => {
+                                parts.get(1)
+                            }
+                            _ => None,
+                        });
+                        if spec.file == "person_daily.csv" || person.is_some() {
+                            if !person.is_some_and(|person| common_complete_people.contains(person))
+                            {
+                                continue;
+                            }
                         }
                     }
                     let (mut before, mut after) =
@@ -809,7 +817,11 @@ fn read_rows(
             .map(|index| row.get(*index).unwrap_or_default())
             .collect::<Vec<_>>();
         let key = serde_json::to_string(&key).map_err(io_error)?;
-        rows.insert(key, value);
+        if file == "economic_appraisal.csv" {
+            *rows.entry(key).or_default() += value;
+        } else {
+            rows.insert(key, value);
+        }
     }
     Ok(rows)
 }
@@ -1024,6 +1036,13 @@ fn table_specs() -> &'static [TableSpec] {
                 "daily_mean_completed_travel_burden",
                 "mean_completed_leg_duration_sum_seconds",
             )],
+        },
+        TableSpec {
+            file: "economic_appraisal.csv",
+            metrics: &[
+                ("economic_input_value", "value"),
+                ("economic_money_equivalent", "money_equivalent"),
+            ],
         },
         TableSpec {
             file: "transit_trips.csv",
@@ -1688,6 +1707,31 @@ mod tests {
         assert!(differences.contains(
             "0.500000,0.750000,0.250000,50.000000,0.500000,8.000000,8.000000,comparable"
         ));
+    }
+
+    #[test]
+    fn compares_supplied_economic_group_benefits() {
+        let temp = tempfile::tempdir().unwrap();
+        let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
+        let alternative = run(temp.path(), "alternative", 1.0, "l1,0,10,0\n");
+        for (output, benefit) in [(&baseline, 10), (&alternative, 15)] {
+            let analysis = output.join("analysis");
+            fs::write(
+                analysis.join("metric_catalog.json"),
+                r#"[{"name":"economic_money_equivalent","unit":"declared_money_unit","aggregation_key":"scope,entity_id,group,account,money_unit"}]"#,
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("economic_appraisal.csv"),
+                format!("scope,entity_id,group,account,value,unit,money_equivalent,money_unit,transfer_id,boundary,source,status\ngroup,workers,workers,traveler_utility_money_equivalent,{},USD,{},USD,,traveler welfare valuation,study,available\ngroup,workers,workers,traveler_utility_money_equivalent,{},USD,{},USD,,traveler welfare valuation,study,available\n", benefit / 2, benefit / 2, benefit - benefit / 2, benefit - benefit / 2),
+            )
+            .unwrap();
+        }
+        let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
+        let differences =
+            fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
+        assert!(differences.contains("economic_money_equivalent"));
+        assert!(differences.contains("10.000000,15.000000,5.000000,50.000000"));
     }
 
     #[test]
