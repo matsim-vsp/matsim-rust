@@ -82,6 +82,9 @@ fn standalone_rerun_matches_automatic_metrics_and_preserves_raw_outputs() {
     let runtime_file = report_dir.join("runtime_metadata.json");
     let runtime_before: serde_json::Value =
         serde_json::from_slice(&fs::read(&runtime_file).unwrap()).unwrap();
+    if cfg!(target_os = "linux") {
+        assert!(runtime_before["peak_memory_bytes"].as_u64().is_some());
+    }
 
     let report = reanalyze_completed_run(&output, None).unwrap();
     assert_eq!(report, report_dir.join("index.html"));
@@ -120,6 +123,10 @@ fn standalone_rerun_matches_automatic_metrics_and_preserves_raw_outputs() {
     assert_eq!(
         runtime_after["worker_count"],
         runtime_before["worker_count"]
+    );
+    assert_eq!(
+        runtime_after["peak_memory_bytes"],
+        runtime_before["peak_memory_bytes"]
     );
     assert!(runtime_after["analysis_seconds"].as_f64().is_some());
     let runtime_csv = fs::read_to_string(report_dir.join("runtime.csv")).unwrap();

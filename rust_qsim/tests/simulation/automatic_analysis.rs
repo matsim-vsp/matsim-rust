@@ -175,11 +175,13 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert_eq!(runtime_json["worker_count"], 2);
     assert_eq!(runtime_json["network_links"], 200);
     assert!(runtime_json["analysis_seconds"].as_f64().is_some());
+    assert!(runtime_json["peak_memory_bytes"].is_null());
     let runtime_csv = fs::read_to_string(runtime_dir.join("runtime.csv")).unwrap();
     assert!(
         runtime_csv.contains("\"simulation_runtime\",\"12.5\",\"seconds\",\"measured wall clock\"")
     );
     assert!(runtime_csv.contains("\"worker_count\",\"2\",\"workers\",\"configured partitions\""));
+    assert!(!runtime_csv.contains("peak_memory"));
     let html = fs::read_to_string(&report).unwrap();
     assert!(html.contains("Execution context"));
     assert!(html.contains("simulation_runtime"));

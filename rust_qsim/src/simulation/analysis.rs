@@ -1231,9 +1231,6 @@ fn publish_complete(
     write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
     let mut runtime = run_metadata.runtime.clone().unwrap_or_default();
     runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
-    if run_metadata.runtime.is_some() && runtime.peak_memory_bytes.is_none() {
-        runtime.peak_memory_bytes = process_peak_memory_bytes();
-    }
     write_runtime_tables(&staging, &runtime)?;
 
     write_json(
@@ -1304,9 +1301,12 @@ fn publish_complete(
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
     write_report(&staging, manifest, &statuses, &link_hourly)?;
+    let initial_runtime = runtime.clone();
     runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
     if let Err(error) = refresh_runtime_report(&staging.join("index.html"), &runtime) {
         warn!("Could not refresh runtime measurements in the staged report: {error}");
+        write_runtime_tables(&staging, &initial_runtime)?;
+        write_report(&staging, manifest, &statuses, &link_hourly)?;
     }
     let published = publish(
         &staging,
@@ -4044,7 +4044,7 @@ fn write_runtime_tables(
 }
 
 #[cfg(target_os = "linux")]
-fn process_peak_memory_bytes() -> Option<u64> {
+pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
     fs::read_to_string("/proc/self/status")
         .ok()?
         .lines()
@@ -4059,7 +4059,7 @@ fn process_peak_memory_bytes() -> Option<u64> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn process_peak_memory_bytes() -> Option<u64> {
+pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
     None
 }
 

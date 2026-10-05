@@ -400,6 +400,7 @@ impl Controller {
                 network_links: Some(self.scenario.core.network.links().len()),
                 population_persons: Some(self.scenario.population.persons.len()),
                 vehicles: Some(self.scenario.core.garage.vehicles.len()),
+                peak_memory_bytes: crate::simulation::analysis::process_peak_memory_bytes(),
                 ..crate::simulation::analysis::AnalysisRuntimeMetadata::default()
             });
             let report = crate::simulation::analysis::analyze_final_iteration(
