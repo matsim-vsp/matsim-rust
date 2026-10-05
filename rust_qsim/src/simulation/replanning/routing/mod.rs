@@ -485,6 +485,7 @@ impl RoutingModule for TransitRoutingModule {
         Ok(vec![InternalPlanElement::Leg(InternalLeg::new(
             route,
             self.mode.external(),
+            self.mode.external(),
             travel_time,
             Some(request.departure_time),
         ))])
@@ -1012,6 +1013,7 @@ mod route_proposal_tests {
             );
             Ok(vec![InternalPlanElement::Leg(InternalLeg::new(
                 InternalRoute::Generic(route),
+                "car",
                 "car",
                 Duration::from_secs(60),
                 None,

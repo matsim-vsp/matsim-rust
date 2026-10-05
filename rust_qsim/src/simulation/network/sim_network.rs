@@ -7,6 +7,7 @@ use crate::simulation::id::Id;
 use crate::simulation::id::serializable_type::StableTypeId;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::link::LinkPosition::{QStart, Waiting};
+use crate::simulation::network::signals::Signals;
 use crate::simulation::scenario::network::{Link, Network, Node};
 use crate::simulation::time::{SimClock, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
@@ -84,6 +85,9 @@ pub struct SimNetworkPartition {
     veh_counter: usize,
     partition: u32,
     clock: SimClock,
+    /// Green windows of the signalised approach links this partition owns. Empty when
+    /// the run has no signals, in which case every approach discharges freely.
+    signals: Signals,
 }
 
 #[derive(Debug)]
@@ -105,6 +109,10 @@ enum FrontDecision {
     MoveNormally,
     MoveAlthoughStuck,
     Wait,
+    /// The out-link has room but the approach's signal is red. Kept distinct from
+    /// `Wait` because the two have different consequences for the stuck timer: a red
+    /// is a legitimate hold and must not be mistaken for a blockage.
+    WaitAtRedSignal,
     Abort,
 }
 
@@ -114,6 +122,7 @@ impl SimNetworkPartition {
         storage_capacities: &LinkStorageCapacities,
         partition: u32,
         config: &config::Config,
+        signals: &Signals,
     ) -> Self {
         let qsim_config = config.qsim();
         let clock = SimClock::new(qsim_config.ticks_per_second);
@@ -151,12 +160,19 @@ impl SimNetworkPartition {
             .map(|n| (n.id.clone(), Self::create_sim_node(n)))
             .collect();
 
+        // Keep only the plan for the links this partition owns. Signal state depends on
+        // the link and the time alone, so it partitions with the link; filtering here
+        // avoids every partition carrying a copy of the whole network's plan.
+        let mut partition_signals = signals.clone();
+        partition_signals.retain_links(&sim_links.keys().cloned().collect());
+
         SimNetworkPartition::build(
             sim_nodes,
             sim_links,
             partition,
             config.computational_setup().random_seed,
             clock,
+            partition_signals,
         )
     }
 
@@ -166,8 +182,31 @@ impl SimNetworkPartition {
         partition: u32,
         config: &config::Config,
     ) -> Self {
+        Self::from_network_for_test_with_signals(
+            global_network,
+            partition,
+            config,
+            &Signals::default(),
+        )
+    }
+
+    /// Test constructor that installs a signal plan, so a test can exercise a run whose
+    /// approaches are governed by signals.
+    #[cfg(test)]
+    pub(crate) fn from_network_for_test_with_signals(
+        global_network: &Network,
+        partition: u32,
+        config: &config::Config,
+        signals: &Signals,
+    ) -> Self {
         let storage_capacities = LinkStorageCapacities::from_network(global_network, config.qsim());
-        Self::from_network(global_network, &storage_capacities, partition, config)
+        Self::from_network(
+            global_network,
+            &storage_capacities,
+            partition,
+            config,
+            signals,
+        )
     }
 
     pub(crate) fn drain(&mut self) -> Vec<SimulationAgent> {
@@ -209,12 +248,14 @@ impl SimNetworkPartition {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build(
         nodes: IntMap<Id<Node>, SimNode>,
         links: IntMap<Id<Link>, SimLink>,
         partition: u32,
         base_seed: u64,
         clock: SimClock,
+        signals: Signals,
     ) -> Self {
         // Initialize RNG with a seed based on the base seed and node id
         let rng = nodes
@@ -236,7 +277,13 @@ impl SimNetworkPartition {
             veh_counter: 0,
             partition,
             clock,
+            signals,
         }
+    }
+
+    /// The signal plan this partition enforces, narrowed to the links it owns.
+    pub fn signals(&self) -> &Signals {
+        &self.signals
     }
 
     pub fn partition(&self) -> u32 {
@@ -478,6 +525,9 @@ impl SimNetworkPartition {
                 deactivate.push(node_id.clone());
             }
         }
+        // A node stays active while any in-link still offers a vehicle. A vehicle held
+        // at a red keeps offering, so this already covers signal holds without a
+        // separate activation rule.
 
         for n in deactivate {
             self.active_nodes.deactivate(&n);
@@ -509,6 +559,7 @@ impl SimNetworkPartition {
                 &mut self.links,
                 &mut self.active_links,
                 comp_env,
+                &self.signals,
                 self.clock,
                 now,
             );
@@ -559,6 +610,8 @@ impl SimNetworkPartition {
     fn evaluate_front_vehicle(
         in_id: &Id<Link>,
         links: &IntMap<Id<Link>, SimLink>,
+        signals: &Signals,
+        clock: SimClock,
         now: Tick,
     ) -> FrontDecision {
         let in_link = links.get(in_id).unwrap();
@@ -591,6 +644,15 @@ impl SimNetworkPartition {
             );
             return FrontDecision::Abort;
         }
+        // A red signal holds the vehicle even when the out-link has room, so the signal
+        // is consulted before the out-link's availability and reported separately. An
+        // unsignalised approach, and a signalised one that is green, do not hold.
+        // The plan is expressed in whole seconds and the sim day is 24 h, so the
+        // tick-derived second is always in range; the cast is exact for that span.
+        let at_red = !signals.allows_departure(in_id, clock.tick_to_secs(now) as u32);
+        if at_red {
+            return FrontDecision::WaitAtRedSignal;
+        }
         if out_link.is_available() {
             FrontDecision::MoveNormally
         } else if in_link.is_veh_stuck(now) {
@@ -605,11 +667,12 @@ impl SimNetworkPartition {
         links: &mut IntMap<Id<Link>, SimLink>,
         active_links: &mut ActiveCache<Link>,
         comp_env: &mut ThreadLocalComputationalEnvironment,
+        signals: &Signals,
         clock: SimClock,
         now: Tick,
     ) {
         loop {
-            match Self::evaluate_front_vehicle(in_link_id, links, now) {
+            match Self::evaluate_front_vehicle(in_link_id, links, signals, clock, now) {
                 FrontDecision::MoveNormally | FrontDecision::MoveAlthoughStuck => {
                     let in_link = links.get_mut(in_link_id).unwrap();
                     let vehicle = in_link
@@ -619,6 +682,28 @@ impl SimNetworkPartition {
                 }
                 FrontDecision::Abort => {
                     panic!("Invalid turn from in-link {}", in_link_id.external());
+                }
+                FrontDecision::WaitAtRedSignal => {
+                    // Restart the stuck timer so a vehicle held at a red is not
+                    // eventually declared stuck and forced through the red.
+                    //
+                    // Without this, `stuck_threshold` bounds how long any vehicle may
+                    // be held, so a signal can only ever hold a vehicle for
+                    // `stuck_threshold` seconds however long its red runs. The Bangkok
+                    // plan has 119 s of red on its restrictive systems against a
+                    // `stuck_threshold` default of 10 s, which would force essentially
+                    // every vehicle through and leave the port looking inert while
+                    // quietly corrupting out-link occupancy. Restarting here means the
+                    // stuck timer only measures genuine blockage: the out-link stays
+                    // full for longer than the threshold, which still escapes.
+                    //
+                    // The cost is that a red signal and a full out-link no longer share
+                    // one escape hatch. A vehicle that is red *and* blocked keeps
+                    // accruing stuck time, so it still escapes.
+                    if let Some(in_link) = links.get_mut(in_link_id) {
+                        in_link.hold_stuck_timer(now);
+                    }
+                    break;
                 }
                 FrontDecision::Wait | FrontDecision::NoVehicle => break,
             }
@@ -700,6 +785,7 @@ mod tests {
     use crate::simulation::network::link::LinkPosition::QStart;
     use crate::simulation::network::link::SimLink;
     use crate::simulation::network::link::SimLink::Local;
+    use crate::simulation::network::signals::Signals;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node};
     use crate::simulation::vehicles::SimulationVehicle;
@@ -1273,6 +1359,172 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Builds the 3-link fixture, which is what registers its link ids.
+    ///
+    /// The signal helpers below resolve link ids through the global store, so the
+    /// network has to be loaded first. `Network::from_file` is idempotent enough for a
+    /// test helper but is called per test anyway to keep each test's ids local.
+    #[cfg(test)]
+    fn three_link_network() -> Network {
+        Network::from_file(
+            "./assets/3-links/3-links-network.xml",
+            1,
+            &PartitionMethod::Metis(MetisOptions::default()),
+        )
+    }
+
+    /// A signal plan keyed to `link1` that is red for its whole first cycle.
+    ///
+    /// Built directly rather than from files so the test states the timing it needs.
+    /// The 180 s cycle matches the Bangkok plans, where the restrictive systems hold
+    /// 119 s of red.
+    #[cfg(test)]
+    fn always_red_signals(approach: &str) -> Signals {
+        let link = Id::get_from_ext(approach);
+        let windows = crate::simulation::network::signals::SignalWindows::from_group(180, 0, 0);
+        let mut signals = Signals::default();
+        signals.insert_for_test(link, windows);
+        signals
+    }
+
+    /// A plan whose single approach is green only during `[113, 174)` of a 180 s cycle.
+    #[cfg(test)]
+    fn bangkok_restrictive_signals(approach: &str) -> Signals {
+        let link = Id::get_from_ext(approach);
+        let windows = crate::simulation::network::signals::SignalWindows::from_group(180, 113, 174);
+        let mut signals = Signals::default();
+        signals.insert_for_test(link, windows);
+        signals
+    }
+
+    /// Runs a 3-link network with one vehicle on `link1` and counts how many ticks pass
+    /// before it enters `link2`.
+    #[cfg(test)]
+    fn ticks_until_reaches_link2(signals: &Signals, max_ticks: u64) -> Option<u64> {
+        let mut env = ThreadLocalComputationalEnvironment::default();
+        let global_net = three_link_network();
+        let mut config = test_utils::config();
+        config.qsim_mut().stuck_threshold = 10;
+        let mut network = SimNetworkPartition::from_network_for_test_with_signals(
+            &global_net,
+            0,
+            &config,
+            signals,
+        );
+
+        let id_1: Id<Link> = Id::get_from_ext("link1");
+        let id_2: Id<Link> = Id::get_from_ext("link2");
+        let agent = test_utils::create_agent(0, vec![id_1.external(), id_2.external(), "link3"]);
+        let vehicle = SimulationVehicle::from_parts(0, 0, 10., 1., agent);
+        network.send_veh_en_route(vehicle, None, 0);
+
+        let entered: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = entered.clone();
+        env.events_manager_borrow_mut()
+            .on::<LinkEnterEvent, _>(move |event| {
+                sink.borrow_mut().push(event.link.external().to_owned());
+            });
+
+        for now in 0..max_ticks {
+            network.move_nodes(&mut env, now);
+            let _ = network.move_links(&mut env, now);
+            if entered.borrow().iter().any(|link| link == id_2.external()) {
+                return Some(now);
+            }
+        }
+        None
+    }
+
+    /// The port's central behavioural test: a red signal must hold a vehicle for the
+    /// whole red, not merely until `stuck_threshold` expires.
+    ///
+    /// Without the stuck-timer suspension, the 10 s threshold used here would force the
+    /// vehicle through a 61 s red at tick 10, so the delay would be capped at the
+    /// threshold instead of following the plan.
+    #[deterministic_id_test]
+    fn a_red_signal_holds_a_vehicle_past_the_stuck_threshold() {
+        let _ = three_link_network();
+        let signals = bangkok_restrictive_signals("link1");
+        // link1 releases at 113; the vehicle must not be let out before then even though
+        // it has been waiting for more than the 10 s stuck threshold.
+        let reached = ticks_until_reaches_link2(&signals, 140);
+        assert_eq!(
+            reached,
+            Some(113),
+            "the vehicle should be released when the signal turns green, not when the stuck \
+             threshold expires"
+        );
+    }
+
+    /// The counterpart: with no signals, the same network releases the vehicle
+    /// immediately. This pins that the delay above comes from the signal and not from
+    /// the fixture.
+    #[deterministic_id_test]
+    fn an_unsignalised_approach_releases_immediately() {
+        let _ = three_link_network();
+        // link1 is 10 m at 10 m/s, so the crossing itself takes one tick.
+        assert_eq!(
+            ticks_until_reaches_link2(&Signals::default(), 140),
+            Some(1),
+            "an unsignalised run must be unaffected"
+        );
+    }
+
+    /// A signal keyed to some other link must not hold this network's approach.
+    #[deterministic_id_test]
+    fn a_signal_on_another_link_does_not_hold_this_approach() {
+        let _ = three_link_network();
+        let signals = always_red_signals("link2");
+        assert_eq!(
+            ticks_until_reaches_link2(&signals, 140),
+            Some(1),
+            "only the signalised approach may be held"
+        );
+    }
+
+    /// A permanently red plan holds the vehicle for as long as the run allows, and the
+    /// stuck threshold does not release it.
+    #[deterministic_id_test]
+    fn a_permanently_red_signal_never_releases() {
+        let _ = three_link_network();
+        let signals = always_red_signals("link1");
+        assert_eq!(
+            ticks_until_reaches_link2(&signals, 400),
+            None,
+            "a zero-length green window must hold the vehicle for the whole run"
+        );
+    }
+
+    /// The signal plan partitions with its links: a partition that does not own a
+    /// signalised link must not carry its plan.
+    #[deterministic_id_test]
+    fn partition_keeps_only_the_signals_of_its_own_links() {
+        let global_net = three_link_network();
+        let config = test_utils::config();
+        let signals = always_red_signals("link1");
+
+        let owning = SimNetworkPartition::from_network_for_test_with_signals(
+            &global_net,
+            0,
+            &config,
+            &signals,
+        );
+        assert_eq!(owning.signals().signalised_links(), 1);
+
+        // The plan names link1, which this partition does not own, so nothing is kept.
+        let other = SimNetworkPartition::from_network_for_test_with_signals(
+            &global_net,
+            1,
+            &config,
+            &signals,
+        );
+        assert_eq!(
+            other.signals().signalised_links(),
+            0,
+            "a partition must not carry signals for links it does not own"
+        );
     }
 
     #[deterministic_id_test]

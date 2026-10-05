@@ -221,6 +221,17 @@ not cover are reported as `unmapped` rather than dropped. An optional
 `output.analysis.excess_delay_clip_seconds` setting adds clipped positive
 delay columns to the CSV exports and metric catalog. See `docs/analysis.md` for allocation and
 metric conventions. The `analyze` binary regenerates that report from the
+occupancy. An optional `output.analysis.excess_delay_clip_seconds` setting adds clipped positive
+delay columns to the CSV exports and metric catalog.
+
+Configuring `output.analysis.accessibility` adds accessibility to supplied opportunities: the
+cumulative count of jobs, schools or services reachable from each zone and person within a
+configurable travel-time threshold, by mode and departure period, with per-zone, per-person, summary
+and map exports. It needs three supplied files — opportunity locations and weights, zone centroids,
+and potential-destination travel costs — and stays `unavailable` until all three are configured.
+Realized trip durations are never substituted for the supplied costs, so a missing cost leaves the
+measure unavailable rather than guessed. See `docs/analysis.md` for the measure, the input formats and
+the status conventions. The `analyze` binary regenerates that report from the
 run's saved outputs without rerunning QSim:
 
 ```shell
@@ -236,12 +247,23 @@ cargo run --release --bin analyze -- --run-dir /path/to/output --interval-second
 The same setting applies to an automatic run's interval width via
 `--set output.analysis.interval_seconds=1800`.
 
+Setting `output.analysis.person_group_attributes` groups the report by person attributes such as
+`income`, `age`, `carAvailability` or `homeZone`, so travel burdens and, against
+`output.analysis.comparison_runs`, winner and loser counts are reported per group under a stated
+equity criterion. `output.analysis.person_weight_attribute` and
+`output.analysis.person_cost_attribute` name the person's weight and monetary cost when the
+population supplies them. See `docs/analysis.md` for the group and comparison definitions.
+
 The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
 rewrites the analysis outputs; event files, plans, the output network and the ID store are left
 untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels, the
 urban boundary and the zone system are restored from `manifest.json`, so a rerun reproduces the
 recorded classification and geography rather than reporting every link as `unknown` or every
 location as `unmapped`.
+urban boundary and the accessibility inputs are restored from `manifest.json`, so a rerun reproduces
+the recorded classification and accessibility measure rather than reporting every link as `unknown`
+and leaving accessibility unavailable. The accessibility inputs themselves are read again from the
+recorded paths, so they have to still be present.
 
 The standalone command needs a run that already recorded a report, so run the simulation once with
 `output.analysis.enabled: true`. It reads its replay parameters from the run's `analysis/manifest.json`

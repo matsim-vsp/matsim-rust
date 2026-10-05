@@ -170,11 +170,16 @@ repeatable setup.
   execution order.
 
 Start with the narrowest relevant check, then widen validation in proportion to
-the change. Typical commands from the repository root are:
+the change. During implementation work, skip the Berlin integration tests
+(`berlin::test_berlin_1` and `berlin::test_berlin_2`) by default because they take
+very long in debug mode. If Berlin validation is needed, run it only with
+`--release`; never run these tests in debug mode. Typical commands from the
+repository root are:
 
 ```shell
 cargo test -p rust_qsim --lib path::to::test -- --test-threads=1
-cargo test --workspace -- --test-threads=1
+cargo test --workspace -- --test-threads=1 --skip berlin::
+cargo test -p rust_qsim --release --test simulation berlin:: -- --test-threads=1
 cargo fmt --all -- --check
 ```
 

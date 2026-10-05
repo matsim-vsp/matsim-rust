@@ -58,7 +58,7 @@ struct StuckEvents {
 impl StuckEvents {
     fn register_fn(&self) -> Box<WorkerListenerRegisterFunction> {
         let events = self.events.clone();
-        Box::new(move |event_manager, _, _| {
+        Box::new(move |event_manager, _, _, _| {
             event_manager.on::<PersonStuckEvent, _>(move |event| {
                 events.lock().unwrap().push(event.clone());
             });
@@ -172,7 +172,7 @@ impl BoundaryEventTimes {
         let enters = self.enters.clone();
         let leaves = self.leaves.clone();
 
-        Box::new(move |events, _, _| {
+        Box::new(move |events, _, _, _| {
             events.on::<LinkEnterEvent, _>(move |event| {
                 if event.link.external() == "link2" {
                     enters.lock().unwrap().push(event.time);

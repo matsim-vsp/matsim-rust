@@ -64,16 +64,21 @@ impl VehicleType {
             pce: vehicle.pce,
             fef: vehicle.fef,
             net_mode: vehicle.net_mode.internal(),
+            seats: vehicle.capacity.map(|capacity| capacity.seats),
+            standing_room: vehicle.capacity.map(|capacity| capacity.standing_room),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::generated;
     use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
     use crate::simulation::scenario::vehicles::Garage;
-    use crate::simulation::scenario::vehicles::{InternalVehicleType, from_file, to_file};
+    use crate::simulation::scenario::vehicles::{
+        InternalVehicleType, VehicleCapacity, from_file, to_file,
+    };
     use macros::deterministic_id_test;
     use std::path::PathBuf;
 
@@ -92,6 +97,10 @@ mod tests {
             pce: 20.0,
             fef: 0.3,
             net_mode: Id::<String>::create("some network type 🚕"),
+            capacity: Some(VehicleCapacity {
+                seats: 50,
+                standing_room: 30,
+            }),
             attributes: InternalAttributes::default(),
         });
         garage.add_veh_by_type(&Id::create("some-person"), &Id::get_from_ext("some-type"));
@@ -101,6 +110,38 @@ mod tests {
 
         assert_eq!(garage.vehicle_types, loaded_garage.vehicle_types);
         assert_eq!(garage.vehicles, loaded_garage.vehicles);
+    }
+
+    #[deterministic_id_test]
+    fn partial_wire_capacity_reads_the_omitted_part_as_zero() {
+        let wire = |seats, standing_room| generated::vehicles::VehicleType {
+            id: Id::<InternalVehicleType>::create("t").internal(),
+            length: 1.0,
+            width: 1.0,
+            max_v: 1.0,
+            pce: 1.0,
+            fef: 1.0,
+            net_mode: Id::<String>::create("car").internal(),
+            seats,
+            standing_room,
+        };
+        let capacity =
+            |seats, standing_room| InternalVehicleType::from(wire(seats, standing_room)).capacity;
+        assert_eq!(capacity(None, None), None);
+        assert_eq!(
+            capacity(Some(4), None),
+            Some(VehicleCapacity {
+                seats: 4,
+                standing_room: 0
+            })
+        );
+        assert_eq!(
+            capacity(None, Some(6)),
+            Some(VehicleCapacity {
+                seats: 0,
+                standing_room: 6
+            })
+        );
     }
 
     #[deterministic_id_test]
@@ -118,6 +159,7 @@ mod tests {
             pce: 20.0,
             fef: 0.3,
             net_mode: Id::<String>::create("some-network-type"),
+            capacity: None,
             attributes: InternalAttributes::default(),
         });
         garage.add_veh_by_type(&Id::create("some-person"), &Id::get_from_ext("some-type"));

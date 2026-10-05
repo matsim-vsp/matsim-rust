@@ -2,7 +2,9 @@ use macros::deterministic_id_test;
 use rust_qsim::simulation::analysis::{
     AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
 };
-use rust_qsim::simulation::config::{Analysis, CommandLineArgs, CompressionType, Config};
+use rust_qsim::simulation::config::{
+    Accessibility, Analysis, CommandLineArgs, CompressionType, Config,
+};
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::id::Id;
 use rust_qsim::simulation::scenario::Coordinate;
@@ -158,9 +160,18 @@ fn analyze_with_clip(
             link_labels: BTreeMap::new(),
             urban_boundary: None,
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
+            service: None,
+            transit_observed_data: None,
+            emissions: None,
+            noise: None,
             excess_delay_clip_seconds: clip_delay,
             zone_system: Default::default(),
+            accessibility: Accessibility::default(),
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         },
     )
     .unwrap();

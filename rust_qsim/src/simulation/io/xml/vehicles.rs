@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::simulation::io::xml;
 use crate::simulation::io::xml::attributes::IOAttributes;
-use crate::simulation::scenario::vehicles::Garage;
+use crate::simulation::scenario::vehicles::{Garage, VehicleCapacity};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -20,7 +20,7 @@ pub(crate) fn write_to_xml(garage: &Garage, path: &Path) {
         .map(|t| IOVehicleType {
             id: t.id.external().to_owned(),
             description: None,
-            capacity: None,
+            capacity: t.capacity.map(VehicleCapacity::to_io),
             length: Some(IODimension { meter: t.length }),
             width: Some(IODimension { meter: t.width }),
             maximum_velocity: Some(IOVelocity {
@@ -88,8 +88,16 @@ pub struct IOVehicleType {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct IOCapacity {
-    // leave emtpy for now
+    pub seats: Option<IOPersons>,
+    pub standing_room: Option<IOPersons>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+pub struct IOPersons {
+    #[serde(rename = "@persons")]
+    pub persons: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -182,7 +190,9 @@ mod test {
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::vehicles::IOVehicleDefinitions;
     use crate::simulation::scenario::vehicles::Garage;
-    use crate::simulation::scenario::vehicles::{InternalVehicleType, from_file, to_file};
+    use crate::simulation::scenario::vehicles::{
+        InternalVehicleType, VehicleCapacity, from_file, to_file,
+    };
     use macros::deterministic_id_test;
     use quick_xml::de::from_str;
 
@@ -200,6 +210,34 @@ mod test {
 
         let veh_type = veh_def.veh_types.first().unwrap();
         assert_eq!("some-vehicle-id", veh_type.id.as_str());
+    }
+
+    #[test]
+    fn capacity_names_seats_and_standing_room_and_an_omitted_one_carries_nobody() {
+        let parse = |capacity: &str| {
+            let xml = format!(
+                "<vehicleDefinitions><vehicleType id=\"t\">{capacity}</vehicleType></vehicleDefinitions>"
+            );
+            let definitions: IOVehicleDefinitions = from_str(&xml).unwrap();
+            VehicleCapacity::from_io(definitions.veh_types[0].capacity.as_ref())
+        };
+        assert_eq!(
+            parse("<capacity><seats persons=\"50\"/><standingRoom persons=\"30\"/></capacity>"),
+            Some(VehicleCapacity {
+                seats: 50,
+                standing_room: 30
+            })
+        );
+        assert_eq!(
+            parse("<capacity><seats persons=\"4\"/></capacity>"),
+            Some(VehicleCapacity {
+                seats: 4,
+                standing_room: 0
+            })
+        );
+        // Neither a missing nor an empty capacity element declares a capacity.
+        assert_eq!(parse(""), None);
+        assert_eq!(parse("<capacity/>"), None);
     }
 
     #[test]
@@ -286,6 +324,10 @@ mod test {
             pce: 20.0,
             fef: 0.3,
             net_mode: Id::<String>::create("some network type 🚕"),
+            capacity: Some(VehicleCapacity {
+                seats: 50,
+                standing_room: 30,
+            }),
             attributes: InternalAttributes::default(),
         });
         garage.add_veh_by_type(&Id::create("some-person"), &Id::get_from_ext("some-type"));
