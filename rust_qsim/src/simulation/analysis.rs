@@ -3,6 +3,7 @@
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
+mod emissions;
 mod ensemble;
 mod link_speed;
 mod service;
@@ -16,7 +17,9 @@ pub use transit::TransitMetadata;
 
 mod network_distance;
 
-use crate::simulation::config::{Analysis, CompressionType, LinkLabels, ServiceInputs};
+use crate::simulation::config::{
+    Analysis, CompressionType, EmissionsInputs, LinkLabels, ServiceInputs,
+};
 use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonStuckEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
@@ -81,6 +84,7 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("cross_run_comparison", None),
     ("service_performance", None),
     ("transit_and_research", None),
+    ("modeled_emissions", None),
 ];
 
 const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
@@ -165,6 +169,8 @@ pub struct Manifest {
     service: Option<ServiceInputs>,
     #[serde(default)]
     transit_observed_data: Option<String>,
+    #[serde(default)]
+    emissions: Option<EmissionsInputs>,
 
     excess_delay_clip_seconds: Option<f64>,
 }
@@ -627,6 +633,7 @@ pub fn analyze_final_iteration(
             .transit_observed_data
             .as_ref()
             .map(|path| path.display().to_string()),
+        emissions: settings.emissions.clone(),
 
         excess_delay_clip_seconds: settings.excess_delay_clip_seconds,
     };
@@ -745,6 +752,7 @@ pub fn reanalyze_completed_run(
         comparison_runs: recorded.comparison_runs.iter().map(PathBuf::from).collect(),
         service: recorded.service.clone(),
         transit_observed_data: recorded.transit_observed_data.as_ref().map(PathBuf::from),
+        emissions: recorded.emissions.clone(),
 
         excess_delay_clip_seconds: recorded.excess_delay_clip_seconds,
     };
@@ -1240,6 +1248,27 @@ fn publish_complete(
     if service.as_ref().is_none_or(Result::is_err) {
         service::write_empty(&staging)?;
     }
+    let emissions = settings.emissions.as_ref().map(|inputs| {
+        let source = if inputs.records.is_absolute() {
+            inputs.records.clone()
+        } else {
+            output_dir.join(&inputs.records)
+        };
+        emissions::write(
+            &staging,
+            &source,
+            inputs,
+            manifest.iteration,
+            run_metadata.sample_size(),
+            interval,
+        )
+        .map_err(|error| error.to_string())
+    });
+    if emissions.as_ref().is_none_or(|result| {
+        result.as_ref().is_err_and(|_| true) || result.as_ref().is_ok_and(|seen| !seen)
+    }) {
+        emissions::write_empty(&staging)?;
+    }
     let statuses = module_statuses(
         &RequiredOutcome::Complete,
         validation.as_ref(),
@@ -1250,6 +1279,7 @@ fn publish_complete(
             validation: transit_validation.as_ref(),
         },
         survey.as_ref(),
+        emissions.as_ref(),
     );
 
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
@@ -1325,6 +1355,7 @@ fn publish_failure(
         None,
         &TransitOutcome::default(),
         None,
+        None,
     );
     let staging = output_dir.join(FAILURE_STAGING_DIR);
     reset_staging(&staging)?;
@@ -1354,6 +1385,7 @@ fn module_statuses(
     service: Option<&Result<(), String>>,
     transit: &TransitOutcome<'_>,
     survey: Option<&Result<(), String>>,
+    emissions: Option<&Result<bool, String>>,
 ) -> Vec<ModuleStatus> {
     let (status, reason) = match outcome {
         RequiredOutcome::Complete => (STATUS_COMPLETE, None),
@@ -1413,6 +1445,18 @@ fn module_statuses(
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No journey survey dataset is configured".to_owned()),
+                )),
+            },
+            "modeled_emissions" => match emissions {
+                Some(Ok(true)) => Some((STATUS_COMPLETE, None)),
+                Some(Ok(false)) => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No modeled emissions records for the final iteration".to_owned()),
+                )),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No modeled emissions input is configured".to_owned()),
                 )),
             },
             _ => None,
@@ -1952,6 +1996,11 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
             name: "period_end_seconds",
             unit: "seconds",
             aggregation_key: "run,iteration,link_id,period_start_seconds",
+        },
+        Metric {
+            name: "emissions_total_expanded",
+            unit: "declared pollutant unit",
+            aggregation_key: "hour_start_seconds,pollutant,unit,vehicle_category,location_type,location_id,emission_type",
         },
     ]
     .into_iter()
@@ -4028,6 +4077,15 @@ fn write_report(
             ("__NETWORK_ANALYSIS_SCRIPT__", &network_script),
         ],
     );
+    let emissions = csv_for_script(&path.join("emissions_hourly.csv"))?;
+    let html = html.replace(
+        "<h2>Module status</h2>",
+        "<h2>Modeled emissions</h2><p>Supplied modeled records report emitted mass, not concentration or exposure. Values keep their declared units and are grouped by pollutant, vehicle category, hour and link or area. The map shades links for the selected pollutant, unit, hour, category and start type; redder links have higher values, gray links have no records, and area-only records remain in the table.</p><label>Map selection <select id=\"emissions-filter\"></select></label><div id=\"emissions-map\"></div><div id=\"emissions\"></div><p><a href=\"emissions_hourly.csv\">Hourly totals</a> · <a href=\"emissions_provenance.json\">Provenance</a></p><h2>Module status</h2>",
+    );
+    let (body, script_end) = html.rsplit_once("</script>").expect("report script exists");
+    let html = format!(
+        "{body}const em={emissions};csvTable('#emissions',em);const emap=document.querySelector('#network-map').cloneNode(true);emap.setAttribute('id','emissions-network-map');document.querySelector('#emissions-map').append(emap);const eh=parseCsv(em[0]);const er=em.slice(1).map(parseCsv);const ei=n=>eh.indexOf(n);const lk=er.filter(r=>r[ei('location_type')]==='link');const choices=[...new Map(lk.map(r=>{{const k=[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]];return [JSON.stringify(k),k]}}))];const select=document.querySelector('#emissions-filter');choices.forEach(([key,k])=>select.add(new Option(k.join(' · '),key)));function colorEmissions(){{const chosen=select.value?JSON.parse(select.value):null;const values=new Map(lk.filter(r=>chosen&&[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]].every((v,i)=>v===chosen[i])).map(r=>[r[ei('location_id')],Number(r[ei('total_expanded')])]));const max=Math.max(0,...values.values());document.querySelectorAll('#emissions-network-map line').forEach(line=>{{const value=values.get(line.getAttribute('data-link-id'));if(value===undefined){{line.setAttribute('stroke','#c8ccd0')}}else{{const scale=max?value/max:0;line.setAttribute('stroke',`rgb(${{Math.round(255*scale)}},${{Math.round(210*(1-scale))}},0)`)}}}})}}select.addEventListener('change',colorEmissions);colorEmissions();</script>{script_end}"
+    );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
 
@@ -4507,6 +4565,8 @@ mod tests {
         // The local report presents the agent-travel tables, not only the CSVs.
         let report_html = fs::read_to_string(output.join("index.html")).unwrap();
         assert!(report_html.contains("<h2>Agent travel</h2>"));
+        assert!(report_html.contains("<h2>Modeled emissions</h2>"));
+        assert!(report_html.contains("emissions-network-map"));
         assert!(report_html.contains("href=\"legs.csv\""));
         assert!(report_html.contains("travelers,2,5.000000"));
         assert!(report_html.contains("missed_plan_leg"));

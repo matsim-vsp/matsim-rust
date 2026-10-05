@@ -3,6 +3,31 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Modeled emissions
+
+Configure `output.analysis.emissions` to consume externally modeled emission records; this
+analysis does not calculate emissions. The CSV must include
+`iteration,time_seconds,pollutant,unit,value,vehicle_category,link_id,area_id,emission_type`. Set exactly one of `link_id` and `area_id`
+on each row, and use `warm` or `cold` for `emission_type`. Units are kept as supplied, so different
+units are never summed together. Only records for the completed iteration are included. Values are
+expanded by `1 / qsim.sample_size`; both sampled and expanded totals are exported.
+
+```yaml
+output:
+  analysis:
+    emissions:
+      records: emissions.csv
+      fleet_provenance: "vehicle categories from fleet-v3"
+      emission_factor_provenance: "HBEFA 4.2"
+      accounting_boundary: "tailpipe"
+```
+
+The report exports `emissions_hourly.csv` and `emissions_provenance.json`; link and area IDs are
+the location keys for mapping these totals onto supplied network or area geometries. Provenance
+records warm/cold record coverage, sample expansion, fleet and factor source, and the accounting
+boundary. These values describe emitted mass, not concentration or exposure. Missing records for
+the final iteration make `modeled_emissions` unavailable rather than reporting zero emissions.
+
 ## Journeys and travel distributions
 
 The final-iteration replay exports observed legs in `legs.csv` and planned journeys in

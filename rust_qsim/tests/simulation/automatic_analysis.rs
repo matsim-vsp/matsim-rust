@@ -1431,6 +1431,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
             excess_delay_clip_seconds: None,
         },
     )
@@ -1537,6 +1538,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
             excess_delay_clip_seconds: None,
         },
     )

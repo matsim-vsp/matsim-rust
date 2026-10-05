@@ -1235,6 +1235,10 @@ fn table_specs() -> &'static [TableSpec] {
                 ("load_share", "load_share"),
             ],
         },
+        TableSpec {
+            file: "emissions_hourly.csv",
+            metrics: &[("emissions_total_expanded", "total_expanded")],
+        },
     ]
 }
 

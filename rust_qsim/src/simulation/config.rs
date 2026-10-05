@@ -617,6 +617,9 @@ pub struct Analysis {
     /// paths are resolved against the configured output directory.
     pub transit_observed_data: Option<PathBuf>,
 
+    /// Optional modeled emission-event records CSV. Relative paths resolve from the output dir.
+    pub emissions: Option<EmissionsInputs>,
+
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
 }
@@ -641,6 +644,15 @@ pub struct ServiceInputs {
     pub max_wait_seconds: Option<f64>,
 }
 
+/// Supplied modeled emissions and the provenance needed to interpret their totals.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EmissionsInputs {
+    pub records: PathBuf,
+    pub fleet_provenance: String,
+    pub emission_factor_provenance: String,
+    pub accounting_boundary: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct LinkLabels {
@@ -662,6 +674,7 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
 
             excess_delay_clip_seconds: None,
         }
