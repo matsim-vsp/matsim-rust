@@ -603,6 +603,8 @@ pub struct Analysis {
     /// inside or the segment crosses the polygon. When set, this determines
     /// `urban_area` instead of the per-link label of the same name.
     pub urban_boundary: Option<Vec<[f64; 2]>>,
+    /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
+    pub excess_delay_clip_seconds: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -620,6 +622,7 @@ impl Default for Analysis {
             interval_seconds: 3600,
             link_labels: std::collections::BTreeMap::new(),
             urban_boundary: None,
+            excess_delay_clip_seconds: None,
         }
     }
 }
@@ -659,6 +662,14 @@ register_override!(
     |config, value| match value.parse() {
         Ok(interval) => config.output_mut().analysis.interval_seconds = interval,
         Err(_) => warn!("Ignoring invalid analysis interval '{value}': expected seconds"),
+    }
+);
+
+register_override!(
+    "output.analysis.excess_delay_clip_seconds",
+    |config, value| match value.parse::<f64>() {
+        Ok(limit) => config.output_mut().analysis.excess_delay_clip_seconds = Some(limit),
+        Err(_) => warn!("Ignoring invalid excess delay clip '{value}': expected seconds"),
     }
 );
 

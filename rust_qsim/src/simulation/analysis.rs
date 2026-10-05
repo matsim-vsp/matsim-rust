@@ -1,7 +1,9 @@
-//! Final-iteration link coverage, capacity and link speed reporting.
+//! Final-iteration link coverage, capacity, speed, distance, delay and agent travel reporting.
 
+mod agent_profile;
 pub mod capacity;
 mod link_speed;
+mod network_distance;
 
 use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
 use crate::simulation::events::{
@@ -16,11 +18,13 @@ use crate::simulation::scenario::network::{Link, Network, Node};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
 use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
+use agent_profile::AgentProfileCollector;
 use capacity::{
     FlowSide, IntervalVolumes, LinkUtilization, VC_BIN_COUNT, VcHistogram, covered_interval_hours,
     vc_bin_bounds,
 };
 use link_speed::LinkSpeedCollector;
+use network_distance::NetworkDistanceCollector;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,6 +60,7 @@ const REQUIRED_MODULE: &str = "link_coverage";
 const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     // Both link metrics are computed from the same replay, so both follow the run's outcome.
     ("link_speed", None),
+    ("network_distance_time", None),
     ("agent_travel", None),
     (
         "validation",
@@ -141,6 +146,8 @@ pub struct Manifest {
     link_labels: BTreeMap<String, LinkLabels>,
     #[serde(default)]
     urban_boundary: Option<Vec<[f64; 2]>>,
+    #[serde(default)]
+    excess_delay_clip_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -403,6 +410,14 @@ pub fn analyze_final_iteration(
             "analysis.interval_seconds must be greater than zero",
         ));
     }
+    if settings
+        .excess_delay_clip_seconds
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+    {
+        return Err(AnalysisError::new(
+            "analysis.excess_delay_clip_seconds must be a non-negative finite number",
+        ));
+    }
     // Observed volumes are scaled up by the reciprocal of the sample size, so a run
     // without a usable fraction cannot produce a report at all.
     let sample_size = run_metadata.sample_size();
@@ -441,6 +456,7 @@ pub fn analyze_final_iteration(
         software_version: env!("CARGO_PKG_VERSION").to_owned(),
         link_labels: settings.link_labels.clone(),
         urban_boundary: settings.urban_boundary.clone(),
+        excess_delay_clip_seconds: settings.excess_delay_clip_seconds,
     };
 
     // Required inputs are validated before anything is staged, so an unreadable recording is
@@ -551,6 +567,7 @@ pub fn reanalyze_completed_run(
         interval_seconds: interval_seconds.unwrap_or(recorded.interval_seconds),
         link_labels: recorded.link_labels.clone(),
         urban_boundary: recorded.urban_boundary.clone(),
+        excess_delay_clip_seconds: recorded.excess_delay_clip_seconds,
     };
 
     analyze_final_iteration(
@@ -650,6 +667,8 @@ fn replay_partitions<'a>(
         .collect();
     let mut agent_travel = AgentTravelAccumulator::new(interval, expected);
     let mut speeds = LinkSpeedCollector::new(interval, ordered_links);
+    let mut network_distance = NetworkDistanceCollector::new(interval, ordered_links);
+    let mut agent_profiles = AgentProfileCollector::new(interval);
     loop {
         let Some(time) = heads
             .iter()
@@ -679,17 +698,22 @@ fn replay_partitions<'a>(
                     &mut counts,
                 );
                 speeds.observe(event.as_ref(), time);
+                network_distance.observe(event.as_ref(), time);
                 simultaneous_events.push(event);
                 heads[rank] = readers[rank].next_event()?;
             }
         }
         agent_travel.process_timestamp(&simultaneous_events, time);
+        agent_profiles.process_timestamp(&simultaneous_events, time);
     }
     speeds.finish();
+    network_distance.finish();
     Ok(ReplayedAnalysis {
         counts,
         agent_travel,
         speeds,
+        network_distance,
+        agent_profiles,
     })
 }
 
@@ -699,6 +723,8 @@ struct ReplayedAnalysis<'a> {
     counts: LinkVolumesByHour,
     agent_travel: AgentTravelAccumulator,
     speeds: LinkSpeedCollector<'a>,
+    network_distance: NetworkDistanceCollector<'a>,
+    agent_profiles: AgentProfileCollector,
 }
 
 fn publish_complete(
@@ -746,6 +772,12 @@ fn publish_complete(
         &link_hourly,
     )?;
     replayed.speeds.write_tables(&staging, &hours)?;
+    replayed
+        .network_distance
+        .write_tables(&staging, &hours, settings.excess_delay_clip_seconds)?;
+    replayed
+        .agent_profiles
+        .write_table(&staging, interval, simulation_end_time)?;
     write_classification(&staging, ordered_links, &classifications)?;
     write_group_coverage(
         &staging,
@@ -757,7 +789,10 @@ fn publish_complete(
     )?;
     write_network_map(&staging, ordered_links, network, &classifications, counts)?;
     write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
-    write_json(&staging.join(METRIC_CATALOG_FILE), &metrics())?;
+    write_json(
+        &staging.join(METRIC_CATALOG_FILE),
+        &metrics(settings.excess_delay_clip_seconds.is_some()),
+    )?;
     let statuses = module_statuses(&RequiredOutcome::Complete);
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
@@ -837,7 +872,7 @@ fn module_statuses(outcome: &RequiredOutcome) -> Vec<ModuleStatus> {
 /// itself, because two tables can export the same column name for different metrics: coverage.csv
 /// and group_coverage.csv both carry `used_links`, which the catalog distinguishes as
 /// `used_links` and `group_used_links`.
-fn metrics() -> Vec<Metric<'static>> {
+fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
     vec![
         Metric {
             name: "entry_vehicles",
@@ -1079,6 +1114,94 @@ fn metrics() -> Vec<Metric<'static>> {
                 aggregation_key: "metric",
             }),
     )
+    .chain([
+        Metric {
+            name: "vehicle_distance_meters",
+            unit: "m",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "vehicle_time_seconds",
+            unit: "s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "free_flow_relative_delay_seconds",
+            unit: "s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "relative_speed_ratio",
+            unit: "ratio",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "network_vehicle_distance_meters",
+            unit: "m",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "network_vehicle_time_seconds",
+            unit: "s",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "network_free_flow_relative_delay_seconds",
+            unit: "s",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "network_relative_speed_ratio",
+            unit: "ratio",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "en_route_departures",
+            unit: "persons",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "en_route_arrivals",
+            unit: "persons",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "en_route_stuck_events",
+            unit: "persons",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "agents_at_interval_start",
+            unit: "persons",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "peak_agents",
+            unit: "persons",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "en_route_person_seconds",
+            unit: "person_seconds",
+            aggregation_key: "hour_start_seconds",
+        },
+    ])
+    .chain(if include_clipped_delay {
+        vec![
+            Metric {
+                name: "clipped_excess_delay_seconds",
+                unit: "s",
+                aggregation_key: "link_id,hour_start_seconds",
+            },
+            Metric {
+                name: "network_clipped_excess_delay_seconds",
+                unit: "s",
+                aggregation_key: "hour_start_seconds",
+            },
+        ]
+    } else {
+        Vec::new()
+    })
     .collect()
 }
 
@@ -2326,7 +2449,7 @@ fn write_report(
             .map(|row| row.split(',').collect::<Vec<_>>())
             .collect::<Vec<_>>(),
     )?;
-    let metrics = json_for_script(&metrics())?;
+    let metrics = json_for_script(&metrics(manifest.excess_delay_clip_seconds.is_some()))?;
     let hourly = json_for_script(link_hourly)?;
     // The filter list comes from the same constant the CSV exporters group by, so a
     // dimension cannot be exported without also being offered as a filter.
@@ -2336,6 +2459,9 @@ fn write_report(
     let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
     let daily = csv_for_script(&path.join("daily_summary.csv"))?;
     let persons = csv_for_script(&path.join("person_daily.csv"))?;
+    let network_link_metrics = csv_for_script(&path.join("network_distance_time.csv"))?;
+    let network_summary = csv_for_script(&path.join("network_distance_time_summary.csv"))?;
+    let en_route_agents = csv_for_script(&path.join("en_route_agents.csv"))?;
     // One row per leg, so only a bounded preview is embedded and the rest stays in the CSV.
     let (legs, legs_truncated) = csv_preview_for_script(&path.join("legs.csv"), LEGS_PREVIEW_ROWS)?;
     let legs_note = if legs_truncated {
@@ -2383,6 +2509,22 @@ fn write_report(
             ("__LEGS__", &legs),
             ("__LEGS_NOTE__", &legs_note),
         ],
+    );
+    // Machine tables remain the source of truth; render them locally with the same CSV helper.
+    let html = html.replace(
+        "<h2>Module status</h2>",
+        "<h2>Network distance, time and congestion</h2><p>Vehicle distance uses the observed fraction of each link. Partial and unfinished traversals are reported in diagnostics. A traversal crossing an interval boundary is assigned whole to its entry interval, so no within-link path is inferred. Relative delay is signed; clipped excess delay, when configured, sums positive link delay capped per link and interval. Passenger distance and time are unavailable because link-level passenger occupancy is not recorded. Agent travel profiles are shown in the Agent travel section. Machine-readable tables: <a href=\"network_distance_time_summary.csv\">network profile</a>, <a href=\"network_distance_time.csv\">per-link profile</a>, <a href=\"network_distance_time_diagnostics.csv\">traversal diagnostics</a>.</p><h3>Network totals and peak-hour profile</h3><p id=\"peak-delay\"></p><div id=\"network-summary\"></div><h3>Per-link distance, time and relative speed</h3><div id=\"network-link-metrics\"></div><h2>Module status</h2>",
+    );
+    let html = html.replace(
+        "<h3>Departures and duration by interval and mode</h3>",
+        "<h3>En-route agent profile</h3><p>Counts use observed person departures, arrivals, and stuck events across all travel modes. Person-seconds are allocated by event timestamps; no within-link position or occupancy is inferred. See <a href=\"en_route_agents.csv\">en_route_agents.csv</a>.</p><div id=\"en-route-agents\"></div><h3>Departures and duration by interval and mode</h3>",
+    );
+    let network_script = format!(
+        "const nd={network_link_metrics};const ns={network_summary};const ea={en_route_agents};csvTable('#network-summary',ns);csvTable('#network-link-metrics',nd);csvTable('#en-route-agents',ea);const delayColumn=ns[0].split(',').indexOf('free_flow_relative_delay_seconds');const peak=ns.slice(1).map(row=>row.split(',')).filter(row=>row[delayColumn]!=='').sort((a,b)=>Number(b[delayColumn])-Number(a[delayColumn]))[0];document.querySelector('#peak-delay').textContent=peak?`Peak interval by total signed free-flow delay: ${{peak[0]}} s (${{peak[delayColumn]}} vehicle-seconds).`:'Peak interval unavailable: no valid free-flow references.';"
+    );
+    let html = html.replace(
+        "</script></body></html>",
+        &format!("{network_script}</script></body></html>"),
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
