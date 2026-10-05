@@ -16,6 +16,8 @@ message VehicleType {
   double pce = 5;
   double fef = 6;
   uint64 net_mode = 7;
+  optional uint32 seats = 8;
+  optional uint32 standing_room = 9;
 }
 
 message Vehicle {
