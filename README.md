@@ -206,6 +206,47 @@ cd rust_qsim
 cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-config-1.yml
 ```
 
+## Reanalyze a completed run
+
+A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. The
+`analyze` binary regenerates that report from the run's saved outputs without rerunning QSim:
+
+```shell
+cargo run --release --bin analyze -- --run-dir /path/to/output
+```
+
+Analysis settings can be changed for the rerun, for example to export narrower intervals:
+
+```shell
+cargo run --release --bin analyze -- --run-dir /path/to/output --interval-seconds 1800
+```
+
+The same setting applies to an automatic run's interval width via
+`--set output.analysis.interval_seconds=1800`.
+
+The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
+rewrites the analysis outputs; event files, plans, the output network and the ID store are left
+untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels and the
+urban boundary are restored from `manifest.json`, so a rerun reproduces the recorded classification
+rather than reporting every link as `unknown`.
+
+The standalone command needs a run that already recorded a report, so run the simulation once with
+`output.analysis.enabled: true`. It reads its replay parameters from the run's `analysis/manifest.json`
+and `analysis/run_metadata.json` rather than a config file, which keeps a rerun independent of the
+run's original inputs and config.
+
+Reports distinguish three states. A completed report in `<output_dir>/analysis` carries
+`"status": "complete"` in its `manifest.json`, and its `index.html` presents a completed report. If
+a required module fails, the diagnostics -- including their own `index.html` -- are written to
+`<output_dir>/analysis-failure` and the completed report is left untouched, so a failed attempt is
+never mistaken for a completed one. Rerunning after fixing the inputs republishes the complete
+report and removes the failure directory. Optional modules that are not implemented or whose inputs
+are not configured are reported as `unavailable` in `module_status.json` rather than failing;
+`module_status.json` marks each entry `required` or not.
+
+A rerun exits non-zero and logs a diagnostic on failure. If a previous run was interrupted while
+publishing, its backup is reclaimed on the next rerun so the last good report is never stranded.
+
 ## Create input files
 
 You need to create protobuf files from the xml files. This can be done with the following command:

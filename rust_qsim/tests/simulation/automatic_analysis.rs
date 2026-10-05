@@ -1,5 +1,7 @@
 use macros::deterministic_id_test;
-use rust_qsim::simulation::analysis::{AnalysisRunMetadata, analyze_final_iteration};
+use rust_qsim::simulation::analysis::{
+    AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
+};
 use rust_qsim::simulation::config::{
     Analysis, CommandLineArgs, CompressionType, Config, LinkLabels,
 };
@@ -79,14 +81,8 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         network.add_link(Link::new_with_default(Id::create(&id), &from, &to));
     }
     let garage = Garage::default();
-    let metadata = AnalysisRunMetadata {
-        random_seed: 4711,
-        network_input: None,
-        population_input: None,
-        vehicles_input: None,
-        expected_travel: &[],
-        garage: &garage,
-    };
+    let metadata =
+        AnalysisRunMetadata::from_run(4711, &garage, Vec::new(), AnalysisInputPaths::default());
 
     let report = analyze_final_iteration(
         output,
@@ -153,6 +149,9 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .contains("missing final-iteration event partition")
     );
 
+    let recorded_events: Vec<Vec<u8>> = (0..2)
+        .map(|rank| fs::read(events.join(format!("events.{rank}.xml"))).unwrap())
+        .collect();
     fs::write(events.join("events.0.xml"), "<events><event").unwrap();
     let parse_error = analyze_final_iteration(
         output,
@@ -175,6 +174,19 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .contains("failed to parse event XML")
     );
     assert!(report.is_file());
+    // A required-module failure records its own diagnostics and leaves the completed report.
+    let failure_dir = output.join("analysis-failure");
+    let failure_manifest = fs::read_to_string(failure_dir.join("manifest.json")).unwrap();
+    assert!(failure_manifest.contains("\"status\": \"failed\""));
+    assert!(failure_manifest.contains("failed to parse event XML"));
+    let failure_status = fs::read_to_string(failure_dir.join("module_status.json")).unwrap();
+    assert!(failure_status.contains("\"module\": \"link_coverage\""));
+    assert!(failure_status.contains("\"required\": true"));
+    assert!(failure_status.contains("\"status\": \"failed\""));
+    assert!(failure_status.contains("\"required\": false"));
+    assert!(!failure_dir.join("link_hourly.csv").exists());
+    let failure_report = fs::read_to_string(failure_dir.join("index.html")).unwrap();
+    assert!(failure_report.contains("Analysis failed"));
 
     let proto_events = output.join("ITERS/it.8/events");
     fs::create_dir_all(&proto_events).unwrap();
@@ -200,6 +212,57 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .contains("failed to parse protobuf events")
     );
     assert!(report.is_file());
+
+    // Recovering from a failed attempt republishes the completed report and clears the failure.
+    fs::write(events.join("events.0.xml"), &recorded_events[0]).unwrap();
+    fs::write(events.join("events.1.xml"), &recorded_events[1]).unwrap();
+    analyze_final_iteration(
+        output,
+        7,
+        2,
+        CompressionType::None,
+        7200,
+        &metadata,
+        &network,
+        &Analysis {
+            enabled: true,
+            interval_seconds: 3600,
+            ..Analysis::default()
+        },
+    )
+    .unwrap();
+    assert!(!failure_dir.exists());
+    assert!(!output.join(".analysis-failure-staging").exists());
+    assert_eq!(
+        fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap(),
+        coverage,
+    );
+
+    // A crash between the two renames of a publish leaves only the backup. The next attempt
+    // reclaims it instead of losing the previous report.
+    fs::rename(report.parent().unwrap(), output.join(".analysis-backup")).unwrap();
+    assert!(!report.parent().unwrap().exists());
+    let republished = analyze_final_iteration(
+        output,
+        7,
+        2,
+        CompressionType::None,
+        7200,
+        &metadata,
+        &network,
+        &Analysis {
+            enabled: true,
+            interval_seconds: 3600,
+            ..Analysis::default()
+        },
+    )
+    .unwrap();
+    assert!(republished.is_file());
+    assert!(!output.join(".analysis-backup").exists());
+    assert_eq!(
+        fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap(),
+        coverage,
+    );
 }
 
 #[deterministic_id_test(rust_qsim)]
@@ -297,14 +360,7 @@ fn boundary_classification_counts_arithmetic_edge_coordinates_as_inside() {
         1,
         CompressionType::None,
         3600,
-        &AnalysisRunMetadata {
-            random_seed: 1,
-            network_input: None,
-            population_input: None,
-            vehicles_input: None,
-            expected_travel: &[],
-            garage: &garage,
-        },
+        &AnalysisRunMetadata::from_run(1, &garage, Vec::new(), AnalysisInputPaths::default()),
         &network,
         &Analysis {
             enabled: true,
@@ -375,14 +431,8 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         ));
     }
     let garage = Garage::default();
-    let metadata = AnalysisRunMetadata {
-        random_seed: 1,
-        network_input: None,
-        population_input: None,
-        vehicles_input: None,
-        expected_travel: &[],
-        garage: &garage,
-    };
+    let metadata =
+        AnalysisRunMetadata::from_run(1, &garage, Vec::new(), AnalysisInputPaths::default());
     let mut labels: std::collections::BTreeMap<String, LinkLabels> = [
         ("outer-road", Some("other"), Some("__METRICS__")),
         ("cross-road", Some("expressway"), Some("large")),
@@ -504,6 +554,15 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
     assert!(html.contains("row[key]===select.value"));
     assert!(html.contains("renderGroups(rows)"));
     assert!(html.contains("updateMap()"));
+    // Each filter change re-renders these tables, so the helper must replace its
+    // contents; appending would stack a new table under the previous one on every
+    // interaction.
+    assert!(
+        html.contains("root.replaceChildren(t)"),
+        "the table helper must replace, not append"
+    );
+    assert!(html.contains("document.querySelector('#metrics')"));
+    assert!(html.contains("document.querySelector('#coverage')"));
 
     let explicitly_classified = analyze_final_iteration(
         output,
