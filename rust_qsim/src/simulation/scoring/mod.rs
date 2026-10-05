@@ -186,7 +186,7 @@ pub(crate) fn create_registrations(
 
 /// Performs multithreaded scoring of the population. Rayon pool is started in the controller.
 pub(crate) fn score_population(
-    experiences: &mut Vec<PersonExperiences>,
+    experiences: &mut [PersonExperiences],
     population: &mut Population,
     plan_scorer: &dyn PlanScorer,
 ) {

@@ -605,13 +605,20 @@ impl ScoringPool {
         scenario_core: &ScenarioCore,
         plan_scorer: Option<Box<dyn PlanScorer>>,
     ) -> Self {
-        let pool = Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(scenario_core.config.computational_setup().scoring_threads as usize)
-                .thread_name(|i| format!("scoring-{i}"))
-                .build()
-                .expect("Failed to build scoring thread pool."),
-        );
+        let threads = scenario_core.config.computational_setup().scoring_threads;
+        let pool = if threads == 0 {
+            None
+        } else {
+            Some(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(
+                        scenario_core.config.computational_setup().scoring_threads as usize,
+                    )
+                    .thread_name(|i| format!("scoring-{i}"))
+                    .build()
+                    .expect("Failed to build scoring thread pool."),
+            )
+        };
         Self {
             pool,
             plan_scorer: plan_scorer.unwrap_or_else(|| {
