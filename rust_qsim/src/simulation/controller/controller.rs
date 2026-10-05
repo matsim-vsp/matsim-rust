@@ -295,6 +295,10 @@ impl Controller {
                 self.config.output().write_events == WriteEvents::File,
                 "Automatic analysis requires output.write_events: File."
             );
+            assert!(
+                self.config.qsim().sample_size > 0.0,
+                "Automatic analysis requires a positive qsim.sample_size: volumes are scaled up by its reciprocal."
+            );
         }
 
         self.controller_events_manager
@@ -360,6 +364,8 @@ impl Controller {
                 .with_extension("output_network");
             let metadata = crate::simulation::analysis::AnalysisRunMetadata::from_run(
                 self.config.computational_setup().random_seed,
+                // The report scales observed volumes up by the reciprocal of this.
+                self.config.qsim().sample_size,
                 &self.scenario.core.garage,
                 // The run has finished, so the snapshot moves into the report instead of copied.
                 std::mem::take(&mut self.expected_travel),

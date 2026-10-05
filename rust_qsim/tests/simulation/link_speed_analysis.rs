@@ -98,6 +98,8 @@ fn analyze(
     let garage = Garage::default();
     let metadata = AnalysisRunMetadata::from_run(
         4711,
+        // An unsampled run; the speed tables do not depend on the fraction.
+        1.0,
         &garage,
         Vec::new(),
         AnalysisInputPaths {

@@ -49,13 +49,33 @@ fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
 
 #[deterministic_id_test(rust_qsim)]
 fn standalone_rerun_matches_automatic_metrics_and_preserves_raw_outputs() {
-    let output = run_simulation(
+    // A sampled run, so the capacity table actually depends on the recorded sample size.
+    // At a full sample the scaling is the identity and a lost value would go unnoticed.
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
         "./tests/resources/3-links/3-links-config-1.yml",
-        "./test_output/simulation/standalone_equivalence",
-    );
+    ));
+    config.controller_mut().last_iteration = 1;
+    config.output_mut().output_dir = "./test_output/simulation/standalone_equivalence".into();
+    config.output_mut().analysis.enabled = true;
+    config.qsim_mut().sample_size = 0.25;
+    let output = config.output().output_dir.clone();
+    ControllerBuilder::default_with_scenario(Scenario::load(config))
+        .build()
+        .unwrap()
+        .run();
     let report_dir = output.join("analysis");
-    let automatic_hourly = fs::read_to_string(report_dir.join("link_hourly.csv")).unwrap();
-    let automatic_coverage = fs::read_to_string(report_dir.join("coverage.csv")).unwrap();
+    // The capacity tables are included because they depend on the recorded sample size
+    // and vehicle/PCE catalog, so a rerun that lost either would silently differ.
+    let tables = [
+        "link_hourly.csv",
+        "coverage.csv",
+        "link_capacity.csv",
+        "vc_histogram.csv",
+    ];
+    let automatic: Vec<String> = tables
+        .iter()
+        .map(|table| fs::read_to_string(report_dir.join(table)).unwrap())
+        .collect();
 
     let raw_before = snapshot(&output.join("ITERS"));
     let network_before = fs::read(output.join("output_network.xml.zst")).unwrap();
@@ -63,14 +83,26 @@ fn standalone_rerun_matches_automatic_metrics_and_preserves_raw_outputs() {
     let report = reanalyze_completed_run(&output, None).unwrap();
     assert_eq!(report, report_dir.join("index.html"));
     // The same recorded iteration, metadata and interval produce the automatic run's metrics.
-    assert_eq!(
-        fs::read_to_string(report_dir.join("link_hourly.csv")).unwrap(),
-        automatic_hourly
+    for (table, expected) in tables.iter().zip(&automatic) {
+        assert_eq!(
+            &fs::read_to_string(report_dir.join(table)).unwrap(),
+            expected,
+            "{table} differs after a standalone rerun"
+        );
+    }
+    // The recorded sample size really is what the capacity table scaled by, so the
+    // equivalence above is not passing by accident on a full sample.
+    let capacity = fs::read_to_string(report_dir.join("link_capacity.csv")).unwrap();
+    assert!(
+        capacity.contains(",0.250000,"),
+        "sample size is not exported"
     );
-    assert_eq!(
-        fs::read_to_string(report_dir.join("coverage.csv")).unwrap(),
-        automatic_coverage
-    );
+    let scaled = capacity
+        .lines()
+        .skip(1)
+        .filter(|line| line.contains(",0.250000,"))
+        .count();
+    assert!(scaled > 0, "no interval carries the sampled scaling");
     assert_eq!(snapshot(&output.join("ITERS")), raw_before);
     assert_eq!(
         fs::read(output.join("output_network.xml.zst")).unwrap(),
