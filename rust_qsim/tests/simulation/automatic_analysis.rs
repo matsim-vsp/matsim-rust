@@ -86,6 +86,15 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     }
     let garage = Garage::default();
     let metadata = run_metadata(4711, 1.0, &garage, &[]);
+    let observed_data = output.join("observed.csv");
+    fs::write(
+        &observed_data,
+        "link_id,period_start_seconds,period_end_seconds,vehicle_class,metric,unit,value,split\n\
+         used,3600,7200,all,count,vehicles,1,calibration\n\
+         used,3600,7200,all,speed,m/s,0.01,holdout\n\
+         missing,3600,7200,all,count,vehicles,1,holdout\n",
+    )
+    .unwrap();
 
     let report = analyze_final_iteration(
         output,
@@ -98,6 +107,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            observed_data: Some(observed_data),
             ..Analysis::default()
         },
     )
@@ -110,6 +120,16 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert!(hourly.contains("\"unused-5\",3600,0,0"));
     let coverage = fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap();
     assert!(coverage.contains("3600,200,5,195,2.500000"));
+    let validation = report.parent().unwrap();
+    let validation_matches = fs::read_to_string(validation.join("validation_matches.csv")).unwrap();
+    assert!(validation_matches.contains("\"used\",3600,\"all\",\"count\",\"calibration\",1.000000,1.000000,1.000000,1.000000,0.000000,0.000000"));
+    assert!(validation_matches.contains("\"used\",3600,\"all\",\"speed\",\"holdout\",0.010000,0.010000,1.000000,0.010000,0.000000,0.000000"));
+    let unmatched = fs::read_to_string(validation.join("validation_unmatched.csv")).unwrap();
+    assert!(unmatched.contains("no_simulation_match"));
+    assert!(validation.join("validation_scatter_count.svg").is_file());
+    assert!(validation.join("validation_scatter_speed.svg").is_file());
+    assert!(validation.join("validation_time_profiles.svg").is_file());
+    assert!(validation.join("validation_residual_map.svg").is_file());
     let html = fs::read_to_string(&report).unwrap();
     // The report embeds the hourly rows and the coverage CSV verbatim; assert the
     // payload's columns and values rather than a bare variable declaration.
@@ -601,7 +621,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 13] = [
+    const TABLES: [&str; 14] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -615,6 +635,7 @@ fn metric_catalog_names_match_the_exported_columns() {
         "person_daily.csv",
         "daily_summary.csv",
         "legs.csv",
+        "validation_summary.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1119,6 +1140,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             interval_seconds: 3600,
             link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
+            observed_data: None,
         },
     )
     .unwrap();
@@ -1219,6 +1241,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             interval_seconds: 3600,
             link_labels: labels,
             urban_boundary: None,
+            observed_data: None,
         },
     )
     .unwrap();

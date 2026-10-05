@@ -24,6 +24,32 @@ across-link mean and population standard deviation per interval,
 `link_speed_histogram.csv` the fixed-bin distribution, and
 `link_speed_diagnostics.csv` every record that could not produce a full-link speed.
 
+## Observed validation
+
+Set `output.analysis.observed_data` to a CSV file to compare observations with the latest
+completed iteration. Relative paths are resolved from the run's output directory; standalone
+reanalysis reuses the path recorded in the manifest. The file must contain one row per link and
+period, with these exact headers:
+
+```csv
+link_id,period_start_seconds,period_end_seconds,vehicle_class,metric,unit,value,split
+link-1,0,3600,all,count,vehicles,120,calibration
+link-1,0,3600,all,speed,km/h,36,holdout
+```
+
+`link_id` is the external network link ID. Periods must match the configured analysis interval
+exactly. `vehicle_class` currently accepts `all`, matching the aggregate link tables; other class
+values are listed as unmatched because the event replay does not yet export class-specific
+simulation totals. `metric` accepts `count` or `speed`; count units are `vehicles`, `vehicle`, or
+`veh`, and speed units are `m/s`, `mps`, `km/h`, or `kph`. Counts are expanded by the reciprocal
+of `qsim.sample_size`, while speeds are not expanded. `split` is `calibration` or `holdout`.
+
+The report exports matched rows, unmatched input rows, and per-split bias, MAE, RMSE, and count
+GEH in CSV. Relative error is blank when the observed reference is zero. It also writes observed
+versus simulated and time-profile SVGs and a link residual map. The input path is recorded as
+observation provenance in each matched row. Validation input errors leave the core report intact
+and mark only the validation module failed.
+
 ## Link classification
 
 `output.analysis.link_labels` is a map keyed by external link ID. Each entry can

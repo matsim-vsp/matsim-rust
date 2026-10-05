@@ -603,6 +603,9 @@ pub struct Analysis {
     /// inside or the segment crosses the polygon. When set, this determines
     /// `urban_area` instead of the per-link label of the same name.
     pub urban_boundary: Option<Vec<[f64; 2]>>,
+    /// Optional observed-data CSV used by the validation report. Relative paths are resolved
+    /// against the configured output directory.
+    pub observed_data: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -620,6 +623,7 @@ impl Default for Analysis {
             interval_seconds: 3600,
             link_labels: std::collections::BTreeMap::new(),
             urban_boundary: None,
+            observed_data: None,
         }
     }
 }

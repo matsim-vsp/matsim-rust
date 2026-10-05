@@ -122,6 +122,7 @@ fn analyze(
             interval_seconds,
             link_labels: BTreeMap::new(),
             urban_boundary: None,
+            observed_data: None,
         },
     )
     .unwrap();
