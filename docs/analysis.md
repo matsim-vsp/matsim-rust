@@ -51,6 +51,51 @@ supplied denominators. Person economic rows outside that shared complete-person 
 `metric_differences.csv` with `excluded_incomplete_or_missing_travel` status and no difference.
 Monetary units are part of comparison keys, so different currencies do not compare as if they
 shared a unit.
+## Execution context
+
+The local report includes `runtime.csv` and `runtime_metadata.json`, separate from the deterministic
+simulation metric catalog. They record total simulation and analysis wall time, measured phase
+times, configured worker count, build target and software version, available logical CPUs, CPU
+model and host memory when exposed by the OS, and network, population, vehicle, and expected-leg
+counts. Each CSV value includes its provenance.
+Peak process memory is sampled after simulation and before analysis, and is included only when
+the host provides a measurement; an unavailable measurement does not affect analysis. Reanalysis
+preserves the original simulation context and refreshes the analysis timing. Cross-run metric
+comparisons continue to use each run's latest
+completed iteration and do not aggregate runtime metadata as simulation output. Legacy reports
+without execution context retain unknown historical fields instead of inventing zero values.
+
+
+## Modeled emissions
+
+Configure `output.analysis.emissions` to consume externally modeled emission records; this
+analysis does not calculate emissions. The CSV must include
+`iteration,time_seconds,pollutant,unit,value,vehicle_id,link_id,area_id,emission_type`. Set exactly one of `link_id` and `area_id`
+on each row, and use `warm` or `cold` for `emission_type`. Units are kept as supplied, so different
+units are never summed together. `vehicle_id` joins through the run's vehicle catalog to a vehicle
+type ID; `vehicle_categories` maps those type IDs to reporting categories. Only records for the
+completed iteration are included. Totals use fixed 3600-second hours regardless of
+`analysis.interval_seconds`. Values are expanded by `1 / qsim.sample_size`; both sampled and
+expanded totals are exported.
+
+```yaml
+output:
+  analysis:
+    emissions:
+      records: emissions.csv
+      vehicle_categories:
+        vehicle-type-car: passenger_car
+        vehicle-type-truck: heavy_truck
+      fleet_provenance: "vehicle categories from fleet-v3"
+      emission_factor_provenance: "HBEFA 4.2"
+      accounting_boundary: "tailpipe"
+```
+
+The report exports `emissions_hourly.csv` and `emissions_provenance.json`; link and area IDs are
+the location keys for mapping these totals onto supplied network or area geometries. Provenance
+records warm/cold record coverage, sample expansion, fleet and factor source, and the accounting
+boundary. These values describe emitted mass, not concentration or exposure. Missing records for
+the final iteration make `modeled_emissions` unavailable rather than reporting zero emissions.
 
 ## Journeys and travel distributions
 
@@ -85,6 +130,119 @@ supplied run's recorded `journey_mode_share.csv`, and writes a local comparison 
 table under `RUN/analysis/cross_run_comparison`. A comparison refuses a run whose report is failed
 or whose recorded iteration is not its latest output iteration.
 
+## Daily activity patterns
+
+`activity_durations.csv` holds one row per observed activity interval, and
+`activity_patterns.csv` one row per person for the simulated day. Activity times come from the
+recorded `actstart` and `actend` events; travel time comes from the observed leg completions in
+`legs.csv`. The chains are the activity types in the order they were observed, the observed leg
+modes in departure order, and the main modes of the observed journeys in order.
+
+A stage activity is one whose type contains `interaction` — a transit access, egress or transfer
+wait. `activity_durations.csv` flags these in the `stage` column and still reports them, so a day
+reconciles against every observed interval, but neither the plan's activity count nor the
+observed `observed_activities` counts them. Both sides therefore use the same rule as the journey
+definition, and a transfer that happened can never stand in for a destination that did not.
+
+### First and last day censoring
+
+The recording window opens at `qsim.start_time`, so an activity observed to begin exactly there
+was already in progress when the window did. Its total duration is only a lower bound and it is
+flagged `start_censored`. An activity with no observed end by the time the run shuts down is
+flagged `end_censored` for the same reason. Both flags are reported per activity and counted per
+person, and a censored interval never reaches a duration mean. Every boolean in these tables —
+`start_censored`, `end_censored`, `stage` and `crosses_zone_boundary` — is written as `true` or
+`false`. The window start is recorded in
+the run metadata, because the event files only contain events from the window onwards and cannot
+recover it. A start time after the end time is refused rather than reported.
+
+Censoring is separate from what is observable *inside* the window. A left-censored activity still
+contributes the seconds it was observed to last, reported as `in_window_seconds` alongside the
+unbounded `duration_seconds`. That is what lets a person's day be reconciled:
+`activity_seconds + travel_seconds` equals `observed_span_seconds`, the time between the first and
+the last thing the recording caught the person doing, and `timeline_gap_seconds` is whatever the
+recorded events leave over. A nonzero gap is time that neither activities nor completed legs
+account for. The bounds count every observed moment: an activity start or leg departure for the
+first, and an activity end, leg arrival or stuck event for the last, so a person who was recorded
+mid-leg and aborted keeps the aborted travel in the day and reports it as a gap.
+
+### Pattern status
+
+`status` is the first of these that applies, so the reason a day is short is the actionable one:
+
+- `not_observed`: the person emitted no activity event at all in the window, so there is no
+  observed day to classify. The plan and the observed events are separate sources and neither is
+  assumed to exist.
+- `stuck`: the person emitted a stuck event, so the rest of the day never happened.
+- `truncated`: fewer activities were observed than the recorded selected plan contains, so the
+  day stopped short of the plan.
+- `complete`: every planned activity was observed. A last activity without an observed end is
+  still `complete`; that is ordinary end-of-day right-censoring and is reported by the censoring
+  flags rather than by downgrading the pattern.
+
+The pattern totals are the ones a reader checks the day against: one pattern row per person, and
+the cohort's journey count equal to the journeys in `journeys.csv` that departed, its travel
+seconds equal to the completed legs in `legs.csv`, and the zone rows' origin and destination
+counts both total the journey table.
+
+`activity_type_summary.csv` groups activities by type and reports the uncensored count, both
+censoring counts, and the mean, median and in-window total. `activity_pattern_summary.csv` is a
+long-format table over three groupings — all persons, the supplied person zone, and the pattern
+status — so one table covers the cohort, geographic and completeness views.
+
+## Zones and origin-destination flows
+
+`output.analysis.zone_system` is the documented zone system the geographic reports are built
+from. It carries an optional `name` for provenance and two independent geographies, because a
+location can be described by either:
+
+```yaml
+output:
+  analysis:
+    enabled: true
+    zone_system:
+      name: berlin-2018
+      # External link ID to zone ID. Journey origins, journey destinations and activities are
+      # located through the links their recorded events and plans name.
+      link_zones:
+        link-1: zone-a
+        link-2: zone-b
+      # External person ID to zone ID, the person geography the summaries are grouped by.
+      person_zones:
+        person-1: zone-a
+```
+
+Zones are supplied, never inferred from the network. A link with no entry and a person with no
+entry are both reported as `unmapped`, and they still form OD rows, boundary crossings and zone
+rows, so a partial zone system still accounts for every observed journey instead of reporting a
+matrix that quietly adds up to less than `journeys.csv` does.
+
+`zone_od.csv` is the mode and departure-interval keyed OD matrix: one row per
+`(departure_hour_seconds, mode, origin_zone, destination_zone)` cell, with
+`crosses_zone_boundary` and the distinct people behind it. `zone_flows.csv` is the boundary
+crossing report: the same journeys collapsed onto the unordered zone pair, named
+`min|max` so both directions of one boundary share a name. `zone_summary.csv` reports per-zone
+link, resident-person, observing-person, activity and journey counts.
+
+Only journeys with an observed departure enter the matrix, because the matrix is keyed by
+departure interval and a journey that never moved has no interval to place. Those journeys keep
+their zone counts in `zone_summary.csv` and their row in `journeys.csv`.
+
+Without a zone system the three zone tables are published with their headers only, and the
+`zones` module reports itself `unavailable`.
+
+`urban_area_summary.csv` is grouped by the geography the run supplied, which the `geography`
+column names on every row. A configured zone system is the report's own definition of an urban
+area, so the summary is keyed by it and the person geography contributes `residents` and
+`unmapped_residents`. Without one it falls back to the link classification the report already
+computes, and the residents are zero because no person geography was supplied. Either way an
+activity whose link the report cannot place is counted as `unclassified` rather than attributed
+to an area it does not belong to, and every location is reported. The report embeds a bounded
+preview of `activity_patterns.csv`, `activity_durations.csv` and `zone_od.csv` and says so when a
+table is longer, as it does for `legs.csv`.
+
+The supplied zone system is recorded in `manifest.json`, so a standalone rerun rebuilds the same
+geographic report.
 ## Public transport performance and demand validation
 
 Public transport is modeled by teleportation in this build. A `travelled with pt` event records
@@ -226,6 +384,32 @@ the full period start and end, so runs with different interval widths remain ide
 Relative paths are resolved from the current run's output directory. A missing or incomplete
 comparison report marks only the cross-run comparison module failed.
 
+
+## Modeled noise and exposure
+
+Set `output.analysis.noise` to analyze supplied receiver records; this reads model outputs and
+does not add a noise simulation engine.
+
+```yaml
+output:
+  analysis:
+    noise:
+      records: noise.csv
+      affected_population: affected_population.csv  # optional
+```
+
+`noise.csv` has `receiver_id,period_start_seconds,period_end_seconds,metric,unit,value` columns;
+optional `x,y` columns give receiver coordinates in the supplied map coordinate system.
+Metrics named `source_sound` and `exposure` require `dB` and are combined by energy mean when
+multiple records share a receiver, period and metric. A supplied `damage` metric is summed in its
+input unit; no monetized damage is calculated. Other supplied metrics use an arithmetic mean.
+`affected_population.csv` has `receiver_id,period_start_seconds,period_end_seconds,affected_population`;
+values join only on the exact receiver and period, and duplicate rows sum. Receiver maps are
+written per sound/exposure metric and exact period only when coordinates are supplied; `noise_maps.csv`
+indexes them. Without that file the
+population column stays blank and availability says unavailable. Summary and availability tables
+are exported and included in the local report. Cross-run comparison reads the latest report's
+noise summary.
 
 ## DRT and taxi service performance
 
@@ -387,6 +571,8 @@ green and unused links in gray. Dashed lines identify expressways, which means
 the exact, case-sensitive label `expressway`; any other road type is drawn solid.
 Hover over a map link to see its labels and usage.
 
+The same urban area is the grouping of `urban_area_summary.csv`, which adds the activities
+and journeys each area carries. See "Zones and origin-destination flows" above.
 ## Comparing completed runs
 
 The shared analysis interface can compare existing reports with an explicit baseline:
@@ -463,3 +649,127 @@ output:
       - [1000.0, 1000.0]
       - [0.0, 1000.0]
 ```
+
+## Accessibility to supplied opportunities
+
+The `accessibility` module reports how many jobs, schools or services each origin
+can reach within a travel-time threshold. It stays `unavailable` until all three
+of its inputs are configured, and a partial set or an unreadable file marks only
+this module `failed`. Relative paths resolve from the run's output directory.
+
+The measure is declared rather than implied: every exported row carries
+`measure=cumulative_opportunities_within_threshold`. It sums the weight of every
+supplied opportunity whose **potential** travel cost from the origin is at or
+below the threshold, and the threshold is inclusive, so a destination costing
+exactly the threshold counts as reachable.
+
+Realized trips are not potential destinations. A journey table says how long one
+person actually took, which says nothing about how long anyone else *could*
+take, so `legs.csv` and the journey tables are never substituted for the supplied
+costs. Where a cost is missing, the module reports no value rather than deriving
+one from what happened to be travelled.
+
+The three inputs, all CSVs with these exact headers:
+
+```csv
+# opportunities: one row per location
+opportunity_id,category,x,y,count
+job-1,jobs,100.0,200.0,250
+
+# zones: the explicit coordinate/zone correspondence
+zone_id,x,y
+zone-1,0.0,0.0
+
+# travel_costs: potential-destination costs, by mode and departure period
+origin_zone,destination_zone,mode,period_start_seconds,travel_time_seconds
+zone-1,zone-1,car,28800,0
+zone-1,zone-2,car,28800,1800
+```
+
+`x` and `y` are in the same coordinate system and units as network node
+coordinates. Weights and costs must be finite and non-negative, and a duplicate
+location, zone or cost key is a module failure. An opportunity or a person is
+placed in the zone whose centroid is nearest by horizontal distance, with ties
+broken on the zone id, so the assignment does not depend on the input file's row
+order. A person is placed by their first non-stage activity. A blank category is
+reported as `unknown` rather than rejected. Cost rows naming a zone the zone file
+does not list are counted in `accessibility_diagnostics.csv` instead of failing the
+module, because a rectangular skim is routinely wider than the zones under study.
+
+`accessibility_zones.csv` holds one row per origin zone, category, mode, departure
+period and threshold. `status` distinguishes five outcomes, because folding them
+together would misreport the data:
+
+| `status` | meaning |
+|---|---|
+| `available` | every location of the category has a supplied cost from this origin |
+| `available_missing_costs` | some locations have no cost; they are excluded and counted in `opportunity_locations_without_cost` |
+| `unavailable:no_origin_costs` | no cost of this mode and period leaves the origin |
+| `unavailable:no_travel_costs` | the cost file supplies no table for this mode and departure period |
+| `unavailable:non_finite_measure` | the category's weights summed to a non-finite number |
+
+A person whose plan has a home activity that cannot be placed gets
+`unavailable:no_home_zone` rows rather than disappearing from the population. A
+person with no selected plan has no recorded expectations at all and so is not in
+`accessibility_persons.csv`; the run's `expected_travel` list is what both the
+per-person and per-zone tables are built from. Every unavailable status leaves the
+measure columns blank rather than reporting zero, so a missing prerequisite is
+never read as poor accessibility.
+
+`accessibility_summary.csv` reports, per category, mode, period and threshold, the
+mean, median, minimum and maximum over the zones that have a supplied cost, plus a
+`population_weighted_opportunities` column. The two differ exactly when
+opportunities are unevenly distributed over people, which is the equity signal.
+`persons_included` is the simulated person count the weighting covers, and
+`sample_size` is the simulated fraction of the population they are, so a reader can
+tell a sampled run from a full one. A zone with no supplied cost at all is counted
+in `zones_without_costs` and excluded from the statistics, because treating it as a
+zone holding zero opportunities would drag every mean down. A zone in
+`available_missing_costs` *is* included, so `zones_without_costs` counts only fully
+unavailable zones; read the missing-cost share from the zone table.
+
+`accessibility_persons.csv` repeats the value of each person's own origin zone per
+cell, which is what an equity analysis reads. Following the catalog rule in
+`docs/architecture.md`, every accessibility name in `metric_catalog.json` is a
+column of one of the tables above, so a consumer can look it up where it is
+exported. The measure itself is catalogued as `opportunities`, and the declared
+measure name is in each row's own `measure` column, which is what tells a consumer
+which definition a value was computed under. The `aggregation_key` names the
+origin, category, mode, period and threshold, which is how a comparison tool lines
+two runs up.
+
+`accessibility_map.svg` draws one small panel per reported cell on a shared
+projection, up to 24 panels; further combinations stay in the CSVs and
+`map_panels_omitted` counts them. A filled circle is an origin zone shaded across a
+single-hue ramp normalized to its own panel, a gray circle is an origin with no
+supplied cost, and a green ring is a zone holding opportunities of that category,
+sized by their total weight. The per-zone and per-person tables are embedded in
+`index.html` as bounded previews of 500 rows, because a per-person table over several
+categories, modes, periods and thresholds outgrows a page; the summary and
+diagnostics tables are embedded in full because each holds one row per reported
+combination rather than per person. The CSVs hold every row either way.
+
+For example:
+
+```yaml
+output:
+  analysis:
+    enabled: true
+    accessibility:
+      opportunities: accessibility/opportunities.csv
+      zones: accessibility/zones.csv
+      travel_costs: accessibility/travel_costs.csv
+      # Defaults to a 45-minute cutoff when omitted.
+      thresholds_seconds: [1800, 3600]
+```
+
+Every setting is also reachable from the command line, for example
+`--set output.analysis.accessibility.thresholds_seconds=1800,3600`.
+
+## Demographic outcomes and equity
+
+Set `output.analysis.person_group_attributes` to the person attributes the report groups people by, such as `income` or `age`. Missing or blank attributes are grouped as `unknown`. Optional weight and cost attributes are recorded with the run; invalid or missing weights default to one, while unavailable costs remain blank.
+
+`group_burdens.csv` reports weighted group sizes and completed daily travel-time burdens. Incomplete or stuck people remain in group counts without lowering the travel-time mean. `person_demographics.csv` lists each person's groups, weight, and cost. `equity_comparison.csv` compares completed daily burdens with configured runs; differences within one microsecond count as unchanged, and persons without comparable completed days are reported separately.
+
+`group_module_outcomes.csv` combines per-group outcomes exported by other modules using `<module>_group_outcomes.csv` with columns `dimension,group,metric,unit,value`.

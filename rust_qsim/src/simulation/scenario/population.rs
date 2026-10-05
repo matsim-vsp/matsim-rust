@@ -245,6 +245,7 @@ pub struct InternalPlan {
     pub score: Option<f64>,
     pub selected: bool,
     pub elements: Vec<InternalPlanElement>,
+    pub attributes: InternalAttributes,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -253,15 +254,6 @@ pub struct InternalPerson {
     plans: Vec<InternalPlan>,
     subpopulation: Id<String>,
     attributes: InternalAttributes,
-}
-
-impl InternalPerson {
-    pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
-        self.plans
-            .iter_mut()
-            .find(|plan| plan.selected)
-            .expect("No selected plan found")
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -307,14 +299,56 @@ impl InternalPerson {
         self.plans.iter().find(|&plan| plan.selected)
     }
 
-    pub(crate) fn attributes(&self) -> &InternalAttributes {
+    pub fn attributes(&self) -> &InternalAttributes {
         &self.attributes
+    }
+
+    pub fn attributes_mut(&mut self) -> &mut InternalAttributes {
+        &mut self.attributes
+    }
+
+    pub(crate) fn copy_metadata_from(&mut self, original: &Self) {
+        self.subpopulation = original.subpopulation.clone();
+        self.attributes = original.attributes.clone();
+    }
+
+    pub fn selected_plan_mut(&mut self) -> &mut InternalPlan {
+        self.plans
+            .iter_mut()
+            .find(|plan| plan.selected)
+            .expect("No selected plan found")
+    }
+
+    pub fn add_new_plan_as_selected(&mut self, plan: InternalPlan) -> usize {
+        // Deselect all existing plans
+        for p in &mut self.plans {
+            p.selected = false;
+        }
+        // Add the new plan and mark it as selected
+        let mut new_plan = plan;
+        new_plan.selected = true;
+        self.plans.push(new_plan);
+        self.plans().len() - 1
+    }
+
+    pub fn mark_plan_as_selected(&mut self, plan_index: usize) {
+        if plan_index >= self.plans.len() {
+            panic!(
+                "Plan index {} is out of bounds for person {}",
+                plan_index,
+                self.id.external()
+            );
+        }
+        for (i, p) in self.plans.iter_mut().enumerate() {
+            p.selected = i == plan_index;
+        }
     }
 }
 
 impl Default for InternalPlan {
     fn default() -> Self {
         Self {
+            attributes: InternalAttributes::default(),
             score: None,
             selected: true,
             elements: Vec::new(),
@@ -406,8 +440,17 @@ impl InternalActivity {
 
     // i think this should go into the utils module rather than being here. paul, mar'26
     pub fn is_interaction(&self) -> bool {
-        self.act_type.external().contains("interaction")
+        is_interaction_type(self.act_type.external())
     }
+}
+
+/// MATSim's stage-activity rule: an activity type containing `interaction` is a transit
+/// access, egress or transfer wait rather than something the person chose to do.
+///
+/// The report applies the same rule to recorded activity events, which name a type rather than
+/// an [`InternalActivity`], so the test lives here and both sides call it.
+pub fn is_interaction_type(act_type: &str) -> bool {
+    act_type.contains("interaction")
 }
 
 impl FromStr for InternalPtRouteDescription {
@@ -684,13 +727,14 @@ impl InternalLeg {
     pub fn new(
         route: InternalRoute,
         mode: &str,
+        routing_mode: &str,
         trav_time: Duration,
         dep_time: Option<SimTime>,
     ) -> Self {
         Self {
             route: Some(route),
             mode: Id::create(mode),
-            routing_mode: Some(Id::create(mode)),
+            routing_mode: Some(Id::create(routing_mode)),
             trav_time: Some(trav_time),
             dep_time,
             attributes: InternalAttributes::default(),
@@ -758,12 +802,7 @@ impl From<IOActivity> for InternalActivity {
         InternalActivity {
             act_type: Id::create(&io.r#type),
             link_id: Id::create(&io.link.expect("Activity must have a link id")),
-            coord: io.x.map(|x| {
-                Coordinate::new_2d(
-                    x,
-                    io.y.expect("y coordinate should be given when x coord is given"),
-                )
-            }),
+            coord: io.x.zip(io.y).map(|(x, y)| Coordinate::new_2d(x, y)),
             start_time: parse_time_opt(&io.start_time),
             end_time: parse_time_opt(&io.end_time),
             max_dur: parse_duration_opt(&io.max_dur),
@@ -780,11 +819,9 @@ impl From<Activity> for InternalActivity {
         InternalActivity {
             act_type: Id::get_from_ext(&value.act_type),
             link_id: Id::get_from_ext(&value.link_id),
-            coord: Some(Coordinate::new_3d(
-                value.coordinate.as_ref().unwrap().x,
-                value.coordinate.as_ref().unwrap().y,
-                value.coordinate.as_ref().unwrap().z,
-            )),
+            coord: value
+                .coordinate
+                .map(|coord| Coordinate::new_3d(coord.x, coord.y, coord.z)),
             start_time: value.start_time_ns.map(SimTime::from_nanos),
             end_time: value.end_time_ns.map(SimTime::from_nanos),
             max_dur: value.max_dur_ns.map(Duration::from_nanos),
@@ -922,6 +959,10 @@ impl InternalPlanElement {
 impl FromIOPerson<IOPlan> for InternalPlan {
     fn from_io(io: IOPlan, id: Id<InternalPerson>) -> Self {
         InternalPlan {
+            attributes: io
+                .attributes
+                .map(InternalAttributes::from)
+                .unwrap_or_default(),
             score: io.score,
             selected: io.selected,
             elements: io
@@ -934,13 +975,13 @@ impl FromIOPerson<IOPlan> for InternalPlan {
 }
 
 impl From<Plan> for InternalPlan {
-    fn from(io: Plan) -> Self {
-        let acts = io
+    fn from(plan: Plan) -> Self {
+        let acts = plan
             .acts
             .into_iter()
             .map(InternalActivity::from)
             .collect::<Vec<_>>();
-        let legs = io
+        let legs = plan
             .legs
             .into_iter()
             .map(InternalLeg::from)
@@ -963,8 +1004,9 @@ impl From<Plan> for InternalPlan {
         }
 
         InternalPlan {
-            score: io.score,
-            selected: io.selected,
+            attributes: InternalAttributes::from(&plan.attributes),
+            score: plan.score,
+            selected: plan.selected,
             elements,
         }
     }
@@ -975,7 +1017,7 @@ mod tests {
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
-    use crate::simulation::io::xml::population::{IOLeg, IOPerson, IOPlan, IORoute};
+    use crate::simulation::io::xml::population::{IOActivity, IOLeg, IOPerson, IOPlan, IORoute};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
@@ -988,6 +1030,35 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[deterministic_id_test]
+    fn activity_from_xml_accepts_missing_or_partial_coordinates() {
+        for (xml, expected_coord) in [
+            (
+                r#"<activity type="home" link="1" x="10" y="20" />"#,
+                Some(Coordinate::new_2d(10.0, 20.0)),
+            ),
+            (r#"<activity type="home" link="1" />"#, None),
+            (r#"<activity type="home" link="1" x="10" />"#, None),
+            (r#"<activity type="home" link="1" y="20" />"#, None),
+        ] {
+            let io_activity = quick_xml::de::from_str::<IOActivity>(xml).unwrap();
+            let activity = InternalActivity::from(io_activity);
+
+            assert_eq!(expected_coord, activity.coord, "input: {xml}");
+            assert_eq!(Id::<Link>::get_from_ext("1"), activity.link_id);
+        }
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Activity must have a link id")]
+    fn activity_from_xml_still_requires_link_id() {
+        let io_activity =
+            quick_xml::de::from_str::<IOActivity>(r#"<activity type="home" x="10" y="20" />"#)
+                .unwrap();
+
+        let _ = InternalActivity::from(io_activity);
+    }
 
     #[deterministic_id_test]
     fn cmp_end_time_uses_bounded_open_ended_sentinel() {
@@ -1018,6 +1089,7 @@ mod tests {
             }),
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),
@@ -1033,6 +1105,7 @@ mod tests {
             attributes: None,
             id: "1".to_string(),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),

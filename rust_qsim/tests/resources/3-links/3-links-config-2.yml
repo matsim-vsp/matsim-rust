@@ -26,10 +26,25 @@ modules:
   routing:
     type: Routing
     mode: UsePlans
+    network_modes: [ "car", "bike" ]
   scoring:
     type: Scoring
     mode_params:
       - mode: car
+        marginal_utility_of_traveling: 0.0
+        marginal_utility_of_distance: 0.0
+        monetary_distance_cost_rate: 0.0
+        daily_money_constant: 0.0
+        daily_utility_constant: 0.0
+        constant: 0.0
+      - mode: bike
+        marginal_utility_of_traveling: 0.0
+        marginal_utility_of_distance: 0.0
+        monetary_distance_cost_rate: 0.0
+        daily_money_constant: 0.0
+        daily_utility_constant: 0.0
+        constant: 0.0
+      - mode: walk
         marginal_utility_of_traveling: 0.0
         marginal_utility_of_distance: 0.0
         monetary_distance_cost_rate: 0.0

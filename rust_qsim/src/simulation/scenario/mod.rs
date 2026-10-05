@@ -8,10 +8,12 @@ pub mod vehicles;
 
 use crate::simulation::config::Config;
 use crate::simulation::network::LinkStorageCapacities;
+use crate::simulation::network::signals::{SignalFiles, Signals};
 use crate::simulation::network::sim_network::SimNetworkPartition;
 use crate::simulation::{id, io};
 use network::Network;
 use population::Population;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 use transit::TransitSchedule;
@@ -160,6 +162,7 @@ pub struct Scenario {
     pub population: Population,
     pub transit_schedule: TransitSchedule,
     pub config: Arc<Config>,
+    pub signals: Signals,
 }
 
 impl Scenario {
@@ -178,6 +181,9 @@ impl Scenario {
         let mut garage = Self::load_garage(&config);
         let transit_schedule = Self::load_transit_schedule(&config);
         let population = Self::load_population(&config, &mut garage);
+        // Signals resolve link ids against the network that was just loaded, so this
+        // has to come after it.
+        let signals = Self::load_signals(&config);
 
         Scenario {
             network,
@@ -185,7 +191,29 @@ impl Scenario {
             population,
             transit_schedule,
             config,
+            signals,
         }
+    }
+
+    /// Resolves the configured signal plan, or an empty plan when none is configured.
+    ///
+    /// A partial set of files is rejected by `SignalFilesConfig::validate` before this
+    /// is reached, so a run either has a complete plan or none.
+    fn load_signals(config: &Config) -> Signals {
+        let files = &config.qsim().signals;
+        if !files.any_present() {
+            return Signals::default();
+        }
+        let resolved = |path: &Option<String>| {
+            path.as_ref()
+                .map(|p| io::resolve_path(config.context(), &PathBuf::from(p)))
+        };
+        let signal_files = SignalFiles {
+            systems: resolved(&files.systems),
+            groups: resolved(&files.groups),
+            control: resolved(&files.control),
+        };
+        Signals::from_files(&signal_files).unwrap_or_else(|err| panic!("{err}"))
     }
 
     fn load_network(config: &Config) -> Network {
@@ -233,6 +261,9 @@ pub struct ScenarioCore {
     pub garage: Arc<Garage>,
     pub transit_schedule: Arc<TransitSchedule>,
     pub config: Arc<Config>,
+    /// Signal plan resolved once at load and shared by every partition. Each partition
+    /// filters this down to the links it owns.
+    pub signals: Arc<Signals>,
 }
 
 /// Controller-owned scenario state between phases.
@@ -271,6 +302,7 @@ impl From<Scenario> for ControllerScenario {
                 garage: Arc::new(scenario.garage),
                 transit_schedule: Arc::new(scenario.transit_schedule),
                 config: scenario.config,
+                signals: Arc::new(Signals::default()),
             },
             population: scenario.population,
         }
@@ -347,7 +379,13 @@ impl ControllerScenario {
         storage_capacities: &LinkStorageCapacities,
         rank: u32,
     ) -> SimNetworkPartition {
-        SimNetworkPartition::from_network(&core.network, storage_capacities, rank, &core.config)
+        SimNetworkPartition::from_network(
+            &core.network,
+            storage_capacities,
+            rank,
+            &core.config,
+            &core.signals,
+        )
     }
 }
 
@@ -357,6 +395,7 @@ mod tests {
     use crate::simulation::config::{Config, PartitionMethod, Transit};
     use crate::simulation::id::Id;
     use crate::simulation::network::LinkStorageCapacities;
+    use crate::simulation::network::signals::Signals;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
     use crate::simulation::scenario::transit::{
@@ -425,6 +464,7 @@ mod tests {
             population,
             transit_schedule: TransitSchedule::default(),
             config,
+            signals: Signals::default(),
         }
         .into();
 

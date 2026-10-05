@@ -1,7 +1,13 @@
+#[path = "simulation/accessibility_analysis.rs"]
+mod accessibility_analysis;
 #[path = "simulation/automatic_analysis.rs"]
 mod automatic_analysis;
 #[path = "simulation/berlin.rs"]
 pub mod berlin;
+#[path = "simulation/daily_patterns.rs"]
+mod daily_patterns;
+#[path = "simulation/demographic_analysis.rs"]
+mod demographic_analysis;
 #[path = "simulation/empty.rs"]
 mod empty;
 #[path = "simulation/equil.rs"]

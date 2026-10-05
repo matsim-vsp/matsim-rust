@@ -12,6 +12,7 @@ use rust_qsim::simulation::config::{
 use rust_qsim::simulation::id;
 use rust_qsim::simulation::logging::init_std_out_logging_thread_local;
 use rust_qsim::simulation::network::LinkStorageCapacities;
+use rust_qsim::simulation::network::signals::Signals;
 use rust_qsim::simulation::network::sim_network::SimNetworkPartition;
 use rust_qsim::simulation::scenario::network::Network;
 
@@ -46,8 +47,13 @@ fn main() {
         let storage_capacities = LinkStorageCapacities::from_network(&net, config.qsim());
         let distinct_partitions: HashSet<u32> = net.nodes().iter().map(|n| n.partition).collect();
         for partition in distinct_partitions {
-            let net_partition =
-                SimNetworkPartition::from_network(&net, &storage_capacities, partition, &config);
+            let net_partition = SimNetworkPartition::from_network(
+                &net,
+                &storage_capacities,
+                partition,
+                &config,
+                &Signals::default(),
+            );
             let neighbors = net_partition.neighbors().len();
             let serialized = format!("{},{},{}\n", num_parts, partition, neighbors);
             writer
