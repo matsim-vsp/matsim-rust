@@ -150,7 +150,11 @@ impl IntervalVolumes {
         if !scaled.is_finite() || scaled >= i64::MAX as f64 {
             return None;
         }
-        Some(scaled.round() as i128)
+        let units = scaled.round();
+        // A PCE below half a unit would round to zero, silently turning a vehicle that
+        // was on the link into one that carried no weight at all. Report it as
+        // unresolved instead, so the interval is flagged rather than under-counted.
+        (units >= 1.0).then_some(units as i128)
     }
 }
 
@@ -544,13 +548,37 @@ mod tests {
             Some(f64::NAN),
             Some(f64::INFINITY),
             Some(f64::MAX),
+            // Below half a unit these would round to zero, so they are reported as
+            // unresolved rather than counted as a vehicle carrying no weight.
+            Some(1e-9),
+            Some(4.0e-7),
         ] {
             let mut volumes = IntervalVolumes::default();
             volumes.record(FlowSide::Entry, pce);
-            assert_eq!(volumes.pce(FlowSide::Entry), None);
+            assert_eq!(volumes.pce(FlowSide::Entry), None, "pce {pce:?}");
             // The crossing itself is still counted as a vehicle.
             assert_eq!(volumes.entries, 1);
             assert_eq!(volumes.entry_unresolved_pce, 1);
+        }
+    }
+
+    #[test]
+    fn the_smallest_representable_pce_is_kept() {
+        // Half a unit rounds up to one unit and stays reportable.
+        let mut volumes = IntervalVolumes::default();
+        volumes.record(FlowSide::Entry, Some(5e-7));
+        assert_eq!(volumes.pce(FlowSide::Entry), Some(1e-6));
+        assert_eq!(volumes.entry_unresolved_pce, 0);
+    }
+
+    #[test]
+    fn realistic_pce_values_survive_the_fixed_point_scale_exactly() {
+        for pce in [
+            0.1, 0.05, 0.2, 0.25, 0.35, 1.0, 1.5, 2.0, 2.5, 3.0, 0.333, 1.234_567,
+        ] {
+            let mut volumes = IntervalVolumes::default();
+            volumes.record(FlowSide::Entry, Some(pce));
+            assert_eq!(volumes.pce(FlowSide::Entry), Some(pce), "pce {pce}");
         }
     }
 
