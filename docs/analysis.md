@@ -174,6 +174,31 @@ Relative paths are resolved from the current run's output directory. A missing o
 comparison report marks only the cross-run comparison module failed.
 
 
+## Travel survey comparison
+
+Set `output.analysis.journey_survey` to a weighted journey-record CSV. Relative paths are
+resolved from the run output directory and recorded in the manifest for standalone reanalysis.
+Each row must contain `study_population`, `journey_definition`, `split`, `mode`, `purpose`,
+`departure_seconds`, `duration_seconds`, `distance_meters`, and `weight`; `uncertainty` is
+optional. The study population must be positive and identical across rows. Weights and
+uncertainty must be finite and non-negative. Split is `calibration` or `holdout`.
+
+The comparable journey definition is `matsim-substantive-activities-v1`: consecutive
+substantive activities form a journey, interaction activities remain inside it, main mode uses
+the MATSim hierarchy (including transit), and purpose is the destination activity type. Survey
+mode labels must use the same categories as the simulated `main_mode`. Other
+definitions are retained in the output but marked `non_comparable_definition`, with observed
+shares withheld. The output compares weighted mode and purpose categories, departure hour,
+distance class, and duration class. Departure uses fixed clock hours; distance uses the journey
+classes above; duration bins are under 15, 15–30, 30–60, 60–120, and 120 or more minutes.
+Duration distributions use survey records with a duration and simulated journeys marked
+completed. Calibration and holdout refer to survey records; the same simulated distribution is
+shown against each split. The `journey_survey_comparison.csv` table
+includes observed and simulated denominators, shares, split, population, supplied uncertainty,
+and missing-category status. `uncertainty` is the standard error for that record's weight; the
+reported group uncertainty combines weighted record standard errors in quadrature. Its rows are
+embedded in the local report. Input errors fail only this optional module.
+
 ## Network distance, time and congestion
 
 `network_distance_time.csv` reports observed vehicle link traversals by link and interval;
@@ -254,6 +279,40 @@ The local SVG map marks links used at least once during the final iteration in
 green and unused links in gray. Dashed lines identify expressways, which means
 the exact, case-sensitive label `expressway`; any other road type is drawn solid.
 Hover over a map link to see its labels and usage.
+
+## Comparing completed runs
+
+The shared analysis interface can compare existing reports with an explicit baseline:
+
+```rust,ignore
+use rust_qsim::simulation::analysis::compare_completed_runs;
+use std::path::{Path, PathBuf};
+
+let report = compare_completed_runs(
+    Path::new("runs/baseline"),
+    &[PathBuf::from("runs/alternative-a"), PathBuf::from("runs/alternative-b")],
+)?;
+```
+
+Each input must contain a complete `analysis/manifest.json`, metric catalog and latest-iteration
+tables. The comparison is written to `baseline/analysis/comparison/` and leaves each input report
+unchanged. `metric_differences.csv` exports both values, alternative-minus-baseline difference,
+relative difference, unit, aggregation key, the baseline value used as the relative denominator,
+and metric-specific aggregation denominators where the source provides them. Relative differences
+are blank when the baseline is zero. `metric_compatibility.csv` identifies
+missing metrics, incompatible definitions and unavailable or unregistered outputs. Link rows are
+matched by external link ID; links missing from either network are excluded and the number of
+corresponding links appears in the HTML report. Aggregate network and group metrics are omitted
+when the link sets differ; network-wide speed and V/C distributions are omitted too, while
+per-link outputs retain only corresponding IDs.
+Runs with different interval widths, simulation end times, sample-size scales, or link
+classification/filter definitions are rejected. `completion_status_differences.csv` and
+`completion_status_transitions.csv` show policy-induced changes in complete, incomplete, stuck and
+no-travel populations; `leg_completion_status_transitions.csv` reports changes per person and leg.
+Per-person duration comparisons include only people with a complete plan in both runs. Leg-hour and
+daily-cohort aggregates are recomputed over their common complete populations. Other registered
+link, group, capacity and speed outputs are compared by their catalog aggregation keys. The HTML
+report renders the metric and completion-status tables.
 
 For example:
 
