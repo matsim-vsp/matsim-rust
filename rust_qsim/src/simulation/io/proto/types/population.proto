@@ -20,6 +20,7 @@ message Plan {
   repeated Leg legs = 2;
   repeated Activity acts = 3;
   optional double score = 4;
+  map<string, general.AttributeValue> attributes = 5;
 }
 
 message Activity {

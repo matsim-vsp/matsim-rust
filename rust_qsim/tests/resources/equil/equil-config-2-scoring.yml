@@ -1,0 +1,42 @@
+modules:
+  network:
+    type: Network
+    path: ./assets/equil/equil-network.xml
+  population:
+    type: Population
+    path: ./assets/equil/equil-1-plan.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/equil/equil-vehicles.xml
+  partitioning:
+    type: Partitioning
+    num_parts: 2
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/scoring_backpacking_2
+    write_events: None
+  routing:
+    type: Routing
+    mode: UsePlans
+    network_modes: [ "car" ]
+  controller:
+    type: Controller
+    last_iteration: 1
+    compression_type: XmlZst
+    write_events_interval: 1
+    write_plans_interval: 1
+  qsim:
+    type: QSim
+    main_modes: [ "car" ]
+  scoring:
+    type: Scoring
+    write_experienced_plans: true
+    activity_params:
+      - activity_type: h
+        typical_duration_s: 43200.0
+      - activity_type: w
+        typical_duration_s: 28800.0

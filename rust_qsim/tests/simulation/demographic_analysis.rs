@@ -56,6 +56,7 @@ fn person(id: &str, attributes: &[(&str, &str, &str)], legs: &[&str]) -> IOPerso
                 .collect(),
         }),
         plans: vec![IOPlan {
+            attributes: None,
             selected: true,
             score: None,
             elements,

@@ -21,7 +21,7 @@ modules:
   simulation:
     type: Simulation
     last_iteration: 0
-    main_modes: []
+    main_modes: [ ]
   routing:
     type: Routing
     mode: UsePlans

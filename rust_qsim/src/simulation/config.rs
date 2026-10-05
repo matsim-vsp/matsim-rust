@@ -617,6 +617,8 @@ pub struct Analysis {
     /// paths are resolved against the configured output directory.
     pub transit_observed_data: Option<PathBuf>,
 
+    /// Optional modeled emission-event records CSV. Relative paths resolve from the output dir.
+    pub emissions: Option<EmissionsInputs>,
     /// Optional modeled receiver sound/exposure records and affected population data.
     pub noise: Option<NoiseInputs>,
 
@@ -739,6 +741,16 @@ pub struct ServiceInputs {
     pub max_wait_seconds: Option<f64>,
 }
 
+/// Supplied modeled emissions and the provenance needed to interpret their totals.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EmissionsInputs {
+    pub records: PathBuf,
+    /// Category labels keyed by the vehicle type ID found in the run's vehicle catalog.
+    pub vehicle_categories: std::collections::BTreeMap<String, String>,
+    pub fleet_provenance: String,
+    pub emission_factor_provenance: String,
+    pub accounting_boundary: String,
+}
 /// Supplied noise model outputs. Analysis never invents receiver locations or exposure.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct NoiseInputs {
@@ -771,6 +783,7 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
             noise: None,
 
             excess_delay_clip_seconds: None,
@@ -1013,6 +1026,16 @@ pub struct StrategySetting {
     pub subpopulation: String,
 }
 
+impl StrategySetting {
+    pub fn new(name: String, weight: f64, subpopulation: String) -> Self {
+        Self {
+            name,
+            weight,
+            subpopulation,
+        }
+    }
+}
+
 register_override!(
     "replanning.fraction_of_iterations_to_disable_innovation",
     |config, value| {
@@ -1070,20 +1093,33 @@ impl Default for Replanning {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Scoring {
+    pub write_experienced_plans: bool,
     pub activity_params: Vec<ActivityParameter>,
     pub mode_params: Vec<ModeParameter>,
     pub agent_params: Vec<AgentParameter>,
 }
 
+register_override!("scoring.write_experienced_plans", |config, value| {
+    config.scoring_mut().write_experienced_plans = value.parse().unwrap();
+});
+
 impl Default for Scoring {
     fn default() -> Self {
         Self {
-            activity_params: Vec::new(),
+            write_experienced_plans: true,
+            activity_params: vec![
+                ActivityParameter::default_for_activity_type("home"),
+                ActivityParameter::default_for_activity_type("work"),
+                ActivityParameter::default_for_activity_type("leisure"),
+                ActivityParameter::default_for_activity_type("shop"),
+                ActivityParameter::default_for_activity_type("errands"),
+            ],
             mode_params: vec![
                 ModeParameter::default_for_mode("car"),
                 ModeParameter::default_for_mode("walk"),
                 ModeParameter::default_for_mode("ride"),
                 ModeParameter::default_for_mode("freight"),
+                ModeParameter::default_for_mode("bike"),
             ],
             agent_params: vec![AgentParameter::default()],
         }
@@ -1093,6 +1129,17 @@ impl Default for Scoring {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActivityParameter {
     pub activity_type: String,
+    #[serde(default = "f64_value_1_0")]
+    pub typical_duration_s: f64,
+}
+
+impl ActivityParameter {
+    pub fn default_for_activity_type(activity_type: &str) -> Self {
+        Self {
+            activity_type: activity_type.to_string(),
+            typical_duration_s: 1.0,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -1137,6 +1184,7 @@ pub struct AgentParameter {
     pub performing: f64,                // utils/hour
     pub waiting: f64,                   // utils/hour
     pub marginal_utility_of_money: f64, // utils/money
+    pub aborted_plan_score: f64,        // utils/hour
 }
 
 impl Default for AgentParameter {
@@ -1148,6 +1196,7 @@ impl Default for AgentParameter {
             performing: 6.0,
             waiting: -0.0,
             marginal_utility_of_money: 1.0,
+            aborted_plan_score: -18.0,
         }
     }
 }
@@ -1161,6 +1210,41 @@ pub struct QSim {
     pub sample_size: f64,
     pub stuck_threshold: u32,
     pub main_modes: Vec<String>,
+    /// Paths to the MATSim signal files. Absent, or present but incomplete, means the
+    /// run has no signals.
+    pub signals: SignalFilesConfig,
+}
+
+/// The three MATSim signal files that together define a signal plan.
+///
+/// All three are required: a partial set is a configuration error rather than a silent
+/// run with no signals, so `validate` reports it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct SignalFilesConfig {
+    pub systems: Option<String>,
+    pub groups: Option<String>,
+    pub control: Option<String>,
+}
+
+impl SignalFilesConfig {
+    pub fn any_present(&self) -> bool {
+        self.systems.is_some() || self.groups.is_some() || self.control.is_some()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.any_present() {
+            return Ok(());
+        }
+        if self.systems.is_some() && self.groups.is_some() && self.control.is_some() {
+            return Ok(());
+        }
+        Err(
+            "qsim.signals needs all three of systems, groups and control; \
+             a partial set cannot define a signal plan"
+                .to_string(),
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -1224,6 +1308,7 @@ impl From<&Simulation> for QSim {
             sample_size: value.sample_size,
             stuck_threshold: value.stuck_threshold,
             main_modes: value.main_modes.clone(),
+            signals: SignalFilesConfig::default(),
         }
     }
 }
@@ -1297,6 +1382,8 @@ pub struct ComputationalSetup {
     pub adapter_worker_threads: u32,
     /// The number of threads to be used by the replanning pool. 0 uses Rayon's default.
     pub replanning_threads: u32,
+    /// The number of threads used for scoring. 0 uses Rayon's default.
+    pub scoring_threads: u32,
     pub retry_time_seconds: u64,
     pub random_seed: u64,
 }
@@ -1310,6 +1397,10 @@ register_override!(
 
 register_override!("computational_setup.replanning_threads", |config, value| {
     config.computational_setup_mut().replanning_threads = value.parse().unwrap();
+});
+
+register_override!("computational_setup.scoring_threads", |config, value| {
+    config.computational_setup_mut().scoring_threads = value.parse().unwrap();
 });
 
 register_override!("computational_setup.global_sync", |config, value| {
@@ -1326,6 +1417,7 @@ impl Default for ComputationalSetup {
             global_sync: false,
             adapter_worker_threads: 3,
             replanning_threads: 0,
+            scoring_threads: 0,
             retry_time_seconds: 600,
             random_seed: DEFAULT_RANDOM_SEED,
         }
@@ -1500,6 +1592,7 @@ impl Default for QSim {
             sample_size: 1.0,
             stuck_threshold: 10,
             main_modes: vec![],
+            signals: SignalFilesConfig::default(),
         }
     }
 }
@@ -1593,9 +1686,11 @@ pub enum WriteEvents {
 #[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum CompressionType {
     None,
+    #[serde(alias = "XmlGz", alias = "Gz")]
     Gz,
     #[default]
     Proto,
+    #[serde(alias = "XmlZst", alias = "Zst")]
     Zst,
 }
 
@@ -1756,6 +1851,10 @@ fn f32_value_0_03() -> f32 {
     0.03
 }
 
+fn f64_value_1_0() -> f64 {
+    1.0
+}
+
 fn edge_weight_constant() -> EdgeWeight {
     EdgeWeight::Constant
 }
@@ -1788,7 +1887,7 @@ mod tests {
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
         Config, Controller, EdgeWeight, MetisOptions, ModeParameter, PartitionMethod, Partitioning,
-        QSim, Replanning, Routing, Scoring, StrategySetting, TeleportedParams,
+        QSim, Replanning, Routing, Scoring, SignalFilesConfig, StrategySetting, TeleportedParams,
         TravelTimeCalculator, VertexWeight, parse_key_val,
     };
     use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
@@ -1816,6 +1915,7 @@ mod tests {
             global_sync: true,
             adapter_worker_threads: 42,
             replanning_threads: 7,
+            scoring_threads: 0,
             retry_time_seconds: 41,
             random_seed: config::DEFAULT_RANDOM_SEED,
         };
@@ -1827,6 +1927,7 @@ mod tests {
             sample_size: 0.1,
             stuck_threshold: 1,
             main_modes: vec!["bike".to_string()],
+            signals: SignalFilesConfig::default(),
         };
         let controller = Controller {
             first_iteration: 2,
@@ -2170,8 +2271,10 @@ mod tests {
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         let expected = Scoring {
+            write_experienced_plans: true,
             activity_params: vec![ActivityParameter {
                 activity_type: "home".to_string(),
+                typical_duration_s: 1.0,
             }],
             mode_params: vec![ModeParameter {
                 mode: "car".to_string(),
@@ -2189,6 +2292,7 @@ mod tests {
                 performing: 4.0,
                 waiting: -3.0,
                 marginal_utility_of_money: 2.0,
+                aborted_plan_score: -18.0,
             }],
         };
         assert_eq!(config.scoring(), &expected);
@@ -2214,12 +2318,14 @@ mod tests {
         assert_eq!(
             config.scoring(),
             &Scoring {
-                activity_params: Vec::new(),
+                write_experienced_plans: true,
+                activity_params: Scoring::default().activity_params,
                 mode_params: vec![
                     ModeParameter::default_for_mode("car"),
                     ModeParameter::default_for_mode("walk"),
                     ModeParameter::default_for_mode("ride"),
                     ModeParameter::default_for_mode("freight"),
+                    ModeParameter::default_for_mode("bike"),
                 ],
                 agent_params: vec![AgentParameter::default()],
             }

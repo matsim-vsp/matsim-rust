@@ -43,7 +43,13 @@ fn equil_single_part_writes_events_at_interval_and_last_iteration() {
     controller.run();
 
     let iters_dir = output_dir.join("ITERS");
-    assert!(!iters_dir.join("it.0").join("events").exists());
+    assert!(
+        iters_dir
+            .join("it.0")
+            .join("events")
+            .join("events.0.xml.gz")
+            .exists()
+    );
     assert!(!iters_dir.join("it.1").join("events").exists());
     assert!(!iters_dir.join("it.2").join("events").exists());
     assert!(
@@ -183,7 +189,7 @@ fn equil_single_part_writes_plans_at_interval_and_last_iteration() {
     controller.run();
 
     let iters_dir = output_dir.join("ITERS");
-    assert!(!iters_dir.join("it.0").join("output_plans.xml.gz").exists());
+    assert!(iters_dir.join("it.0").join("output_plans.xml.gz").exists());
     assert!(!iters_dir.join("it.1").join("output_plans.xml.gz").exists());
     assert!(!iters_dir.join("it.2").join("output_plans.xml.gz").exists());
     assert!(iters_dir.join("it.3").join("output_plans.xml.gz").exists());
