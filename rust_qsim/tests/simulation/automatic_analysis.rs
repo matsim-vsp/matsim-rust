@@ -4,7 +4,7 @@ use rust_qsim::simulation::analysis::{
     AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
 };
 use rust_qsim::simulation::config::{
-    Analysis, CommandLineArgs, CompressionType, Config, LinkLabels, ServiceInputs,
+    Accessibility, Analysis, CommandLineArgs, CompressionType, Config, LinkLabels, ServiceInputs,
 };
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::id::Id;
@@ -1438,6 +1438,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             transit_observed_data: None,
             noise: None,
             excess_delay_clip_seconds: None,
+            accessibility: Accessibility::default(),
         },
     )
     .unwrap();
@@ -1545,6 +1546,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             transit_observed_data: None,
             noise: None,
             excess_delay_clip_seconds: None,
+            accessibility: Accessibility::default(),
         },
     )
     .unwrap();
