@@ -131,7 +131,7 @@ impl AltLandmarkData {
             .build()
             .unwrap();
 
-        match a_star_core(a_star_request) {
+        match a_star_core(a_star_request, None, None) {
             // some graph error occurred in A* (link or node not found). Return it.
             Err(e) => Err(e),
             // everything fine, A* returned a disutility vector; use it

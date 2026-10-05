@@ -1,9 +1,12 @@
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::a_star_core::{
-    AStarCoreResult, AStarRequestBuilder, HeuristicMode, RoutingAStarActions, a_star_core,
+    AStarCoreResult, AStarRequestBuilder, CandidateRoute, HeuristicMode, RoutingAStarActions,
+    a_star_core,
 };
 use crate::simulation::replanning::routing::alt_landmark_data::AltLandmarkData;
-use crate::simulation::replanning::routing::cost::{Disutility, TravelDisutility, TravelTime};
+use crate::simulation::replanning::routing::cost::{
+    Disutility, RoutingCostProfile, TravelDisutility, TravelTime,
+};
 use crate::simulation::replanning::routing::graph::{GraphError, IndexableGraph, LinkIndex};
 use crate::simulation::replanning::routing::least_cost_path_calculator::{
     LeastCostPath, LeastCostPathCalculator, LeastCostPathRequest,
@@ -13,7 +16,11 @@ use crate::simulation::replanning::routing::network_converter::{
 };
 use crate::simulation::scenario::network::{Link, Network, Node};
 use nohash_hasher::IntMap;
-use std::sync::Arc;
+use ordered_float::OrderedFloat;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::mem::size_of;
+use std::sync::{Arc, Mutex};
 use tracing::{error, warn};
 
 /// A heuristic to be used in A*. Given a from and to-node, estimates the disutility between them.
@@ -24,6 +31,10 @@ pub trait AStarHeuristic: Send + Sync {
     /// Estimate travel disutility between from-node and to-node. Never overestimates the
     /// disutility.
     fn estimate(&self, from: Id<Node>, to: Id<Node>) -> Disutility;
+    /// Whether estimates are consistent for static non-negative edge costs.
+    fn supports_consistent_static_bounds(&self) -> bool {
+        false
+    }
     /// Constructor for a heuristic for a given graph using a given travel disutility function as
     /// cost.
     /// Precalculates any data needed to estimate disutilities between nodes, such as landmark data
@@ -43,6 +54,9 @@ pub struct ZeroHeuristic;
 impl AStarHeuristic for ZeroHeuristic {
     fn estimate(&self, _from: Id<Node>, _to: Id<Node>) -> Disutility {
         0.
+    }
+    fn supports_consistent_static_bounds(&self) -> bool {
+        true
     }
     fn create(
         _graph: &dyn IndexableGraph,
@@ -107,6 +121,16 @@ impl AStarHeuristic for AltHeuristic {
 
         result
     }
+    /// The landmark bound never overestimates, but its consistency is not established here. The
+    /// maximum over landmarks of the two distance differences is admissible by the triangle
+    /// inequality, while consistency additionally needs the bound to move by at most the edge cost
+    /// along every edge of this directed graph. Candidate bounds and shared destination guidance
+    /// rely on that stronger property, because this search settles nodes without reopening them and
+    /// compares the bound against popped priorities. ALT therefore declines the capability and
+    /// those paths stay limited to heuristics that can state the property.
+    fn supports_consistent_static_bounds(&self) -> bool {
+        false
+    }
     fn create(
         graph: &dyn IndexableGraph,
         disutility: &dyn TravelDisutility,
@@ -127,6 +151,109 @@ pub struct AStar<H: AStarHeuristic> {
     heuristic: H,
     travel_time: Arc<dyn TravelTime>,
     travel_disutility: Arc<dyn TravelDisutility>,
+    route_cache: Mutex<RouteCache>,
+    destination_guidance: Mutex<DestinationGuidance>,
+}
+
+const ROUTE_CACHE_MAX_ENTRIES: usize = 4096;
+const ROUTE_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
+const DESTINATION_GUIDANCE_MAX_TRACKED: usize = 4096;
+const DESTINATION_GUIDANCE_MAX_TREES: usize = 8;
+const DESTINATION_GUIDANCE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Default)]
+struct DestinationGuidance {
+    request_counts: HashMap<usize, u8>,
+    trees: HashMap<usize, DestinationTree>,
+    estimated_bytes: usize,
+}
+
+struct DestinationTree {
+    next_link: Vec<usize>,
+}
+
+impl DestinationTree {
+    fn path(
+        &self,
+        graph: &dyn IndexableGraph,
+        source: usize,
+        target: usize,
+    ) -> Option<Vec<Id<Link>>> {
+        let mut path = Vec::new();
+        let mut current = source;
+        for _ in 0..graph.num_nodes() {
+            if current == target {
+                return Some(path);
+            }
+            let link = *self.next_link.get(current)?;
+            if link == usize::MAX {
+                return None;
+            }
+            path.push(graph.get_link_id_from_idx(link).ok()?);
+            current = graph.get_end_node_as_idx(link).ok()?;
+        }
+        None
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RouteCacheKey {
+    from: Id<Link>,
+    to: Id<Link>,
+    departure_nanos: u64,
+    travel_time_epoch: u64,
+    disutility_epoch: u64,
+    travel_time_profile: RoutingCostProfile,
+    disutility_profile: RoutingCostProfile,
+}
+
+#[derive(Default)]
+struct RouteCache {
+    entries: HashMap<RouteCacheKey, LeastCostPath>,
+    insertion_order: VecDeque<RouteCacheKey>,
+    estimated_bytes: usize,
+}
+
+impl RouteCache {
+    fn get(&self, key: &RouteCacheKey) -> Option<LeastCostPath> {
+        self.entries.get(key).map(clone_path)
+    }
+
+    fn insert(&mut self, key: RouteCacheKey, path: LeastCostPath) {
+        let bytes = Self::estimate_bytes(&path);
+        if bytes > ROUTE_CACHE_MAX_BYTES {
+            return;
+        }
+        if let Some(previous) = self.entries.remove(&key) {
+            self.estimated_bytes -= Self::estimate_bytes(&previous);
+            self.insertion_order.retain(|queued| queued != &key);
+        }
+        while self.entries.len() >= ROUTE_CACHE_MAX_ENTRIES
+            || self.estimated_bytes + bytes > ROUTE_CACHE_MAX_BYTES
+        {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = self.entries.remove(&oldest) {
+                self.estimated_bytes -= Self::estimate_bytes(&evicted);
+            }
+        }
+        self.estimated_bytes += bytes;
+        self.insertion_order.push_back(key.clone());
+        self.entries.insert(key, path);
+    }
+
+    fn estimate_bytes(path: &LeastCostPath) -> usize {
+        size_of::<LeastCostPath>() + path.path.capacity() * size_of::<Id<Link>>()
+    }
+}
+
+fn clone_path(path: &LeastCostPath) -> LeastCostPath {
+    LeastCostPath {
+        path: path.path.clone(),
+        travel_time: path.travel_time,
+        travel_disutility: path.travel_disutility,
+    }
 }
 
 pub type Dijkstra = AStar<ZeroHeuristic>;
@@ -152,6 +279,8 @@ impl<H: AStarHeuristic> AStar<H> {
             heuristic,
             travel_time,
             travel_disutility,
+            route_cache: Mutex::new(RouteCache::default()),
+            destination_guidance: Mutex::new(DestinationGuidance::default()),
         })
     }
 
@@ -178,6 +307,8 @@ impl<H: AStarHeuristic> AStar<H> {
                         heuristic,
                         travel_time: travel_time.clone(),
                         travel_disutility: travel_disutility.clone(),
+                        route_cache: Mutex::new(RouteCache::default()),
+                        destination_guidance: Mutex::new(DestinationGuidance::default()),
                     },
                 );
                 Ok(map)
@@ -193,7 +324,7 @@ impl<H: AStarHeuristic> AStar<H> {
         &self,
         to_link: Id<Link>,
         from_link: Id<Link>,
-        parent_links: Vec<Option<LinkIndex>>,
+        parent_links: HashMap<usize, LinkIndex>,
     ) -> Result<Option<Vec<Id<Link>>>, GraphError> {
         // convert given "to" link id to node id, by looking for the start node of the link
         let to_node_id = self.graph.get_start_node(to_link.clone())?;
@@ -202,7 +333,7 @@ impl<H: AStarHeuristic> AStar<H> {
         let mut link_path = Vec::new();
         let mut current_node = to_node_idx;
 
-        while let Some(parent_link) = parent_links[current_node] {
+        while let Some(parent_link) = parent_links.get(&current_node).copied() {
             // while a parent link exists, add the link id to the link path
             link_path.push(self.graph.get_link_id_from_idx(parent_link)?);
             // and set the start node of that link as current node
@@ -221,7 +352,7 @@ impl<H: AStarHeuristic> AStar<H> {
     /// from-link and ends at the start node of the to-link.
     fn verify_path(
         &self,
-        path: &Vec<Id<Link>>,
+        path: &[Id<Link>],
         from_link: Id<Link>,
         to_link: Id<Link>,
     ) -> Result<bool, GraphError> {
@@ -240,10 +371,193 @@ impl<H: AStarHeuristic> AStar<H> {
         Ok(first_node_of_path == end_node_of_from_link
             && last_node_of_path == start_node_of_to_link)
     }
+
+    fn validate_candidate(
+        &self,
+        request: &LeastCostPathRequest,
+        path: &[Id<Link>],
+    ) -> Option<CandidateRoute> {
+        // Endpoint checks alone do not prove that consecutive candidate links connect.
+        let mut current_node = self
+            .graph
+            .get_node_idx_from_id(self.graph.get_end_node(request.from.clone()).ok()?);
+        let target_node = self
+            .graph
+            .get_node_idx_from_id(self.graph.get_start_node(request.to.clone()).ok()?);
+        let mut arrival_time = request.departure_time;
+        let mut travel_time = std::time::Duration::ZERO;
+        let mut travel_disutility = 0.0;
+        for link_id in path {
+            let link_index = self.graph.get_link_idx_from_id(link_id.clone()).ok()?;
+            if self.graph.get_start_node_as_idx(link_index).ok()? != current_node {
+                return None;
+            }
+            current_node = self.graph.get_end_node_as_idx(link_index).ok()?;
+            let link = self.graph.get_link_from_idx(link_index).ok()?;
+            let link_time =
+                self.travel_time
+                    .travel_time(link, arrival_time, request.person, request.vehicle);
+            let link_disutility = self.travel_disutility.travel_disutility(
+                link,
+                arrival_time,
+                request.person,
+                request.vehicle,
+            );
+            if !link_disutility.is_finite() || link_disutility < 0.0 {
+                return None;
+            }
+            travel_disutility += link_disutility;
+            if !travel_disutility.is_finite() {
+                return None;
+            }
+            travel_time = travel_time.saturating_add(link_time);
+            arrival_time = arrival_time.saturating_add(link_time);
+        }
+
+        if current_node != target_node {
+            return None;
+        }
+
+        Some(CandidateRoute {
+            path: path.to_vec(),
+            travel_time,
+            travel_disutility,
+        })
+    }
+
+    fn destination_guidance_candidate(
+        &self,
+        request: &LeastCostPathRequest,
+    ) -> Option<Vec<Id<Link>>> {
+        let target_id = self.graph.get_start_node(request.to.clone()).ok()?;
+        let target = self.graph.get_node_idx_from_id(target_id);
+        let source_id = self.graph.get_end_node(request.from.clone()).ok()?;
+        let source = self.graph.get_node_idx_from_id(source_id);
+        {
+            let mut guidance = self.destination_guidance.lock().unwrap();
+            if let Some(tree) = guidance.trees.get(&target) {
+                return tree.path(&*self.graph, source, target);
+            }
+            if !guidance.request_counts.contains_key(&target)
+                && guidance.request_counts.len() >= DESTINATION_GUIDANCE_MAX_TRACKED
+            {
+                return None;
+            }
+            let count = guidance.request_counts.entry(target).or_default();
+            *count = count.saturating_add(1);
+            if *count < 2 {
+                return None;
+            }
+        }
+
+        let tree = self.build_destination_tree(target)?;
+        let tree_bytes = tree.next_link.capacity() * size_of::<usize>();
+        if tree_bytes > DESTINATION_GUIDANCE_MAX_BYTES {
+            return None;
+        }
+        let mut guidance = self.destination_guidance.lock().unwrap();
+        if !guidance.trees.contains_key(&target)
+            && guidance.trees.len() < DESTINATION_GUIDANCE_MAX_TREES
+            && guidance.estimated_bytes + tree_bytes <= DESTINATION_GUIDANCE_MAX_BYTES
+        {
+            guidance.estimated_bytes += tree_bytes;
+            guidance.trees.insert(target, tree);
+        }
+        guidance
+            .trees
+            .get(&target)
+            .and_then(|tree| tree.path(&*self.graph, source, target))
+    }
+
+    fn build_destination_tree(&self, target: usize) -> Option<DestinationTree> {
+        let node_count = self.graph.num_nodes();
+        let mut distances = vec![f64::INFINITY; node_count];
+        let mut settled = vec![false; node_count];
+        let mut next_link = vec![usize::MAX; node_count];
+        let mut queue = BinaryHeap::new();
+        distances[target] = 0.0;
+        queue.push(Reverse((OrderedFloat(0.0), target)));
+
+        while let Some(Reverse((distance, current))) = queue.pop() {
+            if settled[current] || distance.0 != distances[current] {
+                continue;
+            }
+            settled[current] = true;
+            for edge in self.graph.incoming_edges_as_idx(current) {
+                let predecessor = self.graph.get_start_node_as_idx(edge).ok()?;
+                if settled[predecessor] {
+                    continue;
+                }
+                let link = self.graph.get_link_from_idx(edge).ok()?;
+                let cost = self.travel_disutility.get_link_min_travel_disutility(link);
+                if cost.is_nan() || cost.is_infinite() {
+                    continue;
+                }
+                if cost < 0.0 {
+                    return None;
+                }
+                let next_distance = distance.0 + cost;
+                if next_distance.is_finite() && next_distance < distances[predecessor] {
+                    distances[predecessor] = next_distance;
+                    next_link[predecessor] = edge;
+                    queue.push(Reverse((OrderedFloat(next_distance), predecessor)));
+                }
+            }
+        }
+        Some(DestinationTree { next_link })
+    }
 }
 
 impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
     fn calc_least_cost_path(&self, request: LeastCostPathRequest) -> Option<LeastCostPath> {
+        let route_cache_key = self
+            .travel_time
+            .cache_epoch()
+            .zip(self.travel_disutility.cache_epoch())
+            .zip(
+                self.travel_time
+                    .cache_profile(request.person, request.vehicle),
+            )
+            .zip(
+                self.travel_disutility
+                    .cache_profile(request.person, request.vehicle),
+            )
+            .map(
+                |(
+                    ((travel_time_epoch, disutility_epoch), travel_time_profile),
+                    disutility_profile,
+                )| {
+                    RouteCacheKey {
+                        from: request.from.clone(),
+                        to: request.to.clone(),
+                        departure_nanos: request.departure_time.as_nanos(),
+                        travel_time_epoch,
+                        disutility_epoch,
+                        travel_time_profile,
+                        disutility_profile,
+                    }
+                },
+            );
+        if let Some(key) = route_cache_key.as_ref()
+            && let Some(path) = self.route_cache.lock().unwrap().get(key)
+            && self.travel_time.cache_epoch() == Some(key.travel_time_epoch)
+            && self.travel_disutility.cache_epoch() == Some(key.disutility_epoch)
+        {
+            let cache_span = tracing::trace_span!(
+                target: "rust_qsim::simulation::replanning::routing::a_star",
+                "least_cost_path_search",
+                node_count = self.graph.num_nodes() as u64,
+                nodes_expanded = 0_u64,
+                cache_hit = true,
+                candidate_valid = false,
+                candidate_bound_used = false,
+                candidate_validation_ns = 0_u64,
+                fallback_search = false,
+            );
+            let _entered = cache_span.enter();
+            return Some(path);
+        }
+
         // convert given "to" link id to node id, by looking for the start node of the link
         let to_node_id = match self.graph.get_start_node(request.to.clone()).ok() {
             Some(node_id) => node_id, // the link was found as expected
@@ -277,7 +591,6 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
                         to_node_idx,
                         self.travel_time.as_ref(),
                         self.travel_disutility.as_ref(),
-                        self.graph.num_nodes(),
                     ))
                     .build()
                     .unwrap()
@@ -293,72 +606,145 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
             }
         };
 
+        let profile_enabled = tracing::enabled!(
+            target: "rust_qsim::simulation::replanning::routing::a_star",
+            tracing::Level::TRACE
+        );
+        let mut candidate_validation_nanos = 0_u128;
+        let supports_exact_bounds = self.heuristic.supports_consistent_static_bounds()
+            && self.travel_time.supports_static_route_bounds()
+            && self.travel_disutility.supports_static_route_bounds();
+        let direct_candidate = if supports_exact_bounds {
+            request.candidate_path.as_deref().and_then(|path| {
+                let started = profile_enabled.then(std::time::Instant::now);
+                let candidate = self.validate_candidate(&request, path);
+                if let Some(started) = started {
+                    candidate_validation_nanos += started.elapsed().as_nanos();
+                }
+                candidate
+            })
+        } else {
+            None
+        };
+        let guidance_path = if supports_exact_bounds && direct_candidate.is_none() {
+            self.destination_guidance_candidate(&request)
+        } else {
+            None
+        };
+        let guidance_candidate = guidance_path.as_deref().and_then(|path| {
+            let started = profile_enabled.then(std::time::Instant::now);
+            let candidate = self.validate_candidate(&request, path);
+            if let Some(started) = started {
+                candidate_validation_nanos += started.elapsed().as_nanos();
+            }
+            candidate
+        });
+        let candidate = direct_candidate.or(guidance_candidate);
+        let candidate_validation_ns = candidate_validation_nanos.min(u64::MAX as u128) as u64;
+        let candidate_valid = candidate.is_some();
+
+        // Profile only actual searches; invalid link requests return before reaching this point.
+        let search_span = tracing::trace_span!(
+            target: "rust_qsim::simulation::replanning::routing::a_star",
+            "least_cost_path_search",
+            node_count = self.graph.num_nodes() as u64,
+            nodes_expanded = tracing::field::Empty,
+            cache_hit = false,
+            candidate_valid = tracing::field::Empty,
+            candidate_bound_used = tracing::field::Empty,
+            candidate_validation_ns = tracing::field::Empty,
+            fallback_search = tracing::field::Empty,
+        );
+        search_span.record("candidate_valid", candidate_valid);
+        search_span.record("fallback_search", !candidate_valid);
+        search_span.record("candidate_validation_ns", candidate_validation_ns);
+        let mut nodes_expanded = 0;
+
         // call a_star_core with the request, and extract the distance to the goal and the
         // parent links vector from the result
-        let (optimal_disutility, associated_travel_time, parent_links) =
-            match a_star_core(a_star_request) {
-                // Standard case: A* returned a valid result.
-                Ok(AStarCoreResult::SingleDisutilWithParents(distance, time, parent_links)) => {
-                    // if the returned distance to the target is infinity or NaN, it is unreachable, so
-                    // we return None
-                    if distance == f64::INFINITY || distance.is_nan() {
-                        warn!(
-                            "To link {} is unreachable from from link {}, cannot calculate path",
-                            request.to, request.from
-                        );
-                        return None;
-                    }
-                    // else, we take the found shortest "distance" as the optimal disutility
-                    (distance, time, parent_links)
-                }
-                // Unsuccesful case: Some error occurred in A*, e.g., a given link or node was not
-                // found, so we cannot calculate a path. Return None
-                Err(e) => {
-                    warn!("Error during A*: {} cannot calculate path.", e);
+        let a_star_result = {
+            let _entered = search_span.enter();
+            a_star_core(
+                a_star_request,
+                (!search_span.is_disabled()).then_some(&mut nodes_expanded),
+                candidate,
+            )
+        };
+        search_span.record("nodes_expanded", nodes_expanded as u64);
+        let mut candidate_bound_used = false;
+        let (optimal_disutility, associated_travel_time, searched_path) = match a_star_result {
+            // Standard case: A* returned a valid result.
+            Ok(AStarCoreResult::SingleDisutilWithParents(distance, time, parent_links)) => {
+                // if the returned distance to the target is infinity or NaN, it is unreachable, so
+                // we return None
+                if distance == f64::INFINITY || distance.is_nan() {
+                    warn!(
+                        "To link {} is unreachable from from link {}, cannot calculate path",
+                        request.to, request.from
+                    );
                     return None;
                 }
-                // Unrecoverable error: A* returned the wrong result type. This should not happen,
-                // since we use the A* use case RoutingAStarActions, which always builds results
-                // of type SingleDistWithParents.
-                _ => panic!(
-                    "A* with RoutingAStarActions should return \
-                SingleDistWithParents result"
-                ),
-            };
-
-        let link_path = match self.extract_link_path(request.to, request.from, parent_links) {
-            Ok(Some(link_path)) => link_path, // all good, path was found
-            Ok(None) => {
-                // verification negative: incorrect path was found
-                error!(
-                    "Path search unsuccesful: A path was found, but it does not connect \
-                    the given from- and to-links. Something went wrong in Dijkstra or path \
-                    extraction."
-                );
-                return None;
+                // else, we take the found shortest "distance" as the optimal disutility
+                let link_path = match self.extract_link_path(
+                    request.to.clone(),
+                    request.from.clone(),
+                    parent_links,
+                ) {
+                    Ok(Some(link_path)) => link_path,
+                    Ok(None) => {
+                        error!("A* returned a path that does not connect the requested links");
+                        return None;
+                    }
+                    Err(error) => {
+                        error!("A* path verification failed: {error}");
+                        return None;
+                    }
+                };
+                (distance, time, link_path)
             }
-            // from- or to-link not found in the graph. Note: this case should never occur,
-            // since an invalid from- or to-link would have been detected already during A*
+            // The search stopped on the candidate instead of on a settled to-node, so the candidate
+            // decided this result rather than merely bounding it.
+            Ok(AStarCoreResult::SingleDisutilWithPath(distance, time, path)) => {
+                candidate_bound_used = true;
+                (distance, time, path)
+            }
+            // Unsuccesful case: Some error occurred in A*, e.g., a given link or node was not
+            // found, so we cannot calculate a path. Return None
             Err(e) => {
-                error!(
-                    "Path search unsuccessful: A path was found, but when verifying its\
-                    correctness, an error occured: {}",
-                    e
-                );
+                warn!("Error during A*: {} cannot calculate path.", e);
                 return None;
             }
+            // Unrecoverable error: A* returned the wrong result type. This should not happen,
+            // since we use the A* use case RoutingAStarActions, which always builds results
+            // of type SingleDistWithParents.
+            _ => panic!(
+                "A* with RoutingAStarActions should return \
+                SingleDistWithParents result"
+            ),
         };
+        search_span.record("candidate_bound_used", candidate_bound_used);
 
-        Some(LeastCostPath {
-            path: link_path,
+        let result = LeastCostPath {
+            path: searched_path,
             travel_time: associated_travel_time,
             travel_disutility: optimal_disutility,
-        })
+        };
+        if let Some(key) = route_cache_key
+            && self.travel_time.cache_epoch() == Some(key.travel_time_epoch)
+            && self.travel_disutility.cache_epoch() == Some(key.disutility_epoch)
+        {
+            self.route_cache
+                .lock()
+                .unwrap()
+                .insert(key, clone_path(&result));
+        }
+        Some(result)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::simulation::profiling::routing::RoutingSpanDurationToFileLayer;
     use crate::simulation::replanning::routing::cost::TravelTime;
     use crate::simulation::replanning::routing::cost::{
         Disutility, FreeOrMaxSpeedTravelTimeAndDisutility, FreeSpeedTravelTimeAndDisutility,
@@ -390,6 +776,7 @@ mod tests {
 
     use std::path::PathBuf;
     use std::sync::Arc;
+    use tracing_subscriber::prelude::*;
 
     /// Runs an A* least cost path run based on the given input and compares to expected output.
     fn calc_path_and_check<H: AStarHeuristic>(
@@ -747,6 +1134,395 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(parallel_results, sequential_results);
+    }
+
+    #[deterministic_id_test]
+    fn routing_profile_records_search_node_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.csv");
+        let (layer, guard) = RoutingSpanDurationToFileLayer::new_csv(&path);
+        let subscriber = tracing_subscriber::registry().with(layer);
+
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .build()
+            .unwrap();
+
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(router.calc_least_cost_path(request).is_some());
+        });
+        drop(guard);
+
+        let mut reader = csv::Reader::from_path(path).unwrap();
+        let headers = reader.headers().unwrap().clone();
+        let row = reader.records().next().unwrap().unwrap();
+        let node_count = headers
+            .iter()
+            .position(|name| name == "node_count")
+            .unwrap();
+        let nodes_expanded = headers
+            .iter()
+            .position(|name| name == "nodes_expanded")
+            .unwrap();
+        assert_eq!(&row[node_count], "4");
+        assert!(!row[nodes_expanded].is_empty());
+    }
+
+    #[deterministic_id_test]
+    fn exact_static_route_cache_reuses_a_completed_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.csv");
+        let (layer, guard) = RoutingSpanDurationToFileLayer::new_csv(&path);
+        let subscriber = tracing_subscriber::registry().with(layer);
+
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .build()
+            .unwrap();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let first = router.calc_least_cost_path(request.clone()).unwrap();
+            let second = router.calc_least_cost_path(request).unwrap();
+            assert_eq!(second, first);
+        });
+        drop(guard);
+
+        let mut reader = csv::Reader::from_path(path).unwrap();
+        let headers = reader.headers().unwrap().clone();
+        let rows = reader.records().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows.len(), 2);
+        let cache_hit = headers.iter().position(|name| name == "cache_hit").unwrap();
+        let fallback = headers
+            .iter()
+            .position(|name| name == "fallback_search")
+            .unwrap();
+        assert_eq!(&rows[0][cache_hit], "false");
+        assert_eq!(&rows[0][fallback], "true");
+        assert_eq!(&rows[1][cache_hit], "true");
+        assert_eq!(&rows[1][fallback], "false");
+    }
+
+    #[deterministic_id_test]
+    fn verified_static_previous_route_is_an_exact_search_bound() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let candidate = vec![Id::get_from_ext("4"), Id::get_from_ext("5")];
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(candidate))
+            .build()
+            .unwrap();
+
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(
+            result.path,
+            vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
+        );
+        assert_eq!(result.travel_time, Duration::from_secs(6));
+        assert_eq!(result.travel_disutility, 6.0);
+    }
+
+    #[deterministic_id_test]
+    fn routing_profile_separates_candidate_validity_from_bound_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("routing.csv");
+        let (layer, guard) = RoutingSpanDurationToFileLayer::new_csv(&path);
+        let subscriber = tracing_subscriber::registry().with(layer);
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        // The candidate is the least-cost route, so the exact search settles the to-node itself and
+        // the bound never decides the result. A valid candidate is not evidence of a used bound.
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(vec![Id::get_from_ext("4"), Id::get_from_ext("5")]))
+            .build()
+            .unwrap();
+
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(router.calc_least_cost_path(request).is_some());
+        });
+        drop(guard);
+
+        let mut reader = csv::Reader::from_path(path).unwrap();
+        let headers = reader.headers().unwrap().clone();
+        let row = reader.records().next().unwrap().unwrap();
+        let candidate_valid = headers
+            .iter()
+            .position(|name| name == "candidate_valid")
+            .unwrap();
+        let candidate_bound_used = headers
+            .iter()
+            .position(|name| name == "candidate_bound_used")
+            .unwrap();
+        let fallback = headers
+            .iter()
+            .position(|name| name == "fallback_search")
+            .unwrap();
+        assert_eq!(&row[candidate_valid], "true");
+        assert_eq!(&row[candidate_bound_used], "false");
+        assert_eq!(&row[fallback], "false");
+    }
+
+    /// Candidate paths and reverse guidance must not change which route is returned. Every
+    /// candidate here is a stored or guidance path for the same origin and destination, so this
+    /// exercises the bound path rather than the validation fallback.
+    #[deterministic_id_test]
+    fn candidates_and_guidance_preserve_exact_routes() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let plain = Dijkstra::new(
+            network.clone(),
+            None,
+            travel_cost.clone(),
+            travel_cost.clone(),
+        )
+        .unwrap();
+        let assisted = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+
+        // Prime the guidance tree, then compare every request with and without a candidate.
+        let prime = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .build()
+            .unwrap();
+        assisted.destination_guidance_candidate(&prime);
+        assisted.destination_guidance_candidate(&prime);
+
+        let mut requests = Vec::new();
+        for from in ["1", "2", "3", "4", "5", "6"] {
+            for to in ["1", "2", "3", "4", "5", "6"] {
+                requests.push((from, to));
+            }
+        }
+
+        let mut guidance_paths = 0;
+        for (from, to) in requests {
+            let guidance = assisted
+                .destination_guidance_candidate(
+                    &LeastCostPathRequestBuilder::default()
+                        .from(Id::get_from_ext(from))
+                        .to(Id::get_from_ext(to))
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap_or_default();
+            if !guidance.is_empty() {
+                guidance_paths += 1;
+            }
+            let without = plain
+                .calc_least_cost_path(
+                    LeastCostPathRequestBuilder::default()
+                        .from(Id::get_from_ext(from))
+                        .to(Id::get_from_ext(to))
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap();
+            let with = assisted
+                .calc_least_cost_path(
+                    LeastCostPathRequestBuilder::default()
+                        .from(Id::get_from_ext(from))
+                        .to(Id::get_from_ext(to))
+                        .candidate_path(Some(guidance))
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(without, with, "route {from} -> {to} changed");
+        }
+
+        // Guard against the comparison passing because guidance produced nothing at all.
+        assert!(
+            guidance_paths > 0,
+            "reverse guidance produced no candidates, so nothing was compared"
+        );
+    }
+
+    /// Reverse guidance is itself least-cost under the same disutility, so it cannot by itself
+    /// prove that a valid bound leaves the result alone. A stored route that is legal but costs
+    /// more than the optimum is the case that matters, because a search that returned the bound
+    /// instead of its own result would then answer with the worse route.
+    #[deterministic_id_test]
+    fn valid_but_suboptimal_candidate_never_replaces_the_cheaper_route() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        // Node 1 -> 2 -> 2 -> 3 -> 1 costs 1 + 4 + 2 = 7 s, while the least-cost route
+        // 1 -> 2 -> 3 -> 1 through links 4 and 5 costs 6 s.
+        let suboptimal = vec![
+            Id::get_from_ext("3"),
+            Id::get_from_ext("4"),
+            Id::get_from_ext("5"),
+        ];
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(suboptimal))
+            .build()
+            .unwrap();
+
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(
+            result.path,
+            vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
+        );
+        assert_eq!(result.travel_time, Duration::from_secs(6));
+        assert_eq!(result.travel_disutility, 6.0);
+    }
+
+    /// Reverse guidance is built on the second request for a destination, so which requests carry a
+    /// candidate depends on the order requests arrive. That must not reach the returned route.
+    #[deterministic_id_test]
+    fn reverse_guidance_request_order_does_not_change_routes() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let forward = Dijkstra::new(
+            network.clone(),
+            None,
+            travel_cost.clone(),
+            travel_cost.clone(),
+        )
+        .unwrap();
+        let reversed = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+
+        let mut pairs = Vec::new();
+        for from in ["1", "2", "3", "4", "5", "6"] {
+            for to in ["1", "2", "3", "4", "5", "6"] {
+                pairs.push((from, to));
+            }
+        }
+        let reversed_pairs = pairs.iter().rev().copied().collect::<Vec<_>>();
+
+        // Warm both routers so their trees are built from opposite arrival orders.
+        for (from, to) in &pairs {
+            let _ = forward.calc_least_cost_path(
+                LeastCostPathRequestBuilder::default()
+                    .from(Id::get_from_ext(from))
+                    .to(Id::get_from_ext(to))
+                    .build()
+                    .unwrap(),
+            );
+        }
+        for (from, to) in &reversed_pairs {
+            let _ = reversed.calc_least_cost_path(
+                LeastCostPathRequestBuilder::default()
+                    .from(Id::get_from_ext(from))
+                    .to(Id::get_from_ext(to))
+                    .build()
+                    .unwrap(),
+            );
+        }
+
+        for (from, to) in pairs {
+            let request = || {
+                LeastCostPathRequestBuilder::default()
+                    .from(Id::get_from_ext(from))
+                    .to(Id::get_from_ext(to))
+                    .build()
+                    .unwrap()
+            };
+            assert_eq!(
+                forward.calc_least_cost_path(request()),
+                reversed.calc_least_cost_path(request()),
+                "route {from} -> {to} depends on request order"
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn alt_heuristic_declines_consistent_static_bounds() {
+        // Candidate bounds and shared reverse guidance rely on a consistent heuristic, which the
+        // landmark bound does not state. Keep the decline explicit so a future change to the
+        // landmark search has to revisit the exactness claim with it.
+        assert!(!AltHeuristic::supports_consistent_static_bounds(
+            &AltHeuristic::from_graph(
+                &net_to_graph(&get_triangle_test_network()),
+                &FreeOrMaxSpeedTravelTimeAndDisutility
+            )
+            .unwrap()
+        ));
+        assert!(ZeroHeuristic.supports_consistent_static_bounds());
+    }
+
+    #[deterministic_id_test]
+    fn invalid_previous_route_falls_back_to_a_star() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(vec![Id::get_from_ext("2")]))
+            .build()
+            .unwrap();
+
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(
+            result.path,
+            vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
+        );
+    }
+
+    #[deterministic_id_test]
+    fn disconnected_previous_route_falls_back_to_a_star() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(vec![
+                Id::get_from_ext("3"),
+                Id::get_from_ext("2"),
+                Id::get_from_ext("5"),
+            ]))
+            .build()
+            .unwrap();
+
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(
+            result.path,
+            vec![Id::get_from_ext("4"), Id::get_from_ext("5")]
+        );
+        assert_eq!(result.travel_time, Duration::from_secs(6));
+        assert_eq!(result.travel_disutility, 6.0);
+    }
+
+    #[deterministic_id_test]
+    fn repeated_static_destination_builds_shared_reverse_guidance() {
+        let network = Arc::new(get_triangle_test_network());
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .build()
+            .unwrap();
+
+        assert!(router.destination_guidance_candidate(&request).is_none());
+        let path = router.destination_guidance_candidate(&request).unwrap();
+        assert_eq!(path, vec![Id::get_from_ext("4"), Id::get_from_ext("5")]);
+
+        let request = LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext("1"))
+            .to(Id::get_from_ext("2"))
+            .candidate_path(Some(path))
+            .build()
+            .unwrap();
+        let result = router.calc_least_cost_path(request).unwrap();
+        assert_eq!(result.travel_disutility, 6.0);
     }
 
     /// Test routing when start and destination are the same (zero distance)

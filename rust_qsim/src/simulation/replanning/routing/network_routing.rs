@@ -163,6 +163,7 @@ impl NetworkRoutingModule {
                 .to(to.clone())
                 .person(person)
                 .vehicle(request.vehicle)
+                .candidate_path(request.candidate_path().map(<[_]>::to_vec))
                 .departure_time(now)
                 .build()
                 .unwrap();

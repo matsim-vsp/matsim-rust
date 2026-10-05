@@ -226,7 +226,6 @@ pub(crate) fn route_trip(
         dest.link_id.clone(),
     );
     let vehicle = vehicle_for_trip(context, person, span, &plan.elements, mode)?;
-
     let request = RoutingRequestBuilder::default()
         .from(&from_facility)
         .to(&to_facility)
