@@ -36,6 +36,82 @@ supplied run's recorded `journey_mode_share.csv`, and writes a local comparison 
 table under `RUN/analysis/cross_run_comparison`. A comparison refuses a run whose report is failed
 or whose recorded iteration is not its latest output iteration.
 
+## Public transport performance and demand validation
+
+Public transport is modeled by teleportation in this build. A `travelled with pt` event records
+the line, route, access and egress stop and scheduled boarding time of one passenger trip, and no
+transit vehicle drives through the network. The transit tables come from those records, the
+person departure, arrival and stuck events, and the schedule and vehicle capacities recorded in
+`run_metadata.json` (`transit`). The run's vehicle file is the only capacity source: a departure's
+`vehicleRefId` is looked up in it, and the vehicle type's `<capacity>` (seats plus standing room)
+is the capacity. Both XML and protobuf vehicle files carry it.
+
+`transit_trips.csv` has one row per passenger transit leg. `service_modeling` is `teleported`
+for a leg with a service record and `unrecorded` otherwise. `outcome` is `boarded`,
+`missed_service` (the passenger reached the stop after the scheduled boarding time),
+`no_service_record` (the leg arrived with no service record), `stuck` or `incomplete`.
+Waiting is the scheduled boarding time minus the passenger's departure; in-vehicle time is the
+arrival minus the boarding time. A missed service has no waiting time. Arrival delay is the
+arrival minus the scheduled arrival at the egress stop, found by matching the recorded boarding
+time and stop pair to a scheduled departure; teleported service follows the schedule, so delay
+is only a consistency check. Vehicle-level delay and missed stops would need transit vehicle
+service events, which this build does not record, so they are always unavailable.
+
+| Table | Content |
+| --- | --- |
+| `transit_stop_hourly.csv` | boardings and alightings per interval, line and stop |
+| `transit_line_summary.csv` | trips, missed services, mean waiting, in-vehicle time and delay per interval, line and route, with the number of observations behind each mean |
+| `transit_occupancy.csv` | passengers, capacity and load factor per scheduled departure and route segment |
+| `transit_journeys.csv` | access, egress, transfer, waiting and in-vehicle time per journey that uses transit |
+| `transit_outcomes.csv` | trip outcomes per interval and service modeling |
+| `transit_availability.csv` | which metric groups are available and why not |
+
+Trip outcomes use the interval of the passenger's departure, line summaries and boardings the
+interval of the scheduled boarding time, and alightings the interval of the arrival. A trip
+with outcome `missed_service` still counts in boardings, alightings, line trips and occupancy,
+because the simulation carried the passenger on that run; only its waiting time is unavailable.
+An omitted `seats` or `standingRoom` element contributes zero persons, and a `<capacity>`
+element naming neither declares no capacity.
+
+An interval is the one containing the boarding time for boardings and the arrival time for
+alightings. Counts are expanded by the reciprocal of `qsim.sample_size`; the `_sample` columns
+keep the simulated counts. A load factor is the expanded passenger count divided by the vehicle
+capacity, so it can exceed one. A journey's access and egress are the legs before the first and
+after the last transit leg; the transfer time sums the time between leaving one vehicle and
+boarding the next, walking and waiting included. The journey waiting time sums the wait at every
+boarding, so a transfer wait is part of both the waiting and the transfer time. Any quantity whose inputs are missing (no
+service record, no schedule, no matching departure, no capacity, an unfinished component leg) is
+blank and listed as unavailable; it is never inferred, and a journey with a blank quantity has
+status `incomplete`.
+
+Set `output.analysis.transit_observed_data` to a CSV of observed demand to compare it with the
+simulated boardings and alightings. Relative paths are resolved from the run's output directory.
+
+```csv
+scope,line_id,stop_id,station_id,period_start_seconds,period_end_seconds,metric,unit,value,source
+stop,,1,,0,3600,boardings,persons,120,counter-a
+line,Blue Line,,,0,3600,alightings,persons,800,survey
+station,,,central,0,3600,boardings,persons,300,gate-counts
+line_stop,Blue Line,3,,0,3600,alightings,persons,90,survey
+```
+
+`scope` is `stop`, `station` (the stop facility's `stop_area_id`), `line` or `line_stop`, and
+the matching id columns have to be set. `metric` is `boardings` or `alightings` with unit
+`persons`, `person` or `passengers`. The period has to be exactly one analysis interval.
+`transit_validation_matches.csv` carries the observed value, the simulated sample count, the
+expansion factor, the expanded simulated value, the residual, the relative error (blank when
+the observation is zero), the network-wide simulated total of the same metric and interval as a
+denominator, and the observation source with its row. Rows that cannot be compared, with a
+reason such as `unknown_entity`, `period_mismatch` or `no_service_records` (no transit was
+simulated, so not even a zero is compared), are in `transit_validation_unmatched.csv`.
+`transit_validation_summary.csv` gives matched and unmatched counts, observed and simulated
+totals, bias, MAE, RMSE and the relative bias per scope and metric. An invalid file marks only
+the `transit_validation` module failed.
+
+`compare_completed_runs` compares transit stop, line, outcome, occupancy, journey, and observed-demand
+metrics using the aggregation keys in each run's catalog. It reads each supplied run's latest
+completed iteration; metrics missing from either run remain unavailable in the comparison report.
+
 ## Link speeds
 
 `link_speed` reconstructs traversal speeds from the same replay that produces the link
@@ -101,6 +177,85 @@ the full period start and end, so runs with different interval widths remain ide
 Relative paths are resolved from the current run's output directory. A missing or incomplete
 comparison report marks only the cross-run comparison module failed.
 
+
+## DRT and taxi service performance
+
+Set `output.analysis.service` to analyse supplied DRT or taxi records. Nothing is simulated: the
+module only reads CSV files, so it needs no service engine. Relative paths are resolved from the
+run's output directory and the settings are recorded in the manifest for standalone reanalysis.
+
+```yaml
+output:
+  analysis:
+    service:
+      requests: requests.csv          # required
+      passengers: passengers.csv      # optional
+      fleet: fleet.csv                # optional
+      schedule: schedule.csv          # optional
+      max_wait_seconds: 600           # optional constraint
+      service_area: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]  # optional polygon
+```
+
+- `requests.csv`: `request_id,submission_seconds,origin_link,destination_link` plus optional
+  `person_id,status,group,direct_travel_seconds,party_size`. `status` is empty/`submitted` or
+  `rejected`. **A request is rejected only if its request record says so**; it is never inferred
+  from missing legs. A non-rejected request without a passenger record is `unserved`.
+- `passengers.csv`: `request_id,vehicle_id,pickup_seconds,dropoff_seconds`, one association per
+  served request. Rows for unknown or rejected requests, duplicates, and impossible times are
+  excluded and listed in `service_diagnostics.csv`.
+- `fleet.csv`: `vehicle_id,capacity,service_start_seconds,service_end_seconds`.
+- `schedule.csv`: `vehicle_id,task_type,start_seconds,end_seconds,distance_meters` where
+  `task_type` is `drive`, `stop` or `stay`. Only `drive` rows carry distance.
+
+Wait is pickup minus submission; the detour ratio is in-vehicle time divided by
+`direct_travel_seconds` and is blank without it. Distributions use the mean, population standard
+deviation, median and 90th percentile, taken at index `ceil((n - 1) * q)` of the sorted values
+(the same helper as the journey tables, so the median of an even count is the upper middle value). Pickups and drop-offs happen at stops, so a drive task is occupied by the
+served requests on board at its midpoint; its load is the sum of `party_size` on board, so shared
+rides and groups both count. Empty distance is driven distance
+with load zero, which includes relocation. Mean occupancy is passenger-metres over driven metres,
+load factor divides passenger-metres by capacity-metres (for this ratio only vehicles with a
+fleet capacity contribute to either side), and utilization is non-`stay` task time clipped to each vehicle's fleet
+service window over that window.
+
+Coverage is the share of requests whose origin and destination links are entirely inside
+`service_area`; links crossing the border or absent from the network count as outside or
+`area_unknown`. Group rows appear in `service_summary.csv` only when requests carry `group`
+labels; blank labels are grouped as `unknown`. Configured wait and fleet capacity constraints are
+recorded in `service_constraints.csv` and checked as `wait_limit_exceeded` and
+`capacity_exceeded_tasks`. A metric whose input was not supplied is blank, and
+`service_availability.csv` names the missing input. Invalid input fails only the
+`service_performance` module. The completed-run comparison also compares the service summary,
+vehicle and occupancy metrics from each run's published latest-iteration report, keyed by group,
+vehicle and passenger load as appropriate.
+
+Tables: `service_summary.csv`, `service_requests.csv`, `service_vehicles.csv` (a `fleet` total row
+first), `service_occupancy.csv`, `service_constraints.csv`, `service_availability.csv`,
+`service_diagnostics.csv` (which also lists non-positive `direct_travel_seconds`, vehicles missing from a supplied fleet, and fleet windows that end before they start). All appear in the local report.
+## Travel survey comparison
+
+Set `output.analysis.journey_survey` to a weighted journey-record CSV. Relative paths are
+resolved from the run output directory and recorded in the manifest for standalone reanalysis.
+Each row must contain `study_population`, `journey_definition`, `split`, `mode`, `purpose`,
+`departure_seconds`, `duration_seconds`, `distance_meters`, and `weight`; `uncertainty` is
+optional. The study population must be positive and identical across rows. Weights and
+uncertainty must be finite and non-negative. Split is `calibration` or `holdout`.
+
+The comparable journey definition is `matsim-substantive-activities-v1`: consecutive
+substantive activities form a journey, interaction activities remain inside it, main mode uses
+the MATSim hierarchy (including transit), and purpose is the destination activity type. Survey
+mode labels must use the same categories as the simulated `main_mode`. Other
+definitions are retained in the output but marked `non_comparable_definition`, with observed
+shares withheld. The output compares weighted mode and purpose categories, departure hour,
+distance class, and duration class. Departure uses fixed clock hours; distance uses the journey
+classes above; duration bins are under 15, 15–30, 30–60, 60–120, and 120 or more minutes.
+Duration distributions use survey records with a duration and simulated journeys marked
+completed. Calibration and holdout refer to survey records; the same simulated distribution is
+shown against each split. The `journey_survey_comparison.csv` table
+includes observed and simulated denominators, shares, split, population, supplied uncertainty,
+and missing-category status. `uncertainty` is the standard error for that record's weight; the
+reported group uncertainty combines weighted record standard errors in quadrature. Its rows are
+embedded in the local report. Input errors fail only this optional module.
 
 ## Network distance, time and congestion
 
@@ -182,6 +337,66 @@ The local SVG map marks links used at least once during the final iteration in
 green and unused links in gray. Dashed lines identify expressways, which means
 the exact, case-sensitive label `expressway`; any other road type is drawn solid.
 Hover over a map link to see its labels and usage.
+
+## Comparing completed runs
+
+The shared analysis interface can compare existing reports with an explicit baseline:
+
+```rust,ignore
+use rust_qsim::simulation::analysis::compare_completed_runs;
+use std::path::{Path, PathBuf};
+
+let report = compare_completed_runs(
+    Path::new("runs/baseline"),
+    &[PathBuf::from("runs/alternative-a"), PathBuf::from("runs/alternative-b")],
+)?;
+```
+
+Each input must contain a complete `analysis/manifest.json`, metric catalog and latest-iteration
+tables. The comparison is written to `baseline/analysis/comparison/` and leaves each input report
+unchanged. `metric_differences.csv` exports both values, alternative-minus-baseline difference,
+relative difference, unit, aggregation key, the baseline value used as the relative denominator,
+and metric-specific aggregation denominators where the source provides them. Relative differences
+are blank when the baseline is zero. `metric_compatibility.csv` identifies
+missing metrics, incompatible definitions and unavailable or unregistered outputs. Link rows are
+matched by external link ID; links missing from either network are excluded and the number of
+corresponding links appears in the HTML report. Aggregate network and group metrics are omitted
+when the link sets differ; network-wide speed and V/C distributions are omitted too, while
+per-link outputs retain only corresponding IDs.
+Runs with different interval widths, simulation end times, sample-size scales, or link
+classification/filter definitions are rejected. `completion_status_differences.csv` and
+`completion_status_transitions.csv` show policy-induced changes in complete, incomplete, stuck and
+no-travel populations; `leg_completion_status_transitions.csv` reports changes per person and leg.
+Per-person duration comparisons include only people with a complete plan in both runs. Leg-hour and
+daily-cohort aggregates are recomputed over their common complete populations. Other registered
+link, group, capacity and speed outputs are compared by their catalog aggregation keys. The HTML
+report renders the metric and completion-status tables.
+
+## Seed uncertainty and parameter sensitivity
+
+Use `analyze --run-dir BASELINE --ensemble-manifest ensemble.json` to summarize completed runs
+without launching simulations. The manifest names a baseline scenario and each run's output
+directory and scenario; paths are relative to the manifest. Alternative runs may also declare a
+`parameters` object, whose canonical value identifies a parameter setting:
+
+```json
+{
+  "baseline_scenario": "baseline",
+  "pairing": "paired_by_seed",
+  "runs": [
+    {"run_dir": "runs/base-1", "scenario": "baseline"},
+    {"run_dir": "runs/policy-1", "scenario": "policy", "parameters": {"toll": 1.0}}
+  ]
+}
+```
+
+The report is written to `BASELINE/ensemble`. It exports the member and pair manifests, missing
+pairs, per-seed metric differences and their distributions. Differences use the shared completed-run
+comparison interface and each run's latest completed iteration. Both `paired_by_seed` and
+`difference_of_means` uncertainty assumptions are shown; the manifest's optional `pairing` chooses
+which result is marked as supplied. Equal seed numbers alone do not guarantee comparable random
+streams. Intervals are two-sided 95% Student-t intervals; one pair has no interval. Quantiles use
+the nearest-rank convention. Metrics may be restricted with an optional `metrics` array.
 
 For example:
 
@@ -315,3 +530,11 @@ output:
 
 Every setting is also reachable from the command line, for example
 `--set output.analysis.accessibility.thresholds_seconds=1800,3600`.
+
+## Demographic outcomes and equity
+
+Set `output.analysis.person_group_attributes` to the person attributes the report groups people by, such as `income` or `age`. Missing or blank attributes are grouped as `unknown`. Optional weight and cost attributes are recorded with the run; invalid or missing weights default to one, while unavailable costs remain blank.
+
+`group_burdens.csv` reports weighted group sizes and completed daily travel-time burdens. Incomplete or stuck people remain in group counts without lowering the travel-time mean. `person_demographics.csv` lists each person's groups, weight, and cost. `equity_comparison.csv` compares completed daily burdens with configured runs; differences within one microsecond count as unchanged, and persons without comparable completed days are reported separately.
+
+`group_module_outcomes.csv` combines per-group outcomes exported by other modules using `<module>_group_outcomes.csv` with columns `dimension,group,metric,unit,value`.

@@ -607,14 +607,31 @@ pub struct Analysis {
     /// Optional observed-data CSV used by the validation report. Relative paths are resolved
     /// against the configured output directory.
     pub observed_data: Option<PathBuf>,
+    /// Optional weighted journey records from a comparable travel survey.
+    pub journey_survey: Option<PathBuf>,
     /// Run directories whose latest published analysis reports are included in a comparison.
     pub comparison_runs: Vec<PathBuf>,
+    /// Optional DRT/taxi service records analysed after the run.
+    pub service: Option<ServiceInputs>,
+    /// Optional CSV of observed boardings and alightings for the transit validation. Relative
+    /// paths are resolved against the configured output directory.
+    pub transit_observed_data: Option<PathBuf>,
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
 
     /// Reachability of supplied opportunities from the run's zones and people.
     pub accessibility: Accessibility,
+    /// Person attributes the demographic module groups people by, in report order. Every person
+    /// is grouped under each configured attribute, and a person who does not supply one is
+    /// reported as `unknown` rather than dropped. An empty list leaves the module unavailable.
+    pub person_group_attributes: Vec<String>,
+    /// Person attribute holding a person's weight. It has to be a finite, non-negative number;
+    /// a missing or unusable value is reported as a default weight of one.
+    pub person_weight_attribute: Option<String>,
+    /// Person attribute holding a monetary travel cost for the day. Without it the cost burden
+    /// is unavailable rather than zero, because the run supplies no monetary cost of its own.
+    pub person_cost_attribute: Option<String>,
 }
 
 /// Inputs of the accessibility-to-opportunities measure, and the thresholds it reports.
@@ -699,6 +716,26 @@ fn default_accessibility_thresholds_seconds() -> Vec<f64> {
     vec![2700.0]
 }
 
+/// Supplied records for DRT and taxi service performance. The analysis only reads them; no
+/// service is simulated. Relative paths are resolved against the configured output directory.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ServiceInputs {
+    /// One row per request. This is the only source of rejections.
+    pub requests: PathBuf,
+    /// Request-to-vehicle association records with pickup and drop-off times.
+    pub passengers: Option<PathBuf>,
+    /// Vehicle capacity and service window records.
+    pub fleet: Option<PathBuf>,
+    /// Vehicle task records with drive distances.
+    pub schedule: Option<PathBuf>,
+    /// Service area polygon in network node coordinates.
+    #[serde(default)]
+    pub service_area: Option<Vec<[f64; 2]>>,
+    /// Configured maximum wait between request submission and pickup.
+    #[serde(default)]
+    pub max_wait_seconds: Option<f64>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct LinkLabels {
@@ -716,11 +753,17 @@ impl Default for Analysis {
             urban_boundary: None,
 
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
+            service: None,
+            transit_observed_data: None,
 
             excess_delay_clip_seconds: None,
 
             accessibility: Accessibility::default(),
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         }
     }
 }
@@ -826,6 +869,35 @@ register_override!(
         }
     }
 );
+
+// The grouping list is comma separated, so a run can add demographic dimensions without a
+// config file edit. Blank entries are dropped rather than grouping everyone under an empty name.
+register_override!(
+    "output.analysis.person_group_attributes",
+    |config, value| {
+        config.output_mut().analysis.person_group_attributes = value
+            .split(',')
+            .map(str::trim)
+            .filter(|attribute| !attribute.is_empty())
+            .map(str::to_owned)
+            .collect();
+    }
+);
+
+register_override!(
+    "output.analysis.person_weight_attribute",
+    |config, value| {
+        let attribute = value.trim();
+        config.output_mut().analysis.person_weight_attribute =
+            (!attribute.is_empty()).then(|| attribute.to_owned());
+    }
+);
+
+register_override!("output.analysis.person_cost_attribute", |config, value| {
+    let attribute = value.trim();
+    config.output_mut().analysis.person_cost_attribute =
+        (!attribute.is_empty()).then(|| attribute.to_owned());
+});
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Routing {

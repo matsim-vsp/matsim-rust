@@ -4,6 +4,8 @@ mod accessibility_analysis;
 mod automatic_analysis;
 #[path = "simulation/berlin.rs"]
 pub mod berlin;
+#[path = "simulation/demographic_analysis.rs"]
+mod demographic_analysis;
 #[path = "simulation/empty.rs"]
 mod empty;
 #[path = "simulation/equil.rs"]
