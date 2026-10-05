@@ -26,6 +26,7 @@ struct Record {
 struct Cell {
     weight: f64,
     variance: f64,
+    uncertainty_supplied: bool,
 }
 
 type Key = (String, String, String);
@@ -64,9 +65,9 @@ pub(super) fn write(report: &Path, source: &Path) -> Result<(), AnalysisError> {
             .as_deref()
             .filter(|value| !value.trim().is_empty())
             .map(|value| number(value, "uncertainty"))
-            .transpose()?
-            .unwrap_or_default();
-        if study_population <= 0.0 || weight < 0.0 || uncertainty < 0.0 {
+            .transpose()?;
+        let uncertainty_value = uncertainty.unwrap_or_default();
+        if study_population <= 0.0 || weight < 0.0 || uncertainty_value < 0.0 {
             return Err(AnalysisError::new(format!(
                 "journey survey row {} requires positive population and non-negative weight and uncertainty",
                 index + 2
@@ -119,7 +120,8 @@ pub(super) fn write(report: &Path, source: &Path) -> Result<(), AnalysisError> {
                 .entry((row.split.clone(), metric.to_owned(), category))
                 .or_default();
             cell.weight += weight;
-            cell.variance += (weight * uncertainty).powi(2);
+            cell.variance += (weight * uncertainty_value).powi(2);
+            cell.uncertainty_supplied |= uncertainty.is_some();
         }
     }
 
@@ -280,7 +282,7 @@ pub(super) fn write(report: &Path, source: &Path) -> Result<(), AnalysisError> {
                 definition.as_str(),
                 if comparable {
                     observed
-                        .filter(|cell| cell.variance > 0.0)
+                        .filter(|cell| cell.uncertainty_supplied)
                         .map(|cell| format!("{:.6}", cell.variance.sqrt()))
                         .unwrap_or_default()
                 } else {
@@ -340,7 +342,7 @@ mod tests {
         let survey = dir.path().join("survey.csv");
         fs::write(
             &survey,
-            "study_population,journey_definition,split,mode,purpose,departure_seconds,duration_seconds,distance_meters,weight,uncertainty\n100,matsim-substantive-activities-v1,calibration,car,work,120,600,12000,2,0.5\n100,matsim-substantive-activities-v1,holdout,transit,work,1800,1800,8000,1,\n",
+            "study_population,journey_definition,split,mode,purpose,departure_seconds,duration_seconds,distance_meters,weight,uncertainty\n100,matsim-substantive-activities-v1,calibration,car,work,120,600,12000,2,0.5\n100,matsim-substantive-activities-v1,holdout,transit,work,1800,1800,8000,1,0\n",
         )
         .unwrap();
 
@@ -357,6 +359,7 @@ mod tests {
                 "holdout,mode,transit,1.000000,1.000000,1.000000,1,0.500000,2,100.000000"
             )
         );
+        assert!(rows.contains("matsim-substantive-activities-v1,0.000000,matched"));
         assert!(
             rows.contains(
                 "calibration,mode,transit,0.000000,0.000000,2.000000,1,0.500000,2,100.000000"
