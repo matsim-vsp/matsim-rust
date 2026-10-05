@@ -66,8 +66,8 @@ pub enum FlowSide {
 }
 
 impl FlowSide {
-    /// Name of the ratio exported for this side.
-    pub fn label(self) -> &'static str {
+    /// Name this side's ratio is known by, in the histogram and the metric catalog.
+    pub fn metric_name(self) -> &'static str {
         match self {
             Self::Entry => "entry_vc",
             Self::Exit => "exit_vc",
@@ -313,12 +313,12 @@ pub fn vc_bin_bounds(bin: usize) -> (f64, Option<f64>) {
 }
 
 /// Capacity utilization of one link in one reported interval.
+///
+/// It carries only what the exported row and the histogram need: the interval
+/// width and the sample size are already baked into the outcomes.
 #[derive(Debug, Clone, Copy)]
 pub struct LinkUtilization<'a> {
     pub link_id: &'a str,
-    pub interval_start_seconds: u64,
-    pub interval_hours: f64,
-    pub sample_size: f64,
     /// Whole-link network capacity in PCE per hour, exactly as read from the
     /// network and not scaled by the lane count.
     pub capacity_pce_per_hour: f64,
@@ -333,7 +333,6 @@ pub struct LinkUtilization<'a> {
 impl<'a> LinkUtilization<'a> {
     pub fn new(
         link: &'a Link,
-        interval_start_seconds: u64,
         interval_hours: f64,
         sample_size: f64,
         volumes: &IntervalVolumes,
@@ -346,9 +345,6 @@ impl<'a> LinkUtilization<'a> {
         };
         Self {
             link_id: link.id.external(),
-            interval_start_seconds,
-            interval_hours,
-            sample_size,
             capacity_pce_per_hour: link.capacity,
             permlanes: link.permlanes,
             entry_vehicles: volumes.entries,
@@ -433,9 +429,6 @@ mod tests {
     ) -> LinkUtilization<'static> {
         LinkUtilization {
             link_id: "link",
-            interval_start_seconds: 0,
-            interval_hours: 1.0,
-            sample_size: 1.0,
             capacity_pce_per_hour: 1000.0,
             permlanes: 1.0,
             entry_vehicles,
