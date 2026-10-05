@@ -9,6 +9,7 @@ use crate::simulation::framework_events::{
     WorkerListenerRegisterFunction,
 };
 use crate::simulation::id::Id;
+use crate::simulation::logging::init_controller_logging;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::population::agent_source::{
     DynAgentSource, IntoDynAgentSource, PopulationAgentSource,
@@ -20,7 +21,7 @@ use crate::simulation::replanning::routing::teleportation::TeleportationRoutingM
 use crate::simulation::replanning::routing::travel_time_calculator::{
     GlobalTravelTimeCalculator, PartitionTravelTimeCollector,
 };
-use crate::simulation::replanning::routing::{RoutingModule, TripRouter};
+use crate::simulation::replanning::routing::{RoutingModule, TransitRoutingModule, TripRouter};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
@@ -242,6 +243,27 @@ impl ControllerBuilder {
             routers.insert(id, module);
         }
 
+        if !controller_scenario.core.transit_schedule.lines().is_empty() {
+            let walk = config
+                .routing()
+                .teleported_mode_params
+                .iter()
+                .find(|params| params.mode == "walk")
+                .expect("routing config always includes walk parameters");
+            let mode = Id::create("pt");
+            let car_fallback = routers.get(&Id::create("car")).cloned();
+            routers.insert(
+                mode,
+                Arc::new(TransitRoutingModule::new(
+                    controller_scenario.core.transit_schedule.clone(),
+                    walk.teleported_mode_speed,
+                    walk.beeline_distance_factor,
+                    controller_scenario.core.garage.clone(),
+                    car_fallback,
+                )),
+            );
+        }
+
         Ok(TripRouter::new(routers))
     }
 }
@@ -296,6 +318,7 @@ impl Controller {
             fs::create_dir_all(&log_path).expect("Failed to create logs output path");
         }
 
+        let _controller_log_guards = init_controller_logging(&self.config);
         let mut mobsim_workers = self.start_mobsim_workers();
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
 

@@ -21,6 +21,7 @@ Read these files before making broad changes:
 - `README.md` for dependencies, build commands, and runnable examples.
 - `docs/architecture.md` for scenario ownership and worker lifecycles.
 - `docs/tests.md` for the rules around the global ID store and logging.
+- `docs/analysis.md` for final-iteration report conventions.
 
 ## Repository map
 

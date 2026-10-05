@@ -226,7 +226,9 @@ The same setting applies to an automatic run's interval width via
 
 The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
 rewrites the analysis outputs; event files, plans, the output network and the ID store are left
-untouched. Without `--interval-seconds` the recorded interval width is reused.
+untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels and the
+urban boundary are restored from `manifest.json`, so a rerun reproduces the recorded classification
+rather than reporting every link as `unknown`.
 
 The standalone command needs a run that already recorded a report, so run the simulation once with
 `output.analysis.enabled: true`. It reads its replay parameters from the run's `analysis/manifest.json`

@@ -595,6 +595,22 @@ pub struct Analysis {
     pub enabled: bool,
     /// Width of exported link-volume intervals in seconds.
     pub interval_seconds: u32,
+    /// Explicit per-link labels. Missing or blank labels are reported as `unknown`.
+    pub link_labels: std::collections::BTreeMap<String, LinkLabels>,
+    /// Optional polygon in the same coordinate system as network node coordinates.
+    /// A link is inner when both endpoints are inside, outer when both are outside
+    /// and the segment misses the polygon, and cross_boundary when one endpoint is
+    /// inside or the segment crosses the polygon. When set, this determines
+    /// `urban_area` instead of the per-link label of the same name.
+    pub urban_boundary: Option<Vec<[f64; 2]>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct LinkLabels {
+    pub urban_area: Option<String>,
+    pub road_type: Option<String>,
+    pub road_size: Option<String>,
 }
 
 impl Default for Analysis {
@@ -602,6 +618,8 @@ impl Default for Analysis {
         Self {
             enabled: false,
             interval_seconds: 3600,
+            link_labels: std::collections::BTreeMap::new(),
+            urban_boundary: None,
         }
     }
 }
@@ -731,6 +749,9 @@ pub struct Replanning {
     pub max_agent_plan_memory: u32,
     pub plan_selector_for_removal: String,
     pub strategy_settings: Vec<StrategySetting>,
+    pub adaptive_reroute_probability: Option<f64>,
+    pub adaptive_reroute_interval: u32,
+    pub batch_previous_route_proposals: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Builder)]
@@ -757,12 +778,34 @@ register_override!("replanning.plan_selector_for_removal", |config, value| {
     config.replanning_mut().plan_selector_for_removal = value.to_string();
 });
 
+register_override!(
+    "replanning.adaptive_reroute_probability",
+    |config, value| {
+        config.replanning_mut().adaptive_reroute_probability =
+            (value != "none").then(|| value.parse().unwrap());
+    }
+);
+
+register_override!("replanning.adaptive_reroute_interval", |config, value| {
+    config.replanning_mut().adaptive_reroute_interval = value.parse().unwrap();
+});
+
+register_override!(
+    "replanning.batch_previous_route_proposals",
+    |config, value| {
+        config.replanning_mut().batch_previous_route_proposals = value.parse().unwrap();
+    }
+);
+
 impl Default for Replanning {
     fn default() -> Self {
         Self {
             fraction_of_iterations_to_disable_innovation: 1.0,
             max_agent_plan_memory: 5,
             plan_selector_for_removal: WORST_SCORE_STRATEGY_NAME.to_string(),
+            adaptive_reroute_probability: None,
+            adaptive_reroute_interval: 5,
+            batch_previous_route_proposals: false,
             strategy_settings: vec![StrategySetting {
                 name: KEEP_LAST_SELECTED_STRATEGY_NAME.to_string(),
                 weight: 1.0,
@@ -1807,6 +1850,9 @@ mod tests {
                 fraction_of_iterations_to_disable_innovation: 0.8,
                 max_agent_plan_memory: 7,
                 plan_selector_for_removal: "BestScore".to_string(),
+                adaptive_reroute_probability: None,
+                adaptive_reroute_interval: 5,
+                batch_previous_route_proposals: false,
                 strategy_settings: vec![
                     StrategySetting {
                         name: "ReRoute".to_string(),
@@ -1833,6 +1879,9 @@ mod tests {
                 fraction_of_iterations_to_disable_innovation: 1.0,
                 max_agent_plan_memory: 5,
                 plan_selector_for_removal: WORST_SCORE_STRATEGY_NAME.to_string(),
+                adaptive_reroute_probability: None,
+                adaptive_reroute_interval: 5,
+                batch_previous_route_proposals: false,
                 strategy_settings: vec![StrategySetting {
                     name: KEEP_LAST_SELECTED_STRATEGY_NAME.to_string(),
                     weight: 1.0,

@@ -201,18 +201,24 @@ mod tests {
         execute_test(move |communicator| {
             let mut broker = create_net_message_broker(communicator);
 
-            sends.fetch_add(1, Ordering::Relaxed);
+            sends.fetch_add(1, Ordering::SeqCst);
             let result = broker.send_recv(0);
 
-            // all threads should block on receive. Therefore, the send count should be equal to 3, as
-            // 0,1 have 3 as a remote neighbor. It is possible for 0 and 1 to move on before 3 has
-            // increased the send count. Most of the time it should be 4 though. I don't know how
-            // good this test is in this case. I guess the remaining asserts are also fine.
+            // A rank only returns once it has received a message from every one of its
+            // neighbours, and a neighbour sends only after entering send_recv. So by
+            // the time this rank returns, this rank and each of its neighbours must
+            // have bumped the counter. The bound is therefore per-rank rather than a
+            // fixed total: rank 3 waits on rank 2 alone and may legitimately return
+            // while ranks 0 and 1 have not entered send_recv yet, so a single fixed
+            // threshold across all ranks cannot hold.
+            let expected_sends = broker.neighbors.len() + 1;
             assert!(
-                3 <= sends.load(Ordering::Relaxed),
-                "# {} Failed on send count of {}",
+                expected_sends <= sends.load(Ordering::SeqCst),
+                "# {} Failed on send count of {}, expected at least {} for {} neighbors",
                 broker.rank(),
-                sends.load(Ordering::Relaxed)
+                sends.load(Ordering::SeqCst),
+                expected_sends,
+                broker.neighbors.len()
             );
 
             // the different partitions expect varying numbers of sync messags.
