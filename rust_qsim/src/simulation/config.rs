@@ -607,10 +607,15 @@ pub struct Analysis {
     /// Optional observed-data CSV used by the validation report. Relative paths are resolved
     /// against the configured output directory.
     pub observed_data: Option<PathBuf>,
+    /// Optional weighted journey records from a comparable travel survey.
+    pub journey_survey: Option<PathBuf>,
     /// Run directories whose latest published analysis reports are included in a comparison.
     pub comparison_runs: Vec<PathBuf>,
     /// Optional DRT/taxi service records analysed after the run.
     pub service: Option<ServiceInputs>,
+    /// Optional CSV of observed boardings and alightings for the transit validation. Relative
+    /// paths are resolved against the configured output directory.
+    pub transit_observed_data: Option<PathBuf>,
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
@@ -653,8 +658,10 @@ impl Default for Analysis {
             urban_boundary: None,
 
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
             service: None,
+            transit_observed_data: None,
 
             excess_delay_clip_seconds: None,
         }

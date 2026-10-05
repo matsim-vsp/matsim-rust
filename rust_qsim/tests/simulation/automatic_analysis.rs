@@ -145,6 +145,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             enabled: true,
             interval_seconds: 3600,
             observed_data: Some(observed_data),
+            journey_survey: None,
             comparison_runs: vec![PathBuf::from("comparison")],
             ..Analysis::default()
         },
@@ -562,6 +563,12 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
         rust_qsim::simulation::analysis::capture_expected_travel(&population),
         AnalysisInputPaths::default(),
     );
+    let survey = output.join("journey_survey.csv");
+    fs::write(
+        &survey,
+        "study_population,journey_definition,split,mode,purpose,departure_seconds,duration_seconds,distance_meters,weight,uncertainty\n100,matsim-substantive-activities-v1,calibration,pt,work,0,100,6700,2,0.1\n100,matsim-substantive-activities-v1,calibration,bicycle,school,1200,900,5000,1,0.2\n",
+    )
+    .unwrap();
     let report = analyze_final_iteration(
         output,
         0,
@@ -573,6 +580,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            journey_survey: Some(survey),
             ..Analysis::default()
         },
     )
@@ -606,11 +614,18 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
     assert!(summary.contains(
         "\"walk\",\"work\",2,2,10.000000,0.000000,10.000000,10.000000,203.250000,196.750000,400.000000,400.000000"
     ));
-    let html = fs::read_to_string(report).unwrap();
+    let html = fs::read_to_string(&report).unwrap();
     assert!(html.contains("journey_mode_share.csv"));
     assert!(html.contains("Journey duration and distance distributions"));
     assert!(html.contains("journey-summary"));
     assert!(html.contains("Journey mode share by hour, purpose, and distance"));
+    assert!(html.contains("Travel survey comparison"));
+    let survey_rows = fs::read_to_string(report_dir.join("journey_survey_comparison.csv")).unwrap();
+    assert!(survey_rows.contains("calibration,mode,pt,2.000000,0.666667,3.000000,1,0.250000"));
+    assert!(survey_rows.contains("calibration,mode,bicycle,1.000000,0.333333,3.000000,0,0.000000"));
+    assert!(
+        survey_rows.contains("matsim-substantive-activities-v1,0.200000,missing_simulation_group")
+    );
 }
 
 #[deterministic_id_test(rust_qsim)]
@@ -873,7 +888,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 23] = [
+    const TABLES: [&str; 32] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -897,6 +912,15 @@ fn metric_catalog_names_match_the_exported_columns() {
         "service_summary.csv",
         "service_vehicles.csv",
         "service_occupancy.csv",
+        "transit_trips.csv",
+        "transit_stop_hourly.csv",
+        "transit_line_summary.csv",
+        "transit_outcomes.csv",
+        "transit_occupancy.csv",
+        "transit_journeys.csv",
+        "transit_availability.csv",
+        "transit_validation_summary.csv",
+        "transit_validation_matches.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1071,6 +1095,7 @@ fn run_metadata(
             pce: *pce,
             fef: 1.0,
             net_mode: Id::create("car"),
+            capacity: None,
             attributes: Default::default(),
         });
         garage.add_veh(InternalVehicle {
@@ -1402,8 +1427,10 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
             service: None,
+            transit_observed_data: None,
             excess_delay_clip_seconds: None,
         },
     )
@@ -1506,8 +1533,10 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             link_labels: labels,
             urban_boundary: None,
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
             service: None,
+            transit_observed_data: None,
             excess_delay_clip_seconds: None,
         },
     )
