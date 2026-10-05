@@ -1,6 +1,6 @@
 //! Comparisons between reports from completed runs.
 
-use super::{AnalysisError, Manifest, read_json};
+use super::{AnalysisError, Manifest, csv, escape_html, read_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -99,6 +99,37 @@ fn write_comparison(
                 .then_some(person.clone())
             })
             .collect::<BTreeSet<_>>();
+        let common_full_population = baseline_statuses
+            .iter()
+            .filter_map(|(person, status)| {
+                (matches!(status.as_str(), "complete" | "no_travel")
+                    && alternative_statuses
+                        .get(person)
+                        .is_some_and(|other| matches!(other.as_str(), "complete" | "no_travel")))
+                .then_some(person.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let baseline_departures = person_departures(baseline)?;
+        let alternative_departures = person_departures(alternative)?;
+        let common_travelers = common_complete_people
+            .iter()
+            .filter(|person| {
+                baseline_departures
+                    .get(*person)
+                    .is_some_and(|count| *count > 0)
+                    && alternative_departures
+                        .get(*person)
+                        .is_some_and(|count| *count > 0)
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let baseline_leg_values = common_complete_leg_values(baseline, &common_complete_people)?;
+        let alternative_leg_values =
+            common_complete_leg_values(alternative, &common_complete_people)?;
+        let baseline_daily_values =
+            common_daily_cohort_values(baseline, &common_full_population, &common_travelers)?;
+        let alternative_daily_values =
+            common_daily_cohort_values(alternative, &common_full_population, &common_travelers)?;
         let compatible = baseline
             .catalog
             .iter()
@@ -115,7 +146,16 @@ fn write_comparison(
         let specs = table_specs();
         let mut available = 0usize;
         for spec in specs {
-            if !same_network && matches!(spec.file, "coverage.csv" | "group_coverage.csv") {
+            if !same_network
+                && matches!(
+                    spec.file,
+                    "coverage.csv"
+                        | "group_coverage.csv"
+                        | "link_speed_summary.csv"
+                        | "link_speed_histogram.csv"
+                        | "vc_histogram.csv"
+                )
+            {
                 continue;
             }
             let Some(headers) = first_headers(baseline, alternative, spec.file)? else {
@@ -150,10 +190,39 @@ fn write_comparison(
                 {
                     continue;
                 }
-                let (left, right) = (
-                    read_rows(baseline, spec.file, &key_columns, metric_name)?,
-                    read_rows(alternative, spec.file, &key_columns, metric_name)?,
-                );
+                let (mut left, mut right) = if spec.file == "leg_hourly.csv" {
+                    (
+                        baseline_leg_values
+                            .get(catalog_name)
+                            .cloned()
+                            .unwrap_or_default(),
+                        alternative_leg_values
+                            .get(catalog_name)
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                } else if spec.file == "daily_summary.csv" {
+                    (
+                        baseline_daily_values
+                            .get(catalog_name)
+                            .cloned()
+                            .unwrap_or_default(),
+                        alternative_daily_values
+                            .get(catalog_name)
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                } else {
+                    (
+                        read_rows(baseline, spec.file, &key_columns, metric_name)?,
+                        read_rows(alternative, spec.file, &key_columns, metric_name)?,
+                    )
+                };
+                if spec.file == "link_speed_diagnostics.csv" {
+                    let key = serde_json::to_string(&[catalog_name]).map_err(io_error)?;
+                    left.retain(|row_key, _| row_key == &key);
+                    right.retain(|row_key, _| row_key == &key);
+                }
                 let keys = left
                     .keys()
                     .chain(right.keys())
@@ -253,12 +322,14 @@ fn write_comparison(
     for file in [
         "completion_status_differences.csv",
         "completion_status_transitions.csv",
+        "leg_completion_status_transitions.csv",
         "metric_compatibility.csv",
     ] {
         html.push_str(&format!(
             "<h2>{}</h2><table>",
             match file {
                 "completion_status_transitions.csv" => "Completion status transitions",
+                "leg_completion_status_transitions.csv" => "Leg completion status transitions",
                 "metric_compatibility.csv" => "Metric compatibility and availability",
                 _ => "Completion status counts",
             }
@@ -297,6 +368,9 @@ fn write_completion_status(
     let mut transitions = BufWriter::new(
         File::create(path.join("completion_status_transitions.csv")).map_err(io_error)?,
     );
+    let mut leg_transitions = BufWriter::new(
+        File::create(path.join("leg_completion_status_transitions.csv")).map_err(io_error)?,
+    );
     writeln!(
         counts,
         "alternative,status,baseline_count,alternative_count,difference"
@@ -305,6 +379,11 @@ fn write_completion_status(
     writeln!(
         transitions,
         "alternative,baseline_status,alternative_status,persons"
+    )
+    .map_err(io_error)?;
+    writeln!(
+        leg_transitions,
+        "alternative,person_id,leg_index,baseline_status,alternative_status"
     )
     .map_err(io_error)?;
     for alternative in alternatives {
@@ -343,10 +422,66 @@ fn write_completion_status(
             )
             .map_err(io_error)?;
         }
+        let base_legs = leg_statuses(baseline)?;
+        let other_legs = leg_statuses(alternative)?;
+        let leg_keys = base_legs
+            .keys()
+            .chain(other_legs.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for (person, leg_index) in leg_keys {
+            writeln!(
+                leg_transitions,
+                "{},{},{},{},{}",
+                csv(&alternative.path.display().to_string()),
+                csv(&person),
+                leg_index,
+                base_legs
+                    .get(&(person.clone(), leg_index.clone()))
+                    .map(String::as_str)
+                    .unwrap_or("missing"),
+                other_legs
+                    .get(&(person, leg_index.clone()))
+                    .map(String::as_str)
+                    .unwrap_or("missing")
+            )
+            .map_err(io_error)?;
+        }
     }
     counts.flush().map_err(io_error)?;
     transitions.flush().map_err(io_error)?;
+    leg_transitions.flush().map_err(io_error)?;
     Ok(())
+}
+
+fn leg_statuses(run: &Run) -> Result<BTreeMap<(String, String), String>, AnalysisError> {
+    let mut reader =
+        csv::Reader::from_path(run.path.join("analysis/legs.csv")).map_err(io_error)?;
+    let headers = reader.headers().map_err(io_error)?.clone();
+    let column = |name: &str| {
+        headers
+            .iter()
+            .position(|header| header == name)
+            .ok_or_else(|| AnalysisError::new(format!("legs.csv has no {name} column")))
+    };
+    let (person_idx, leg_idx, status_idx) = (
+        column("person_id")?,
+        column("leg_index")?,
+        column("status")?,
+    );
+    reader
+        .records()
+        .map(|row| {
+            let row = row.map_err(io_error)?;
+            Ok((
+                (
+                    row.get(person_idx).unwrap_or_default().to_owned(),
+                    row.get(leg_idx).unwrap_or_default().to_owned(),
+                ),
+                row.get(status_idx).unwrap_or_default().to_owned(),
+            ))
+        })
+        .collect()
 }
 
 fn write_metric_compatibility(
@@ -370,26 +505,56 @@ fn write_metric_compatibility(
             let diagnostic_metric = before
                 .or(after)
                 .is_some_and(|metric| metric.aggregation_key == "metric");
+            let common_cohort_metric = matches!(
+                name.as_str(),
+                "leg_departures"
+                    | "departing_persons"
+                    | "leg_duration_mean"
+                    | "daily_mean_completed_travel_burden"
+            );
+            let leg_status_metric = name == "leg_completion_status";
             let registered = table_specs().iter().any(|spec| {
                 spec.metrics
                     .iter()
                     .any(|(catalog_name, _)| *catalog_name == name)
-            }) || diagnostic_metric;
+            }) || diagnostic_metric
+                || common_cohort_metric
+                || leg_status_metric;
             let output_available = table_specs().iter().any(|spec| {
                 spec.metrics
                     .iter()
                     .any(|(catalog_name, _)| *catalog_name == name)
                     && baseline.path.join("analysis").join(spec.file).is_file()
                     && alternative.path.join("analysis").join(spec.file).is_file()
-            }) || diagnostic_metric
-                && baseline
-                    .path
-                    .join("analysis/link_speed_diagnostics.csv")
-                    .is_file()
-                && alternative
-                    .path
-                    .join("analysis/link_speed_diagnostics.csv")
-                    .is_file();
+            }) || leg_status_metric
+                && baseline.path.join("analysis/legs.csv").is_file()
+                && alternative.path.join("analysis/legs.csv").is_file()
+                || common_cohort_metric
+                    && baseline
+                        .path
+                        .join(if name == "daily_mean_completed_travel_burden" {
+                            "analysis/daily_summary.csv"
+                        } else {
+                            "analysis/legs.csv"
+                        })
+                        .is_file()
+                    && alternative
+                        .path
+                        .join(if name == "daily_mean_completed_travel_burden" {
+                            "analysis/daily_summary.csv"
+                        } else {
+                            "analysis/legs.csv"
+                        })
+                        .is_file()
+                || diagnostic_metric
+                    && baseline
+                        .path
+                        .join("analysis/link_speed_diagnostics.csv")
+                        .is_file()
+                    && alternative
+                        .path
+                        .join("analysis/link_speed_diagnostics.csv")
+                        .is_file();
             let status = match (before, after) {
                 (None, Some(_)) => "added_in_alternative",
                 (Some(_), None) => "missing_in_alternative",
@@ -540,6 +705,153 @@ fn read_rows(
     Ok(rows)
 }
 
+#[derive(Default)]
+struct CompleteLegGroup {
+    departures: usize,
+    persons: BTreeSet<String>,
+    duration_sum: f64,
+}
+
+fn common_complete_leg_values(
+    run: &Run,
+    common_complete_people: &BTreeSet<String>,
+) -> Result<BTreeMap<&'static str, BTreeMap<String, f64>>, AnalysisError> {
+    let mut reader =
+        csv::Reader::from_path(run.path.join("analysis/legs.csv")).map_err(io_error)?;
+    let headers = reader.headers().map_err(io_error)?.clone();
+    let column = |name: &str| {
+        headers
+            .iter()
+            .position(|header| header == name)
+            .ok_or_else(|| AnalysisError::new(format!("legs.csv has no {name} column")))
+    };
+    let (person_idx, hour_idx, mode_idx, duration_idx, status_idx) = (
+        column("person_id")?,
+        column("departure_hour_seconds")?,
+        column("mode")?,
+        column("duration_seconds")?,
+        column("status")?,
+    );
+    let mut groups = BTreeMap::<String, CompleteLegGroup>::new();
+    for record in reader.records() {
+        let record = record.map_err(io_error)?;
+        let person = record.get(person_idx).unwrap_or_default();
+        if record.get(status_idx) != Some("completed") || !common_complete_people.contains(person) {
+            continue;
+        }
+        let Some(duration) = record
+            .get(duration_idx)
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite())
+        else {
+            continue;
+        };
+        let key = serde_json::to_string(&[
+            record.get(hour_idx).unwrap_or_default(),
+            record.get(mode_idx).unwrap_or_default(),
+        ])
+        .map_err(io_error)?;
+        let group = groups.entry(key).or_default();
+        group.departures += 1;
+        group.persons.insert(person.to_owned());
+        group.duration_sum += duration;
+    }
+    let mut departures = BTreeMap::new();
+    let mut persons = BTreeMap::new();
+    let mut means = BTreeMap::new();
+    for (key, group) in groups {
+        departures.insert(key.clone(), group.departures as f64);
+        persons.insert(key.clone(), group.persons.len() as f64);
+        means.insert(key, group.duration_sum / group.departures as f64);
+    }
+    Ok(BTreeMap::from([
+        ("leg_departures", departures),
+        ("departing_persons", persons),
+        ("leg_duration_mean", means),
+    ]))
+}
+
+fn person_departures(run: &Run) -> Result<BTreeMap<String, usize>, AnalysisError> {
+    let mut reader =
+        csv::Reader::from_path(run.path.join("analysis/person_daily.csv")).map_err(io_error)?;
+    let headers = reader.headers().map_err(io_error)?.clone();
+    let person = headers
+        .iter()
+        .position(|name| name == "person_id")
+        .ok_or_else(|| AnalysisError::new("person_daily.csv has no person_id column"))?;
+    let departures = headers
+        .iter()
+        .position(|name| name == "departed_legs")
+        .ok_or_else(|| AnalysisError::new("person_daily.csv has no departed_legs column"))?;
+    reader
+        .records()
+        .map(|row| {
+            let row = row.map_err(io_error)?;
+            Ok((
+                row.get(person).unwrap_or_default().to_owned(),
+                row.get(departures)
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or_default(),
+            ))
+        })
+        .collect()
+}
+
+fn common_daily_cohort_values(
+    run: &Run,
+    all_complete: &BTreeSet<String>,
+    travelers: &BTreeSet<String>,
+) -> Result<BTreeMap<&'static str, BTreeMap<String, f64>>, AnalysisError> {
+    let mut reader =
+        csv::Reader::from_path(run.path.join("analysis/person_daily.csv")).map_err(io_error)?;
+    let headers = reader.headers().map_err(io_error)?.clone();
+    let person_idx = headers
+        .iter()
+        .position(|name| name == "person_id")
+        .ok_or_else(|| AnalysisError::new("person_daily.csv has no person_id column"))?;
+    let sum_idx = headers
+        .iter()
+        .position(|name| name == "completed_duration_sum_seconds")
+        .ok_or_else(|| AnalysisError::new("person_daily.csv has no completed duration column"))?;
+    let mut sums = BTreeMap::new();
+    for row in reader.records() {
+        let row = row.map_err(io_error)?;
+        let person = row.get(person_idx).unwrap_or_default().to_owned();
+        let Some(sum) = row
+            .get(sum_idx)
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite())
+        else {
+            continue;
+        };
+        sums.insert(person, sum);
+    }
+    let cohort_mean = |people: &BTreeSet<String>| {
+        let values = people
+            .iter()
+            .filter_map(|person| sums.get(person))
+            .collect::<Vec<_>>();
+        if values.is_empty() {
+            None
+        } else {
+            Some(values.iter().map(|value| **value).sum::<f64>() / values.len() as f64)
+        }
+    };
+    let mut values = BTreeMap::new();
+    for (cohort, people) in [
+        ("all_complete_persons", all_complete),
+        ("travelers", travelers),
+    ] {
+        if let Some(mean) = cohort_mean(people) {
+            values.insert(serde_json::to_string(&[cohort]).map_err(io_error)?, mean);
+        }
+    }
+    Ok(BTreeMap::from([(
+        "daily_mean_completed_travel_burden",
+        values,
+    )]))
+}
+
 fn read_column(path: &Path, name: &str) -> Result<BTreeSet<String>, AnalysisError> {
     let mut reader = csv::Reader::from_path(path).map_err(io_error)?;
     let headers = reader.headers().map_err(io_error)?.clone();
@@ -588,6 +900,21 @@ fn table_specs() -> &'static [TableSpec] {
                 ("unused_links", "unused_links"),
                 ("used_percent", "used_percent"),
             ],
+        },
+        TableSpec {
+            file: "leg_hourly.csv",
+            metrics: &[
+                ("leg_departures", "departures"),
+                ("departing_persons", "departing_persons"),
+                ("leg_duration_mean", "mean_duration_seconds"),
+            ],
+        },
+        TableSpec {
+            file: "daily_summary.csv",
+            metrics: &[(
+                "daily_mean_completed_travel_burden",
+                "mean_completed_leg_duration_sum_seconds",
+            )],
         },
         TableSpec {
             file: "link_speed_hourly.csv",
@@ -645,7 +972,6 @@ fn table_specs() -> &'static [TableSpec] {
                 ("links", "links"),
                 ("observations", "observations"),
                 ("unavailable_links", "unavailable_links"),
-                ("unused_links", "unused_links"),
             ],
         },
         TableSpec {
@@ -668,16 +994,6 @@ fn table_specs() -> &'static [TableSpec] {
     ]
 }
 
-fn csv(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
-}
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
 fn number(value: Option<f64>) -> String {
     value.map_or_else(String::new, |number| format!("{number:.6}"))
 }
@@ -718,7 +1034,23 @@ mod tests {
         fs::write(analysis.join("link_capacity.csv"), capacity).unwrap();
         fs::write(
             analysis.join("person_daily.csv"),
-            "person_id,completion_status\n",
+            "person_id,expected_legs,departed_legs,completed_legs,completed_duration_sum_seconds,completed_duration_mean_seconds,completion_status\n",
+        )
+        .unwrap();
+        fs::write(
+            analysis.join("legs.csv"),
+            "person_id,leg_index,mode,departure_seconds,departure_hour_seconds,arrival_seconds,duration_seconds,status\n",
+        )
+        .unwrap();
+        fs::write(analysis.join("leg_hourly.csv"), "departure_hour_seconds,mode,departures,departing_persons,completed_legs,mean_duration_seconds\n").unwrap();
+        fs::write(
+            analysis.join("daily_summary.csv"),
+            "cohort,persons,mean_completed_leg_duration_sum_seconds\n",
+        )
+        .unwrap();
+        fs::write(
+            analysis.join("link_speed_diagnostics.csv"),
+            "metric,count\n",
         )
         .unwrap();
         output
@@ -790,7 +1122,14 @@ mod tests {
         let catalog = r#"[
             {"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},
             {"name":"group_used_links","unit":"links","aggregation_key":"dimension,category,hour_start_seconds"},
-            {"name":"person_completed_leg_duration_sum","unit":"seconds","aggregation_key":"person_id"}
+            {"name":"person_completed_leg_duration_sum","unit":"seconds","aggregation_key":"person_id"},
+            {"name":"leg_departures","unit":"legs","aggregation_key":"departure_hour_seconds,mode"},
+            {"name":"departing_persons","unit":"persons","aggregation_key":"departure_hour_seconds,mode"},
+            {"name":"leg_duration_mean","unit":"seconds","aggregation_key":"departure_hour_seconds,mode"},
+            {"name":"daily_mean_completed_travel_burden","unit":"seconds","aggregation_key":"cohort"},
+            {"name":"leg_completion_status","unit":"category","aggregation_key":"person_id,leg_index"},
+            {"name":"partial_link_traversals","unit":"records","aggregation_key":"metric"},
+            {"name":"unmatched_leave_events","unit":"records","aggregation_key":"metric"}
         ]"#;
         for (dir, group_used, alice, bob) in [
             (&baseline, 1, 100, "stuck"),
@@ -800,12 +1139,27 @@ mod tests {
             fs::write(analysis.join("metric_catalog.json"), catalog).unwrap();
             fs::write(analysis.join("group_coverage.csv"), format!("dimension,category,hour_start_seconds,eligible_links,used_links,unused_links,used_percent\nroad_type,local,0,3,{group_used},1,66.666667\n")).unwrap();
             fs::write(analysis.join("person_daily.csv"), format!("person_id,expected_legs,departed_legs,completed_legs,completed_duration_sum_seconds,completed_duration_mean_seconds,completion_status\nalice,1,1,1,{alice},{alice},complete\nbob,1,1,0,50,,{bob}\n")).unwrap();
+            let duration = if alice == 100 { 100 } else { 120 };
+            let bob_status = if bob == "stuck" { "stuck" } else { "completed" };
+            fs::write(analysis.join("legs.csv"), format!("person_id,leg_index,mode,departure_seconds,departure_hour_seconds,arrival_seconds,duration_seconds,status\nalice,0,car,0,0,{duration},{duration},completed\nbob,0,car,0,0,,,{bob_status}\n")).unwrap();
+            let diagnostics = if alice == 100 {
+                "metric,count\npartial_link_traversals,4\nunmatched_leave_events,2\n"
+            } else {
+                "metric,count\npartial_link_traversals,1\nunmatched_leave_events,9\n"
+            };
+            fs::write(analysis.join("link_speed_diagnostics.csv"), diagnostics).unwrap();
         }
         let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
         let differences =
             fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
         assert!(differences.contains("group_used_links"));
         assert!(differences.contains("person_completed_leg_duration_sum"));
+        assert!(differences.contains("leg_departures"));
+        assert!(differences.contains("departing_persons"));
+        assert!(differences.contains("leg_duration_mean"));
+        assert!(differences.contains("daily_mean_completed_travel_burden"));
+        assert!(differences.contains("partial_link_traversals"));
+        assert!(differences.contains("4.000000,1.000000,-3.000000,-75.000000,4.000000,comparable"));
         assert!(differences.contains("1.000000,2.000000,1.000000,100.000000,1.000000,comparable"));
         assert!(
             differences.contains("100.000000,120.000000,20.000000,20.000000,100.000000,comparable")
@@ -827,6 +1181,14 @@ mod tests {
         )
         .unwrap();
         assert!(transitions.contains(",stuck,complete,1"));
+        let leg_transitions = fs::read_to_string(
+            report
+                .parent()
+                .unwrap()
+                .join("leg_completion_status_transitions.csv"),
+        )
+        .unwrap();
+        assert!(leg_transitions.contains(",\"bob\",0,stuck,completed"));
         assert!(
             !differences.contains("bob"),
             "stuck or incomplete people must not enter duration comparisons"

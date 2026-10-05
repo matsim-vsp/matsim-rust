@@ -87,13 +87,16 @@ Relative differences are blank when the baseline is zero. `metric_compatibility.
 missing metrics, incompatible definitions and unavailable or unregistered outputs. Link rows are
 matched by external link ID; links missing from either network are excluded and the number of
 corresponding links appears in the HTML report. Aggregate network and group metrics are omitted
-when the link sets differ.
+when the link sets differ; network-wide speed and V/C distributions are omitted too, while
+per-link outputs retain only corresponding IDs.
 Runs with different interval widths, simulation end times, sample-size scales, or link
 classification/filter definitions are rejected. `completion_status_differences.csv` and
 `completion_status_transitions.csv` show policy-induced changes in complete, incomplete, stuck and
-no-travel populations. Per-person duration comparisons include only people with a complete plan in
-both runs. Other registered link, group, capacity and speed outputs are compared by their catalog
-aggregation keys. The HTML report renders the same metric and completion-status tables.
+no-travel populations; `leg_completion_status_transitions.csv` reports changes per person and leg.
+Per-person duration comparisons include only people with a complete plan in both runs. Leg-hour and
+daily-cohort aggregates are recomputed over their common complete populations. Other registered
+link, group, capacity and speed outputs are compared by their catalog aggregation keys. The HTML
+report renders the metric and completion-status tables.
 
 For example:
 
