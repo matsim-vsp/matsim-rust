@@ -51,6 +51,7 @@ pub struct Controller {
     global_barrier: Arc<Barrier>,
     adapter_handles: Vec<AdapterHandle>,
     trip_router: TripRouter,
+    expected_travel: Vec<crate::simulation::analysis::PersonExpectedTravel>,
 }
 
 pub struct ControllerBuilder {
@@ -141,6 +142,7 @@ impl ControllerBuilder {
             global_barrier: barrier,
             adapter_handles: self.adapter_handles,
             trip_router: router,
+            expected_travel: Vec::new(),
         })
     }
 
@@ -331,6 +333,9 @@ impl Controller {
                 random_seed: self.config.computational_setup().random_seed,
                 network_input: self.config.network().path.as_deref(),
                 population_input: self.config.population().path.as_deref(),
+                vehicles_input: self.config.vehicles().path.as_deref(),
+                expected_travel: &self.expected_travel,
+                garage: &self.scenario.core.garage,
             };
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
@@ -395,6 +400,10 @@ impl Controller {
 
         prepare_for_sim(&mut self.scenario, &self.trip_router)
             .unwrap_or_else(|err| panic!("{err}: {:?}", err.issues()));
+        if is_last_iteration && self.config.output().analysis.enabled {
+            self.expected_travel =
+                crate::simulation::analysis::capture_expected_travel(&self.scenario.population);
+        }
         let inputs = self
             .scenario
             .split_for_mobsim(&self.link_storage_capacities);

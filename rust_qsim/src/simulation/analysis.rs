@@ -8,6 +8,8 @@ use crate::simulation::events::{
 use crate::simulation::io::proto::proto_events::{ProtoEventsReader, event_from_proto};
 use crate::simulation::io::xml::events::XmlEventsReader;
 use crate::simulation::scenario::network::{Link, Network};
+use crate::simulation::scenario::population::{InternalPlanElement, Population};
+use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -47,10 +49,78 @@ struct Manifest<'a> {
     software_version: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PersonExpectedTravel {
+    person_id: String,
+    legs: Vec<ExpectedLeg>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExpectedLeg {
+    leg_index: usize,
+    mode: String,
+    departure_seconds: Option<f64>,
+    expected_travel_seconds: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct VehiclePce {
+    vehicle_id: String,
+    vehicle_type_id: String,
+    pce: f64,
+}
+
+#[derive(Serialize)]
+struct ModuleStatus<'a> {
+    module: &'a str,
+    status: &'a str,
+    reason: Option<&'a str>,
+}
+
 pub struct AnalysisRunMetadata<'a> {
     pub random_seed: u64,
     pub network_input: Option<&'a Path>,
     pub population_input: Option<&'a Path>,
+    pub vehicles_input: Option<&'a Path>,
+    pub expected_travel: &'a [PersonExpectedTravel],
+    pub garage: &'a Garage,
+}
+
+/// Capture compact plan expectations immediately before the final iteration's mobsim.
+pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTravel> {
+    let mut persons: Vec<_> = population.persons.values().collect();
+    persons.sort_by(|a, b| a.id().external().cmp(b.id().external()));
+    persons
+        .into_iter()
+        .filter_map(|person| {
+            let plan = person.selected_plan()?;
+            let legs: Vec<_> = plan
+                .elements
+                .iter()
+                .enumerate()
+                .filter_map(|(element_index, element)| {
+                    let InternalPlanElement::Leg(leg) = element else {
+                        return None;
+                    };
+                    let expected = leg.trav_time.or_else(|| {
+                        leg.route
+                            .as_ref()
+                            .and_then(|route| route.as_generic().trav_time())
+                    });
+                    Some(ExpectedLeg {
+                        leg_index: element_index,
+                        mode: leg.mode.external().to_owned(),
+                        departure_seconds: leg.dep_time.map(|time| time.as_nanos() as f64 / 1e9),
+                        expected_travel_seconds: expected.map(|time| time.as_secs_f64()),
+                    })
+                })
+                .collect();
+            Some(PersonExpectedTravel {
+                person_id: person.id().external().to_owned(),
+                legs,
+            })
+        })
+        .collect()
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
@@ -181,6 +251,38 @@ pub fn analyze_final_iteration(
         serde_json::to_vec_pretty(&manifest).map_err(|e| AnalysisError(e.to_string()))?,
     )
     .map_err(io_error)?;
+    let mut vehicles: Vec<_> = run_metadata
+        .garage
+        .vehicles
+        .values()
+        .map(|vehicle| VehiclePce {
+            vehicle_id: vehicle.id.external().to_owned(),
+            vehicle_type_id: vehicle.vehicle_type.external().to_owned(),
+            pce: vehicle.pce,
+        })
+        .collect();
+    vehicles.sort_by(|a, b| a.vehicle_id.cmp(&b.vehicle_id));
+    let mut vehicle_types: Vec<_> = run_metadata
+        .garage
+        .vehicle_types
+        .values()
+        .map(|vehicle_type| (vehicle_type.id.external().to_owned(), vehicle_type.pce))
+        .collect();
+    vehicle_types.sort_by(|a, b| a.0.cmp(&b.0));
+    fs::write(
+        staging.join("run_metadata.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "expected_travel": run_metadata.expected_travel,
+            "vehicles": vehicles,
+            "vehicle_types": vehicle_types.iter().map(|(id, pce)| serde_json::json!({
+                "vehicle_type_id": id,
+                "pce": pce,
+            })).collect::<Vec<_>>(),
+            "vehicles_input": run_metadata.vehicles_input.map(|path| path.display().to_string()),
+        }))
+        .map_err(|e| AnalysisError(e.to_string()))?,
+    )
+    .map_err(io_error)?;
     let metrics = [
         Metric {
             name: "link_entry_vehicles",
@@ -197,18 +299,82 @@ pub fn analyze_final_iteration(
             unit: "links",
             aggregation_key: "hour_start_seconds",
         },
+        Metric {
+            name: "unused_links",
+            unit: "links",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "used_link_percent",
+            unit: "percent",
+            aggregation_key: "hour_start_seconds",
+        },
     ];
     fs::write(
         staging.join("metric_catalog.json"),
         serde_json::to_vec_pretty(&metrics).map_err(|e| AnalysisError(e.to_string()))?,
     )
     .map_err(io_error)?;
+    let statuses = [
+        ModuleStatus {
+            module: "link_coverage",
+            status: "complete",
+            reason: None,
+        },
+        ModuleStatus {
+            module: "link_speed",
+            status: "unavailable",
+            reason: Some("Traversal timing metrics are not implemented yet"),
+        },
+        ModuleStatus {
+            module: "agent_travel",
+            status: "unavailable",
+            reason: Some("Observed leg and journey metrics are not implemented yet"),
+        },
+        ModuleStatus {
+            module: "validation",
+            status: "unavailable",
+            reason: Some("No observed validation datasets are configured"),
+        },
+        ModuleStatus {
+            module: "cross_run_comparison",
+            status: "unavailable",
+            reason: Some("No comparison runs are configured"),
+        },
+        ModuleStatus {
+            module: "transit_and_research",
+            status: "unavailable",
+            reason: Some("Optional module inputs are not configured"),
+        },
+    ];
+    fs::write(
+        staging.join("module_status.json"),
+        serde_json::to_vec_pretty(&statuses).map_err(|e| AnalysisError(e.to_string()))?,
+    )
+    .map_err(io_error)?;
     write_report(&staging, iteration, ordered_links.len())?;
     let published = output_dir.join("analysis");
-    if published.exists() {
-        fs::remove_dir_all(&published).map_err(io_error)?;
+    let backup = output_dir.join(".analysis-backup");
+    if backup.exists() {
+        if published.exists() {
+            fs::remove_dir_all(&backup).map_err(io_error)?;
+        } else {
+            fs::rename(&backup, &published).map_err(io_error)?;
+        }
     }
-    fs::rename(&staging, &published).map_err(io_error)?;
+    let had_published = published.exists();
+    if had_published {
+        fs::rename(&published, &backup).map_err(io_error)?;
+    }
+    if let Err(error) = fs::rename(&staging, &published) {
+        if had_published {
+            let _ = fs::rename(&backup, &published);
+        }
+        return Err(io_error(error));
+    }
+    if had_published {
+        fs::remove_dir_all(&backup).map_err(io_error)?;
+    }
     Ok(published.join("index.html"))
 }
 
@@ -354,10 +520,25 @@ fn write_tables(
 }
 
 fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), AnalysisError> {
+    let coverage = fs::read_to_string(path.join("coverage.csv")).map_err(io_error)?;
+    let coverage = json_for_script(&coverage.lines().collect::<Vec<_>>())?;
+    let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
+    let hourly = fs::read_to_string(path.join("link_hourly.csv")).map_err(io_error)?;
+    let hourly = json_for_script(&hourly.lines().collect::<Vec<_>>())?;
     let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:900px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end.</p><ul><li><a href=\"link_hourly.csv\">Per-link hourly entry/exit volumes (CSV)</a></li><li><a href=\"coverage.csv\">Hourly link coverage (CSV)</a></li><li><a href=\"manifest.json\">Run manifest</a></li><li><a href=\"metric_catalog.json\">Metric catalog</a></li></ul></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}table(document.querySelector('#hourly'),h[0].split(','),h.slice(1).map(x=>x.split(',')));table(document.querySelector('#coverage'),c[0].split(','),c.slice(1).map(x=>x.split(',')));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
+fn json_for_script(value: &impl Serialize) -> Result<String, AnalysisError> {
+    serde_json::to_string(value)
+        .map(|json| {
+            json.replace('&', "\\u0026")
+                .replace('<', "\\u003c")
+                .replace('>', "\\u003e")
+        })
+        .map_err(|e| AnalysisError(e.to_string()))
 }
 
 fn csv(value: &str) -> String {
