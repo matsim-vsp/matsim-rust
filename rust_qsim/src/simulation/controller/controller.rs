@@ -270,7 +270,7 @@ impl ControllerBuilder {
 
 impl Controller {
     /// Runs the simulation and joins all threads before returning.
-    pub fn run(mut self) {
+    pub fn run(mut self) -> (TripRouter, Population) {
         let first_iteration = self.config.controller().first_iteration;
         let last_iteration = self.config.controller().last_iteration;
         assert!(
@@ -389,6 +389,7 @@ impl Controller {
             .unwrap_or_else(|err| panic!("Automatic analysis failed: {err}"));
             info!("Analysis report: {}", report.display());
         }
+        (self.trip_router, self.scenario.population)
     }
 
     fn run_iteration(
