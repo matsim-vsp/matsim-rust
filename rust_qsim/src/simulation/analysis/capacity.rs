@@ -202,6 +202,28 @@ impl RatioOutcome {
     }
 }
 
+/// Width of the reported interval that the simulation actually covered, in hours.
+///
+/// The last interval is truncated when `simulation_end_time` is not a whole
+/// multiple of `interval_seconds`, so it must be given only the capacity of the
+/// window that exists. Without this the final interval is credited with a full
+/// interval of capacity, which understates its flow and its V/C. Intervals at or
+/// beyond the end time keep the full width, because events are still recorded
+/// there.
+pub fn covered_interval_hours(
+    interval_start_seconds: u64,
+    interval_seconds: u32,
+    simulation_end_time: u32,
+) -> f64 {
+    let end = u64::from(simulation_end_time);
+    let covered = if interval_start_seconds >= end {
+        u64::from(interval_seconds)
+    } else {
+        u64::from(interval_seconds).min(end - interval_start_seconds)
+    };
+    covered as f64 / 3600.0
+}
+
 /// Capacity available in one interval for the unsampled network, in PCE.
 ///
 /// Returns `None` for a capacity or interval width that cannot describe a
@@ -368,6 +390,14 @@ impl Default for VcHistogram {
 impl VcHistogram {
     pub fn observe(&mut self, link: &LinkUtilization<'_>, side: FlowSide) {
         let (outcome, vehicles) = link.side(side);
+        // "Unused" means the link carried nothing on this side, whatever its capacity
+        // says. A link that was idle but has an unusable capacity is still idle, and
+        // counting it as unavailable would hide how much of the network is simply
+        // not in use. Its capacity problem stays visible in the per-link status.
+        if vehicles == 0 {
+            self.unused_links += 1;
+            return;
+        }
         if !outcome.status.is_available() {
             self.unavailable_links += 1;
             return;
@@ -377,12 +407,6 @@ impl VcHistogram {
             self.unavailable_links += 1;
             return;
         };
-        // A link that carried nothing has a valid zero ratio, but it would swamp
-        // the lowest bin; count it apart from lightly used links.
-        if vehicles == 0 {
-            self.unused_links += 1;
-            return;
-        }
         self.bins[bin] += 1;
         self.observations += 1;
     }
@@ -598,6 +622,38 @@ mod tests {
     }
 
     #[test]
+    fn the_final_interval_is_only_as_wide_as_the_window_that_exists() {
+        // A 1 h interval with 1.5 h of simulation: the second interval really covers
+        // only half an hour and must not be credited with a full hour of capacity.
+        assert_eq!(covered_interval_hours(0, 3600, 5400), 1.0);
+        assert_eq!(covered_interval_hours(3600, 3600, 5400), 0.5);
+        // An exact multiple leaves every interval full width.
+        assert_eq!(covered_interval_hours(0, 3600, 7200), 1.0);
+        assert_eq!(covered_interval_hours(3600, 3600, 7200), 1.0);
+        // Intervals at or past the end keep the full width, because events are still
+        // recorded there and the simulation did not truncate them.
+        assert_eq!(covered_interval_hours(7200, 3600, 5400), 1.0);
+        assert_eq!(covered_interval_hours(5400, 1800, 5400), 0.5);
+        // A sub-minute remainder still contributes its own width.
+        assert_eq!(covered_interval_hours(0, 3600, 60), 60.0 / 3600.0);
+    }
+
+    #[test]
+    fn a_truncated_final_interval_reports_the_higher_ratio() {
+        // One PCE-1 vehicle in the half hour that the final interval really covers,
+        // against 3600 PCE/h: 1 / (3600 * 0.5) rather than 1 / (3600 * 1).
+        let truncated = covered_interval_hours(3600, 3600, 5400);
+        let outcome = volume_capacity_ratio(&RatioInput {
+            capacity_pce_per_hour: 3600.0,
+            interval_hours: truncated,
+            sample_size: 1.0,
+            pce: Some(1.0),
+        });
+        assert_eq!(outcome.ratio, Some(1.0 / 1800.0));
+        assert_eq!(outcome.flow_pce_per_hour, Some(2.0));
+    }
+
+    #[test]
     fn bin_index_uses_left_closed_bins_and_overflow() {
         assert_eq!(vc_bin_index(0.0), Some(0));
         assert_eq!(vc_bin_index(0.099_999), Some(0));
@@ -648,5 +704,34 @@ mod tests {
         assert_eq!(exit.bins[0], 1);
         assert_eq!(exit.unused_links, 0);
         assert_eq!(exit.unavailable_links, 0);
+    }
+
+    #[test]
+    fn an_idle_link_stays_unused_even_when_its_capacity_is_unusable() {
+        // No vehicle ever crossed, so the link is idle. Reporting it as unavailable
+        // instead would hide how much of the network is simply not in use.
+        let idle_without_capacity = link_with(
+            RatioOutcome::unavailable(UsageStatus::InvalidCapacity, None),
+            available(0.0),
+            0,
+        );
+        // A link that did carry traffic but cannot be weighted stays unavailable.
+        let busy_without_capacity = link_with(
+            RatioOutcome::unavailable(UsageStatus::MissingPce, Some(1000.0)),
+            available(0.0),
+            1,
+        );
+
+        let mut histogram = VcHistogram::default();
+        histogram.observe(&idle_without_capacity, FlowSide::Entry);
+        assert_eq!(histogram.unused_links, 1);
+        assert_eq!(histogram.unavailable_links, 0);
+        assert_eq!(histogram.observations, 0);
+
+        let mut histogram = VcHistogram::default();
+        histogram.observe(&busy_without_capacity, FlowSide::Entry);
+        assert_eq!(histogram.unused_links, 0);
+        assert_eq!(histogram.unavailable_links, 1);
+        assert_eq!(histogram.observations, 0);
     }
 }

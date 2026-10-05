@@ -14,7 +14,8 @@ use crate::simulation::scenario::population::{InternalPlanElement, Population};
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
 use capacity::{
-    FlowSide, IntervalVolumes, LinkUtilization, VC_BIN_COUNT, VcHistogram, vc_bin_bounds,
+    FlowSide, IntervalVolumes, LinkUtilization, VC_BIN_COUNT, VcHistogram, covered_interval_hours,
+    vc_bin_bounds,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -297,39 +298,81 @@ pub fn analyze_final_iteration(
     )
     .map_err(io_error)?;
     let metrics = [
+        // A catalogued name is the column it describes, so the raw counts are shared
+        // by the volume table and the capacity table under one entry.
         Metric {
-            name: "link_entry_vehicles",
+            name: "entry_vehicles",
             unit: "vehicles",
-            aggregation_key: "link_id,hour_start_seconds",
+            aggregation_key: "link_id,interval_start_seconds",
         },
         Metric {
-            name: "link_exit_vehicles",
+            name: "exit_vehicles",
             unit: "vehicles",
-            aggregation_key: "link_id,hour_start_seconds",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "eligible_links",
+            unit: "links",
+            aggregation_key: "interval_start_seconds",
         },
         Metric {
             name: "used_links",
             unit: "links",
-            aggregation_key: "hour_start_seconds",
+            aggregation_key: "interval_start_seconds",
         },
+        // unused_links is a column of both coverage.csv and vc_histogram.csv; the
+        // histogram groups it by metric, the coverage table does not.
         Metric {
             name: "unused_links",
             unit: "links",
-            aggregation_key: "hour_start_seconds",
+            aggregation_key: "interval_start_seconds",
         },
         Metric {
-            name: "used_link_percent",
+            name: "used_percent",
             unit: "percent",
-            aggregation_key: "hour_start_seconds",
+            aggregation_key: "interval_start_seconds",
+        },
+        // Every name below matches a column header of link_capacity.csv or
+        // vc_histogram.csv, so a consumer of the catalog can look each metric up by
+        // name in the table that describes it.
+        Metric {
+            name: "capacity_pce_per_hour",
+            unit: "pce_per_hour",
+            aggregation_key: "link_id,interval_start_seconds",
         },
         Metric {
-            name: "entry_pce_vehicles",
+            name: "effective_capacity_pce",
             unit: "pce",
             aggregation_key: "link_id,interval_start_seconds",
         },
         Metric {
-            name: "exit_pce_vehicles",
+            name: "entry_pce",
             unit: "pce",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "exit_pce",
+            unit: "pce",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "entry_pce_scaled",
+            unit: "pce",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "exit_pce_scaled",
+            unit: "pce",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "entry_flow_pce_per_hour",
+            unit: "pce_per_hour",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "exit_flow_pce_per_hour",
+            unit: "pce_per_hour",
             aggregation_key: "link_id,interval_start_seconds",
         },
         Metric {
@@ -343,14 +386,30 @@ pub fn analyze_final_iteration(
             aggregation_key: "link_id,interval_start_seconds",
         },
         Metric {
-            name: "entry_vc_histogram",
-            unit: "links",
-            aggregation_key: "interval_start_seconds,bin_index",
+            name: "entry_unresolved_pce",
+            unit: "vehicles",
+            aggregation_key: "link_id,interval_start_seconds",
         },
         Metric {
-            name: "exit_vc_histogram",
+            name: "exit_unresolved_pce",
+            unit: "vehicles",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        // The histogram rows carry metric=entry_vc or metric=exit_vc.
+        Metric {
+            name: "links",
             unit: "links",
-            aggregation_key: "interval_start_seconds,bin_index",
+            aggregation_key: "interval_start_seconds,metric,bin_index",
+        },
+        Metric {
+            name: "observations",
+            unit: "links",
+            aggregation_key: "interval_start_seconds,metric",
+        },
+        Metric {
+            name: "unavailable_links",
+            unit: "links",
+            aggregation_key: "interval_start_seconds,metric",
         },
     ];
     fs::write(
@@ -520,7 +579,6 @@ fn write_tables(
     let mut hours: BTreeSet<u64> = counts.keys().map(|key| key.hour_start_seconds).collect();
     hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
     hours.insert(0);
-    let interval_hours = f64::from(interval) / 3600.0;
     // Every table below covers the same intervals, including those without any events.
     for hour in &hours {
         let hour = *hour;
@@ -542,6 +600,10 @@ fn write_tables(
             .map_err(io_error)?;
         }
     }
+    // The final interval is only as wide as the window the simulation covered, so its
+    // capacity denominator has to be computed per interval rather than once.
+    let interval_hours =
+        |interval_start: u64| covered_interval_hours(interval_start, interval, simulation_end_time);
     let mut coverage = BufWriter::new(File::create(path.join("coverage.csv")).map_err(io_error)?);
     writeln!(
         coverage,
@@ -584,12 +646,20 @@ fn write_tables(
                 .copied()
                 .unwrap_or_default();
             let utilization =
-                LinkUtilization::new(link, hour, interval_hours, sample_size, &volumes);
+                LinkUtilization::new(link, hour, interval_hours(hour), sample_size, &volumes);
             histograms.entry.observe(&utilization, FlowSide::Entry);
             histograms.exit.observe(&utilization, FlowSide::Exit);
         }
     }
-    write_capacity_table(path, links, counts, &hours, interval_hours, sample_size)?;
+    write_capacity_table(
+        path,
+        links,
+        counts,
+        &hours,
+        interval,
+        simulation_end_time,
+        sample_size,
+    )?;
     write_histograms(path, &capacities)?;
     Ok(())
 }
@@ -604,7 +674,8 @@ fn write_capacity_table(
     links: &[&Link],
     counts: &LinkVolumesByHour,
     hours: &BTreeSet<u64>,
-    interval_hours: f64,
+    interval: u32,
+    simulation_end_time: u32,
     sample_size: f64,
 ) -> Result<(), AnalysisError> {
     let mut table = BufWriter::new(File::create(path.join("link_capacity.csv")).map_err(io_error)?);
@@ -622,6 +693,7 @@ fn write_capacity_table(
                 })
                 .copied()
                 .unwrap_or_default();
+            let interval_hours = covered_interval_hours(*hour, interval, simulation_end_time);
             let utilization =
                 LinkUtilization::new(link, *hour, interval_hours, sample_size, &volumes);
             let (entry, exit) = (&utilization.entry, &utilization.exit);
@@ -703,7 +775,7 @@ struct IntervalHistograms {
     exit: VcHistogram,
 }
 
-/// An unavailable quantity is exported blank, a non-finite one as `nan`.
+/// A quantity that could not be computed is exported as an empty cell.
 fn number_opt(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.6}"))
 }

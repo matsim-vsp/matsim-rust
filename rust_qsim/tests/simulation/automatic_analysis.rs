@@ -462,6 +462,106 @@ fn capacity_utilization_reports_zero_capacity_as_unavailable() {
 }
 
 #[deterministic_id_test(rust_qsim)]
+fn capacity_utilization_credits_a_truncated_final_interval_only_for_its_window() {
+    // A 1 h interval but 1.5 h of simulation, with one PCE-1 vehicle entering at
+    // 4800 s. The final interval really covers only half an hour, so it may claim
+    // 3600 * 0.5 PCE of capacity, not a full hour's worth. Crediting it a full hour
+    // would halve both the reported flow and the V/C.
+    let report = capacity_report_until(
+        "truncated_interval",
+        1.0,
+        3600,
+        5400,
+        3600.0,
+        &[("car", 1.0)],
+        &[("car", "entered link", 4800)],
+    );
+    let last = report.row("link1", 3600);
+    assert_eq!(last["interval_hours"], "0.500000");
+    assert_eq!(last["effective_capacity_pce"], "1800.000000");
+    assert_eq!(last["entry_pce"], "1.000000");
+    assert_eq!(last["entry_flow_pce_per_hour"], "2.000000");
+    assert_eq!(last["entry_vc"], "0.000556");
+    assert_eq!(last["entry_vc_status"], "available");
+    // The complete first interval keeps its full hour.
+    let first = report.row("link1", 0);
+    assert_eq!(first["interval_hours"], "1.000000");
+    assert_eq!(first["effective_capacity_pce"], "3600.000000");
+    assert_eq!(first["entry_vc"], "0.000000");
+}
+
+#[deterministic_id_test(rust_qsim)]
+fn metric_catalog_names_match_the_exported_columns() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/3-links/3-links-config-1.yml",
+    ));
+    config.controller_mut().last_iteration = 1;
+    config.output_mut().analysis.enabled = true;
+    let output_dir = config.output().output_dir.clone();
+    ControllerBuilder::default_with_scenario(Scenario::load(config))
+        .build()
+        .unwrap()
+        .run();
+
+    let report_dir = output_dir.join("analysis");
+    let catalog = fs::read_to_string(report_dir.join("metric_catalog.json")).unwrap();
+    let names: Vec<String> = catalog
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("\"name\": \""))
+        .map(|line| line.trim_end_matches("\",").to_owned())
+        .collect();
+    assert!(!names.is_empty());
+
+    // Every catalogued name has to be findable in the file it describes, otherwise a
+    // consumer cannot look the column up.
+    const TABLES: [&str; 4] = [
+        "link_hourly.csv",
+        "coverage.csv",
+        "link_capacity.csv",
+        "vc_histogram.csv",
+    ];
+    let headers: Vec<Vec<String>> = TABLES
+        .iter()
+        .map(|file| {
+            fs::read_to_string(report_dir.join(file))
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap()
+                .split(',')
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect();
+    // A name is catalogued once and described by one table, so it only has to appear
+    // in at least one of them, not in each.
+    for name in &names {
+        assert!(
+            headers
+                .iter()
+                .any(|header| header.iter().any(|column| column == name)),
+            "{name} is catalogued but is not a column in any of {TABLES:?}"
+        );
+    }
+    // The capacity denominators the acceptance criteria call for are catalogued.
+    for expected in [
+        "capacity_pce_per_hour",
+        "effective_capacity_pce",
+        "entry_flow_pce_per_hour",
+        "exit_flow_pce_per_hour",
+        "entry_vc",
+        "exit_vc",
+        "unused_links",
+        "unavailable_links",
+    ] {
+        assert!(
+            names.iter().any(|name| name == expected),
+            "{expected} is not catalogued"
+        );
+    }
+}
+
+#[deterministic_id_test(rust_qsim)]
 fn capacity_utilization_uses_effective_capacity_and_survives_event_order() {
     // The 900 PCE/h link with a half-hour interval has 450 PCE of effective
     // capacity, which is the denominator of the exported ratio.
@@ -597,6 +697,28 @@ fn capacity_report(
     vehicles: &[(&str, f64)],
     events: &[(&str, &str, u32)],
 ) -> CapacityReport {
+    capacity_report_until(
+        name,
+        sample_size,
+        interval_seconds,
+        interval_seconds,
+        capacity,
+        vehicles,
+        events,
+    )
+}
+
+/// As [`capacity_report`], but with an explicit simulation end time so a final
+/// interval shorter than `interval_seconds` can be exercised.
+fn capacity_report_until(
+    name: &str,
+    sample_size: f64,
+    interval_seconds: u32,
+    simulation_end_time: u32,
+    capacity: f64,
+    vehicles: &[(&str, f64)],
+    events: &[(&str, &str, u32)],
+) -> CapacityReport {
     let output_dir = TempDir::new().unwrap();
     let output = output_dir.path();
     let events_dir = output.join("ITERS/it.0/events");
@@ -650,7 +772,7 @@ fn capacity_report(
         0,
         1,
         CompressionType::None,
-        u32::from(interval_seconds),
+        simulation_end_time,
         &metadata,
         &network,
         &Analysis {

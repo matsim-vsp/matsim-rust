@@ -48,6 +48,14 @@ counts, observed PCE volumes and sample-scaled volumes as separate columns, and 
 the volumes stay reportable because they do not involve the capacity; missing PCE invalidates the PCE
 columns as well. Every case is reported per link through `entry_vc_status`/`exit_vc_status`, and
 `vc_histogram.csv` separates links whose ratio is unusable from links that genuinely carried no traffic.
+A link that carried no vehicles on a side is counted as unused whatever its capacity says, so an idle
+network is not hidden behind unavailable ratios.
+
+Each interval is credited only with the capacity of the window the simulation covered, so a final
+interval that is shorter than `analysis.interval_seconds` is not treated as a whole one.
+
+Every name in `metric_catalog.json` is the column it describes, so a consumer can look a metric up in
+the table that exports it.
 
 PCE totals are accumulated as exact integers at a fixed scale, not as running floating-point sums,
 because floating-point addition does not commute. Otherwise the same vehicles crossing a link
