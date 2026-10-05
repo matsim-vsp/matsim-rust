@@ -166,7 +166,7 @@ pub(super) fn write(
         } else if metric == "damage" {
             group.values.iter().sum()
         } else {
-            group.values.iter().sum::<f64>() / group.values.len() as f64
+            arithmetic_mean(&group.values)
         };
         if !value.is_finite() {
             return Err(AnalysisError::new("noise metric aggregate is not finite"));
@@ -346,6 +346,14 @@ fn noise_error(error: impl std::fmt::Display) -> AnalysisError {
     AnalysisError::new(error.to_string())
 }
 
+fn arithmetic_mean(values: &[f64]) -> f64 {
+    let scale = values.iter().map(|value| value.abs()).fold(0.0, f64::max);
+    if scale == 0.0 {
+        return 0.0;
+    }
+    scale * (values.iter().map(|value| value / scale).sum::<f64>() / values.len() as f64)
+}
+
 fn resolve(output_dir: &Path, path: &Path) -> std::path::PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
@@ -439,5 +447,27 @@ mod tests {
         assert_eq!(rows[1].get(1), Some("1800"));
         assert_eq!(rows[1].get(2), Some("3600"));
         assert!(rows[1][7].is_empty());
+    }
+
+    #[test]
+    fn arithmetic_mean_does_not_overflow_representable_results() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("records.csv"),
+            "receiver_id,period_start_seconds,period_end_seconds,metric,unit,value\nr1,0,3600,other,unit,1e308\nr1,0,3600,other,unit,1e308\n",
+        )
+        .unwrap();
+        write(
+            dir.path(),
+            dir.path(),
+            &NoiseInputs {
+                records: "records.csv".into(),
+                affected_population: None,
+            },
+        )
+        .unwrap();
+        let mut rows = csv::Reader::from_path(dir.path().join("noise_summary.csv")).unwrap();
+        let row = rows.records().next().unwrap().unwrap();
+        assert_eq!(row[5].parse::<f64>().unwrap(), 1e308);
     }
 }
