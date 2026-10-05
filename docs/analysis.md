@@ -57,6 +57,51 @@ across-link mean and population standard deviation per interval,
 `link_speed_histogram.csv` the fixed-bin distribution, and
 `link_speed_diagnostics.csv` every record that could not produce a full-link speed.
 
+
+## Observed validation
+
+Set `output.analysis.observed_data` to a CSV file to compare observations with the latest
+completed iteration. Relative paths are resolved from the run's output directory; standalone
+reanalysis reuses the path recorded in the manifest. The file must contain one row per link and
+period, with these exact headers:
+
+```csv
+link_id,period_start_seconds,period_end_seconds,vehicle_class,metric,unit,value,split
+link-1,0,3600,all,count,vehicles,120,calibration
+link-1,0,3600,all,speed,km/h,36,holdout
+```
+
+`link_id` is the external network link ID. Periods must match the configured analysis interval
+exactly, and each split may contain only one row per link, period, class, and metric.
+`vehicle_class` accepts `all` for aggregate results or a vehicle type ID from the run's
+vehicle definitions. Class-specific count and speed tables are exported alongside aggregate link
+tables. The class name `all` is reserved for aggregate observations. `metric` accepts `count` or
+`speed`; count units are `vehicles`, `vehicle`, or
+`veh`, and speed units are `m/s`, `mps`, `km/h`, or `kph`. Counts are expanded by the reciprocal
+of `qsim.sample_size`, while speeds are not expanded. `split` is `calibration` or `holdout`. An
+optional `source` column can identify a station or data source; the path, label, and source row
+are carried into matched and unmatched exports.
+
+The report exports matched rows, unmatched input rows, and bias, MAE, RMSE, and count GEH in CSV,
+grouped by split, metric, and vehicle class. GEH scales matched count intervals to hourly rates before applying the formula, so
+its thresholds remain comparable when `interval_seconds` differs from 3600. Relative error is
+blank when the observed reference is zero. It also writes separate
+calibration and holdout scatterplots by metric, time profiles, and residual maps. These plots use
+aggregate `all` observations so vehicle classes are not counted again alongside the aggregate.
+The input path is recorded as
+observation provenance in each matched row. Validation input errors leave the core report intact
+and mark only the validation module failed.
+
+To compare completed runs, set `output.analysis.comparison_runs` to run output directories. Each
+directory's `analysis/manifest.json` selects its latest completed iteration, and its published
+aggregate and vehicle-class count and speed tables are combined in `cross_run_comparison.csv`.
+Count rows include both the simulated sample and the population-expanded value, using each run's
+recorded sample size; speed rows have identical sample and population values. Each row includes
+the full period start and end, so runs with different interval widths remain identifiable.
+Relative paths are resolved from the current run's output directory. A missing or incomplete
+comparison report marks only the cross-run comparison module failed.
+
+
 ## Network distance, time and congestion
 
 `network_distance_time.csv` reports observed vehicle link traversals by link and interval;
@@ -95,6 +140,7 @@ arrivals, stuck events, interval-start and peak concurrent counts, and apportion
 from event timestamps. It covers travel modes in the person event stream and does not claim
 link-level network occupancy. Link speed tables remain a
 separate view and only include complete full-link traversals.
+
 
 ## Link classification
 

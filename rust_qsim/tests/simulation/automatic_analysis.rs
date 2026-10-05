@@ -93,6 +93,45 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     }
     let garage = Garage::default();
     let metadata = run_metadata(4711, 1.0, &garage, &[]);
+    let observed_data = output.join("observed.csv");
+    fs::write(
+        &observed_data,
+        "link_id,period_start_seconds,period_end_seconds,vehicle_class,metric,unit,value,split,source\n\
+         used,3600,7200,all,count,vehicles,1,calibration,counter-west\n\
+         used,3600,7200,all,speed,m/s,0.01,holdout,sensor-east\n\
+         used,3600,7200,all,count,vehicles,0,holdout,counter-zero\n\
+         used,3600,7200,bus,count,vehicles,1,calibration,counter-bus\n\
+         used,3600,5400,all,count,vehicles,1,calibration,counter-period\n\
+         missing,3600,7200,all,count,vehicles,1,holdout,counter-north\n",
+    )
+    .unwrap();
+    let comparison_report = output.join("comparison/analysis");
+    fs::create_dir_all(&comparison_report).unwrap();
+    fs::write(
+        comparison_report.join("manifest.json"),
+        r#"{"status":"complete","iteration":3,"sample_size":0.5,"interval_seconds":3600}"#,
+    )
+    .unwrap();
+    fs::write(
+        comparison_report.join("link_hourly.csv"),
+        "link_id,hour_start_seconds,entry_vehicles\nused,3600,5\n",
+    )
+    .unwrap();
+    fs::write(
+        comparison_report.join("link_speed_hourly.csv"),
+        "link_id,hour_start_seconds,representative_speed_mps\nused,3600,10\n",
+    )
+    .unwrap();
+    fs::write(
+        comparison_report.join("link_hourly_by_class.csv"),
+        "vehicle_class,link_id,hour_start_seconds,entry_vehicles\n",
+    )
+    .unwrap();
+    fs::write(
+        comparison_report.join("link_speed_by_class.csv"),
+        "vehicle_class,link_id,hour_start_seconds,representative_speed_mps\n",
+    )
+    .unwrap();
 
     let report = analyze_final_iteration(
         output,
@@ -105,6 +144,8 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            observed_data: Some(observed_data),
+            comparison_runs: vec![PathBuf::from("comparison")],
             ..Analysis::default()
         },
     )
@@ -117,12 +158,64 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert!(hourly.contains("\"unused-5\",3600,0,0"));
     let coverage = fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap();
     assert!(coverage.contains("3600,200,5,195,2.500000"));
+    let validation = report.parent().unwrap();
+    let validation_matches = fs::read_to_string(validation.join("validation_matches.csv")).unwrap();
+    assert!(validation_matches.contains("\"used\",3600,\"all\",\"count\",\"calibration\",1.000000,1.000000,1.000000,1.000000,0.000000,0.000000"));
+    assert!(validation_matches.contains("\"used\",3600,\"all\",\"speed\",\"holdout\",0.010000,0.010000,1.000000,0.010000,0.000000,0.000000"));
+    assert!(validation_matches.contains("counter-west"));
+    let unmatched = fs::read_to_string(validation.join("validation_unmatched.csv")).unwrap();
+    assert!(unmatched.contains("no_simulation_match"));
+    assert!(unmatched.contains("counter-north"));
+    assert!(unmatched.contains("vehicle_class_unavailable"));
+    assert!(unmatched.contains("period_mismatch"));
+    assert!(unmatched.contains("counter-bus"));
+    assert!(unmatched.contains("counter-period"));
+    let summary = fs::read_to_string(validation.join("validation_summary.csv")).unwrap();
+    assert!(summary.contains("holdout,count,all,1,1.000000,1.000000,1.000000,1.414214,1,1,1"));
+    let cross_run = fs::read_to_string(validation.join("cross_run_comparison.csv")).unwrap();
+    assert!(cross_run.contains("comparison,3,entry_vehicles,used,3600,7200,all,5,0.5,10,vehicles"));
+    assert!(
+        cross_run
+            .contains("comparison,3,representative_speed_mps,used,3600,7200,all,10,0.5,10,m/s")
+    );
+    for plot in [
+        "validation_scatter_count_calibration.svg",
+        "validation_scatter_count_holdout.svg",
+        "validation_scatter_speed_calibration.svg",
+        "validation_scatter_speed_holdout.svg",
+    ] {
+        assert!(validation.join(plot).is_file());
+    }
+    assert!(validation.join("validation_time_profiles.svg").is_file());
+    assert!(validation.join("validation_residual_map.svg").is_file());
+    assert!(
+        validation
+            .join("validation_time_profiles_calibration.svg")
+            .is_file()
+    );
+    assert!(
+        validation
+            .join("validation_time_profiles_holdout.svg")
+            .is_file()
+    );
+    assert!(
+        validation
+            .join("validation_residual_map_calibration.svg")
+            .is_file()
+    );
+    assert!(
+        validation
+            .join("validation_residual_map_holdout.svg")
+            .is_file()
+    );
     let html = fs::read_to_string(&report).unwrap();
     // The report embeds the hourly rows and the coverage CSV verbatim; assert the
     // payload's columns and values rather than a bare variable declaration.
     assert!(html.contains(
         "\"link_id\":\"used\",\"hour_start_seconds\":3600,\"entry_vehicles\":1,\"exit_vehicles\":1"
     ));
+    assert!(html.contains("id=\"cross-run\""));
+    assert!(html.contains("csvTable('#cross-run'"));
     assert!(
         html.contains(
             "[\"hour_start_seconds,eligible_links,used_links,unused_links,used_percent\","
@@ -780,7 +873,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 16] = [
+    const TABLES: [&str; 20] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -797,6 +890,10 @@ fn metric_catalog_names_match_the_exported_columns() {
         "person_daily.csv",
         "daily_summary.csv",
         "legs.csv",
+        "validation_summary.csv",
+        "link_hourly_by_class.csv",
+        "link_speed_by_class.csv",
+        "cross_run_comparison.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1301,6 +1398,8 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             interval_seconds: 3600,
             link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
+            observed_data: None,
+            comparison_runs: Vec::new(),
             excess_delay_clip_seconds: None,
         },
     )
@@ -1402,6 +1501,8 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             interval_seconds: 3600,
             link_labels: labels,
             urban_boundary: None,
+            observed_data: None,
+            comparison_runs: Vec::new(),
             excess_delay_clip_seconds: None,
         },
     )
