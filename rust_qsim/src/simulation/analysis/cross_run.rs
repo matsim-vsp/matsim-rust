@@ -87,8 +87,8 @@ fn write_comparison(
         let matched_links = matching_link_ids(baseline, alternative)?;
         let same_network = matched_links.len() == baseline.manifest.eligible_links
             && matched_links.len() == alternative.manifest.eligible_links;
-        let baseline_statuses = person_statuses(baseline)?;
-        let alternative_statuses = person_statuses(alternative)?;
+        let baseline_statuses = optional_person_statuses(baseline)?;
+        let alternative_statuses = optional_person_statuses(alternative)?;
         let common_complete_people = baseline_statuses
             .iter()
             .filter_map(|(person, status)| {
@@ -109,8 +109,8 @@ fn write_comparison(
                 .then_some(person.clone())
             })
             .collect::<BTreeSet<_>>();
-        let baseline_departures = person_departures(baseline)?;
-        let alternative_departures = person_departures(alternative)?;
+        let baseline_departures = optional_person_departures(baseline)?;
+        let alternative_departures = optional_person_departures(alternative)?;
         let common_travelers = common_complete_people
             .iter()
             .filter(|person| {
@@ -123,13 +123,13 @@ fn write_comparison(
             })
             .cloned()
             .collect::<BTreeSet<_>>();
-        let baseline_leg_values = common_complete_leg_values(baseline, &common_complete_people)?;
+        let baseline_leg_values = optional_complete_leg_values(baseline, &common_complete_people)?;
         let alternative_leg_values =
-            common_complete_leg_values(alternative, &common_complete_people)?;
+            optional_complete_leg_values(alternative, &common_complete_people)?;
         let baseline_daily_values =
-            common_daily_cohort_values(baseline, &common_full_population, &common_travelers)?;
+            optional_daily_cohort_values(baseline, &common_full_population, &common_travelers)?;
         let alternative_daily_values =
-            common_daily_cohort_values(alternative, &common_full_population, &common_travelers)?;
+            optional_daily_cohort_values(alternative, &common_full_population, &common_travelers)?;
         let compatible = baseline
             .catalog
             .iter()
@@ -427,8 +427,8 @@ fn write_completion_status(
     )
     .map_err(io_error)?;
     for alternative in alternatives {
-        let base = person_statuses(baseline)?;
-        let other = person_statuses(alternative)?;
+        let base = optional_person_statuses(baseline)?;
+        let other = optional_person_statuses(alternative)?;
         let mut base_counts = BTreeMap::<&str, usize>::new();
         let mut other_counts = BTreeMap::<&str, usize>::new();
         for status in base.values() {
@@ -462,8 +462,8 @@ fn write_completion_status(
             )
             .map_err(io_error)?;
         }
-        let base_legs = leg_statuses(baseline)?;
-        let other_legs = leg_statuses(alternative)?;
+        let base_legs = optional_leg_statuses(baseline)?;
+        let other_legs = optional_leg_statuses(alternative)?;
         let leg_keys = base_legs
             .keys()
             .chain(other_legs.keys())
@@ -675,6 +675,53 @@ fn person_statuses(run: &Run) -> Result<BTreeMap<String, String>, AnalysisError>
             ))
         })
         .collect()
+}
+
+fn optional_person_statuses(run: &Run) -> Result<BTreeMap<String, String>, AnalysisError> {
+    if run.path.join("analysis/person_daily.csv").is_file() {
+        person_statuses(run)
+    } else {
+        Ok(BTreeMap::new())
+    }
+}
+
+fn optional_leg_statuses(run: &Run) -> Result<BTreeMap<(String, String), String>, AnalysisError> {
+    if run.path.join("analysis/legs.csv").is_file() {
+        leg_statuses(run)
+    } else {
+        Ok(BTreeMap::new())
+    }
+}
+
+fn optional_person_departures(run: &Run) -> Result<BTreeMap<String, usize>, AnalysisError> {
+    if run.path.join("analysis/person_daily.csv").is_file() {
+        person_departures(run)
+    } else {
+        Ok(BTreeMap::new())
+    }
+}
+
+fn optional_complete_leg_values(
+    run: &Run,
+    common_complete_people: &BTreeSet<String>,
+) -> Result<BTreeMap<&'static str, BTreeMap<String, f64>>, AnalysisError> {
+    if run.path.join("analysis/legs.csv").is_file() {
+        common_complete_leg_values(run, common_complete_people)
+    } else {
+        Ok(BTreeMap::new())
+    }
+}
+
+fn optional_daily_cohort_values(
+    run: &Run,
+    all_complete: &BTreeSet<String>,
+    travelers: &BTreeSet<String>,
+) -> Result<BTreeMap<&'static str, BTreeMap<String, f64>>, AnalysisError> {
+    if run.path.join("analysis/person_daily.csv").is_file() {
+        common_daily_cohort_values(run, all_complete, travelers)
+    } else {
+        Ok(BTreeMap::new())
+    }
 }
 
 fn validate_compatible(base: &Run, other: &Run) -> Result<(), AnalysisError> {
@@ -1063,9 +1110,8 @@ fn denominator_column(metric: &str) -> Option<&'static str> {
     match metric {
         "used_percent" | "group_used_link_percent" => Some("eligible_links"),
         "entry_vc" | "exit_vc" => Some("effective_capacity_pce"),
-        "link_representative_speed"
-        | "link_vehicle_speed_mean"
-        | "link_vehicle_speed_population_std" => Some("observations"),
+        "link_representative_speed" => Some("total_duration_seconds"),
+        "link_vehicle_speed_mean" | "link_vehicle_speed_population_std" => Some("observations"),
         "hourly_mean_link_speed" | "hourly_link_speed_population_std" => Some("links_with_speed"),
         "person_completed_leg_duration_mean" => Some("completed_legs"),
         _ => None,
@@ -1190,6 +1236,37 @@ mod tests {
         let alternative = run(temp.path(), "alternative", 0.5, "l1,0,20,0\n");
         let error = compare_completed_runs(&baseline, &[alternative]).unwrap_err();
         assert!(error.to_string().contains("sample-size scales"));
+    }
+
+    #[test]
+    fn missing_agent_reports_do_not_block_link_comparisons_and_speed_uses_duration_denominator() {
+        let temp = tempfile::tempdir().unwrap();
+        let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
+        let alternative = run(temp.path(), "alternative", 1.0, "l1,0,15,0\n");
+        for output in [&baseline, &alternative] {
+            let analysis = output.join("analysis");
+            fs::remove_file(analysis.join("person_daily.csv")).unwrap();
+            fs::remove_file(analysis.join("legs.csv")).unwrap();
+            fs::write(
+                analysis.join("metric_catalog.json"),
+                r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"link_representative_speed","unit":"m/s","aggregation_key":"link_id,hour_start_seconds"},{"name":"person_completed_leg_duration_sum","unit":"seconds","aggregation_key":"person_id"}]"#,
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("link_speed_hourly.csv"),
+                "link_id,hour_start_seconds,representative_speed_mps,total_duration_seconds,observations\nl1,0,10,30,2\n",
+            )
+            .unwrap();
+        }
+
+        let report = compare_completed_runs(&baseline, std::slice::from_ref(&alternative)).unwrap();
+        let differences =
+            fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
+        assert!(differences.contains("link_representative_speed"));
+        assert!(differences.contains(",30.000000,30.000000,comparable"));
+        let compatibility =
+            fs::read_to_string(report.parent().unwrap().join("metric_compatibility.csv")).unwrap();
+        assert!(compatibility.contains("unavailable_output"));
     }
 
     #[test]
