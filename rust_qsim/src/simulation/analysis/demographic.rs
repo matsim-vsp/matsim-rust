@@ -847,6 +847,7 @@ mod tests {
                     .collect(),
             }),
             plans: vec![IOPlan {
+                attributes: None,
                 selected: true,
                 score: None,
                 elements: Vec::new(),

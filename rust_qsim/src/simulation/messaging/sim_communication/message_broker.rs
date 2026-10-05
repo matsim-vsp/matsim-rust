@@ -1,11 +1,12 @@
 use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::id::Id;
-use crate::simulation::messaging::messages::{InternalSyncMessage, ScheduledTeleportation};
+use crate::simulation::messaging::messages::{
+    InternalSyncMessage, TeleportationMessage, VehicleMessage,
+};
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::network::sim_network::{SimNetworkPartition, StorageUpdate};
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::time::Tick;
-use crate::simulation::vehicles::SimulationVehicle;
 use ahash::HashMapExt;
 use nohash_hasher::{IntMap, IntSet};
 use std::collections::BinaryHeap;
@@ -60,32 +61,32 @@ where
         *self.link_mapping.get(link_id).unwrap()
     }
 
-    pub fn add_veh(&mut self, vehicle: SimulationVehicle, now: impl Into<Tick>) {
+    pub fn add_veh(&mut self, vehicle_message: VehicleMessage, now: impl Into<Tick>) {
         let now = now.into();
-        let link_id = vehicle.curr_link_id().unwrap();
+        let link_id = vehicle_message.vehicle().curr_link_id().unwrap();
         let partition = *self.link_mapping.get(link_id).unwrap();
         let rank = self.rank();
         let message = self
             .out_messages
             .entry(partition)
             .or_insert_with(|| InternalSyncMessage::new(now, rank, partition));
-        message.add_veh(vehicle);
+        message.add_veh(vehicle_message);
     }
 
     pub(crate) fn add_teleportation(
         &mut self,
-        teleportation: ScheduledTeleportation,
+        teleportation_message: TeleportationMessage,
         now: impl Into<Tick>,
     ) {
         let now = now.into();
-        let link_id = teleportation.agent().curr_link_id().unwrap();
+        let link_id = teleportation_message.agent().curr_link_id().unwrap();
         let partition = *self.link_mapping.get(link_id).unwrap();
         let rank = self.rank();
         let message = self
             .out_messages
             .entry(partition)
             .or_insert_with(|| InternalSyncMessage::new(now, rank, partition));
-        message.add_teleportation(teleportation);
+        message.add_teleportation(teleportation_message);
     }
 
     pub fn add_cap_update(&mut self, cap: StorageUpdate, now: impl Into<Tick>) {
@@ -179,6 +180,7 @@ mod tests {
     use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
     use crate::simulation::config;
     use crate::simulation::id::Id;
+    use crate::simulation::messaging::messages::VehicleMessage;
     use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
     use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
     use crate::simulation::network::sim_network::SimNetworkPartition;
@@ -246,7 +248,7 @@ mod tests {
             if broker.rank() == 0 {
                 let agent = create_agent(0, vec!["2", "6"]);
                 let vehicle = SimulationVehicle::from_parts(0, 0, 0., 0., agent);
-                broker.add_veh(vehicle, 0);
+                broker.add_veh(vehicle_message(vehicle), 0);
             }
 
             // do sync step for all partitions
@@ -260,9 +262,9 @@ mod tests {
                     .unwrap();
                 assert_eq!(0, msg.time());
                 assert_eq!(1, msg.vehicles().len());
-                let mut vehicle = msg.vehicles_mut().remove(0);
+                let (mut vehicle, attachments) = msg.vehicles_mut().remove(0).into_parts();
                 vehicle.notify_event(&mut AgentEvent::LeftLink(), SimTime::default());
-                broker.add_veh(vehicle, 1);
+                broker.add_veh(VehicleMessage::with_attachments(vehicle, attachments), 1);
             } else {
                 for msg in result_0 {
                     if !msg.vehicles().is_empty() {
@@ -301,7 +303,7 @@ mod tests {
             if broker.rank() == 0 {
                 let agent = create_agent(0, vec!["6"]);
                 let vehicle = SimulationVehicle::from_parts(0, 0, 0., 0., agent);
-                broker.add_veh(vehicle, 1);
+                broker.add_veh(vehicle_message(vehicle), 1);
             }
 
             // do sync step for all partitions for "current" time step
@@ -334,7 +336,7 @@ mod tests {
                 // place vehicle into partition 0 with a future timestamp with remote destination
                 let agent = create_agent(0, vec!["6"]);
                 let vehicle = SimulationVehicle::from_parts(0, 0, 0., 0., agent);
-                broker.add_veh(vehicle, 1);
+                broker.add_veh(vehicle_message(vehicle), 1);
             }
 
             // do sync step for all partitions for "current" time step
@@ -349,7 +351,7 @@ mod tests {
                 // place vehicle into partition 2 with a current timestamp with neighbor destination
                 let agent = create_agent(1, vec!["6"]);
                 let vehicle = SimulationVehicle::from_parts(1, 0, 0., 0., agent);
-                broker.add_veh(vehicle, 1);
+                broker.add_veh(vehicle_message(vehicle), 1);
             }
 
             // do sync step for all partitions for "future" time step
@@ -358,10 +360,16 @@ mod tests {
             for msg in result_1 {
                 if broker.rank() == 3 && msg.from_process() == 0 {
                     assert_eq!(1, msg.vehicles().len());
-                    assert_eq!("0", msg.vehicles().first().unwrap().id().external());
+                    assert_eq!(
+                        "0",
+                        msg.vehicles().first().unwrap().vehicle().id().external()
+                    );
                 } else if broker.rank() == 3 && msg.from_process() == 2 {
                     assert_eq!(1, msg.vehicles().len());
-                    assert_eq!("1", msg.vehicles().first().unwrap().id().external());
+                    assert_eq!(
+                        "1",
+                        msg.vehicles().first().unwrap().vehicle().id().external()
+                    );
                 } else {
                     assert_eq!(0, msg.vehicles().len());
                 }
@@ -398,6 +406,10 @@ mod tests {
         }
 
         NetMessageBroker::new(Rc::new(communicator), &create_network(), &partition, false)
+    }
+
+    fn vehicle_message(vehicle: SimulationVehicle) -> VehicleMessage {
+        VehicleMessage::new(vehicle)
     }
 
     #[deterministic_id_test]

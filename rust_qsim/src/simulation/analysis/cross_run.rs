@@ -62,6 +62,14 @@ fn read_run(path: &Path) -> Result<Run, AnalysisError> {
             path.display()
         )));
     }
+    let latest_iteration = super::latest_output_iteration(path)?;
+    if latest_iteration != manifest.iteration {
+        return Err(AnalysisError::new(format!(
+            "run {} report covers iteration {}, but its latest output is iteration {latest_iteration}",
+            path.display(),
+            manifest.iteration
+        )));
+    }
     let catalog: Vec<CatalogMetric> = read_json(&report.join("metric_catalog.json"))?;
     let catalog = catalog
         .into_iter()
@@ -986,6 +994,8 @@ fn table_specs() -> Vec<&'static TableSpec> {
         .chain(super::transit::COMPARISON_TABLES)
         .chain(super::service::COMPARISON_TABLES)
         .chain(super::link_speed::COMPARISON_TABLES)
+        .chain(super::emissions::COMPARISON_TABLES)
+        .chain(super::noise::COMPARISON_TABLES)
         .collect()
 }
 
@@ -1323,7 +1333,9 @@ mod tests {
 
     #[test]
     fn every_comparison_table_metric_is_in_the_catalog() {
-        let catalog = super::super::metrics(false)
+        // Accessibility metrics are catalogued only when the module is configured, and this
+        // catalog comparison covers the tables that need no such input.
+        let catalog = super::super::metrics(false, false)
             .into_iter()
             .map(|metric| metric.name)
             .collect::<BTreeSet<_>>();
@@ -1343,6 +1355,7 @@ mod tests {
         let output = root.join(name);
         let analysis = output.join("analysis");
         fs::create_dir_all(&analysis).unwrap();
+        fs::create_dir_all(output.join("ITERS/it.3/events")).unwrap();
         let eligible_links = links.lines().filter(|line| !line.is_empty()).count();
         fs::write(analysis.join("manifest.json"), format!(r#"{{"status":"complete","failure":null,"iteration":3,"interval_seconds":3600,"simulation_end_time":3600,"partitions":[0],"input_format":"xml","eligible_links":{eligible_links},"random_seed":1,"sample_size":{sample},"network_input":null,"population_input":null,"software_version":"test"}}"#)).unwrap();
         fs::write(analysis.join("metric_catalog.json"), r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"entry_pce_scaled","unit":"pce","aggregation_key":"link_id,interval_start_seconds"},{"name":"entry_vc","unit":"ratio","aggregation_key":"link_id,interval_start_seconds"},{"name":"used_percent","unit":"percent","aggregation_key":"interval_start_seconds"}]"#).unwrap();
@@ -1405,6 +1418,18 @@ mod tests {
         )
         .unwrap();
         output
+    }
+
+    #[test]
+    fn rejects_cross_run_report_when_a_newer_iteration_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
+        let alternative = run(temp.path(), "alternative", 1.0, "l1,0,15,0\n");
+        fs::create_dir_all(alternative.join("ITERS/it.4/events")).unwrap();
+
+        let error = compare_completed_runs(&baseline, &[alternative]).unwrap_err();
+
+        assert!(error.to_string().contains("latest output is iteration 4"));
     }
 
     #[test]
@@ -1660,7 +1685,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
         let alternative = run(temp.path(), "alternative", 1.0, "l1,0,10,0\n");
-        let catalog = serde_json::to_string(&super::super::metrics(false)).unwrap();
+        let catalog = serde_json::to_string(&super::super::metrics(false, false)).unwrap();
         for (dir, served, wait, empty, loaded) in [
             (&baseline, 8, 100, 250, 700),
             (&alternative, 10, 80, 300, 900),

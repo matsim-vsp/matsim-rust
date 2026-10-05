@@ -56,6 +56,7 @@ fn person(id: &str, attributes: &[(&str, &str, &str)], legs: &[&str]) -> IOPerso
                 .collect(),
         }),
         plans: vec![IOPlan {
+            attributes: None,
             selected: true,
             score: None,
             elements,
@@ -321,7 +322,7 @@ fn group_burdens_retain_weights_missing_attributes_and_incomplete_persons() {
         status.contains(&format!("\"module\": \"{MODULE}\"")),
         "{status}"
     );
-    // The module is complete, and the two modules without configured input stay unavailable.
+    // The demographic module is complete; every optional module without input is unavailable.
     assert_eq!(
         status.matches("\"status\": \"complete\"").count(),
         5,
@@ -329,7 +330,7 @@ fn group_burdens_retain_weights_missing_attributes_and_incomplete_persons() {
     );
     assert_eq!(
         status.matches("\"status\": \"unavailable\"").count(),
-        3,
+        7,
         "{status}"
     );
 

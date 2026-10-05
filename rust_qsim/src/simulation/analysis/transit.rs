@@ -1466,6 +1466,7 @@ mod tests {
             .collect();
         PersonExpectedTravel {
             person_id: person.to_owned(),
+            home_coord: None,
             journeys: vec![ExpectedJourney {
                 journey_index: 0,
                 origin: "home".to_owned(),

@@ -268,6 +268,7 @@ mod tests {
                 InternalPlanElement::Leg(leg(Some(Duration::from_secs(7)), None)),
                 InternalPlanElement::Activity(activity(None, Some(Duration::from_secs(3)))),
             ],
+            attributes: Default::default(),
         };
         let target = plan.elements[2].as_activity().unwrap();
 
@@ -288,6 +289,7 @@ mod tests {
                 InternalPlanElement::Leg(leg(Some(Duration::from_secs(7)), None)),
                 InternalPlanElement::Activity(activity(None, Some(Duration::from_secs(3)))),
             ],
+            attributes: Default::default(),
         };
         let target = plan.elements[2].as_activity().unwrap();
 
@@ -306,6 +308,7 @@ mod tests {
                 Some(SimTime::from_secs(5)),
                 None,
             ))],
+            attributes: Default::default(),
         };
         let outside_activity = activity(Some(SimTime::from_secs(10)), None);
 

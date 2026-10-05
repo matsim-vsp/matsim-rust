@@ -16,7 +16,10 @@ pub(super) fn publish_failure(
         None,
         None,
         None,
+        None,
         &TransitOutcome::default(),
+        None,
+        None,
         None,
     );
     let staging = output_dir.join(FAILURE_STAGING_DIR);

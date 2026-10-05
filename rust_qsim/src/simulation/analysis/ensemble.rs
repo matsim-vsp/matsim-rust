@@ -1307,6 +1307,7 @@ mod tests {
         let output = root.join(name);
         let analysis = output.join("analysis");
         fs::create_dir_all(&analysis).unwrap();
+        fs::create_dir_all(output.join("ITERS/it.3/events")).unwrap();
         fs::write(
             analysis.join("manifest.json"),
             format!(
