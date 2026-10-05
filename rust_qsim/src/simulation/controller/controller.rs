@@ -2,7 +2,7 @@ use crate::external_services::AdapterHandle;
 use crate::simulation::config::{Config, Logging, OverwriteFiles, WriteEvents, write_config};
 use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
-    create_output_filename,
+    ScoringPool, create_output_filename,
 };
 use crate::simulation::framework_events::{
     ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn,
@@ -24,9 +24,12 @@ use crate::simulation::replanning::routing::{RoutingModule, TripRouter};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
+use crate::simulation::scoring;
+use crate::simulation::scoring::{PersonExperiences, PlanScorer};
 use crate::simulation::{id, io};
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
+use itertools::Itertools;
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -51,6 +54,10 @@ pub struct Controller {
     global_barrier: Arc<Barrier>,
     adapter_handles: Vec<AdapterHandle>,
     trip_router: TripRouter,
+    #[debug(skip)]
+    experienced_plan_collection: scoring::ExperiencedPlansCollection,
+    #[debug(skip)]
+    scoring_function: Option<Box<dyn PlanScorer>>,
 }
 
 pub struct ControllerBuilder {
@@ -61,6 +68,7 @@ pub struct ControllerBuilder {
     external_services: ExternalServices,
     global_barrier: Option<Arc<Barrier>>,
     adapter_handles: Vec<AdapterHandle>,
+    scoring_function: Option<Box<dyn PlanScorer>>,
 }
 
 impl ControllerBuilder {
@@ -73,6 +81,7 @@ impl ControllerBuilder {
             external_services: ExternalServices::default(),
             global_barrier: None,
             adapter_handles: Vec::new(),
+            scoring_function: None,
         }
     }
 
@@ -101,6 +110,16 @@ impl ControllerBuilder {
         let scenario: ControllerScenario = self.scenario.into();
         let config = scenario.core.config.clone();
 
+        let (worker_registrations, controller_registration, experienced_plans) =
+            scoring::create_registrations(&scenario);
+        for (rank, registrations) in worker_registrations {
+            self.worker_listener_register_fn
+                .entry(rank)
+                .or_default()
+                .extend(registrations);
+        }
+        controller_registration(&mut controller_event_manager);
+
         let global_ttc = Arc::new(GlobalTravelTimeCalculator::new(
             num_parts as usize,
             Duration::from_secs(u64::from(config.travel_time_calculator().bin_size)),
@@ -120,7 +139,7 @@ impl ControllerBuilder {
             self.worker_listener_register_fn
                 .entry(i)
                 .or_default()
-                .push(Box::new(move |events, mobsim, partition| {
+                .push(Box::new(move |events, mobsim, partition, _migration| {
                     let ttc = travel_time_collector();
                     PartitionTravelTimeCollector::register_events(&ttc, events);
                     PartitionTravelTimeCollector::register_travel_time_publication(
@@ -141,6 +160,8 @@ impl ControllerBuilder {
             global_barrier: barrier,
             adapter_handles: self.adapter_handles,
             trip_router: router,
+            experienced_plan_collection: experienced_plans,
+            scoring_function: self.scoring_function,
         })
     }
 
@@ -154,6 +175,11 @@ impl ControllerBuilder {
 
     pub fn agent_source(mut self, source: impl IntoDynAgentSource) -> Self {
         self.agent_source = source.into_dyn_agent_source();
+        self
+    }
+
+    pub fn scoring_function(mut self, scoring_function: Box<dyn PlanScorer>) -> Self {
+        self.scoring_function = Some(scoring_function);
         self
     }
 
@@ -202,8 +228,7 @@ impl ControllerBuilder {
 
         let access_egress_mode = Id::create(&config.routing().access_egress_mode);
 
-        // for every main mode, create the corresponding router.
-        for mode in &config.qsim().main_modes {
+        for mode in &config.routing().network_modes {
             let id = Id::create(mode);
             let Some(access_egress) = routers.get(&access_egress_mode).cloned() else {
                 return Err(format!(
@@ -281,13 +306,18 @@ impl Controller {
         }
 
         let mut mobsim_workers = self.start_mobsim_workers();
+        let scoring_pool = ScoringPool::new(&self.scenario.core, self.scoring_function.take());
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
 
         for iteration in first_iteration..=last_iteration {
+            if iteration != first_iteration {
+                self.controller_events_manager.reset_iteration(iteration);
+            }
             self.run_iteration(
                 iteration,
                 last_iteration,
                 &mut mobsim_workers,
+                &scoring_pool,
                 &replanning_pool,
                 &iters_path,
             );
@@ -322,6 +352,7 @@ impl Controller {
         iteration: u32,
         end_iter: u32,
         mobsim_workers: &mut MobsimWorkerPool,
+        scoring_pool: &ScoringPool,
         replanning_pool: &ReplanningPool,
         iters_path: impl AsRef<Path>,
     ) {
@@ -332,9 +363,14 @@ impl Controller {
             .process_event(ControllerEvent::iteration_starts(is_last_iteration));
 
         let population = self.run_mobsim_phase(iteration, is_last_iteration, mobsim_workers);
-        let population = self.run_scoring_phase(iteration, is_last_iteration, population);
+        let population =
+            self.run_scoring_phase(iteration, is_last_iteration, scoring_pool, population);
 
-        if self.should_write_iteration_plans(iteration, is_last_iteration) {
+        if self
+            .config
+            .controller()
+            .should_write_plans(iteration, is_last_iteration)
+        {
             self.write_iteration_files(iteration, iters_path, &population);
         }
 
@@ -380,6 +416,7 @@ impl Controller {
         &mut self,
         iteration: u32,
         is_last_iteration: bool,
+        scoring_pool: &ScoringPool,
         mut population: Population,
     ) -> Population {
         info!("Starting scoring phase for iteration {iteration}");
@@ -387,12 +424,37 @@ impl Controller {
         self.controller_events_manager
             .process_event(ControllerEvent::scoring(is_last_iteration));
 
-        // Dummy impl: set scores to 1.0 for all persons.
-        population
-            .persons
-            .values_mut()
-            .flat_map(|p| p.plans_mut())
-            .for_each(|p| p.score = Some(1.0));
+        let mut experienced_plans = self.experienced_plan_collection.take(iteration);
+        assert_eq!(
+            population.persons.len(),
+            experienced_plans.iter().map(|e| e.len()).sum::<usize>(),
+            "Experienced population size differs from the mobsim population in iteration {iteration}."
+        );
+
+        info!(
+            "Scoring population of {} persons in iteration {iteration}",
+            population.persons.len()
+        );
+        scoring_pool.score_population(&mut experienced_plans, &mut population);
+        info!("Finished scoring population in iteration {iteration}");
+
+        if self.config.scoring().write_experienced_plans
+            && self
+                .config
+                .controller()
+                .should_write_plans(iteration, is_last_iteration)
+        {
+            let output_path =
+                io::resolve_path(self.config.context(), &self.config.output().output_dir);
+            write_experienced_population(
+                experienced_plans,
+                &population,
+                &self.config,
+                &output_path,
+                iteration,
+                is_last_iteration,
+            );
+        }
 
         population
     }
@@ -408,11 +470,13 @@ impl Controller {
         self.controller_events_manager
             .process_event(ControllerEvent::replanning(false));
 
-        replanning_pool.replan(
+        let res = replanning_pool.replan(
             population,
             iteration,
             self.config.computational_setup().random_seed,
-        )
+        );
+        info!("Ending replanning phase for iteration {iteration}");
+        res
     }
 
     fn start_mobsim_workers(&mut self) -> MobsimWorkerPool {
@@ -519,11 +583,6 @@ impl Controller {
             ),
         );
     }
-
-    fn should_write_iteration_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
-        is_last_iteration
-            || (iteration != 0 && iteration % self.config.controller().write_plans_interval == 0)
-    }
 }
 
 fn prepare_output_directory(
@@ -560,6 +619,50 @@ fn prepare_output_directory(
     })?;
 
     Ok(())
+}
+
+pub(crate) fn write_experienced_population(
+    experienced_plans: Vec<PersonExperiences>,
+    original_population: &Population,
+    config: &Config,
+    output_path: &Path,
+    iteration: u32,
+    is_last_iteration: bool,
+) {
+    let persons: Vec<_> = experienced_plans
+        .into_iter()
+        .flat_map(|e| e.into_iter())
+        .map(|(person_id, experience)| {
+            let original = original_population
+                .persons
+                .get(&person_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No original person {} is available for experienced-plan output.",
+                        person_id.external()
+                    )
+                });
+            experience.convert_to_person(original)
+        })
+        .sorted_by(|a, b| a.id().cmp(&b.id()))
+        .collect();
+    let filename = config
+        .controller()
+        .compression_type
+        .with_extension("output_experienced_plans");
+    let iteration_path = output_path
+        .join("ITERS")
+        .join(format!("it.{iteration}"))
+        .join(&filename);
+    info!("Writing experienced plans to {}", iteration_path.display());
+    let population = Population::from_persons(persons);
+    population.to_file(&iteration_path);
+
+    if is_last_iteration {
+        let root_path = output_path.join(filename);
+        info!("Writing experienced plans to {}", root_path.display());
+        population.to_file(&root_path);
+    }
 }
 
 #[cfg(test)]

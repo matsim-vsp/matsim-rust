@@ -1,5 +1,6 @@
 use crate::simulation::events::EventsManager;
 use crate::simulation::id::Id;
+use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
@@ -16,8 +17,12 @@ pub type PartitionEventsManager = FrameworkEventsManager<PartitionEvent>;
 
 pub type ControllerListenerRegisterFn = dyn FnOnce(&mut ControllerEventsManager) + Send;
 
-pub type WorkerListenerRegisterFunction =
-    dyn FnOnce(&mut EventsManager, &mut MobsimEventsManager, &mut PartitionEventsManager) + Send;
+pub type WorkerListenerRegisterFunction = dyn FnOnce(
+        &mut EventsManager,
+        &mut MobsimEventsManager,
+        &mut PartitionEventsManager,
+        &mut PartitionChangeExtensionsManager,
+    ) + Send;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PartitionEvent {

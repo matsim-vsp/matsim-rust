@@ -31,7 +31,7 @@ pub mod pt;
 pub mod random;
 pub mod replanning;
 pub mod scenario;
-mod scoring;
+pub mod scoring;
 #[allow(clippy::module_inception)]
 pub mod simulation;
 pub mod time;

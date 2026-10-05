@@ -210,6 +210,7 @@ impl NetworkRoutingModule {
             return InternalPlanElement::Leg(InternalLeg::new(
                 InternalRoute::Network(net_route),
                 mode.external(),
+                mode.external(),
                 Duration::from_secs(0),
                 Some(now),
             ));
@@ -252,7 +253,13 @@ impl NetworkRoutingModule {
 
         let net_route = InternalNetworkRoute::new(generic, route);
         let route = InternalRoute::Network(net_route);
-        let leg = InternalLeg::new(route, mode.external(), trav_time, Some(now));
+        let leg = InternalLeg::new(
+            route,
+            mode.external(),
+            mode.external(),
+            trav_time,
+            Some(now),
+        );
         InternalPlanElement::Leg(leg)
     }
 
