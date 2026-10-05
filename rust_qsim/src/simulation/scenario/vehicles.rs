@@ -61,12 +61,21 @@ impl VehicleCapacity {
     /// omitted one of the two carries nobody.
     pub(crate) fn from_io(io: Option<&IOCapacity>) -> Option<Self> {
         let io = io?;
-        if io.seats.is_none() && io.standing_room.is_none() {
+        Self::from_parts(
+            io.seats.as_ref().map(|seats| seats.persons),
+            io.standing_room.as_ref().map(|room| room.persons),
+        )
+    }
+
+    /// Shared by the XML and protobuf readers, so both formats declare a capacity under the
+    /// same rule.
+    pub(crate) fn from_parts(seats: Option<u32>, standing_room: Option<u32>) -> Option<Self> {
+        if seats.is_none() && standing_room.is_none() {
             return None;
         }
         Some(Self {
-            seats: io.seats.as_ref().map_or(0, |seats| seats.persons),
-            standing_room: io.standing_room.as_ref().map_or(0, |room| room.persons),
+            seats: seats.unwrap_or_default(),
+            standing_room: standing_room.unwrap_or_default(),
         })
     }
 
@@ -130,13 +139,7 @@ impl From<VehicleType> for InternalVehicleType {
             pce: value.pce,
             fef: value.fef,
             net_mode: Id::get(value.net_mode),
-            capacity: match (value.seats, value.standing_room) {
-                (None, None) => None,
-                (seats, standing_room) => Some(VehicleCapacity {
-                    seats: seats.unwrap_or_default(),
-                    standing_room: standing_room.unwrap_or_default(),
-                }),
-            },
+            capacity: VehicleCapacity::from_parts(value.seats, value.standing_room),
             attributes: InternalAttributes::default(),
         }
     }

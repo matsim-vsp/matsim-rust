@@ -1207,6 +1207,10 @@ pub(super) fn write_observed(
                 observation.metric.clone(),
             )) {
                 Some("duplicate_observation_key")
+            } else if stops.is_empty() {
+                // The schedule alone knows the entities, but nothing was simulated to compare:
+                // a zero here would be a made-up result, not an observation of no riders.
+                Some("no_service_records")
             } else if !entity_known {
                 Some("unknown_entity")
             } else {
@@ -1764,12 +1768,30 @@ mod tests {
             );
         }
         assert_eq!(run.status("transit_performance")["status"], "unavailable");
-        // Without any simulated service, every observed entity is unknown.
+        // Without any simulated service nothing can be compared, not even against a zero.
         let unmatched = run.report("transit_validation_unmatched.csv");
-        assert!(unmatched.contains("unknown_entity"));
+        assert!(unmatched.contains("no_service_records"));
         assert_eq!(
             run.report("transit_validation_matches.csv").lines().count(),
             1
+        );
+    }
+
+    #[deterministic_id_test]
+    fn a_recorded_schedule_without_service_records_does_not_match_observations_to_zero() {
+        let run = analyze(
+            vec![departure(100, "p4", "pt"), arrival(200, "p4", "pt")],
+            vec![traveller("p4", &["pt"])],
+            true,
+            Some(OBSERVATIONS),
+        );
+        assert_eq!(
+            run.report("transit_validation_matches.csv").lines().count(),
+            1
+        );
+        assert!(
+            run.report("transit_validation_unmatched.csv")
+                .contains("no_service_records")
         );
     }
 

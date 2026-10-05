@@ -36,6 +36,16 @@ fn pt_tutorial_transit_analysis_reports_teleported_service() {
     ));
     config.output_mut().output_dir = "./test_output/simulation/pt_tutorial_analysis".into();
     config.output_mut().analysis.enabled = true;
+    // The observation file lives outside the output directory, which the run recreates.
+    let observed = tempfile::tempdir().unwrap();
+    let observed_path = observed.path().join("observed_transit.csv");
+    std::fs::write(
+        &observed_path,
+        "scope,line_id,stop_id,station_id,period_start_seconds,period_end_seconds,metric,unit,value,source\n\
+         stop,,1,,25200,28800,boardings,persons,1,counter-1\n",
+    )
+    .unwrap();
+    config.output_mut().analysis.transit_observed_data = Some(observed_path);
     let output_dir = config.output().output_dir.clone();
 
     let scenario = Scenario::load(config);
@@ -56,6 +66,29 @@ fn pt_tutorial_transit_analysis_reports_teleported_service() {
             .unwrap()
             .contains("<h2>Public transport</h2>")
     );
+    let matches = std::fs::read_to_string(report.join("transit_validation_matches.csv")).unwrap();
+    assert!(matches.contains("\"stop\",\"\",\"1\",\"\",25200,\"boardings\",1.000000,1,1.000000,1.000000,0.000000,0.000000,1.000000,"), "{matches}");
+
+    // A standalone rerun rebuilds the same transit tables from the recorded schedule, vehicle
+    // capacities and observation path.
+    let tables = [
+        "transit_trips.csv",
+        "transit_stop_hourly.csv",
+        "transit_availability.csv",
+        "transit_validation_matches.csv",
+    ];
+    let before: Vec<_> = tables
+        .iter()
+        .map(|table| std::fs::read(report.join(table)).unwrap())
+        .collect();
+    rust_qsim::simulation::analysis::reanalyze_completed_run(&output_dir, None).unwrap();
+    for (table, before) in tables.iter().zip(before) {
+        assert_eq!(
+            before,
+            std::fs::read(report.join(table)).unwrap(),
+            "{table} changed on rerun"
+        );
+    }
 }
 
 #[deterministic_id_test(rust_qsim)]

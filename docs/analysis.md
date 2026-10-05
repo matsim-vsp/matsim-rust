@@ -102,7 +102,8 @@ the matching id columns have to be set. `metric` is `boardings` or `alightings` 
 expansion factor, the expanded simulated value, the residual, the relative error (blank when
 the observation is zero), the network-wide simulated total of the same metric and interval as a
 denominator, and the observation source with its row. Rows that cannot be compared, with a
-reason such as `unknown_entity` or `period_mismatch`, are in `transit_validation_unmatched.csv`.
+reason such as `unknown_entity`, `period_mismatch` or `no_service_records` (no transit was
+simulated, so not even a zero is compared), are in `transit_validation_unmatched.csv`.
 `transit_validation_summary.csv` gives matched and unmatched counts, observed and simulated
 totals, bias, MAE, RMSE and the relative bias per scope and metric. An invalid file marks only
 the `transit_validation` module failed.

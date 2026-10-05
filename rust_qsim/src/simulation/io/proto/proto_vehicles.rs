@@ -72,6 +72,7 @@ impl VehicleType {
 
 #[cfg(test)]
 mod tests {
+    use crate::generated;
     use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
     use crate::simulation::scenario::vehicles::Garage;
@@ -109,6 +110,38 @@ mod tests {
 
         assert_eq!(garage.vehicle_types, loaded_garage.vehicle_types);
         assert_eq!(garage.vehicles, loaded_garage.vehicles);
+    }
+
+    #[deterministic_id_test]
+    fn partial_wire_capacity_reads_the_omitted_part_as_zero() {
+        let wire = |seats, standing_room| generated::vehicles::VehicleType {
+            id: Id::<InternalVehicleType>::create("t").internal(),
+            length: 1.0,
+            width: 1.0,
+            max_v: 1.0,
+            pce: 1.0,
+            fef: 1.0,
+            net_mode: Id::<String>::create("car").internal(),
+            seats,
+            standing_room,
+        };
+        let capacity =
+            |seats, standing_room| InternalVehicleType::from(wire(seats, standing_room)).capacity;
+        assert_eq!(capacity(None, None), None);
+        assert_eq!(
+            capacity(Some(4), None),
+            Some(VehicleCapacity {
+                seats: 4,
+                standing_room: 0
+            })
+        );
+        assert_eq!(
+            capacity(None, Some(6)),
+            Some(VehicleCapacity {
+                seats: 0,
+                standing_room: 6
+            })
+        );
     }
 
     #[deterministic_id_test]

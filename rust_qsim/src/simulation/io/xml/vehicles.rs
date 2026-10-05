@@ -214,7 +214,6 @@ mod test {
 
     #[test]
     fn capacity_names_seats_and_standing_room_and_an_omitted_one_carries_nobody() {
-        use crate::simulation::scenario::vehicles::VehicleCapacity;
         let parse = |capacity: &str| {
             let xml = format!(
                 "<vehicleDefinitions><vehicleType id=\"t\">{capacity}</vehicleType></vehicleDefinitions>"
