@@ -14,7 +14,7 @@ use crate::simulation::time::SimTime;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -27,6 +27,9 @@ impl std::fmt::Display for AnalysisError {
 }
 
 impl std::error::Error for AnalysisError {}
+
+/// Leg rows embedded in the local report before it defers to the full `legs.csv`.
+const LEGS_PREVIEW_ROWS: usize = 200;
 
 #[derive(Serialize)]
 struct Metric<'a> {
@@ -282,8 +285,10 @@ pub fn analyze_final_iteration(
         else {
             break;
         };
-        // Link counts commute; process all same-time agent events together so partition rank
-        // cannot decide whether a same-time arrival precedes its departure.
+        // Link counts commute; process all same-time agent events together so that pairing an
+        // arrival with a same-time departure does not depend on which partition delivered
+        // either event first. Within a batch, an arrival still matches the person's open leg
+        // before any leg created in the same batch.
         let mut simultaneous_events = Vec::new();
         for rank in 0..heads.len() {
             while heads[rank]
@@ -574,6 +579,26 @@ fn accumulate(
     }
 }
 
+/// Reconstructs per-leg completion from replayed person events.
+///
+/// The rules are a deliberate deviation from MATSim Java, which reads leg status
+/// off its own leg objects instead of inferring it from the event stream. QSim's
+/// event files carry a person, a mode and a time, so leg status has to be inferred:
+///
+/// - A departure consumes the next planned leg whose mode matches, starting from
+///   the person's plan offset. Departures that match no remaining planned leg are
+///   unplanned: they keep indices after the plan and never advance the offset.
+/// - An arrival completes the person's open leg when the mode matches it, first the
+///   leg opened by an earlier timestamp, then any leg opened in the same batch.
+///   Same-timestamp events are processed as one batch, so pairing does not depend
+///   on which partition delivered an event first.
+/// - A departure while a leg is still open closes that leg as `MissingArrival`;
+///   among legs opened in the same batch only the last one can stay open.
+/// - `PersonStuckEvent` marks the person's open leg `Stuck` and flags the day as
+///   stuck. It names no leg, so a planned leg that was never departed stays
+///   `not_departed`; only `person_daily.csv` reports the stuck day.
+/// - A leg still open after the last event is reported as `incomplete`, never as a
+///   zero-duration leg: missing arrivals are excluded from every duration mean.
 struct AgentTravelAccumulator {
     interval: u32,
     expected: BTreeMap<String, Vec<(usize, String)>>,
@@ -864,17 +889,16 @@ fn write_tables(
     for (person, expected_legs) in expected {
         for (leg_index, mode) in expected_legs {
             if !observed_leg_keys.contains(&(person.clone(), *leg_index)) {
+                // A leg that was never departed is `not_departed` even for a stuck person: the
+                // stuck event names no leg, so only `person_daily.csv` can report the day as
+                // stuck. A leg that was open when the person got stuck is an observed leg and
+                // already carries `LegCompletion::Stuck`.
                 writeln!(
                     legs,
-                    "{},{},{},,,,,{}",
+                    "{},{},{},,,,,not_departed",
                     csv(person),
                     leg_index,
                     csv(mode),
-                    if stuck_people.contains(person) {
-                        "stuck"
-                    } else {
-                        "not_departed"
-                    }
                 )
                 .map_err(io_error)?;
             }
@@ -977,8 +1001,17 @@ fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), Analysi
     let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
     let daily = csv_for_script(&path.join("daily_summary.csv"))?;
     let persons = csv_for_script(&path.join("person_daily.csv"))?;
+    // One row per leg, so only a bounded prefix is embedded and the rest stays in the CSV.
+    let (legs, legs_truncated) = csv_preview_for_script(&path.join("legs.csv"), LEGS_PREVIEW_ROWS)?;
+    let legs_note = if legs_truncated {
+        format!(
+            "Showing the first {LEGS_PREVIEW_ROWS} rows of <a href=\"legs.csv\">legs.csv</a>, which holds every leg."
+        )
+    } else {
+        "Every observed and planned leg is listed in <a href=\"legs.csv\">legs.csv</a>.".to_owned()
+    };
     let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by hour/mode</h3><div id=\"leg-hourly\"></div><h3>Daily cohort means</h3><div id=\"daily\"></div><h3>Person daily totals and status</h3><div id=\"persons\"></div><p><a href=\"legs.csv\">Observed and planned legs</a></p><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const a={leg_hourly};const d={daily};const p={persons};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}function parseCsv(line){{const fields=[];let field='',quoted=false;for(let i=0;i<line.length;i++){{const ch=line[i];if(ch.charCodeAt(0)===34){{if(quoted&&line.charCodeAt(i+1)===34){{field+=String.fromCharCode(34);i++}}else{{quoted=!quoted}}}}else if(ch===','&&!quoted){{fields.push(field);field=''}}else{{field+=ch}}}}fields.push(field);return fields}}function csvTable(id,rows){{table(document.querySelector(id),parseCsv(rows[0]),rows.slice(1).map(parseCsv))}}csvTable('#hourly',h);csvTable('#coverage',c);csvTable('#leg-hourly',a);csvTable('#daily',d);csvTable('#persons',p);table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by hour/mode</h3><div id=\"leg-hourly\"></div><h3>Daily cohort means</h3><div id=\"daily\"></div><h3>Person daily totals and status</h3><div id=\"persons\"></div><h3>Observed and planned legs</h3><p>{legs_note}</p><div id=\"legs\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const a={leg_hourly};const d={daily};const p={persons};const g={legs};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}function parseCsv(line){{const fields=[];let field='',quoted=false;for(let i=0;i<line.length;i++){{const ch=line[i];if(ch.charCodeAt(0)===34){{if(quoted&&line.charCodeAt(i+1)===34){{field+=String.fromCharCode(34);i++}}else{{quoted=!quoted}}}}else if(ch===','&&!quoted){{fields.push(field);field=''}}else{{field+=ch}}}}fields.push(field);return fields}}function csvTable(id,rows){{table(document.querySelector(id),parseCsv(rows[0]),rows.slice(1).map(parseCsv))}}csvTable('#hourly',h);csvTable('#coverage',c);csvTable('#leg-hourly',a);csvTable('#daily',d);csvTable('#persons',p);csvTable('#legs',g);table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
@@ -986,6 +1019,22 @@ fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), Analysi
 fn csv_for_script(path: &Path) -> Result<String, AnalysisError> {
     let csv = fs::read_to_string(path).map_err(io_error)?;
     json_for_script(&csv.lines().collect::<Vec<_>>())
+}
+
+/// Embeds at most `rows` lines, header included, without reading the whole file.
+/// Reports whether the file had more lines than were embedded.
+fn csv_preview_for_script(path: &Path, rows: usize) -> Result<(String, bool), AnalysisError> {
+    let file = File::open(path).map_err(io_error)?;
+    let mut lines = Vec::new();
+    let mut truncated = false;
+    for line in BufReader::new(file).lines() {
+        if lines.len() == rows {
+            truncated = true;
+            break;
+        }
+        lines.push(line.map_err(io_error)?);
+    }
+    Ok((json_for_script(&lines)?, truncated))
 }
 
 fn json_for_script(value: &impl Serialize) -> Result<String, AnalysisError> {
@@ -1075,6 +1124,7 @@ mod tests {
                 <event time="36100" type="departure" person="missed_plan_leg" link="l" legMode="car" computationalRoutingMode="car" />
                 <event time="40000" type="departure" person="unplanned" link="l" legMode="bike" computationalRoutingMode="bike" />
                 <event time="50000" type="departure" person="unplanned" link="l" legMode="train" computationalRoutingMode="train" />
+                <event time="60000" type="departure" person="stuck_midway" link="l" legMode="walk" computationalRoutingMode="walk" />
                 <event time="86390" type="departure" person="traveler" link="l" legMode="car" computationalRoutingMode="car" />
             </events>"#,
         )
@@ -1091,6 +1141,7 @@ mod tests {
                 <event time="36110" type="arrival" person="missed_plan_leg" link="l" legMode="car" />
                 <event time="40010" type="arrival" person="unplanned" link="l" legMode="bike" />
                 <event time="50020" type="arrival" person="unplanned" link="l" legMode="train" />
+                <event time="60010" type="stuckAndAbort" person="stuck_midway" />
                 <event time="86400" type="arrival" person="traveler" link="l" legMode="car" />
             </events>"#,
         )
@@ -1105,6 +1156,7 @@ mod tests {
             expected_person("stuck_no_departure", &[(0, "car")]),
             expected_person("missed_plan_leg", &[(1, "walk"), (3, "car")]),
             expected_person("unplanned", &[(0, "car")]),
+            expected_person("stuck_midway", &[(0, "walk"), (1, "car"), (2, "train")]),
         ];
         let garage = Garage::default();
         let metadata = AnalysisRunMetadata {
@@ -1143,7 +1195,14 @@ mod tests {
         let legs = fs::read_to_string(output.join("legs.csv")).unwrap();
         assert!(legs.contains("\"partial\",0,\"car\",100.000000,0,,,missing_arrival"));
         assert!(legs.contains("\"missing\",0,\"bike\",,,,,not_departed"));
-        assert!(legs.contains("\"stuck_no_departure\",0,\"car\",,,,,stuck"));
+        assert!(legs.contains("\"stuck_no_departure\",0,\"car\",,,,,not_departed"));
+        // A stuck event names no leg: only the leg that was open is `stuck`, and the
+        // planned legs the person never reached stay `not_departed`.
+        assert!(legs.contains("\"stuck\",0,\"car\",140.000000,0,,,stuck"));
+        assert!(legs.contains("\"stuck_midway\",0,\"walk\",60000.000000,57600,,,stuck"));
+        assert!(legs.contains("\"stuck_midway\",1,\"car\",,,,,not_departed"));
+        assert!(legs.contains("\"stuck_midway\",2,\"train\",,,,,not_departed"));
+        assert!(persons.contains("\"stuck_midway\",3,1,0,0.000000,,stuck"));
         assert!(legs.contains("\"missed_plan_leg\",1,\"walk\",,,,,not_departed"));
         assert!(legs.contains(
             "\"missed_plan_leg\",3,\"car\",36100.000000,36000,36110.000000,10.000000,completed"
@@ -1167,11 +1226,46 @@ mod tests {
         assert!(report_html.contains("href=\"legs.csv\""));
         assert!(report_html.contains("travelers,2,5.000000"));
         assert!(report_html.contains("missed_plan_leg"));
+        // Leg rows are embedded, so the leg-level metric has a presentation and not just a link.
+        assert!(report_html.contains("person_id,leg_index,mode,departure_seconds"));
+        assert!(report_html.contains("stuck_midway"));
+        let statuses = read_json(&output.join("module_status.json"));
+        let agent_travel = statuses
+            .as_array()
+            .expect("module status is an array")
+            .iter()
+            .find(|status| status["module"] == "agent_travel")
+            .expect("agent_travel module status is reported");
+        assert_eq!(agent_travel["status"], "complete");
+        assert!(agent_travel["reason"].is_null());
+        let catalog = read_json(&output.join("metric_catalog.json"));
+        let names: BTreeSet<&str> = catalog
+            .as_array()
+            .expect("metric catalog is an array")
+            .iter()
+            .map(|metric| metric["name"].as_str().expect("metric name"))
+            .collect();
+        for metric in [
+            "leg_departures",
+            "departing_persons",
+            "leg_duration_mean",
+            "person_completed_leg_duration_sum",
+            "person_completed_leg_duration_mean",
+            "daily_mean_completed_travel_burden",
+            "leg_completion_status",
+        ] {
+            assert!(names.contains(metric), "missing catalogued metric {metric}");
+        }
         let hourly = fs::read_to_string(output.join("leg_hourly.csv")).unwrap();
         assert!(hourly.contains("0,\"car\",4,3,2,2.500000"));
         assert!(hourly.contains("0,\"walk\",2,2,1,0.000000"));
         assert!(hourly.contains("82800,\"car\",1,1,1,10.000000"));
         assert!(hourly.contains("36000,\"car\",1,1,1,10.000000"));
+    }
+
+    fn read_json(path: &Path) -> serde_json::Value {
+        let raw = fs::read_to_string(path).unwrap();
+        serde_json::from_str(&raw).unwrap()
     }
 
     fn expected_person(person_id: &str, legs: &[(usize, &str)]) -> PersonExpectedTravel {
