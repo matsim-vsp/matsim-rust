@@ -7,6 +7,7 @@ mod link_speed;
 mod survey;
 mod validation;
 
+pub use cross_run::compare_completed_runs;
 mod network_distance;
 
 use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
