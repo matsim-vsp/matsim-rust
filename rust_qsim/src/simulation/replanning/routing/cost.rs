@@ -16,6 +16,22 @@ use std::time::Duration;
 /// Disutility is the unit of the cost values used in routing
 pub type Disutility = f64;
 
+/// Exact request-level cost inputs used to decide whether a route result can be reused.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct RoutingCostProfile {
+    pub subpopulation: Option<Id<String>>,
+    pub vehicle_max_speed_bits: Option<u64>,
+}
+
+impl RoutingCostProfile {
+    fn for_request(person: Option<&InternalPerson>, vehicle: Option<&InternalVehicle>) -> Self {
+        Self {
+            subpopulation: person.map(|person| person.subpopulation().clone()),
+            vehicle_max_speed_bits: vehicle.map(|vehicle| vehicle.max_v.to_bits()),
+        }
+    }
+}
+
 /// Travel time function, mapping any network link to a travel time, depending on the departure time
 /// and optionally the person and vehicle.
 pub trait TravelTime: Debug + Send + Sync {
@@ -27,6 +43,23 @@ pub trait TravelTime: Debug + Send + Sync {
         person: Option<&InternalPerson>,
         vehicle: Option<&InternalVehicle>,
     ) -> Duration;
+
+    /// Identifies the immutable time-cost snapshot when exact route caching is safe.
+    fn cache_epoch(&self) -> Option<u64> {
+        None
+    }
+
+    fn cache_profile(
+        &self,
+        _person: Option<&InternalPerson>,
+        _vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        None
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        false
+    }
 }
 
 /// Travel disutility function, mapping any network link to a travel disutility, depending on the
@@ -55,6 +88,23 @@ pub trait TravelDisutility: Debug + Send + Sync {
     /// This is used when calculating landmark data, to ensure that the ALT heuristic never
     /// overestimates the travel disutility between two nodes.
     fn get_link_min_travel_disutility(&self, link: &Link) -> Disutility;
+
+    /// Identifies the immutable disutility inputs when exact route caching is safe.
+    fn cache_epoch(&self) -> Option<u64> {
+        None
+    }
+
+    fn cache_profile(
+        &self,
+        _person: Option<&InternalPerson>,
+        _vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        None
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -181,6 +231,22 @@ impl TravelTime for ScoringBasedTravelTimeAndDisutility {
             TravelTimeGetter::Average,
         )
     }
+
+    fn cache_epoch(&self) -> Option<u64> {
+        Some(self.travel_time.snapshot_epoch())
+    }
+
+    fn cache_profile(
+        &self,
+        person: Option<&InternalPerson>,
+        vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        Some(RoutingCostProfile::for_request(person, vehicle))
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        false
+    }
 }
 
 impl TravelDisutility for ScoringBasedTravelTimeAndDisutility {
@@ -200,6 +266,22 @@ impl TravelDisutility for ScoringBasedTravelTimeAndDisutility {
 
     fn get_link_min_travel_disutility(&self, link: &Link) -> Disutility {
         self.disutility(link, travel_time(link.length, link.freespeed), None)
+    }
+
+    fn cache_epoch(&self) -> Option<u64> {
+        Some(self.travel_time.snapshot_epoch())
+    }
+
+    fn cache_profile(
+        &self,
+        person: Option<&InternalPerson>,
+        vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        Some(RoutingCostProfile::for_request(person, vehicle))
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        false
     }
 }
 
@@ -222,6 +304,25 @@ impl TravelTime for FreeSpeedTravelTimeAndDisutility {
         // the given vehicle type is ignored => true freespeed
         travel_time(link.length, link.freespeed)
     }
+
+    fn cache_epoch(&self) -> Option<u64> {
+        Some(0)
+    }
+
+    fn cache_profile(
+        &self,
+        _person: Option<&InternalPerson>,
+        _vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        Some(RoutingCostProfile {
+            subpopulation: None,
+            vehicle_max_speed_bits: None,
+        })
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        true
+    }
 }
 
 impl TravelDisutility for FreeSpeedTravelTimeAndDisutility {
@@ -240,6 +341,25 @@ impl TravelDisutility for FreeSpeedTravelTimeAndDisutility {
     // min travel disutility is equal to the travel disutility, since it does not depend on time, person or vehicle
     fn get_link_min_travel_disutility(&self, link: &Link) -> Disutility {
         self.travel_disutility(link, SimTime::from_secs(0), None, None)
+    }
+
+    fn cache_epoch(&self) -> Option<u64> {
+        Some(0)
+    }
+
+    fn cache_profile(
+        &self,
+        _person: Option<&InternalPerson>,
+        _vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        Some(RoutingCostProfile {
+            subpopulation: None,
+            vehicle_max_speed_bits: None,
+        })
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        true
     }
 }
 
@@ -267,6 +387,25 @@ impl TravelTime for FreeOrMaxSpeedTravelTimeAndDisutility {
 
         travel_time(link.length, max_speed)
     }
+
+    fn cache_epoch(&self) -> Option<u64> {
+        Some(0)
+    }
+
+    fn cache_profile(
+        &self,
+        _person: Option<&InternalPerson>,
+        vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        Some(RoutingCostProfile {
+            subpopulation: None,
+            vehicle_max_speed_bits: vehicle.map(|vehicle| vehicle.max_v.to_bits()),
+        })
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        true
+    }
 }
 
 impl TravelDisutility for FreeOrMaxSpeedTravelTimeAndDisutility {
@@ -283,6 +422,25 @@ impl TravelDisutility for FreeOrMaxSpeedTravelTimeAndDisutility {
     }
     fn get_link_min_travel_disutility(&self, link: &Link) -> Disutility {
         self.travel_disutility(link, SimTime::from_secs(0), None, None)
+    }
+
+    fn cache_epoch(&self) -> Option<u64> {
+        Some(0)
+    }
+
+    fn cache_profile(
+        &self,
+        _person: Option<&InternalPerson>,
+        vehicle: Option<&InternalVehicle>,
+    ) -> Option<RoutingCostProfile> {
+        Some(RoutingCostProfile {
+            subpopulation: None,
+            vehicle_max_speed_bits: vehicle.map(|vehicle| vehicle.max_v.to_bits()),
+        })
+    }
+
+    fn supports_static_route_bounds(&self) -> bool {
+        true
     }
 }
 

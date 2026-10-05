@@ -11,7 +11,9 @@ use crate::simulation::time::SimTime;
 use derive_builder::Builder;
 use keyed_priority_queue::{Entry, KeyedPriorityQueue};
 use ordered_float::OrderedFloat;
+use std::cell::RefCell;
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 use tracing::warn;
@@ -63,8 +65,8 @@ impl NodePriority {
         NodePriority(Reverse(OrderedFloat(priority)))
     }
 
-    pub fn get(&self) -> f64 {
-        self.0.0.into_inner()
+    fn value(&self) -> f64 {
+        self.0.0.0
     }
 }
 
@@ -77,7 +79,15 @@ pub(crate) enum AStarCoreResult {
     /// Shortest distance (=travel disutility) from one node to another, with the associated travel
     /// time and generated list of parent links (the link from which the algorithm arrived at the
     /// node)
-    SingleDisutilWithParents(Disutility, Duration, Vec<Option<LinkIndex>>),
+    SingleDisutilWithParents(Disutility, Duration, HashMap<NodeIndex, LinkIndex>),
+    /// A previously validated candidate that beats every remaining lower-bound estimate.
+    SingleDisutilWithPath(Disutility, Duration, Vec<crate::simulation::id::Id<Link>>),
+}
+
+pub(crate) struct CandidateRoute {
+    pub(crate) path: Vec<crate::simulation::id::Id<Link>>,
+    pub(crate) travel_time: Duration,
+    pub(crate) travel_disutility: Disutility,
 }
 
 /// Implementations of this trait represent different use cases of `a_star_core`.
@@ -103,8 +113,9 @@ pub(crate) trait AStarActions: Clone + Debug {
         self,
         current_disutility: Option<Disutility>,
         initial_departure_time: SimTime,
-        disutilities: Vec<Disutility>,
+        disutilities: Option<&[Disutility]>,
     ) -> AStarCoreResult;
+    fn needs_full_disutilities(&self) -> bool;
     /// Called by `a_star_core` to get the to-node, to be able to pass it to a heuristic
     fn get_to_node_opt(&self) -> Option<NodeIndex>;
     /// Called to store the arrival time at a specific node. Implementations decide if and how they
@@ -164,13 +175,20 @@ impl AStarActions for LandmarkCalcAStarActions<'_> {
         self,
         _current_disutility: Option<Disutility>,
         _initial_departure_time: SimTime,
-        disutilities: Vec<Disutility>,
+        disutilities: Option<&[Disutility]>,
     ) -> AStarCoreResult {
-        AStarCoreResult::DisutilityToAllWithoutParents(disutilities)
+        AStarCoreResult::DisutilityToAllWithoutParents(
+            disutilities
+                .expect("landmark searches require dense disutilities")
+                .to_vec(),
+        )
     }
     /// returns None, since there is no to-node
     fn get_to_node_opt(&self) -> Option<NodeIndex> {
         None
+    }
+    fn needs_full_disutilities(&self) -> bool {
+        true
     }
     /// when called to track arrival times, this implementation does nothing
     fn set_arrival_time_opt(&mut self, _node: NodeIndex, _time: SimTime) {}
@@ -211,8 +229,8 @@ impl AStarActions for LandmarkCalcAStarActions<'_> {
 #[derive(Clone, Debug)]
 pub(crate) struct RoutingAStarActions<'a> {
     to_node: NodeIndex,
-    parent_links: Vec<Option<LinkIndex>>,
-    arrival_times: Vec<SimTime>,
+    parent_links: HashMap<NodeIndex, LinkIndex>,
+    arrival_times: HashMap<NodeIndex, SimTime>,
     travel_time: &'a dyn TravelTime,
     travel_disutility: &'a dyn TravelDisutility,
 }
@@ -224,12 +242,11 @@ impl<'a> RoutingAStarActions<'a> {
         to_node: NodeIndex,
         travel_time: &'a dyn TravelTime,
         travel_disutility: &'a dyn TravelDisutility,
-        number_of_nodes: usize,
     ) -> Self {
         Self {
             to_node,
-            parent_links: vec![None; number_of_nodes],
-            arrival_times: vec![SimTime::max(); number_of_nodes],
+            parent_links: HashMap::new(),
+            arrival_times: HashMap::new(),
             travel_time,
             travel_disutility,
         }
@@ -243,7 +260,7 @@ impl AStarActions for RoutingAStarActions<'_> {
     }
     /// stores parent links in a vector
     fn set_parent_link_opt(&mut self, child: NodeIndex, parent_link: LinkIndex) {
-        self.parent_links[child] = Some(parent_link);
+        self.parent_links.insert(child, parent_link);
     }
 
     /// constructs a "single distance with parent tracking" result, containing the distance from the
@@ -253,7 +270,7 @@ impl AStarActions for RoutingAStarActions<'_> {
         self,
         current_disutility: Option<Disutility>,
         initial_departure_time: SimTime,
-        _disutilities: Vec<Disutility>,
+        _disutilities: Option<&[Disutility]>,
     ) -> AStarCoreResult {
         // note that current_disutility and initial_departure_time is given as an option, since the
         // trait also allows implementations of one2many, where only the disutilites vector is
@@ -264,11 +281,10 @@ impl AStarActions for RoutingAStarActions<'_> {
         // to_node has neither been found nor been determined to be unreachable, which only happens
         // in one2many (where no to-node exists)
 
-        // We always return the arrival time at the to-node, regardless of whether the algorithm
-        // reached it or not. Since if it didn't, the arrival time there will be SimTime::max(),
-        // which is reasonable to return.
-
-        let current_arrival_time = self.get_arrival_time_at_node_opt(self.to_node).unwrap();
+        // An undiscovered target has the same sentinel arrival time as before sparse tracking.
+        let current_arrival_time = self
+            .get_arrival_time_at_node_opt(self.to_node)
+            .unwrap_or_else(SimTime::max);
 
         // subtract departure time to get the actual travel time
         let current_travel_time = current_arrival_time
@@ -286,10 +302,13 @@ impl AStarActions for RoutingAStarActions<'_> {
     fn get_to_node_opt(&self) -> Option<NodeIndex> {
         Some(self.to_node)
     }
+    fn needs_full_disutilities(&self) -> bool {
+        false
+    }
 
     /// stores the arrival time in a vector
     fn set_arrival_time_opt(&mut self, node: NodeIndex, time: SimTime) {
-        self.arrival_times[node] = time;
+        self.arrival_times.insert(node, time);
     }
 
     /// calculates the link travel time by calling the TravelTime function. Then sets the arrival
@@ -321,7 +340,7 @@ impl AStarActions for RoutingAStarActions<'_> {
 
     /// returns the arrival time at the given node
     fn get_arrival_time_at_node_opt(&self, node: NodeIndex) -> Option<SimTime> {
-        Some(self.arrival_times[node])
+        self.arrival_times.get(&node).copied()
     }
 
     /// returns the actual travel disutility of the given link, at the arrival time at the start
@@ -412,14 +431,95 @@ impl<'a, H: AStarHeuristic, O: AStarActions> AStarRequestBuilder<'a, H, O> {
 /// implementation of the `AStarActions` trait, which determines which of the above use cases is
 /// used.
 pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
-    mut request: AStarRequest<H, O>,
+    request: AStarRequest<H, O>,
+    nodes_expanded: Option<&mut usize>,
+    candidate: Option<CandidateRoute>,
 ) -> Result<AStarCoreResult, GraphError> {
     let number_of_nodes = request.graph.num_nodes();
+    SEARCH_SCRATCH.with(|shared| match shared.try_borrow_mut() {
+        Ok(mut scratch) => {
+            scratch.prepare(number_of_nodes);
+            run_a_star(request, &mut scratch, nodes_expanded, candidate)
+        }
+        Err(_) => {
+            let mut scratch = SearchScratch::default();
+            scratch.prepare(number_of_nodes);
+            run_a_star(request, &mut scratch, nodes_expanded, candidate)
+        }
+    })
+}
 
+thread_local! {
+    static SEARCH_SCRATCH: RefCell<SearchScratch> = RefCell::new(SearchScratch::default());
+}
+
+#[derive(Default)]
+struct SearchScratch {
+    generation: u32,
+    node_count: usize,
+    distance_generations: Vec<u32>,
+    settled_generations: Vec<u32>,
+    disutilities: Vec<Disutility>,
+    queue: KeyedPriorityQueue<NodeIndex, NodePriority>,
+}
+
+impl SearchScratch {
+    fn prepare(&mut self, node_count: usize) {
+        self.node_count = node_count;
+        if self.distance_generations.len() < node_count {
+            self.distance_generations.resize(node_count, 0);
+            self.settled_generations.resize(node_count, 0);
+            self.disutilities.resize(node_count, f64::INFINITY);
+        }
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            self.distance_generations.fill(0);
+            self.settled_generations.fill(0);
+            self.generation = 1;
+        }
+        self.queue.clear();
+    }
+
+    fn distance(&self, node: NodeIndex) -> Disutility {
+        if self.distance_generations[node] == self.generation {
+            self.disutilities[node]
+        } else {
+            f64::INFINITY
+        }
+    }
+
+    fn set_distance(&mut self, node: NodeIndex, value: Disutility) {
+        self.distance_generations[node] = self.generation;
+        self.disutilities[node] = value;
+    }
+
+    fn is_settled(&self, node: NodeIndex) -> bool {
+        self.settled_generations[node] == self.generation
+    }
+
+    fn settle(&mut self, node: NodeIndex) {
+        self.settled_generations[node] = self.generation;
+    }
+
+    fn dense_disutilities(&self) -> Vec<Disutility> {
+        (0..self.node_count)
+            .map(|node| self.distance(node))
+            .collect()
+    }
+}
+
+fn run_a_star<H: AStarHeuristic, O: AStarActions>(
+    mut request: AStarRequest<H, O>,
+    scratch: &mut SearchScratch,
+    mut nodes_expanded: Option<&mut usize>,
+    candidate: Option<CandidateRoute>,
+) -> Result<AStarCoreResult, GraphError> {
     let from_node = request.from;
 
-    // initialize queue: from_node gets disutility and priority 0, all others infinity
-    let (mut queue, mut disutilities) = get_initial_queue(number_of_nodes, from_node);
+    // Keep only discovered nodes in the frontier. Generation stamps avoid clearing dense
+    // per-node search state between requests while preserving dense landmark results.
+    scratch.queue.push(from_node, NodePriority::new(0.0));
+    scratch.set_distance(from_node, 0.0);
 
     // The arrival times are initialized with SimTime::max() for all nodes, so the arrival time at
     // the from-node must be set to the departure time manually.
@@ -429,49 +529,40 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
 
     // Not initializing parents here, since they are contained in the options
 
-    while let Some((current_id, _)) = queue.pop() {
+    while let Some((current_id, priority)) = scratch.queue.pop() {
+        if let Some(candidate) = candidate.as_ref()
+            && priority.value() > candidate.travel_disutility
+        {
+            return Ok(AStarCoreResult::SingleDisutilWithPath(
+                candidate.travel_disutility,
+                candidate.travel_time,
+                candidate.path.clone(),
+            ));
+        }
+        scratch.settle(current_id);
         // disutility from "from"-node to the current_id node
-        let current_disutility = disutilities[current_id];
+        let current_disutility = scratch.distance(current_id);
 
-        // checking "unusual" values of current_disutility
-        match current_disutility {
-            f64::INFINITY => {
-                //The smallest value in queue was unreachable. So abort here.
-
-                // this chooses the correct result enum variant automatically
-                return Ok(request.options.build_result(
-                    Some(current_disutility),
-                    request.departure_time,
-                    disutilities,
-                ));
-            }
-            f64::NEG_INFINITY => {
-                warn!("Disutility of negative infinity encountered in A*.");
-            }
-            nan_disutility if nan_disutility.is_nan() => {
-                // The smallest value in queue is NaN, treated as worse than disutility infinity
-                warn!(
-                    "Queue in A* only contains entries with disutility NaN, which are\
-                    treated as unreachable. Aborting A*."
-                );
-
-                return Ok(request.options.build_result(
-                    Some(nan_disutility),
-                    request.departure_time,
-                    disutilities,
-                ));
-            }
-            _ => {}
+        if current_disutility == f64::NEG_INFINITY {
+            warn!("Disutility of negative infinity encountered in A*.");
         }
 
         // check if the target node has been reached, if applicable, in that case return early
         if request.options.reached_end(current_id) {
+            let disutilities = request
+                .options
+                .needs_full_disutilities()
+                .then(|| scratch.dense_disutilities());
             // this chooses the correct result enum variant automatically
             return Ok(request.options.build_result(
                 Some(current_disutility),
                 request.departure_time,
-                disutilities,
+                disutilities.as_deref(),
             ));
+        }
+
+        if let Some(nodes_expanded) = &mut nodes_expanded {
+            **nodes_expanded += 1;
         }
 
         // if request.backward=true, we consider the incoming edges, to consider paths from
@@ -497,8 +588,8 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
                 request.graph.get_end_node_as_idx(i)
             }?;
 
-            // This case should never occur, since all nodes should be part of the initial queue.
-            if let Entry::Vacant(_) = queue.entry(neighbour) {
+            // A missing frontier entry may be either undiscovered or already settled.
+            if scratch.is_settled(neighbour) {
                 continue;
             }
 
@@ -515,9 +606,9 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
                     request.vehicle,
                 );
 
-            if disutilities[neighbour] > neighbour_disutility {
+            if scratch.distance(neighbour) > neighbour_disutility {
                 // update disutility to neighbour node
-                disutilities[neighbour] = neighbour_disutility;
+                scratch.set_distance(neighbour, neighbour_disutility);
 
                 // tell options object to track the arrival time at the neighbour node
                 request.options.set_arrival_time_at_neighbour_opt(
@@ -531,44 +622,42 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
                 // update priority of the neighbour in the queue, which is the (now lower)
                 // disutility to get there plus the heuristic estimate to get to the target (if
                 // applicable)
-                match queue.entry(neighbour) {
-                    Entry::Occupied(e) => {
-                        // Compute heuristic estimate based on the heuristic mode
-                        let heuristic_estimate = match &request.heuristic_mode {
-                            HeuristicMode::WithHeuristic(h) => {
-                                // panic is okay here, since it is a programming error if
-                                // someone uses WithHeuristic but does not provide a to_node in
-                                // the options
-                                let to_node_idx = request.options.get_to_node_opt().expect(
-                                    "Heuristic mode is WithHeuristic, but no to_node \
+                let heuristic_estimate = match &request.heuristic_mode {
+                    HeuristicMode::WithHeuristic(h) => {
+                        // panic is okay here, since it is a programming error if
+                        // someone uses WithHeuristic but does not provide a to_node in
+                        // the options
+                        let to_node_idx = request.options.get_to_node_opt().expect(
+                            "Heuristic mode is WithHeuristic, but no to_node \
                                         provided in AStarOptions.",
-                                );
+                        );
 
-                                let to_node_id = request.graph.get_node_id_from_idx(to_node_idx)?;
+                        let to_node_id = request.graph.get_node_id_from_idx(to_node_idx)?;
 
-                                h.estimate(
-                                    request.graph.get_node_id_from_idx(neighbour)?,
-                                    to_node_id,
-                                )
-                            }
-                            HeuristicMode::WithoutHeuristic => {
-                                // In WithoutHeuristic-mode, set heuristic to 0.0. This is the
-                                // case in One-to-Many (landmark calculation).
-                                // This collapses A* to pure Dijkstra.
-                                // (We don't use the ZeroHeuristic.estimate function here, since
-                                // it would require unnecessary calls to the graph and in particular
-                                // that we pass a to-node, which doesn't exist in one-to-many).
-                                0.0
-                            }
-                        };
+                        h.estimate(request.graph.get_node_id_from_idx(neighbour)?, to_node_id)
+                    }
+                    HeuristicMode::WithoutHeuristic => {
+                        // In WithoutHeuristic-mode, set heuristic to 0.0. This is the
+                        // case in One-to-Many (landmark calculation).
+                        // This collapses A* to pure Dijkstra.
+                        // (We don't use the ZeroHeuristic.estimate function here, since
+                        // it would require unnecessary calls to the graph and in particular
+                        // that we pass a to-node, which doesn't exist in one-to-many).
+                        0.0
+                    }
+                };
 
+                match scratch.queue.entry(neighbour) {
+                    Entry::Occupied(e) => {
                         // update priority of the neighbour
                         e.set_priority(NodePriority::new(
                             neighbour_disutility + heuristic_estimate,
                         ));
                     }
-                    Entry::Vacant(_) => {
-                        unreachable!()
+                    Entry::Vacant(e) => {
+                        e.set_priority(NodePriority::new(
+                            neighbour_disutility + heuristic_estimate,
+                        ));
                     }
                 }
                 // update parent link if applicable
@@ -576,46 +665,25 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
             }
         }
     }
-    // will panic if options are AltOptions, since then, a current_disutility must be provided.
-    // But this is okay, since we should not reach this point (all points in queue visited) in
-    // this case: either, the to_node was reached and the function returned already, or the
-    // to_node is unreachable, in which case, at some point the smallest disutility in the queue
-    // will be infinity or NaN and the function will also return.
-    Ok(request
-        .options
-        .build_result(None, request.departure_time, disutilities))
-}
-
-/// Initialize the priority queue and Disutilities vector for A* search. The from-node gets
-/// priority and Disutility 0.0, all others infinity
-fn get_initial_queue(
-    node_count: usize,
-    from: NodeIndex,
-) -> (KeyedPriorityQueue<NodeIndex, NodePriority>, Vec<Disutility>) {
-    // queue contains node indices and their priority (of type NodePriority, i.e., OrderedFloats
-    // that are sorted in reverse order (=> queue prefers small numbers))
-    let mut queue = KeyedPriorityQueue::new();
-
-    // We will also return disutilities as "Disutility" (f64) separately, since we need them as
-    // standard floats with normal sorting.
-    // Also, in A*, node priority and disutility will not stay the same, since priorities also
-    // contain the heuristic values.
-    let mut disutilities = Vec::new();
-
-    for node in 0..node_count {
-        let node_index = node as NodeIndex;
-        // the from node gets priority 0, all others infinity
-        let node_priority = if node_index == from {
-            NodePriority::new(0f64)
-        } else {
-            NodePriority::new(f64::INFINITY)
-        };
-        // track f64 disutilities
-        disutilities.push(node_priority.get());
-        // save entry to queue
-        queue.push(node_index, node_priority);
+    if let Some(candidate) = candidate {
+        return Ok(AStarCoreResult::SingleDisutilWithPath(
+            candidate.travel_disutility,
+            candidate.travel_time,
+            candidate.path,
+        ));
     }
-    (queue, disutilities)
+
+    // A sparse frontier exhausts naturally when the destination is unreachable. Report infinite
+    // disutility for one-to-one routing; one-to-many landmark actions ignore this value.
+    let disutilities = request
+        .options
+        .needs_full_disutilities()
+        .then(|| scratch.dense_disutilities());
+    Ok(request.options.build_result(
+        Some(f64::INFINITY),
+        request.departure_time,
+        disutilities.as_deref(),
+    ))
 }
 
 // Note: a_star_core is not tested here as of now, since it is implicitly tested by the tests of

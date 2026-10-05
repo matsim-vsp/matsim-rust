@@ -34,9 +34,21 @@ pub fn init_std_out_logging_thread_local() -> DefaultGuard {
 
 pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
     let file_discriminant = part.to_string();
+    init_logging_with_discriminant(config, part, &file_discriminant)
+}
+
+pub(crate) fn init_controller_logging(config: &Config) -> LogGuards {
+    init_logging_with_discriminant(config, 0, "controller")
+}
+
+fn init_logging_with_discriminant(
+    config: &Config,
+    part: u32,
+    file_discriminant: &str,
+) -> LogGuards {
     let dir = resolve_path(config.context(), &config.output().output_dir);
 
-    let csv_layers = init_tracing(config, part, &file_discriminant, &dir);
+    let csv_layers = init_tracing(config, part, file_discriminant, &dir);
     let (log_layer, log_guard) = if Logging::Info == config.output().logging {
         let log_file_name = format!("logs/log_process_{file_discriminant}.txt");
         let log_file_appender = rolling::never(&dir, log_file_name);
@@ -77,7 +89,7 @@ pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
     }
 }
 
-fn init_tracing(config: &Config, part: u32, file_discriminant: &String, dir: &Path) -> FileLayers {
+fn init_tracing(config: &Config, part: u32, file_discriminant: &str, dir: &Path) -> FileLayers {
     // if we set profiling at all and if profiling is set to level trace, then each process creates an instrumenting file
     // if profiling level is set to INFO, only process 0 creates an instrument file. This is important if we run on a lot of
     // processes, because then we spent a lot of computing time on creating instrument files for each process.
@@ -134,8 +146,15 @@ fn init_tracing(config: &Config, part: u32, file_discriminant: &String, dir: &Pa
 
 fn create_filter(level: Level) -> (EnvFilter, EnvFilter) {
     let routing_mod = "rust_qsim::simulation::agents::agent_logic";
-    let routing_filter = EnvFilter::new(format!("{}={}", routing_mod, level));
-    let general_filter = EnvFilter::new(format!("{},{}=off", level, routing_mod));
+    let routing_search_mod = "rust_qsim::simulation::replanning::routing::a_star";
+    let routing_filter = EnvFilter::new(format!(
+        "{}={},{}=trace",
+        routing_mod, level, routing_search_mod
+    ));
+    let general_filter = EnvFilter::new(format!(
+        "{},{routing_mod}=off,{routing_search_mod}=off",
+        level
+    ));
     (routing_filter, general_filter)
 }
 
