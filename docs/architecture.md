@@ -34,6 +34,27 @@ The shared router reads the snapshot without taking the submission lock; unobser
 iteration-reset hooks clear the collectors before the next Mobsim. No event-file output is required for travel-time
 collection.
 
+### Final-Iteration Analysis
+
+`output.analysis` publishes a local report once, after a successful run, from the last completed iteration only.
+It replays the written event partitions, so it requires `output.write_events: File`, and it needs a positive
+`qsim.sample_size` because observed volumes are scaled up to the unsampled population.
+
+Volumes are passenger-car-equivalent weighted, which matches how `LocalLink` charges its flow cap, and the
+V/C denominator is the link's own whole-link capacity multiplied by the interval width. Lane counts are
+exported next to the capacity but never applied to it a second time. `link_capacity.csv` keeps raw vehicle
+counts, observed PCE volumes and sample-scaled volumes as separate columns, and exports
+`effective_capacity_pce`, the V/C denominator. A non-positive capacity leaves only the ratio blank, while
+the volumes stay reportable because they do not involve the capacity; missing PCE invalidates the PCE
+columns as well. Every case is reported per link through `entry_vc_status`/`exit_vc_status`, and
+`vc_histogram.csv` separates links whose ratio is unusable from links that genuinely carried no traffic.
+
+PCE totals are accumulated as exact integers at a fixed scale, not as running floating-point sums,
+because floating-point addition does not commute. Otherwise the same vehicles crossing a link
+simultaneously could produce totals that differ in the last bit, and a ratio sitting exactly on a
+histogram bin edge would land in different bins depending on the order in which event partitions were
+replayed.
+
 ### External Services
 
 As a next step, we integrated the ability to communicate to external services. They are intended to be used during the

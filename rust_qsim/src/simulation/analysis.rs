@@ -1,4 +1,6 @@
-//! Final-iteration link coverage reporting.
+//! Final-iteration link coverage and capacity reporting.
+
+pub mod capacity;
 
 use crate::simulation::config::{Analysis, CompressionType};
 use crate::simulation::events::{
@@ -11,6 +13,9 @@ use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
+use capacity::{
+    FlowSide, IntervalVolumes, LinkUtilization, VC_BIN_COUNT, VcHistogram, vc_bin_bounds,
+};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -44,6 +49,8 @@ struct Manifest<'a> {
     input_format: &'a str,
     eligible_links: usize,
     random_seed: u64,
+    /// Simulated fraction of the population the volumes were scaled up from.
+    sample_size: f64,
     network_input: Option<String>,
     population_input: Option<String>,
     software_version: &'static str,
@@ -84,6 +91,9 @@ pub struct AnalysisRunMetadata<'a> {
     pub vehicles_input: Option<&'a Path>,
     pub expected_travel: &'a [PersonExpectedTravel],
     pub garage: &'a Garage,
+    /// Simulated fraction of the population; observed volumes are scaled up by
+    /// its reciprocal before being compared with network capacity.
+    pub sample_size: f64,
 }
 
 /// Capture compact plan expectations immediately before the final iteration's mobsim.
@@ -129,13 +139,7 @@ struct LinkHour {
     link_id: String,
 }
 
-#[derive(Clone, Copy, Default)]
-struct LinkVolumes {
-    entries: u64,
-    exits: u64,
-}
-
-type LinkVolumesByHour = BTreeMap<LinkHour, LinkVolumes>;
+type LinkVolumesByHour = BTreeMap<LinkHour, IntervalVolumes>;
 
 /// Replay every final-iteration partition and publish deterministic coverage tables and HTML.
 pub fn analyze_final_iteration(
@@ -155,6 +159,12 @@ pub fn analyze_final_iteration(
         return Err(AnalysisError(
             "analysis.interval_seconds must be greater than zero".into(),
         ));
+    }
+    if !run_metadata.sample_size.is_finite() || run_metadata.sample_size <= 0.0 {
+        return Err(AnalysisError(format!(
+            "sample size must be a positive finite number to scale volumes, got {}",
+            run_metadata.sample_size
+        )));
     }
     let events_dir = output_dir
         .join("ITERS")
@@ -213,6 +223,7 @@ pub fn analyze_final_iteration(
             time,
             settings.interval_seconds,
             &ids,
+            run_metadata.garage,
             &mut counts,
         );
         heads[rank] = readers[rank].next_event()?;
@@ -229,6 +240,7 @@ pub fn analyze_final_iteration(
         &counts,
         settings.interval_seconds,
         simulation_end_time,
+        run_metadata.sample_size,
     )?;
     let manifest = Manifest {
         status: "complete",
@@ -238,6 +250,7 @@ pub fn analyze_final_iteration(
         input_format: ext,
         eligible_links: ordered_links.len(),
         random_seed: run_metadata.random_seed,
+        sample_size: run_metadata.sample_size,
         network_input: run_metadata
             .network_input
             .map(|path| path.display().to_string()),
@@ -309,6 +322,36 @@ pub fn analyze_final_iteration(
             unit: "percent",
             aggregation_key: "hour_start_seconds",
         },
+        Metric {
+            name: "entry_pce_vehicles",
+            unit: "pce",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "exit_pce_vehicles",
+            unit: "pce",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "entry_vc",
+            unit: "ratio",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "exit_vc",
+            unit: "ratio",
+            aggregation_key: "link_id,interval_start_seconds",
+        },
+        Metric {
+            name: "entry_vc_histogram",
+            unit: "links",
+            aggregation_key: "interval_start_seconds,bin_index",
+        },
+        Metric {
+            name: "exit_vc_histogram",
+            unit: "links",
+            aggregation_key: "interval_start_seconds,bin_index",
+        },
     ];
     fs::write(
         staging.join("metric_catalog.json"),
@@ -318,6 +361,11 @@ pub fn analyze_final_iteration(
     let statuses = [
         ModuleStatus {
             module: "link_coverage",
+            status: "complete",
+            reason: None,
+        },
+        ModuleStatus {
+            module: "link_capacity",
             status: "complete",
             reason: None,
         },
@@ -418,35 +466,41 @@ fn accumulate(
     time: SimTime,
     interval: u32,
     ids: &BTreeSet<String>,
+    garage: &Garage,
     counts: &mut LinkVolumesByHour,
 ) {
-    let (link, entry) = if let Some(event) = event.as_any().downcast_ref::<LinkEnterEvent>() {
-        (&event.link, true)
-    } else if let Some(event) = event.as_any().downcast_ref::<LinkLeaveEvent>() {
-        (&event.link, false)
-    } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
-        (&event.link, true)
-    } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
-        (&event.link, false)
-    } else {
-        return;
-    };
+    let (link, vehicle, entry) =
+        if let Some(event) = event.as_any().downcast_ref::<LinkEnterEvent>() {
+            (&event.link, &event.vehicle, true)
+        } else if let Some(event) = event.as_any().downcast_ref::<LinkLeaveEvent>() {
+            (&event.link, &event.vehicle, false)
+        } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
+            (&event.link, &event.vehicle, true)
+        } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
+            (&event.link, &event.vehicle, false)
+        } else {
+            return;
+        };
     let id = link.external();
     if !ids.contains(id) {
         return;
     }
     let hour = time.as_nanos() / 1_000_000_000 / u64::from(interval) * u64::from(interval);
-    let count = counts
+    // Vehicles that never appear in the garage, e.g. transit or DRT units, leave the
+    // PCE total for the interval unusable instead of silently counting as zero.
+    let pce = garage.vehicles.get(vehicle).map(|vehicle| vehicle.pce);
+    let side = if entry {
+        FlowSide::Entry
+    } else {
+        FlowSide::Exit
+    };
+    counts
         .entry(LinkHour {
             hour_start_seconds: hour,
             link_id: id.to_owned(),
         })
-        .or_default();
-    if entry {
-        count.entries += 1;
-    } else {
-        count.exits += 1;
-    }
+        .or_default()
+        .record(side, pce);
 }
 
 fn write_tables(
@@ -455,6 +509,7 @@ fn write_tables(
     counts: &LinkVolumesByHour,
     interval: u32,
     simulation_end_time: u32,
+    sample_size: f64,
 ) -> Result<(), AnalysisError> {
     let mut hourly = BufWriter::new(File::create(path.join("link_hourly.csv")).map_err(io_error)?);
     writeln!(
@@ -465,6 +520,8 @@ fn write_tables(
     let mut hours: BTreeSet<u64> = counts.keys().map(|key| key.hour_start_seconds).collect();
     hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
     hours.insert(0);
+    let interval_hours = f64::from(interval) / 3600.0;
+    // Every table below covers the same intervals, including those without any events.
     for hour in &hours {
         let hour = *hour;
         for link in links {
@@ -491,7 +548,9 @@ fn write_tables(
         "hour_start_seconds,eligible_links,used_links,unused_links,used_percent"
     )
     .map_err(io_error)?;
-    for hour in hours {
+    let mut capacities: BTreeMap<u64, IntervalHistograms> = BTreeMap::new();
+    for hour in &hours {
+        let hour = *hour;
         let used = links
             .iter()
             .filter(|link| {
@@ -515,8 +574,138 @@ fn write_tables(
             total - used
         )
         .map_err(io_error)?;
+        let histograms = capacities.entry(hour).or_default();
+        for link in links {
+            let volumes = counts
+                .get(&LinkHour {
+                    hour_start_seconds: hour,
+                    link_id: link.id.external().to_owned(),
+                })
+                .copied()
+                .unwrap_or_default();
+            let utilization =
+                LinkUtilization::new(link, hour, interval_hours, sample_size, &volumes);
+            histograms.entry.observe(&utilization, FlowSide::Entry);
+            histograms.exit.observe(&utilization, FlowSide::Exit);
+        }
+    }
+    write_capacity_table(path, links, counts, &hours, interval_hours, sample_size)?;
+    write_histograms(path, &capacities)?;
+    Ok(())
+}
+
+/// Per-link hourly PCE volumes, effective capacity and V/C ratios.
+///
+/// Raw vehicle counts, the observed PCE volume and the volume expanded to the
+/// unsampled network are separate columns, and a link's raw network capacity is
+/// never multiplied by its lane count.
+fn write_capacity_table(
+    path: &Path,
+    links: &[&Link],
+    counts: &LinkVolumesByHour,
+    hours: &BTreeSet<u64>,
+    interval_hours: f64,
+    sample_size: f64,
+) -> Result<(), AnalysisError> {
+    let mut table = BufWriter::new(File::create(path.join("link_capacity.csv")).map_err(io_error)?);
+    writeln!(
+        table,
+        "link_id,interval_start_seconds,capacity_pce_per_hour,effective_capacity_pce,permlanes,interval_hours,sample_size,entry_vehicles,exit_vehicles,entry_pce,exit_pce,entry_unresolved_pce,exit_unresolved_pce,entry_pce_scaled,exit_pce_scaled,entry_flow_pce_per_hour,exit_flow_pce_per_hour,entry_vc,exit_vc,entry_vc_status,exit_vc_status"
+    )
+    .map_err(io_error)?;
+    for hour in hours {
+        for link in links {
+            let volumes = counts
+                .get(&LinkHour {
+                    hour_start_seconds: *hour,
+                    link_id: link.id.external().to_owned(),
+                })
+                .copied()
+                .unwrap_or_default();
+            let utilization =
+                LinkUtilization::new(link, *hour, interval_hours, sample_size, &volumes);
+            let (entry, exit) = (&utilization.entry, &utilization.exit);
+            writeln!(
+                table,
+                "{},{},{:.6},{},{:.6},{:.6},{:.6},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                csv(utilization.link_id),
+                *hour,
+                utilization.capacity_pce_per_hour,
+                // The V/C denominator. Blank exactly when the capacity is unusable.
+                number_opt(entry.effective_capacity_pce),
+                utilization.permlanes,
+                interval_hours,
+                sample_size,
+                utilization.entry_vehicles,
+                utilization.exit_vehicles,
+                // Observed PCE volumes depend only on the vehicles, so a link with
+                // an unusable capacity still reports what it carried.
+                number_opt(volumes.pce(FlowSide::Entry)),
+                number_opt(volumes.pce(FlowSide::Exit)),
+                volumes.entry_unresolved_pce,
+                volumes.exit_unresolved_pce,
+                number_opt(entry.expanded_pce),
+                number_opt(exit.expanded_pce),
+                number_opt(entry.flow_pce_per_hour),
+                number_opt(exit.flow_pce_per_hour),
+                number_opt(entry.ratio),
+                number_opt(exit.ratio),
+                entry.status.label(),
+                exit.status.label(),
+            )
+            .map_err(io_error)?;
+        }
     }
     Ok(())
+}
+
+/// Fixed-bin V/C distributions per interval, one row per bin per side.
+fn write_histograms(
+    path: &Path,
+    capacities: &BTreeMap<u64, IntervalHistograms>,
+) -> Result<(), AnalysisError> {
+    let mut table = BufWriter::new(File::create(path.join("vc_histogram.csv")).map_err(io_error)?);
+    writeln!(
+        table,
+        "interval_start_seconds,metric,bin_index,bin_lower,bin_upper,links,observations,unused_links,unavailable_links"
+    )
+    .map_err(io_error)?;
+    for (hour, histograms) in capacities {
+        for (metric, histogram) in [
+            (FlowSide::Entry, &histograms.entry),
+            (FlowSide::Exit, &histograms.exit),
+        ] {
+            for bin in 0..VC_BIN_COUNT {
+                let (lower, upper) = vc_bin_bounds(bin);
+                writeln!(
+                    table,
+                    "{hour},{},{bin},{lower:.3},{},{},{},{},{}",
+                    metric.label(),
+                    upper
+                        .map(|upper| format!("{upper:.3}"))
+                        .unwrap_or_else(|| "inf".to_owned()),
+                    histogram.bins[bin],
+                    histogram.observations,
+                    histogram.unused_links,
+                    histogram.unavailable_links,
+                )
+                .map_err(io_error)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Both V/C distributions of one reported interval.
+#[derive(Default)]
+struct IntervalHistograms {
+    entry: VcHistogram,
+    exit: VcHistogram,
+}
+
+/// An unavailable quantity is exported blank, a non-finite one as `nan`.
+fn number_opt(value: Option<f64>) -> String {
+    value.map_or_else(String::new, |value| format!("{value:.6}"))
 }
 
 fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), AnalysisError> {
@@ -525,8 +714,18 @@ fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), Analysi
     let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
     let hourly = fs::read_to_string(path.join("link_hourly.csv")).map_err(io_error)?;
     let hourly = json_for_script(&hourly.lines().collect::<Vec<_>>())?;
+    let capacity = fs::read_to_string(path.join("link_capacity.csv")).map_err(io_error)?;
+    let capacity = json_for_script(&capacity.lines().collect::<Vec<_>>())?;
+    let histogram = fs::read_to_string(path.join("vc_histogram.csv")).map_err(io_error)?;
+    // Split into columns so the report can filter by metric and label the bins itself.
+    let histogram_rows = json_for_script(
+        &histogram
+            .lines()
+            .map(|row| row.split(',').collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+    )?;
     let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}table(document.querySelector('#hourly'),h[0].split(','),h.slice(1).map(x=>x.split(',')));table(document.querySelector('#coverage'),c[0].split(','),c.slice(1).map(x=>x.split(',')));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the interval length; lanes are never applied again, and a value on a bin edge belongs to the higher bin. Unused links carry no vehicles and are counted apart from lightly used ones, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link hourly PCE volumes, capacity and V/C</h3><div id=\"capacity\"></div><h3>Hourly V/C distribution</h3><p id=\"histogram-metric-label\">Entry V/C (default view)</p><div id=\"histogram\"></div><button id=\"histogram-toggle\" type=\"button\">Show exit V/C</button><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"link_capacity.csv\">PCE volumes, capacity and V/C (CSV)</a>, <a href=\"vc_histogram.csv\">V/C distribution (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const p={capacity};const d={histogram_rows};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}table(document.querySelector('#hourly'),h[0].split(','),h.slice(1).map(x=>x.split(',')));table(document.querySelector('#coverage'),c[0].split(','),c.slice(1).map(x=>x.split(',')));table(document.querySelector('#capacity'),p[0].split(','),p.slice(1).map(x=>x.split(',')));const metricColumn=d[0].indexOf('metric');let metric='entry_vc';function histogram(){{const root=document.querySelector('#histogram');root.replaceChildren();table(root,d[0],d.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()}});table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }

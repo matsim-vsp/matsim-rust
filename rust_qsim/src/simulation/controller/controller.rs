@@ -273,6 +273,10 @@ impl Controller {
                 self.config.output().write_events == WriteEvents::File,
                 "Automatic analysis requires output.write_events: File."
             );
+            assert!(
+                self.config.qsim().sample_size > 0.0,
+                "Automatic analysis requires a positive qsim.sample_size: volumes are scaled up by its reciprocal."
+            );
         }
 
         self.controller_events_manager
@@ -336,6 +340,7 @@ impl Controller {
                 vehicles_input: self.config.vehicles().path.as_deref(),
                 expected_travel: &self.expected_travel,
                 garage: &self.scenario.core.garage,
+                sample_size: self.config.qsim().sample_size,
             };
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
