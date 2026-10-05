@@ -4067,8 +4067,23 @@ fn write_report(
         ],
     );
     let economic = csv_for_script(&path.join("economic_summary.csv"))?;
+    let economic_status = statuses
+        .iter()
+        .find(|status| status.module == "economic_appraisal");
+    let economic_note = match economic_status {
+        Some(status) if status.status == STATUS_COMPLETE => "Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate; group and run net values require utility and all three costs at the same scope and currency. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.".to_owned(),
+        Some(status) if status.status == STATUS_FAILED => format!(
+            "Economic appraisal failed: {}. See module_status.json for details.",
+            escape_html(status.reason.as_deref().unwrap_or("unspecified error"))
+        ),
+        Some(status) => format!(
+            "Economic appraisal is unavailable: {}.",
+            escape_html(status.reason.as_deref().unwrap_or("no input data was configured"))
+        ),
+        None => "Economic appraisal status is unavailable.".to_owned(),
+    };
     let economic_section = format!(
-        "<h2>Economic appraisal</h2><p>Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.</p><div id=\"economic-summary\"></div><p><a href=\"economic_appraisal.csv\">Appraisal ledger</a> · <a href=\"economic_summary.csv\">Appraisal summary</a></p><script>csvTable('#economic-summary',{economic});</script>"
+        "<h2>Economic appraisal</h2><p>{economic_note}</p><div id=\"economic-summary\"></div><p><a href=\"economic_appraisal.csv\">Appraisal ledger</a> · <a href=\"economic_summary.csv\">Appraisal summary</a></p><script>csvTable('#economic-summary',{economic});</script>"
     );
     let html = html.replace("</body>", &format!("{economic_section}</body>"));
     fs::write(path.join("index.html"), html).map_err(io_error)
@@ -4170,6 +4185,41 @@ fn io_error(error: std::io::Error) -> AnalysisError {
     AnalysisError(error.to_string())
 }
 
+/// Accumulated sum of supplied amounts, with Neumaier compensation so a small contribution
+/// survives next to a much larger one. A sum that stops being finite stays unavailable rather
+/// than being reported as a number.
+#[derive(Default)]
+struct CompensatedSum {
+    sum: f64,
+    correction: f64,
+    count: usize,
+    overflowed: bool,
+}
+
+impl CompensatedSum {
+    fn add(&mut self, value: f64) {
+        self.count += 1;
+        let next = self.sum + value;
+        if next.is_finite() {
+            self.correction += if self.sum.abs() >= value.abs() {
+                (self.sum - next) + value
+            } else {
+                (value - next) + self.sum
+            };
+        }
+        if !next.is_finite() || !self.correction.is_finite() {
+            self.overflowed = true;
+            return;
+        }
+        self.sum = next;
+    }
+
+    fn value(&self) -> Option<f64> {
+        let value = self.sum + self.correction;
+        (!self.overflowed && value.is_finite()).then_some(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4177,6 +4227,22 @@ mod tests {
     use crate::simulation::events::{PersonArrivalEvent, PersonDepartureEvent};
     use crate::simulation::id::Id;
     use macros::deterministic_id_test;
+
+    #[test]
+    fn compensated_sum_keeps_small_contributions_and_refuses_overflow() {
+        let mut total = CompensatedSum::default();
+        total.add(1e16);
+        total.add(1.0);
+        total.add(-1e16);
+        assert_eq!(total.value().unwrap(), 1.0);
+        assert_eq!(total.count, 3);
+
+        let mut overflow = CompensatedSum::default();
+        overflow.add(f64::MAX);
+        assert_eq!(overflow.value().unwrap(), f64::MAX);
+        overflow.add(f64::MAX);
+        assert_eq!(overflow.value(), None);
+    }
 
     #[test]
     fn analysis_main_mode_collapses_access_walk_and_transit_transfers() {
@@ -4493,6 +4559,11 @@ mod tests {
                 vehicles: None,
             },
         );
+        fs::write(
+            dir.path().join("economic.csv"),
+            "scope,entity_id,group,account,value,unit,marginal_utility_of_money,money_unit,transfer_id,source\nperson,traveler,workers,utility,10,utils,2,USD,,survey\n",
+        )
+        .unwrap();
         let report = analyze_final_iteration(
             dir.path(),
             0,
@@ -4504,6 +4575,7 @@ mod tests {
             &Analysis {
                 enabled: true,
                 interval_seconds: 3600,
+                economic_inputs: Some("economic.csv".into()),
                 ..Analysis::default()
             },
         )
@@ -4547,12 +4619,38 @@ mod tests {
         let summary = fs::read_to_string(output.join("daily_summary.csv")).unwrap();
         assert!(summary.contains("all_complete_persons,3,3.333333"));
         assert!(summary.contains("travelers,2,5.000000"));
+        let economic_ledger = fs::read_to_string(output.join("economic_appraisal.csv")).unwrap();
+        let mut economic_rows = csv::Reader::from_reader(economic_ledger.as_bytes());
+        assert!(economic_rows.records().map(Result::unwrap).any(|row| {
+            row.get(1) == Some("traveler")
+                && row.get(3) == Some("traveler_utility_money_equivalent")
+                && row.get(4) == Some("5.000000")
+                && row.get(6) == Some("5.000000")
+        }));
+        let economic_summary = fs::read_to_string(output.join("economic_summary.csv")).unwrap();
+        let mut economic_summary = csv::Reader::from_reader(economic_summary.as_bytes());
+        assert!(economic_summary.records().map(Result::unwrap).any(|row| {
+            row.get(3) == Some("traveler_utility_money_equivalent")
+                && row.get(4) == Some("USD")
+                && row.get(6) == Some("5.000000")
+        }));
+        let manifest: Manifest = read_json(&output.join(MANIFEST_FILE)).unwrap();
+        assert_eq!(manifest.economic_inputs.as_deref(), Some("economic.csv"));
+        let statuses: serde_json::Value = read_json(&output.join(MODULE_STATUS_FILE)).unwrap();
+        let economic_status = statuses
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|status| status["module"] == "economic_appraisal")
+            .unwrap();
+        assert_eq!(economic_status["status"], STATUS_COMPLETE);
         // The local report presents the agent-travel tables, not only the CSVs.
         let report_html = fs::read_to_string(output.join("index.html")).unwrap();
         assert!(report_html.contains("<h2>Agent travel</h2>"));
         assert!(report_html.contains("<h2>Economic appraisal</h2>"));
         assert!(report_html.contains("economic_appraisal.csv"));
         assert!(report_html.contains("Operating, investment, and external costs stay separate"));
+        assert!(report_html.contains("traveler_utility_money_equivalent"));
         assert!(report_html.contains("href=\"legs.csv\""));
         assert!(report_html.contains("travelers,2,5.000000"));
         assert!(report_html.contains("missed_plan_leg"));

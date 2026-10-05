@@ -32,14 +32,25 @@ or could not be converted; omitted costs are not estimated.
 `economic_appraisal.csv` is the row-level ledger and `economic_summary.csv` groups its converted
 monetary values by entity and account. `total` preserves supplied positive cost amounts;
 `net_social_value` subtracts operating, investment, and external costs and leaves transfers blank.
+Every group and run scope also gets a `net_social_value` account row per money unit. It is
+`available` only when that scope supplied utility and all three cost categories in that same
+currency; a scope never borrows another scope's numbers, and person utility never stands in for a
+group total. A scope's missing accounts are marked `unavailable_not_supplied_at_scope` and its
+incomplete net is `unavailable_missing_inputs`, so an unavailable net is never read as zero. A run
+row is emitted for every unit seen anywhere, including when only person or group records supplied
+it. Person utilities remain comparable per person, without allocating group/run costs to
+individuals. Sums that stop being finite are marked `unavailable_overflow` rather than reported as
+a number.
 The ledger keeps the supplied marginal utility of money beside both the utility and converted rows.
 Repeated records are summed by their person/group/run, account, and money unit in the comparison.
 The summary marks each account included in net social accounting. Do not add person, group, and run
 rows together because they may describe the same costs at different aggregation levels. The
 cross-run comparison reports alternative minus baseline from each run's latest completed report.
 Person rows use people with complete travel records in both runs; group and run rows retain the
-supplied denominators. Monetary units are part of comparison keys, so different currencies do not
-compare as if they shared a unit.
+supplied denominators. Person economic rows outside that shared complete-person cohort remain in
+`metric_differences.csv` with `excluded_incomplete_or_missing_travel` status and no difference.
+Monetary units are part of comparison keys, so different currencies do not compare as if they
+shared a unit.
 
 ## Journeys and travel distributions
 
