@@ -108,6 +108,10 @@ simulated, so not even a zero is compared), are in `transit_validation_unmatched
 totals, bias, MAE, RMSE and the relative bias per scope and metric. An invalid file marks only
 the `transit_validation` module failed.
 
+`compare_completed_runs` compares transit stop, line, outcome, occupancy, journey, and observed-demand
+metrics using the aggregation keys in each run's catalog. It reads each supplied run's latest
+completed iteration; metrics missing from either run remain unavailable in the comparison report.
+
 ## Link speeds
 
 `link_speed` reconstructs traversal speeds from the same replay that produces the link
