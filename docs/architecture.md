@@ -78,6 +78,12 @@ available. `interval_seconds` can override the recorded width so analysis settin
 rerunning QSim; only the analysis outputs are rewritten, while event files, plans, the output
 network and the ID store are read but left untouched.
 
+Journey analysis groups observed legs between consecutive substantive plan activities. Stage
+activities containing `interaction` do not end a journey. The main mode follows the MATSim analysis
+mode hierarchy, and journey distance sums the route distances captured from the prepared selected
+plan, including model-derived teleportation distances. Journeys with incomplete observed legs keep
+their completion and route-distance fields but have no duration.
+
 #### PCE volumes and capacity utilization
 
 `simulation::analysis::capacity` adds per-link capacity utilization. Volumes are weighted by PCE,
