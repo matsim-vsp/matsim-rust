@@ -397,3 +397,89 @@ fn standalone_rerun_rejects_invalid_inputs_with_diagnostics() {
     assert!(failure.contains("\"status\": \"failed\""));
     assert!(failure.contains("missing recorded output network"));
 }
+
+#[deterministic_id_test(rust_qsim)]
+fn standalone_rerun_reproduces_the_automatic_run_accessibility_tables() {
+    // The home coordinates of the run's people travel in `run_metadata.json` rather than being
+    // recovered from the population, because the analysis pass never sees the population. A
+    // rerun that lost them would drop every person row, so the comparison below is on the
+    // automatic run's own tables, not on a re-derivation.
+    let temp = tempfile::tempdir().unwrap();
+    let output = temp.path().join("run");
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/3-links/3-links-config-1.yml",
+    ));
+    config.controller_mut().last_iteration = 1;
+    config.output_mut().output_dir = output.clone();
+    // The shipped config deletes its output directory, which would take the supplied
+    // accessibility inputs with it. Overwriting leaves the directory and its inputs alone.
+    config.output_mut().overwrite_files =
+        rust_qsim::simulation::config::OverwriteFiles::OverwriteExistingFiles;
+    config.output_mut().analysis.enabled = true;
+    config.output_mut().analysis.accessibility = rust_qsim::simulation::config::Accessibility {
+        opportunities: Some("accessibility/opportunities.csv".into()),
+        zones: Some("accessibility/zones.csv".into()),
+        travel_costs: Some("accessibility/travel_costs.csv".into()),
+        thresholds_seconds: vec![1800.0],
+    };
+    // The configured paths are relative and resolve from the run's output directory.
+    fs::create_dir_all(output.join("accessibility")).unwrap();
+    fs::write(
+        output.join("accessibility/zones.csv"),
+        "zone_id,x,y\nz1,0,0\nz2,1000,0\n",
+    )
+    .unwrap();
+    fs::write(
+        output.join("accessibility/opportunities.csv"),
+        "opportunity_id,category,x,y,count\njob-a,jobs,0,0,100\njob-b,jobs,1000,0,250\n",
+    )
+    .unwrap();
+    fs::write(
+        output.join("accessibility/travel_costs.csv"),
+        "origin_zone,destination_zone,mode,period_start_seconds,travel_time_seconds\n\
+         z1,z1,car,28800,0\n\
+         z1,z2,car,28800,1800\n\
+         z2,z1,car,28800,1800\n\
+         z2,z2,car,28800,0\n",
+    )
+    .unwrap();
+    ControllerBuilder::default_with_scenario(Scenario::load(config))
+        .build()
+        .unwrap()
+        .run();
+
+    let report_dir = output.join("analysis");
+    let statuses = fs::read_to_string(report_dir.join("module_status.json")).unwrap();
+    assert!(statuses.contains("\"module\": \"accessibility\""));
+    assert!(statuses.contains("\"status\": \"complete\""), "{statuses}");
+    let persons = fs::read_to_string(report_dir.join("accessibility_persons.csv")).unwrap();
+    // The single agent lives at (5, 10), which the nearest zone places in z1, and both jobs are
+    // within the 1800 s threshold from either zone.
+    assert!(
+        persons.contains("\"100\",5.000000,10.000000,\"z1\",\"jobs\",\"car\",28800,1800.000000"),
+        "{persons}"
+    );
+    assert!(persons.contains("350"), "{persons}");
+    assert!(!persons.contains("unavailable:no_home_zone"), "{persons}");
+
+    let tables = [
+        "accessibility_zones.csv",
+        "accessibility_summary.csv",
+        "accessibility_persons.csv",
+        "accessibility_diagnostics.csv",
+        "accessibility_map.svg",
+    ];
+    let automatic: Vec<String> = tables
+        .iter()
+        .map(|table| fs::read_to_string(report_dir.join(table)).unwrap())
+        .collect();
+
+    reanalyze_completed_run(&output, None).unwrap();
+    for (table, expected) in tables.iter().zip(&automatic) {
+        assert_eq!(
+            &fs::read_to_string(report_dir.join(table)).unwrap(),
+            expected,
+            "{table} differs after a standalone rerun"
+        );
+    }
+}

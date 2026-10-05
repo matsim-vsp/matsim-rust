@@ -213,8 +213,16 @@ covers link volumes and coverage, link classification, per-interval link speeds,
 and travel time, free-flow-relative delay, relative-speed profiles, traversal diagnostics, and
 en-route agent travel; passenger distance and time are explicitly unavailable without link-level
 occupancy. An optional `output.analysis.excess_delay_clip_seconds` setting adds clipped positive
-delay columns to the CSV exports and metric catalog. See `docs/analysis.md` for allocation and
-metric conventions. The `analyze` binary regenerates that report from the
+delay columns to the CSV exports and metric catalog.
+
+Configuring `output.analysis.accessibility` adds accessibility to supplied opportunities: the
+cumulative count of jobs, schools or services reachable from each zone and person within a
+configurable travel-time threshold, by mode and departure period, with per-zone, per-person, summary
+and map exports. It needs three supplied files — opportunity locations and weights, zone centroids,
+and potential-destination travel costs — and stays `unavailable` until all three are configured.
+Realized trip durations are never substituted for the supplied costs, so a missing cost leaves the
+measure unavailable rather than guessed. See `docs/analysis.md` for the measure, the input formats and
+the status conventions. The `analyze` binary regenerates that report from the
 run's saved outputs without rerunning QSim:
 
 ```shell
@@ -239,9 +247,11 @@ population supplies them. See `docs/analysis.md` for the group and comparison de
 
 The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
 rewrites the analysis outputs; event files, plans, the output network and the ID store are left
-untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels and the
-urban boundary are restored from `manifest.json`, so a rerun reproduces the recorded classification
-rather than reporting every link as `unknown`.
+untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels, the
+urban boundary and the accessibility inputs are restored from `manifest.json`, so a rerun reproduces
+the recorded classification and accessibility measure rather than reporting every link as `unknown`
+and leaving accessibility unavailable. The accessibility inputs themselves are read again from the
+recorded paths, so they have to still be present.
 
 The standalone command needs a run that already recorded a report, so run the simulation once with
 `output.analysis.enabled: true`. It reads its replay parameters from the run's `analysis/manifest.json`
