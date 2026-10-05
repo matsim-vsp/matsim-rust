@@ -17,6 +17,22 @@ fn main() -> ExitCode {
     match analysis::reanalyze_completed_run(&args.run_dir, args.interval_seconds) {
         Ok(report) => {
             info!("Analysis report: {}", report.display());
+            if !args.compare_run_dirs.is_empty() {
+                let mut runs = vec![args.run_dir.clone()];
+                runs.extend(args.compare_run_dirs);
+                match analysis::compare_latest_run_reports(
+                    report
+                        .parent()
+                        .expect("analysis report has a parent directory"),
+                    &runs,
+                ) {
+                    Ok(comparison) => info!("Cross-run report: {}", comparison.display()),
+                    Err(error) => {
+                        error!("{error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -36,4 +52,7 @@ struct AnalyzeArgs {
     /// report used, so analysis settings can change without rerunning QSim.
     #[arg(long, short)]
     interval_seconds: Option<u32>,
+    /// Another completed run to include in a latest-iteration journey comparison. Repeat as needed.
+    #[arg(long = "compare-run-dir")]
+    compare_run_dirs: Vec<PathBuf>,
 }

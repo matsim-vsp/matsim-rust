@@ -11,6 +11,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{info, warn};
 
 pub mod routing;
+pub mod silo_routing;
 
 /// This trait is a marker trait for requests that can be sent to an adapter.
 pub trait RequestToAdapter: Debug + Send {}

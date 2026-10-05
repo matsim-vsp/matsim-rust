@@ -210,3 +210,17 @@ Before reporting completion:
 - State which checks passed and which were not run, including the reason.
 - Call out compatibility, determinism, performance, or input-format consequences
   that a reviewer should know about.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: use root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.

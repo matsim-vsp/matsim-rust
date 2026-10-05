@@ -437,15 +437,21 @@ impl RoutingModule for TransitRoutingModule {
         let Some((arrival_time, boarding_time, distance, route_id, line_id, access_id, egress_id)) =
             best
         else {
-            if let (Some(person), Some(fallback)) = (request.person, &self.fallback) {
-                let vehicle_id =
-                    Id::get_from_ext(format!("{}_car", person.id().external()).as_str());
-                let vehicle = self.garage.vehicles.get(&vehicle_id);
+            // An origin/destination pair that no transit line connects is not an error: SILO
+            // expects a car trip instead of teleporting the agent across the city on foot.
+            // Callers that do not carry a person (skims, travel-time matrices) still get an
+            // answer, because the car router works without one.
+            if let Some(fallback) = &self.fallback {
+                let vehicle = request.person.and_then(|person| {
+                    let vehicle_id =
+                        Id::try_get_from_ext(format!("{}_car", person.id().external()).as_str());
+                    vehicle_id.and_then(|vehicle_id| self.garage.vehicles.get(&vehicle_id))
+                });
                 let car_request = RoutingRequestBuilder::default()
                     .from(request.from)
                     .to(request.to)
                     .departure_time(request.departure_time)
-                    .person(Some(person))
+                    .person(request.person)
                     .vehicle(vehicle)
                     .attributes(request.attributes.clone())
                     .build()
@@ -881,11 +887,20 @@ impl Debug for dyn RoutingModule {
 mod route_proposal_tests {
     use super::{
         RouteFrequencyProposalBackend, RouteProposal, RouteProposalKey, RouteProposalSeed,
-        RouteProposalTable,
+        RouteProposalTable, RoutingError, RoutingModule, RoutingRequest, RoutingRequestBuilder,
+        TransitRoutingModule,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::network::Link;
+    use crate::simulation::scenario::population::{
+        InternalGenericRoute, InternalLeg, InternalPlanElement, InternalRoute,
+    };
+    use crate::simulation::scenario::transit::TransitSchedule;
+    use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     #[deterministic_id_test]
     fn batch_proposes_most_frequent_previous_path_deterministically() {
@@ -974,5 +989,110 @@ mod route_proposal_tests {
                 Some(vec![first.clone()])
             );
         }
+    }
+
+    /// A recording stand-in for the car router, so the test only observes the fallback.
+    struct FallbackSpy {
+        mode: Id<String>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl RoutingModule for FallbackSpy {
+        fn calc_route(
+            &self,
+            request: RoutingRequest,
+        ) -> Result<Vec<InternalPlanElement>, RoutingError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let route = InternalGenericRoute::new(
+                request.from.link().clone(),
+                request.to.link().clone(),
+                Some(Duration::from_secs(60)),
+                Some(1_000.0),
+                None,
+            );
+            Ok(vec![InternalPlanElement::Leg(InternalLeg::new(
+                InternalRoute::Generic(route),
+                "car",
+                Duration::from_secs(60),
+                None,
+            ))])
+        }
+
+        fn mode(&self) -> &Id<String> {
+            &self.mode
+        }
+    }
+
+    /// SILO asks for travel times between zones without a person, so the pt module has to
+    /// fall back to a car trip there too. Bangkok's earlier Java runs got the same behaviour
+    /// from BangkokPtFallbackModule, which was installed as a controler-wide override.
+    #[deterministic_id_test]
+    fn pt_without_a_person_falls_back_to_the_car_router() {
+        use crate::simulation::scenario::Coordinate;
+        use crate::simulation::scenario::facilities::Facility;
+        use crate::simulation::scenario::network::Link;
+        use crate::simulation::scenario::vehicles::Garage;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // An empty schedule leaves the pt module with no transit path to find.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let module = TransitRoutingModule::new(
+            Arc::new(TransitSchedule::default()),
+            1.0,
+            1.0,
+            Arc::new(Garage::default()),
+            Some(Arc::new(FallbackSpy {
+                mode: Id::create("car"),
+                calls: calls.clone(),
+            })),
+        );
+        let from =
+            Facility::new_link_wrapper(Coordinate::new_2d(0.0, 0.0), Id::<Link>::create("1"));
+        let to =
+            Facility::new_link_wrapper(Coordinate::new_2d(10.0, 10.0), Id::<Link>::create("5"));
+        let request = RoutingRequestBuilder::default()
+            .from(&from)
+            .to(&to)
+            .departure_time(SimTime::from_duration(Duration::ZERO))
+            .build()
+            .unwrap();
+
+        // No person on the request: the answer has to come from the car fallback.
+        let elements = module.calc_route(request).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(elements.iter().any(|element| element.as_leg().is_some()));
+    }
+
+    /// Without a fallback router there is nothing to answer with, so the caller gets the
+    /// no-path error rather than a silently wrong travel time.
+    #[deterministic_id_test]
+    fn pt_without_transit_or_fallback_reports_no_path() {
+        use crate::simulation::scenario::Coordinate;
+        use crate::simulation::scenario::facilities::Facility;
+        use crate::simulation::scenario::network::Link;
+        use crate::simulation::scenario::vehicles::Garage;
+
+        let module = TransitRoutingModule::new(
+            Arc::new(TransitSchedule::default()),
+            1.0,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        );
+        let from =
+            Facility::new_link_wrapper(Coordinate::new_2d(0.0, 0.0), Id::<Link>::create("1"));
+        let to =
+            Facility::new_link_wrapper(Coordinate::new_2d(10.0, 10.0), Id::<Link>::create("5"));
+        let request = RoutingRequestBuilder::default()
+            .from(&from)
+            .to(&to)
+            .departure_time(SimTime::from_duration(Duration::ZERO))
+            .build()
+            .unwrap();
+
+        assert!(matches!(
+            module.calc_route(request),
+            Err(RoutingError::NoPath { .. })
+        ));
     }
 }

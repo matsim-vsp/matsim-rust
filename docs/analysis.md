@@ -3,6 +3,39 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Journeys and travel distributions
+
+The final-iteration replay exports observed legs in `legs.csv` and planned journeys in
+`journeys.csv`. A journey spans consecutive substantive activities. Activity types containing
+`interaction` are treated as stage activities, so transit access, egress, and transfer waits stay
+inside one journey. Journey duration is elapsed time from the first observed component departure
+to the last component arrival; incomplete journeys keep their mode and distance but have no duration.
+The purpose is the destination activity type.
+
+The main mode uses MATSim's default analysis hierarchy: the highest-ranked component mode wins,
+which folds walk-transit-walk and transit transfers into one transit journey. An entirely walked
+journey remains walk. When a custom mode is mixed with a known non-walk mode, the report marks the
+main mode `unknown_mixed_modes` rather than guessing at a hierarchy the run has not configured.
+`journey_mode_share.csv` groups journey counts and shares by departure
+interval, purpose, distance class, and main mode. Distance classes are under 1 km, 1–5 km, 5–10 km,
+10–25 km, 25 km or more, and unknown. `journey_summary.csv` reports count, completion, and mean,
+population standard deviation, median, and 90th percentile for duration and distance by main mode
+and destination purpose. Percentiles use the nearest-rank definition.
+
+Journey distance sums the prepared plan's route distance for every component leg. This includes
+model-derived distances assigned to teleported routes during plan preparation. If any component
+has no finite non-negative route distance, the total is blank; `distance_provenance` distinguishes
+`planned_route`, `partial_planned_route`, and `unavailable`. Component leg indices and modes
+link each journey to `legs.csv`. A journey with no observed components is `not_departed`; observed
+journeys distinguish `completed`, `stuck`, `missing_arrival`, and `incomplete`. These tables
+describe the recorded selected plan and replayed events of the latest completed iteration only.
+
+To compare saved journey mode shares, run `analyze --run-dir RUN --compare-run-dir OTHER`; repeat
+`--compare-run-dir` for more runs. The command refreshes RUN's latest-iteration report, reads each
+supplied run's recorded `journey_mode_share.csv`, and writes a local comparison report and combined
+table under `RUN/analysis/cross_run_comparison`. A comparison refuses a run whose report is failed
+or whose recorded iteration is not its latest output iteration.
+
 ## Link speeds
 
 `link_speed` reconstructs traversal speeds from the same replay that produces the link
@@ -23,6 +56,7 @@ entry, and volume, coverage, group and speed tables therefore share one interval
 across-link mean and population standard deviation per interval,
 `link_speed_histogram.csv` the fixed-bin distribution, and
 `link_speed_diagnostics.csv` every record that could not produce a full-link speed.
+
 
 ## Observed validation
 
@@ -66,6 +100,47 @@ recorded sample size; speed rows have identical sample and population values. Ea
 the full period start and end, so runs with different interval widths remain identifiable.
 Relative paths are resolved from the current run's output directory. A missing or incomplete
 comparison report marks only the cross-run comparison module failed.
+
+
+## Network distance, time and congestion
+
+`network_distance_time.csv` reports observed vehicle link traversals by link and interval;
+`network_distance_time_summary.csv` reports network totals by interval. Traversal distance is
+`link.length * (exit_position - entry_position)`, so first and last link portions count. Visits
+with entry position zero and exit position one are complete; other valid forward positions are
+partial and included. Positions outside `[0, 1]` or a decreasing position, non-finite or negative
+lengths and decreasing event times are excluded and counted in
+`network_distance_time_diagnostics.csv`. A valid visit with zero elapsed time retains its observed
+distance and traversal count, reports zero vehicle time and signed delay when the reference speed
+is valid, and contributes no relative-speed ratio; it is counted in the non-positive-duration
+diagnostic. Visits still open at the end are counted as unfinished and contribute no guessed
+distance or time. A same-link route is a regular visit and is counted when its entry and exit
+events are paired.
+
+Vehicle time is the elapsed time between link entry and exit. A visit crossing an analysis
+interval boundary is assigned whole to its entry interval, as in the link-speed tables. This
+avoids assuming how the vehicle moved inside the link. Distance and signed free-flow-relative
+delay are kept with that visit. Free-flow-relative delay is `observed time - distance /
+freespeed`, so it can be negative. `relative_speed_ratio` is free-flow travel time divided by
+observed time, so values below one indicate slower than free flow and values above one indicate
+faster travel. Network ratios use the sums over visits with valid free speeds. A non-finite or non-positive free speed leaves delay blank for
+that traversal while retaining its distance and time. The optional
+`output.analysis.excess_delay_clip_seconds` setting exports separately labeled clipped excess
+delay: per link and interval it sums positive traversal delay, then caps that sum at the configured
+value. The network total sums those capped per-link values, so it matches the per-link export.
+The default is unset, in which case the clipped-delay column and catalog entry are omitted.
+It can be set in YAML or with `--set output.analysis.excess_delay_clip_seconds=120`.
+
+The event stream records vehicles and person travel events but does not provide reliable
+link-level passenger occupancy. Passenger distance and time are therefore explicitly unavailable;
+PCE is a capacity weight and is not treated as a passenger count. Existing leg departure and
+completion metrics provide agent travel profiles. `en_route_agents.csv` counts distinct people
+with an observed departure not yet matched by an arrival or stuck event, reports departures,
+arrivals, stuck events, interval-start and peak concurrent counts, and apportions person-seconds
+from event timestamps. It covers travel modes in the person event stream and does not claim
+link-level network occupancy. Link speed tables remain a
+separate view and only include complete full-link traversals.
+
 
 ## Link classification
 
