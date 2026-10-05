@@ -1,5 +1,6 @@
 //! Final-iteration link coverage, capacity, speed, distance, delay and agent travel reporting.
 
+mod accessibility;
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
@@ -21,7 +22,8 @@ mod network_distance;
 mod noise;
 
 use crate::simulation::config::{
-    Analysis, CompressionType, EmissionsInputs, LinkLabels, NoiseInputs, ServiceInputs,
+    Accessibility, Analysis, CompressionType, EmissionsInputs, LinkLabels, NoiseInputs,
+    ServiceInputs,
 };
 use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
@@ -85,9 +87,15 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("transit_validation", None),
     ("validation", None),
     ("cross_run_comparison", None),
+    // Follows the run's outcome when its three supplied inputs are configured; otherwise
+    // unavailable, and `module_statuses` supplies the reason.
+    ("accessibility", None),
+    (
+        "transit_and_research",
+        Some("Optional module inputs are not configured"),
+    ),
     (demographic::MODULE, None),
     ("service_performance", None),
-    ("transit_and_research", None),
     ("modeled_emissions", None),
     ("noise_exposure", None),
 ];
@@ -99,7 +107,7 @@ const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=doc
 /// Complete report shell. Substituted in one pass by [`substitute_template`], so a link
 /// label that happens to read like a token cannot corrupt the payloads.
 
-const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Observed validation</h2><p>Count observations are expanded by the reciprocal of the simulated sample fraction. Only exact link, period, class and metric matches are compared; __VALIDATION_NOTE__ A blank relative error means the observed reference is zero.</p><h3>Validation summary</h3><div id="validation-summary"></div><h3>Matched observations</h3><div id="validation-matches"></div>__VALIDATION_PLOTS__<p><a href="validation_summary.csv">Summary CSV</a> · <a href="validation_matches.csv">Matched observations CSV</a> · <a href="validation_unmatched.csv">Unmatched observations CSV</a></p><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Network distance, time and congestion</h2><p>Vehicle distance uses the observed fraction of each link. Partial and unfinished traversals are reported in diagnostics. A traversal crossing an interval boundary is assigned whole to its entry interval, so no within-link path is inferred. Relative delay is signed; clipped excess delay, when configured, sums positive link delay capped per link and interval. Passenger distance and time are unavailable because link-level passenger occupancy is not recorded. <a href="network_distance_time_diagnostics.csv">Traversal diagnostics (CSV)</a>.</p><h3>Network totals and peak-hour profile</h3><p id="peak-delay"></p><div id="network-summary"></div><h3>Per-link distance, time and relative speed</h3><div id="network-link-metrics"></div><h3>Traversal exclusions</h3><div id="network-distance-diagnostics"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs. Journeys run between substantive activities; stage activities such as transit transfers stay within the journey. Main mode follows the MATSim analysis hierarchy. Distances sum planned route distances, including prepared teleported routes, and report when any component is unavailable.</p><h3>En-route agent profile</h3><p>Counts use observed person departures, arrivals, and stuck events across all travel modes. Person-seconds are allocated by event timestamps; no within-link position or occupancy is inferred.</p><div id="en-route-agents"></div><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Journey mode share by hour, purpose, and distance</h3><div id="journey-shares"></div><h3>Journey duration and distance distributions</h3><div id="journey-summary"></div><h3>Journey components and completion</h3><div id="journeys"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div>__SURVEY_SECTION____TRANSIT_SECTION____CROSS_RUN_SECTION____SERVICE_SECTION____NOISE_SECTION__<h2>Demographic outcomes and equity</h2><p>__DEMOGRAPHIC_NOTE__</p><h3>Group sizes and travel burdens</h3><div id="group-burdens"></div><h3>Person groups</h3><div id="person-demographics"></div><h3>Other modules' group outcomes</h3><div id="group-module-outcomes"></div><h3>Equity comparison</h3><div id="equity-comparison"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="journeys.csv">journey components and completion (CSV)</a>, <a href="journey_mode_share.csv">journey mode shares (CSV)</a>, <a href="journey_summary.csv">journey distributions (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="journey_survey_comparison.csv">journey survey (CSV)</a>, <a href="service_summary.csv">service summary (CSV)</a>, <a href="service_requests.csv">service requests (CSV)</a>, <a href="service_vehicles.csv">service vehicles (CSV)</a>, <a href="service_occupancy.csv">service occupancy (CSV)</a>, <a href="service_constraints.csv">service constraints (CSV)</a>, <a href="service_availability.csv">service availability (CSV)</a>, <a href="service_diagnostics.csv">service diagnostics (CSV)</a>, <a href="transit_trips.csv">transit trips (CSV)</a>, <a href="transit_stop_hourly.csv">transit boardings and alightings (CSV)</a>, <a href="transit_line_summary.csv">transit line summary (CSV)</a>, <a href="transit_occupancy.csv">transit occupancy (CSV)</a>, <a href="transit_journeys.csv">transit journeys (CSV)</a>, <a href="transit_outcomes.csv">transit outcomes (CSV)</a>, <a href="transit_availability.csv">transit availability (CSV)</a>, <a href="transit_validation_summary.csv">transit observed demand (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;const gb=__GROUP_BURDENS__;const pg=__PERSON_DEMOGRAPHICS__;const gm=__GROUP_MODULE_OUTCOMES__;const eq=__EQUITY_COMPARISON__;const js=__JOURNEY_SHARES__;const jy=__JOURNEY_SUMMARY__;const jn=__JOURNEYS__;const jsurvey=__JOURNEY_SURVEY__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;csvTable('#validation-summary',__VALIDATION_SUMMARY__);csvTable('#validation-matches',__VALIDATION_MATCHES__);__TRANSIT_RENDER____CROSS_RUN_RENDER____SERVICE_RENDER____NOISE_RENDER__table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#journey-shares',js);csvTable('#journey-survey',jsurvey);csvTable('#journey-summary',jy);csvTable('#journeys',jn);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);csvTable('#group-burdens',gb);csvTable('#person-demographics',pg);csvTable('#group-module-outcomes',gm);csvTable('#equity-comparison',eq);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()__NETWORK_ANALYSIS_SCRIPT__</script></body></html>"#;
+const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Observed validation</h2><p>Count observations are expanded by the reciprocal of the simulated sample fraction. Only exact link, period, class and metric matches are compared; __VALIDATION_NOTE__ A blank relative error means the observed reference is zero.</p><h3>Validation summary</h3><div id="validation-summary"></div><h3>Matched observations</h3><div id="validation-matches"></div>__VALIDATION_PLOTS__<p><a href="validation_summary.csv">Summary CSV</a> · <a href="validation_matches.csv">Matched observations CSV</a> · <a href="validation_unmatched.csv">Unmatched observations CSV</a></p><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Network distance, time and congestion</h2><p>Vehicle distance uses the observed fraction of each link. Partial and unfinished traversals are reported in diagnostics. A traversal crossing an interval boundary is assigned whole to its entry interval, so no within-link path is inferred. Relative delay is signed; clipped excess delay, when configured, sums positive link delay capped per link and interval. Passenger distance and time are unavailable because link-level passenger occupancy is not recorded. <a href="network_distance_time_diagnostics.csv">Traversal diagnostics (CSV)</a>.</p><h3>Network totals and peak-hour profile</h3><p id="peak-delay"></p><div id="network-summary"></div><h3>Per-link distance, time and relative speed</h3><div id="network-link-metrics"></div><h3>Traversal exclusions</h3><div id="network-distance-diagnostics"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs. Journeys run between substantive activities; stage activities such as transit transfers stay within the journey. Main mode follows the MATSim analysis hierarchy. Distances sum planned route distances, including prepared teleported routes, and report when any component is unavailable.</p><h3>En-route agent profile</h3><p>Counts use observed person departures, arrivals, and stuck events across all travel modes. Person-seconds are allocated by event timestamps; no within-link position or occupancy is inferred.</p><div id="en-route-agents"></div><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Journey mode share by hour, purpose, and distance</h3><div id="journey-shares"></div><h3>Journey duration and distance distributions</h3><div id="journey-summary"></div><h3>Journey components and completion</h3><div id="journeys"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div>__SURVEY_SECTION____TRANSIT_SECTION____CROSS_RUN_SECTION____ACCESSIBILITY_SECTION____SERVICE_SECTION____NOISE_SECTION__<h2>Demographic outcomes and equity</h2><p>__DEMOGRAPHIC_NOTE__</p><h3>Group sizes and travel burdens</h3><div id="group-burdens"></div><h3>Person groups</h3><div id="person-demographics"></div><h3>Other modules' group outcomes</h3><div id="group-module-outcomes"></div><h3>Equity comparison</h3><div id="equity-comparison"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="journeys.csv">journey components and completion (CSV)</a>, <a href="journey_mode_share.csv">journey mode shares (CSV)</a>, <a href="journey_summary.csv">journey distributions (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="journey_survey_comparison.csv">journey survey (CSV)</a>, <a href="service_summary.csv">service summary (CSV)</a>, <a href="service_requests.csv">service requests (CSV)</a>, <a href="service_vehicles.csv">service vehicles (CSV)</a>, <a href="service_occupancy.csv">service occupancy (CSV)</a>, <a href="service_constraints.csv">service constraints (CSV)</a>, <a href="service_availability.csv">service availability (CSV)</a>, <a href="service_diagnostics.csv">service diagnostics (CSV)</a>, <a href="transit_trips.csv">transit trips (CSV)</a>, <a href="transit_stop_hourly.csv">transit boardings and alightings (CSV)</a>, <a href="transit_line_summary.csv">transit line summary (CSV)</a>, <a href="transit_occupancy.csv">transit occupancy (CSV)</a>, <a href="transit_journeys.csv">transit journeys (CSV)</a>, <a href="transit_outcomes.csv">transit outcomes (CSV)</a>, <a href="transit_availability.csv">transit availability (CSV)</a>, <a href="transit_validation_summary.csv">transit observed demand (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;const gb=__GROUP_BURDENS__;const pg=__PERSON_DEMOGRAPHICS__;const gm=__GROUP_MODULE_OUTCOMES__;const eq=__EQUITY_COMPARISON__;const js=__JOURNEY_SHARES__;const jy=__JOURNEY_SUMMARY__;const jn=__JOURNEYS__;const jsurvey=__JOURNEY_SURVEY__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;csvTable('#validation-summary',__VALIDATION_SUMMARY__);csvTable('#validation-matches',__VALIDATION_MATCHES__);__TRANSIT_RENDER____CROSS_RUN_RENDER____SERVICE_RENDER____NOISE_RENDER____ACCESSIBILITY_SCRIPTS__table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#journey-shares',js);csvTable('#journey-survey',jsurvey);csvTable('#journey-summary',jy);csvTable('#journeys',jn);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);csvTable('#group-burdens',gb);csvTable('#person-demographics',pg);csvTable('#group-module-outcomes',gm);csvTable('#equity-comparison',eq);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()__NETWORK_ANALYSIS_SCRIPT__</script></body></html>"#;
 
 /// Renders the agent travel tables. They quote person identifiers, so the header and every row
 /// are split with a quote-aware parser instead of `String.split(',')`.
@@ -129,6 +137,14 @@ const PERSON_DEMOGRAPHIC_PREVIEW_ROWS: usize = 200;
 const EXPRESSWAY: &str = "expressway";
 /// Leg rows embedded in the local report before it defers to the full `legs.csv`.
 const LEGS_PREVIEW_ROWS: usize = 200;
+/// Rows of each accessibility table embedded in the local report. The CSVs hold every row.
+const ACCESSIBILITY_PREVIEW_ROWS: usize = 500;
+/// Dimensions every accessibility row is grouped by, as the catalog declares them.
+const ACCESSIBILITY_AGGREGATION_KEY: &str =
+    "origin_zone,category,mode,departure_period_start_seconds,threshold_seconds";
+/// The same dimensions without the origin, which is how a summary row aggregates.
+const ACCESSIBILITY_SUMMARY_KEY: &str =
+    "category,mode,departure_period_start_seconds,threshold_seconds";
 
 #[derive(Serialize)]
 struct Metric<'a> {
@@ -185,11 +201,22 @@ pub struct Manifest {
     person_cost_attribute: Option<String>,
 
     excess_delay_clip_seconds: Option<f64>,
+    /// Accessibility inputs, recorded so [`reanalyze_completed_run`] rebuilds the same
+    /// report. Absent in a manifest written before the module existed, which reads back as
+    /// "nothing configured" rather than failing the rerun.
+    #[serde(default)]
+    accessibility: Accessibility,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonExpectedTravel {
     person_id: String,
+    /// Coordinate of the person's first non-stage activity, or `None` for a plan without one.
+    /// Accessibility places a person in the zone nearest this point, so the coordinate has to
+    /// be recorded here rather than recovered later: the analysis pass never sees the
+    /// population, only this metadata.
+    #[serde(default)]
+    home_coord: Option<[f64; 2]>,
     legs: Vec<ExpectedLeg>,
     #[serde(default)]
     journeys: Vec<ExpectedJourney>,
@@ -531,6 +558,11 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
                 .collect();
             Some(PersonExpectedTravel {
                 person_id: person.id().external().to_owned(),
+                home_coord: activities
+                    .first()
+                    .and_then(|(_, activity)| activity.coord.as_ref())
+                    .map(|coordinate| [coordinate.x, coordinate.y])
+                    .filter(|[x, y]| x.is_finite() && y.is_finite()),
                 legs,
                 journeys,
             })
@@ -669,6 +701,7 @@ pub fn analyze_final_iteration(
         person_cost_attribute: settings.person_cost_attribute.clone(),
 
         excess_delay_clip_seconds: settings.excess_delay_clip_seconds,
+        accessibility: settings.accessibility.clone(),
     };
 
     // Required inputs are validated before anything is staged, so an unreadable recording is
@@ -792,6 +825,7 @@ pub fn reanalyze_completed_run(
         person_cost_attribute: recorded.person_cost_attribute.clone(),
 
         excess_delay_clip_seconds: recorded.excess_delay_clip_seconds,
+        accessibility: recorded.accessibility.clone(),
     };
 
     analyze_final_iteration(
@@ -1234,7 +1268,10 @@ fn publish_complete(
 
     write_json(
         &staging.join(METRIC_CATALOG_FILE),
-        &metrics(settings.excess_delay_clip_seconds.is_some()),
+        &metrics(
+            settings.excess_delay_clip_seconds.is_some(),
+            settings.accessibility.is_configured(),
+        ),
     )?;
     let vehicle_classes: Vec<_> = run_metadata
         .vehicle_types
@@ -1277,6 +1314,19 @@ fn publish_complete(
     });
     if comparison.as_ref().is_none_or(Result::is_err) {
         cross_run::write_empty(&staging)?;
+    }
+    // A partially configured accessibility input cannot produce a measure, so a bad setting
+    // fails only this module; the rest of the report is unaffected.
+    let accessibility = accessibility_result(output_dir, &staging, settings, run_metadata);
+    if !matches!(accessibility, Some(Ok(()))) {
+        // Replace whatever a half-written module left behind, so the report never mixes a
+        // partial accessibility result with an unavailable one.
+        accessibility::write_empty(
+            &staging,
+            accessibility
+                .as_ref()
+                .and_then(|result| result.as_ref().err().map(String::as_str)),
+        )?;
     }
     let service = settings.service.as_ref().map(|inputs| {
         service::write(&staging, output_dir, inputs, network, ordered_links)
@@ -1334,6 +1384,7 @@ fn publish_complete(
         &RequiredOutcome::Complete,
         validation.as_ref(),
         comparison.as_ref(),
+        accessibility.as_ref(),
         service.as_ref(),
         demographics.as_ref(),
         &TransitOutcome {
@@ -1359,6 +1410,33 @@ fn publish_complete(
         fs::remove_dir_all(&failure_dir).map_err(io_error)?;
     }
     Ok(published.join("index.html"))
+}
+
+/// Outcome of the accessibility module.
+///
+/// `None` means no accessibility input is configured, which leaves the module unavailable.
+/// A configured module either produces its tables or reports why it cannot; a partial set of
+/// inputs and an unreadable file are both that one failure, and neither touches the required
+/// module.
+fn accessibility_result(
+    output_dir: &Path,
+    staging: &Path,
+    settings: &Analysis,
+    run_metadata: &AnalysisRunMetadata,
+) -> Option<Result<(), String>> {
+    if !settings.accessibility.is_configured() {
+        return None;
+    }
+    Some(settings.accessibility.validate().and_then(|()| {
+        accessibility::write(
+            staging,
+            output_dir,
+            &settings.accessibility,
+            &run_metadata.expected_travel,
+            run_metadata.sample_size(),
+        )
+        .map_err(|error| error.to_string())
+    }))
 }
 
 fn write_class_counts(
@@ -1417,6 +1495,7 @@ fn publish_failure(
         None,
         None,
         None,
+        None,
         &TransitOutcome::default(),
         None,
         None,
@@ -1447,6 +1526,7 @@ fn module_statuses(
     outcome: &RequiredOutcome,
     validation: Option<&Result<(), String>>,
     comparison: Option<&Result<(), String>>,
+    accessibility: Option<&Result<(), String>>,
     service: Option<&Result<(), String>>,
     demographics: Option<&Result<(), String>>,
     transit: &TransitOutcome<'_>,
@@ -1496,6 +1576,14 @@ fn module_statuses(
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No comparison runs are configured".to_owned()),
+                )),
+            },
+            "accessibility" => match accessibility {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No accessibility inputs are configured".to_owned()),
                 )),
             },
             "service_performance" => match service {
@@ -1640,7 +1728,7 @@ fn write_empty_validation(path: &Path) -> Result<(), AnalysisError> {
 /// itself, because two tables can export the same column name for different metrics: coverage.csv
 /// and group_coverage.csv both carry `used_links`, which the catalog distinguishes as
 /// `used_links` and `group_used_links`.
-fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
+fn metrics(include_clipped_delay: bool, include_accessibility: bool) -> Vec<Metric<'static>> {
     vec![
         Metric {
             name: "entry_vehicles",
@@ -2430,7 +2518,162 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
     } else {
         Vec::new()
     })
+    .chain(
+        include_accessibility
+            .then(accessibility_metrics)
+            .into_iter()
+            .flatten(),
+    )
     .collect()
+}
+
+/// Catalog entries of the accessibility module.
+///
+/// Registering the measure here is what makes it available to the comparison and equity
+/// consumers: they read the catalog rather than the module, so a metric that is computed but
+/// not registered would be invisible to them. The aggregation key names the origin, the
+/// category, the mode, the departure period and the threshold, which are exactly the
+/// dimensions a comparison needs to line two runs up on.
+///
+/// The catalog names the column, per the rule in `docs/architecture.md`, so the measure is
+/// registered as `opportunities` — the column that carries it. The declared measure name is in
+/// that table's own `measure` column, which is what tells a consumer which definition a
+/// `opportunities` value was computed under.
+fn accessibility_metrics() -> Vec<Metric<'static>> {
+    vec![
+        Metric {
+            name: "opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "reachable_opportunity_share",
+            unit: "proportion",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "reachable_opportunity_locations",
+            unit: "locations",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "unreachable_opportunity_locations",
+            unit: "locations",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "opportunity_locations_without_cost",
+            unit: "locations",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "total_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        // The equity pair: the same measure summarised once per zone and once per person.
+        Metric {
+            name: "mean_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "population_weighted_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "median_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "min_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "max_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "zones_without_costs",
+            unit: "zones",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "persons_included",
+            unit: "persons",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+    ]
+}
+
+/// Build the accessibility part of the local report, and the script that fills it.
+///
+/// The section is derived from the module's own status rather than from a separate flag, so
+/// the page cannot claim tables the module did not write. Each table is embedded as a bounded
+/// preview and links to the CSV that holds every row.
+fn accessibility_section(
+    path: &Path,
+    statuses: &[ModuleStatus],
+) -> Result<(String, String), AnalysisError> {
+    let Some(status) = statuses
+        .iter()
+        .find(|status| status.module == "accessibility")
+    else {
+        return Ok((String::new(), String::new()));
+    };
+    if status.status != STATUS_COMPLETE {
+        return Ok((
+            format!(
+                "<h2>Accessibility to supplied opportunities</h2><p>Unavailable: {}. See <a href=\"accessibility_diagnostics.csv\">accessibility_diagnostics.csv</a>.</p>",
+                escape_html(status.reason.as_deref().unwrap_or(STATUS_UNAVAILABLE))
+            ),
+            String::new(),
+        ));
+    }
+    let map = fs::read_to_string(path.join("accessibility_map.svg")).map_err(io_error)?;
+    let (zones, zones_truncated) = csv_preview_for_script(
+        &path.join("accessibility_zones.csv"),
+        ACCESSIBILITY_PREVIEW_ROWS,
+    )?;
+    let summary = csv_for_script(&path.join("accessibility_summary.csv"))?;
+    let (persons, persons_truncated) = csv_preview_for_script(
+        &path.join("accessibility_persons.csv"),
+        ACCESSIBILITY_PREVIEW_ROWS,
+    )?;
+    let diagnostics = csv_for_script(&path.join("accessibility_diagnostics.csv"))?;
+    let preview = |truncated: bool, table: &str, rows: usize| {
+        if truncated {
+            format!(
+                "Showing the first {rows} rows of <a href=\"{table}\">{table}</a>, which holds every row."
+            )
+        } else {
+            format!("Every row is listed in <a href=\"{table}\">{table}</a>.")
+        }
+    };
+    let section = format!(
+        "<h2>Accessibility to supplied opportunities</h2><p>The declared measure is <code>{}</code>: the summed weight of every supplied opportunity whose <em>potential</em> travel cost from the origin is at or below the threshold. Costs come from the supplied cost file only. A realized trip duration is not a potential destination, so the observed leg and journey tables above are never used as a substitute. A zone with no supplied cost from it has no value and is exported with a status rather than as zero.</p><h3>Accessibility map</h3><p>One panel per category, mode, departure period and threshold, on a shared projection. A filled circle is an origin zone, shaded from the lowest to the highest value in its own panel; a gray circle is an origin with no supplied cost, which is not a low value. A green ring is a zone holding opportunities of that category, sized by their total weight.</p><div id=\"accessibility-map\">{map}</div><h3>Cumulative opportunities by origin zone</h3><p>{}</p><div id=\"accessibility-zones\"></div><h3>Accessibility totals and equity comparison</h3><p>The mean describes the zones that have a supplied cost; the population-weighted mean describes what a person in this run's population actually faces. The two differ exactly when opportunities are unevenly distributed over people. A zone without any supplied cost is counted in <code>zones_without_costs</code> and left out of the statistics rather than counted as holding zero opportunities. A zone with <em>some</em> missing costs is included, so read <code>zones_without_costs</code> together with the missing-cost counts in the zone table above.</p><div id=\"accessibility-summary\"></div><h3>Per-person accessibility</h3><p>A person is placed in the zone nearest their first non-stage activity. {}</p><div id=\"accessibility-persons\"></div><h3>Accessibility inputs and coverage</h3><div id=\"accessibility-diagnostics\"></div><p><a href=\"accessibility_zones.csv\">origin zones (CSV)</a> · <a href=\"accessibility_summary.csv\">totals and equity comparison (CSV)</a> · <a href=\"accessibility_persons.csv\">per person (CSV)</a> · <a href=\"accessibility_diagnostics.csv\">input coverage (CSV)</a> · <a href=\"accessibility_map.svg\">map (SVG)</a></p>",
+        accessibility::MEASURE,
+        preview(
+            zones_truncated,
+            "accessibility_zones.csv",
+            ACCESSIBILITY_PREVIEW_ROWS
+        ),
+        preview(
+            persons_truncated,
+            "accessibility_persons.csv",
+            ACCESSIBILITY_PREVIEW_ROWS
+        ),
+    );
+    // The declarations are emitted before the other tables render, because the script that
+    // fills these tables runs earlier in the same inline block.
+    let scripts = format!(
+        "const az={zones};const asum={summary};const ap={persons};const ad={diagnostics};csvTable('#accessibility-zones',az);csvTable('#accessibility-summary',asum);csvTable('#accessibility-persons',ap);csvTable('#accessibility-diagnostics',ad);"
+    );
+    Ok((section, scripts))
 }
 
 /// Swap a fully staged directory into place.
@@ -4058,7 +4301,12 @@ fn write_report(
             .map(|row| row.split(',').collect::<Vec<_>>())
             .collect::<Vec<_>>(),
     )?;
-    let metrics = json_for_script(&metrics(manifest.excess_delay_clip_seconds.is_some()))?;
+    // The same two flags the published catalog was written from, so the table the report
+    // renders and the catalog a consumer reads can never disagree.
+    let metrics = json_for_script(&metrics(
+        manifest.excess_delay_clip_seconds.is_some(),
+        manifest.accessibility.is_configured(),
+    ))?;
     let hourly = json_for_script(link_hourly)?;
     // The filter list comes from the same constant the CSV exporters group by, so a
     // dimension cannot be exported without also being offered as a filter.
@@ -4106,6 +4354,7 @@ fn write_report(
     let validation_note = "vehicle_class accepts all or a vehicle type ID. Calibration and holdout plots are kept separate.";
     let validation_plots = "<h3>Calibration count</h3><img src=\"validation_scatter_count_calibration.svg\" alt=\"Calibration count scatterplot\"><h3>Holdout count</h3><img src=\"validation_scatter_count_holdout.svg\" alt=\"Holdout count scatterplot\"><h3>Calibration speed</h3><img src=\"validation_scatter_speed_calibration.svg\" alt=\"Calibration speed scatterplot\"><h3>Holdout speed</h3><img src=\"validation_scatter_speed_holdout.svg\" alt=\"Holdout speed scatterplot\"><h3>Calibration time profile</h3><img src=\"validation_time_profiles_calibration.svg\" alt=\"Calibration observed and simulated counts by period\"><h3>Holdout time profile</h3><img src=\"validation_time_profiles_holdout.svg\" alt=\"Holdout observed and simulated counts by period\"><h3>Calibration residual map</h3><img src=\"validation_residual_map_calibration.svg\" alt=\"Calibration link count residual map\"><h3>Holdout residual map</h3><img src=\"validation_residual_map_holdout.svg\" alt=\"Holdout link count residual map\">";
     let cross_run_section = "<h2>Cross-run comparison</h2><p>Rows contain metrics from the latest completed report in each configured comparison run.</p><div id=\"cross-run\"></div><p><a href=\"cross_run_comparison.csv\">Cross-run comparison CSV</a></p>";
+    let (accessibility_section, accessibility_scripts) = accessibility_section(path, statuses)?;
     let (service_requests, service_requests_truncated) =
         csv_preview_for_script(&path.join("service_requests.csv"), LEGS_PREVIEW_ROWS)?;
     let service_section = format!(
@@ -4199,6 +4448,8 @@ fn write_report(
                 "__CROSS_RUN_RENDER__",
                 &format!("csvTable('#cross-run',{cross_run});"),
             ),
+            ("__ACCESSIBILITY_SECTION__", &accessibility_section),
+            ("__ACCESSIBILITY_SCRIPTS__", &accessibility_scripts),
             ("__DEMOGRAPHIC_NOTE__", &demographic_note),
             ("__GROUP_BURDENS__", &group_burdens),
             ("__PERSON_DEMOGRAPHICS__", &person_demographics),
@@ -4831,6 +5082,7 @@ mod tests {
     fn expected_person(person_id: &str, legs: &[(usize, &str)]) -> PersonExpectedTravel {
         PersonExpectedTravel {
             person_id: person_id.to_owned(),
+            home_coord: None,
             legs: legs
                 .iter()
                 .map(|(leg_index, mode)| ExpectedLeg {

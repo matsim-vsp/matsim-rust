@@ -472,6 +472,122 @@ output:
       - [0.0, 1000.0]
 ```
 
+## Accessibility to supplied opportunities
+
+The `accessibility` module reports how many jobs, schools or services each origin
+can reach within a travel-time threshold. It stays `unavailable` until all three
+of its inputs are configured, and a partial set or an unreadable file marks only
+this module `failed`. Relative paths resolve from the run's output directory.
+
+The measure is declared rather than implied: every exported row carries
+`measure=cumulative_opportunities_within_threshold`. It sums the weight of every
+supplied opportunity whose **potential** travel cost from the origin is at or
+below the threshold, and the threshold is inclusive, so a destination costing
+exactly the threshold counts as reachable.
+
+Realized trips are not potential destinations. A journey table says how long one
+person actually took, which says nothing about how long anyone else *could*
+take, so `legs.csv` and the journey tables are never substituted for the supplied
+costs. Where a cost is missing, the module reports no value rather than deriving
+one from what happened to be travelled.
+
+The three inputs, all CSVs with these exact headers:
+
+```csv
+# opportunities: one row per location
+opportunity_id,category,x,y,count
+job-1,jobs,100.0,200.0,250
+
+# zones: the explicit coordinate/zone correspondence
+zone_id,x,y
+zone-1,0.0,0.0
+
+# travel_costs: potential-destination costs, by mode and departure period
+origin_zone,destination_zone,mode,period_start_seconds,travel_time_seconds
+zone-1,zone-1,car,28800,0
+zone-1,zone-2,car,28800,1800
+```
+
+`x` and `y` are in the same coordinate system and units as network node
+coordinates. Weights and costs must be finite and non-negative, and a duplicate
+location, zone or cost key is a module failure. An opportunity or a person is
+placed in the zone whose centroid is nearest by horizontal distance, with ties
+broken on the zone id, so the assignment does not depend on the input file's row
+order. A person is placed by their first non-stage activity. A blank category is
+reported as `unknown` rather than rejected. Cost rows naming a zone the zone file
+does not list are counted in `accessibility_diagnostics.csv` instead of failing the
+module, because a rectangular skim is routinely wider than the zones under study.
+
+`accessibility_zones.csv` holds one row per origin zone, category, mode, departure
+period and threshold. `status` distinguishes five outcomes, because folding them
+together would misreport the data:
+
+| `status` | meaning |
+|---|---|
+| `available` | every location of the category has a supplied cost from this origin |
+| `available_missing_costs` | some locations have no cost; they are excluded and counted in `opportunity_locations_without_cost` |
+| `unavailable:no_origin_costs` | no cost of this mode and period leaves the origin |
+| `unavailable:no_travel_costs` | the cost file supplies no table for this mode and departure period |
+| `unavailable:non_finite_measure` | the category's weights summed to a non-finite number |
+
+A person whose plan has a home activity that cannot be placed gets
+`unavailable:no_home_zone` rows rather than disappearing from the population. A
+person with no selected plan has no recorded expectations at all and so is not in
+`accessibility_persons.csv`; the run's `expected_travel` list is what both the
+per-person and per-zone tables are built from. Every unavailable status leaves the
+measure columns blank rather than reporting zero, so a missing prerequisite is
+never read as poor accessibility.
+
+`accessibility_summary.csv` reports, per category, mode, period and threshold, the
+mean, median, minimum and maximum over the zones that have a supplied cost, plus a
+`population_weighted_opportunities` column. The two differ exactly when
+opportunities are unevenly distributed over people, which is the equity signal.
+`persons_included` is the simulated person count the weighting covers, and
+`sample_size` is the simulated fraction of the population they are, so a reader can
+tell a sampled run from a full one. A zone with no supplied cost at all is counted
+in `zones_without_costs` and excluded from the statistics, because treating it as a
+zone holding zero opportunities would drag every mean down. A zone in
+`available_missing_costs` *is* included, so `zones_without_costs` counts only fully
+unavailable zones; read the missing-cost share from the zone table.
+
+`accessibility_persons.csv` repeats the value of each person's own origin zone per
+cell, which is what an equity analysis reads. Following the catalog rule in
+`docs/architecture.md`, every accessibility name in `metric_catalog.json` is a
+column of one of the tables above, so a consumer can look it up where it is
+exported. The measure itself is catalogued as `opportunities`, and the declared
+measure name is in each row's own `measure` column, which is what tells a consumer
+which definition a value was computed under. The `aggregation_key` names the
+origin, category, mode, period and threshold, which is how a comparison tool lines
+two runs up.
+
+`accessibility_map.svg` draws one small panel per reported cell on a shared
+projection, up to 24 panels; further combinations stay in the CSVs and
+`map_panels_omitted` counts them. A filled circle is an origin zone shaded across a
+single-hue ramp normalized to its own panel, a gray circle is an origin with no
+supplied cost, and a green ring is a zone holding opportunities of that category,
+sized by their total weight. The per-zone and per-person tables are embedded in
+`index.html` as bounded previews of 500 rows, because a per-person table over several
+categories, modes, periods and thresholds outgrows a page; the summary and
+diagnostics tables are embedded in full because each holds one row per reported
+combination rather than per person. The CSVs hold every row either way.
+
+For example:
+
+```yaml
+output:
+  analysis:
+    enabled: true
+    accessibility:
+      opportunities: accessibility/opportunities.csv
+      zones: accessibility/zones.csv
+      travel_costs: accessibility/travel_costs.csv
+      # Defaults to a 45-minute cutoff when omitted.
+      thresholds_seconds: [1800, 3600]
+```
+
+Every setting is also reachable from the command line, for example
+`--set output.analysis.accessibility.thresholds_seconds=1800,3600`.
+
 ## Demographic outcomes and equity
 
 Set `output.analysis.person_group_attributes` to the person attributes the report groups people by, such as `income` or `age`. Missing or blank attributes are grouped as `unknown`. Optional weight and cost attributes are recorded with the run; invalid or missing weights default to one, while unavailable costs remain blank.
