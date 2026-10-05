@@ -80,7 +80,7 @@ fn write_comparison(
 ) -> Result<(), AnalysisError> {
     let mut file =
         BufWriter::new(File::create(path.join("metric_differences.csv")).map_err(io_error)?);
-    writeln!(file, "alternative,table,metric,unit,aggregation_key,key,baseline_value,alternative_value,absolute_difference,relative_difference_percent,relative_baseline_denominator,status").map_err(io_error)?;
+    writeln!(file, "alternative,table,metric,unit,aggregation_key,key,baseline_value,alternative_value,absolute_difference,relative_difference_percent,relative_baseline_denominator,baseline_aggregation_denominator,alternative_aggregation_denominator,status").map_err(io_error)?;
     let mut summary = Vec::new();
     for alternative in alternatives {
         validate_compatible(baseline, alternative)?;
@@ -247,8 +247,14 @@ fn write_comparison(
                             continue;
                         }
                     }
-                    let before = left.get(&key).copied();
-                    let after = right.get(&key).copied();
+                    let (mut before, mut after) =
+                        (left.get(&key).copied(), right.get(&key).copied());
+                    if spec.file == "leg_hourly.csv"
+                        && matches!(catalog_name, "leg_departures" | "departing_persons")
+                    {
+                        before = Some(before.unwrap_or_default());
+                        after = Some(after.unwrap_or_default());
+                    }
                     // Completion filters exclude no-travel, stuck and incomplete people from
                     // person-level duration metrics; those outcomes remain visible in status counts.
                     let difference = before.zip(after).map(|(before, after)| after - before);
@@ -263,9 +269,41 @@ fn write_comparison(
                         (None, Some(_)) => "missing_baseline_observation",
                         (None, None) => continue,
                     };
+                    let (baseline_denominator, alternative_denominator) =
+                        if spec.file == "leg_hourly.csv" && catalog_name == "leg_duration_mean" {
+                            (
+                                baseline_leg_values
+                                    .get("leg_departures")
+                                    .and_then(|rows| rows.get(&key))
+                                    .copied(),
+                                alternative_leg_values
+                                    .get("leg_departures")
+                                    .and_then(|rows| rows.get(&key))
+                                    .copied(),
+                            )
+                        } else if spec.file == "daily_summary.csv" {
+                            let cohort = serde_json::from_str::<Vec<String>>(&key)
+                                .ok()
+                                .and_then(|parts| parts.first().cloned());
+                            let people = match cohort.as_deref() {
+                                Some("travelers") => common_travelers.len(),
+                                _ => common_full_population.len(),
+                            } as f64;
+                            (Some(people), Some(people))
+                        } else if let Some(column) = denominator_column(catalog_name) {
+                            let before_rows = read_rows(baseline, spec.file, &key_columns, column)?;
+                            let after_rows =
+                                read_rows(alternative, spec.file, &key_columns, column)?;
+                            (
+                                before_rows.get(&key).copied(),
+                                after_rows.get(&key).copied(),
+                            )
+                        } else {
+                            (None, None)
+                        };
                     writeln!(
                         file,
-                        "{},{},{},{},{},{},{},{},{},{},{},{}",
+                        "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                         csv(&alternative.path.display().to_string()),
                         spec.file,
                         catalog_name,
@@ -277,6 +315,8 @@ fn write_comparison(
                         number(difference),
                         number(relative),
                         number(before),
+                        number(baseline_denominator),
+                        number(alternative_denominator),
                         status
                     )
                     .map_err(io_error)?;
@@ -308,7 +348,7 @@ fn write_comparison(
             }
         ));
     }
-    html.push_str("</ul><h2>Metric differences</h2><table><thead><tr><th>Alternative</th><th>Table</th><th>Metric</th><th>Unit</th><th>Aggregation key</th><th>Key</th><th>Baseline</th><th>Alternative</th><th>Difference</th><th>Relative (%)</th><th>Relative baseline denominator</th><th>Status</th></tr></thead><tbody>");
+    html.push_str("</ul><h2>Metric differences</h2><table><thead><tr><th>Alternative</th><th>Table</th><th>Metric</th><th>Unit</th><th>Aggregation key</th><th>Key</th><th>Baseline</th><th>Alternative</th><th>Difference</th><th>Relative (%)</th><th>Relative baseline denominator</th><th>Baseline aggregation denominator</th><th>Alternative aggregation denominator</th><th>Status</th></tr></thead><tbody>");
     let mut rows = csv::Reader::from_path(path.join("metric_differences.csv")).map_err(io_error)?;
     for row in rows.records() {
         let row = row.map_err(io_error)?;
@@ -493,6 +533,9 @@ fn write_metric_compatibility(
         BufWriter::new(File::create(path.join("metric_compatibility.csv")).map_err(io_error)?);
     writeln!(writer, "alternative,metric,unit,baseline_aggregation_key,alternative_unit,alternative_aggregation_key,status").map_err(io_error)?;
     for alternative in alternatives {
+        let matched_links = matching_link_ids(baseline, alternative)?;
+        let same_network = matched_links.len() == baseline.manifest.eligible_links
+            && matched_links.len() == alternative.manifest.eligible_links;
         let names = baseline
             .catalog
             .keys()
@@ -513,48 +556,65 @@ fn write_metric_compatibility(
                     | "daily_mean_completed_travel_burden"
             );
             let leg_status_metric = name == "leg_completion_status";
-            let registered = table_specs().iter().any(|spec| {
+            let mapped = table_specs().iter().find_map(|spec| {
                 spec.metrics
                     .iter()
-                    .any(|(catalog_name, _)| *catalog_name == name)
-            }) || diagnostic_metric
-                || common_cohort_metric
-                || leg_status_metric;
-            let output_available = table_specs().iter().any(|spec| {
-                spec.metrics
-                    .iter()
-                    .any(|(catalog_name, _)| *catalog_name == name)
-                    && baseline.path.join("analysis").join(spec.file).is_file()
-                    && alternative.path.join("analysis").join(spec.file).is_file()
+                    .find(|(catalog_name, _)| *catalog_name == name)
+                    .map(|(_, column)| (spec.file, *column))
+            });
+            let registered =
+                mapped.is_some() || diagnostic_metric || common_cohort_metric || leg_status_metric;
+            let output_file = mapped.map(|(file, _)| file).or_else(|| {
+                if leg_status_metric {
+                    Some("legs.csv")
+                } else if diagnostic_metric {
+                    Some("link_speed_diagnostics.csv")
+                } else if common_cohort_metric && name == "daily_mean_completed_travel_burden" {
+                    Some("daily_summary.csv")
+                } else if common_cohort_metric {
+                    Some("legs.csv")
+                } else {
+                    None
+                }
+            });
+            let output_available = output_file.is_some_and(|file| {
+                baseline.path.join("analysis").join(file).is_file()
+                    && alternative.path.join("analysis").join(file).is_file()
             }) || leg_status_metric
                 && baseline.path.join("analysis/legs.csv").is_file()
-                && alternative.path.join("analysis/legs.csv").is_file()
-                || common_cohort_metric
-                    && baseline
-                        .path
-                        .join(if name == "daily_mean_completed_travel_burden" {
-                            "analysis/daily_summary.csv"
-                        } else {
-                            "analysis/legs.csv"
-                        })
-                        .is_file()
-                    && alternative
-                        .path
-                        .join(if name == "daily_mean_completed_travel_burden" {
-                            "analysis/daily_summary.csv"
-                        } else {
-                            "analysis/legs.csv"
-                        })
-                        .is_file()
-                || diagnostic_metric
-                    && baseline
-                        .path
-                        .join("analysis/link_speed_diagnostics.csv")
-                        .is_file()
-                    && alternative
-                        .path
-                        .join("analysis/link_speed_diagnostics.csv")
-                        .is_file();
+                && alternative.path.join("analysis/legs.csv").is_file();
+            let headers = output_file
+                .map(|file| first_headers(baseline, alternative, file))
+                .transpose()?
+                .flatten();
+            let missing_columns = if let (Some((_, column)), Some(metric), Some(headers)) =
+                (mapped, before, headers.as_ref())
+            {
+                let keys = metric.aggregation_key.split(',').map(|key| {
+                    if key == "interval_start_seconds" && !headers.contains(key) {
+                        "hour_start_seconds"
+                    } else {
+                        key
+                    }
+                });
+                !headers.contains(column) || keys.into_iter().any(|key| !headers.contains(key))
+            } else if diagnostic_metric {
+                headers
+                    .as_ref()
+                    .is_none_or(|headers| !headers.contains("metric") || !headers.contains("count"))
+            } else {
+                false
+            };
+            let network_aggregate = mapped.is_some_and(|(file, _)| {
+                matches!(
+                    file,
+                    "coverage.csv"
+                        | "group_coverage.csv"
+                        | "link_speed_summary.csv"
+                        | "link_speed_histogram.csv"
+                        | "vc_histogram.csv"
+                )
+            });
             let status = match (before, after) {
                 (None, Some(_)) => "added_in_alternative",
                 (Some(_), None) => "missing_in_alternative",
@@ -565,6 +625,8 @@ fn write_metric_compatibility(
                 }
                 (Some(_), Some(_)) if !registered => "not_registered_for_comparison",
                 (Some(_), Some(_)) if !output_available => "unavailable_output",
+                (Some(_), Some(_)) if !same_network && network_aggregate => "incompatible_network",
+                (Some(_), Some(_)) if missing_columns => "missing_column",
                 (Some(_), Some(_)) => "compatible",
                 (None, None) => unreachable!(),
             };
@@ -997,6 +1059,18 @@ fn table_specs() -> &'static [TableSpec] {
 fn number(value: Option<f64>) -> String {
     value.map_or_else(String::new, |number| format!("{number:.6}"))
 }
+fn denominator_column(metric: &str) -> Option<&'static str> {
+    match metric {
+        "used_percent" | "group_used_link_percent" => Some("eligible_links"),
+        "entry_vc" | "exit_vc" => Some("effective_capacity_pce"),
+        "link_representative_speed"
+        | "link_vehicle_speed_mean"
+        | "link_vehicle_speed_population_std" => Some("observations"),
+        "hourly_mean_link_speed" | "hourly_link_speed_population_std" => Some("links_with_speed"),
+        "person_completed_leg_duration_mean" => Some("completed_legs"),
+        _ => None,
+    }
+}
 fn io_error(error: impl std::fmt::Display) -> AnalysisError {
     AnalysisError::new(error.to_string())
 }
@@ -1009,8 +1083,9 @@ mod tests {
         let output = root.join(name);
         let analysis = output.join("analysis");
         fs::create_dir_all(&analysis).unwrap();
-        fs::write(analysis.join("manifest.json"), format!(r#"{{"status":"complete","failure":null,"iteration":3,"interval_seconds":3600,"simulation_end_time":3600,"partitions":[0],"input_format":"xml","eligible_links":2,"random_seed":1,"sample_size":{sample},"network_input":null,"population_input":null,"software_version":"test"}}"#)).unwrap();
-        fs::write(analysis.join("metric_catalog.json"), r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"entry_pce_scaled","unit":"pce","aggregation_key":"link_id,interval_start_seconds"},{"name":"entry_vc","unit":"ratio","aggregation_key":"link_id,interval_start_seconds"}]"#).unwrap();
+        let eligible_links = links.lines().filter(|line| !line.is_empty()).count();
+        fs::write(analysis.join("manifest.json"), format!(r#"{{"status":"complete","failure":null,"iteration":3,"interval_seconds":3600,"simulation_end_time":3600,"partitions":[0],"input_format":"xml","eligible_links":{eligible_links},"random_seed":1,"sample_size":{sample},"network_input":null,"population_input":null,"software_version":"test"}}"#)).unwrap();
+        fs::write(analysis.join("metric_catalog.json"), r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"entry_pce_scaled","unit":"pce","aggregation_key":"link_id,interval_start_seconds"},{"name":"entry_vc","unit":"ratio","aggregation_key":"link_id,interval_start_seconds"},{"name":"used_percent","unit":"percent","aggregation_key":"interval_start_seconds"}]"#).unwrap();
         fs::write(
             analysis.join("link_hourly.csv"),
             format!("link_id,hour_start_seconds,entry_vehicles,exit_vehicles\n{links}"),
@@ -1032,6 +1107,22 @@ mod tests {
             }
         }
         fs::write(analysis.join("link_capacity.csv"), capacity).unwrap();
+        let used = links
+            .lines()
+            .filter(|line| {
+                line.split(',')
+                    .nth(2)
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or_default()
+                    > 0
+            })
+            .count();
+        let used_percent = if eligible_links == 0 {
+            0.0
+        } else {
+            used as f64 * 100.0 / eligible_links as f64
+        };
+        fs::write(analysis.join("coverage.csv"), format!("hour_start_seconds,eligible_links,used_links,unused_links,used_percent\n0,{eligible_links},{used},{},{used_percent:.6}\n", eligible_links - used)).unwrap();
         fs::write(
             analysis.join("person_daily.csv"),
             "person_id,expected_legs,departed_legs,completed_legs,completed_duration_sum_seconds,completed_duration_mean_seconds,completion_status\n",
@@ -1072,11 +1163,23 @@ mod tests {
         assert!(csv.contains("entry_vehicles"));
         assert!(csv.contains("entry_pce_scaled"));
         assert!(csv.contains("entry_vc"));
-        assert!(csv.contains("10.000000,15.000000,5.000000,50.000000,10.000000,comparable"));
-        assert!(csv.contains("0.000000,3.000000,3.000000,,0.000000,zero_baseline"));
+        assert!(csv.contains("10.000000,15.000000,5.000000,50.000000,10.000000,,,comparable"));
+        assert!(csv.contains("0.000000,3.000000,3.000000,,0.000000,,,zero_baseline"));
         assert!(
             !csv.contains("99.000000"),
             "non-corresponding network links must be excluded"
+        );
+        let html = fs::read_to_string(&report).unwrap();
+        assert!(html.contains("changed network; aggregate coverage metrics omitted"));
+        assert!(
+            html.contains("10.000000"),
+            "the local report renders numeric differences"
+        );
+        let compatibility =
+            fs::read_to_string(report.parent().unwrap().join("metric_compatibility.csv")).unwrap();
+        assert!(
+            compatibility.contains("used_percent")
+                && compatibility.contains("incompatible_network")
         );
     }
 
@@ -1141,7 +1244,8 @@ mod tests {
             fs::write(analysis.join("person_daily.csv"), format!("person_id,expected_legs,departed_legs,completed_legs,completed_duration_sum_seconds,completed_duration_mean_seconds,completion_status\nalice,1,1,1,{alice},{alice},complete\nbob,1,1,0,50,,{bob}\n")).unwrap();
             let duration = if alice == 100 { 100 } else { 120 };
             let bob_status = if bob == "stuck" { "stuck" } else { "completed" };
-            fs::write(analysis.join("legs.csv"), format!("person_id,leg_index,mode,departure_seconds,departure_hour_seconds,arrival_seconds,duration_seconds,status\nalice,0,car,0,0,{duration},{duration},completed\nbob,0,car,0,0,,,{bob_status}\n")).unwrap();
+            let hour = if alice == 100 { 0 } else { 3600 };
+            fs::write(analysis.join("legs.csv"), format!("person_id,leg_index,mode,departure_seconds,departure_hour_seconds,arrival_seconds,duration_seconds,status\nalice,0,car,{hour},{hour},{},{duration},completed\nbob,0,car,0,0,,,{bob_status}\n", hour + duration)).unwrap();
             let diagnostics = if alice == 100 {
                 "metric,count\npartial_link_traversals,4\nunmatched_leave_events,2\n"
             } else {
@@ -1157,13 +1261,21 @@ mod tests {
         assert!(differences.contains("leg_departures"));
         assert!(differences.contains("departing_persons"));
         assert!(differences.contains("leg_duration_mean"));
+        assert!(
+            differences.contains("1.000000,0.000000,-1.000000,-100.000000,1.000000,,,comparable")
+        );
+        assert!(differences.contains("0.000000,1.000000,1.000000,,0.000000,,,zero_baseline"));
         assert!(differences.contains("daily_mean_completed_travel_burden"));
         assert!(differences.contains("partial_link_traversals"));
-        assert!(differences.contains("4.000000,1.000000,-3.000000,-75.000000,4.000000,comparable"));
-        assert!(differences.contains("1.000000,2.000000,1.000000,100.000000,1.000000,comparable"));
         assert!(
-            differences.contains("100.000000,120.000000,20.000000,20.000000,100.000000,comparable")
+            differences.contains("4.000000,1.000000,-3.000000,-75.000000,4.000000,,,comparable")
         );
+        assert!(
+            differences.contains("1.000000,2.000000,1.000000,100.000000,1.000000,,,comparable")
+        );
+        assert!(differences.contains(
+            "100.000000,120.000000,20.000000,20.000000,100.000000,1.000000,1.000000,comparable"
+        ));
         let statuses = fs::read_to_string(
             report
                 .parent()

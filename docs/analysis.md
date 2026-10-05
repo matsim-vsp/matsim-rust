@@ -82,8 +82,9 @@ let report = compare_completed_runs(
 Each input must contain a complete `analysis/manifest.json`, metric catalog and latest-iteration
 tables. The comparison is written to `baseline/analysis/comparison/` and leaves each input report
 unchanged. `metric_differences.csv` exports both values, alternative-minus-baseline difference,
-relative difference, unit, aggregation key and the baseline value used as the relative denominator.
-Relative differences are blank when the baseline is zero. `metric_compatibility.csv` identifies
+relative difference, unit, aggregation key, the baseline value used as the relative denominator,
+and metric-specific aggregation denominators where the source provides them. Relative differences
+are blank when the baseline is zero. `metric_compatibility.csv` identifies
 missing metrics, incompatible definitions and unavailable or unregistered outputs. Link rows are
 matched by external link ID; links missing from either network are excluded and the number of
 corresponding links appears in the HTML report. Aggregate network and group metrics are omitted
