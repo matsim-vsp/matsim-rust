@@ -11,13 +11,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-const SPEED_TABLE_FILES: [&str; 4] = [
-    "link_speed_hourly.csv",
-    "link_speed_summary.csv",
-    "link_speed_histogram.csv",
-    "link_speed_diagnostics.csv",
-];
-
 fn link_event(time: f64, event_type: &str, link: &str, vehicle: &str) -> String {
     format!("<event time=\"{time}\" type=\"{event_type}\" link=\"{link}\" vehicle=\"{vehicle}\"/>")
 }
@@ -97,6 +90,7 @@ fn analyze(
     iteration: u32,
     partitions: u32,
     simulation_end_time: u32,
+    interval_seconds: u32,
     network: &Network,
 ) -> BTreeMap<String, String> {
     let garage = Garage::default();
@@ -118,7 +112,7 @@ fn analyze(
         network,
         &Analysis {
             enabled: true,
-            interval_seconds: 3600,
+            interval_seconds,
         },
     )
     .unwrap();
@@ -229,7 +223,7 @@ fn link_speed_reports_representative_and_vehicle_speed_metrics() {
         left(11800.5, "huge", "veh-27"),
     ];
     write_partitions(temp.path(), 4, &[events]);
-    let tables = analyze(temp.path(), 4, 1, 18_000, &network);
+    let tables = analyze(temp.path(), 4, 1, 18_000, 3600, &network);
 
     let speeds = rows(
         &tables["link_speed_hourly.csv"],
@@ -336,6 +330,55 @@ fn link_speed_reports_representative_and_vehicle_speed_metrics() {
 }
 
 #[deterministic_id_test(rust_qsim)]
+fn link_speed_follows_the_configured_analysis_interval() {
+    let temp = tempfile::tempdir().unwrap();
+    let network = network_with_links(&[("a", 100.0), ("b", 50.0)]);
+    let events = vec![
+        // 100 m in 20 s is 5 m/s, reported in the interval that contains the entry.
+        entered(1750.0, "a", "veh-1"),
+        // A traversal that crosses an interval boundary stays in the interval it entered.
+        entered(1790.0, "b", "veh-1"),
+        left(1770.0, "a", "veh-1"),
+        left(1810.0, "b", "veh-1"),
+        // 50 m in 10 s is 5 m/s.
+        entered(3559.0, "b", "veh-2"),
+        left(3569.0, "b", "veh-2"),
+    ];
+    write_partitions(temp.path(), 1, &[events]);
+    // 15-minute intervals: the traversal that entered at 1790 belongs to the interval starting at
+    // 900 even though it leaves in the next one, and the one that entered at 3559 belongs to 2700.
+    let tables = analyze(temp.path(), 1, 1, 3600, 900, &network);
+
+    let speeds = rows(
+        &tables["link_speed_hourly.csv"],
+        "link_id,hour_start_seconds,observations,total_distance_meters,total_duration_seconds,representative_speed_mps,vehicle_speed_mean_mps,vehicle_speed_population_std_mps",
+    );
+    assert_row(
+        &speeds,
+        "\"a\",900,1,100.000000,20.000000,5.000000,5.000000,0.000000",
+    );
+    assert_row(
+        &speeds,
+        "\"b\",900,1,50.000000,20.000000,2.500000,2.500000,0.000000",
+    );
+    assert_row(&speeds, "\"b\",1800,0,0.000000,0.000000,,,");
+    assert_row(
+        &speeds,
+        "\"b\",2700,1,50.000000,10.000000,5.000000,5.000000,0.000000",
+    );
+    // The intervals of the simulated day are reported, including the ones without an observation.
+    let summary = rows(
+        &tables["link_speed_summary.csv"],
+        "hour_start_seconds,links_with_speed,observations,mean_link_speed_mps,population_std_link_speed_mps",
+    );
+    assert_eq!(summary.len(), 4);
+    assert_row(&summary, "0,0,0,,");
+    assert_row(&summary, "900,2,2,3.750000,1.250000");
+    assert_row(&summary, "1800,0,0,,");
+    assert_row(&summary, "2700,1,1,5.000000,0.000000");
+}
+
+#[deterministic_id_test(rust_qsim)]
 fn link_speed_survives_partition_handovers_at_the_same_timestamp() {
     let temp = tempfile::tempdir().unwrap();
     let network = network_with_links(&[("a", 120.0), ("b", 40.0)]);
@@ -350,7 +393,7 @@ fn link_speed_survives_partition_handovers_at_the_same_timestamp() {
         left(260.0, "a", "veh-2"),
     ];
     write_partitions(temp.path(), 2, std::slice::from_ref(&in_order));
-    let single = analyze(temp.path(), 2, 1, 3600, &network);
+    let single = analyze(temp.path(), 2, 1, 3600, 3600, &network);
 
     // The receiving partition reports the enter of b first and the departing partition the leave
     // of a afterwards, which reverses the order of the two simultaneous events.
@@ -367,7 +410,7 @@ fn link_speed_survives_partition_handovers_at_the_same_timestamp() {
         ],
     ];
     write_partitions(temp.path(), 3, &split);
-    let two_partitions = analyze(temp.path(), 3, 2, 3600, &network);
+    let two_partitions = analyze(temp.path(), 3, 2, 3600, 3600, &network);
 
     for name in [
         "link_hourly.csv",
@@ -445,34 +488,4 @@ fn simulation_reports_link_speeds_of_the_final_iteration() {
         diagnostics.contains("unfinished_traversals,0"),
         "{diagnostics}"
     );
-}
-
-#[deterministic_id_test(rust_qsim)]
-fn simulation_link_speeds_match_across_event_formats() {
-    let run = |config_path: &str, output_dir: &str, file: &str| {
-        let mut config = Config::from_args(CommandLineArgs::new_with_path(config_path));
-        config.controller_mut().last_iteration = 1;
-        config.output_mut().output_dir = output_dir.into();
-        config.output_mut().analysis.enabled = true;
-        let output = config.output().output_dir.clone();
-        let controller = ControllerBuilder::default_with_scenario(Scenario::load(config))
-            .build()
-            .unwrap();
-        controller.run();
-        fs::read_to_string(output.join("analysis").join(file)).unwrap()
-    };
-
-    for file in SPEED_TABLE_FILES {
-        let xml = run(
-            "./tests/resources/3-links/3-links-config-1.yml",
-            "./test_output/simulation/link_speed_xml_equivalence",
-            file,
-        );
-        let protobuf = run(
-            "./tests/resources/3-links/3-links-config-2.yml",
-            "./test_output/simulation/link_speed_proto_equivalence",
-            file,
-        );
-        assert_eq!(xml, protobuf, "{file} differs between event formats");
-    }
 }

@@ -7,11 +7,12 @@ use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
 };
+use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_events::{ProtoEventsReader, event_from_proto};
 use crate::simulation::io::xml::events::XmlEventsReader;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
-use crate::simulation::scenario::vehicles::Garage;
+use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
 use link_speed::LinkSpeedCollector;
 use serde::Serialize;
@@ -202,7 +203,9 @@ pub fn analyze_final_iteration(
     let mut counts = LinkVolumesByHour::new();
     let mut speeds = LinkSpeedCollector::new(settings.interval_seconds, &ordered_links);
     loop {
-        // Rank order breaks simultaneous timestamps consistently; these link counts commute.
+        // Rank order breaks simultaneous timestamps consistently, so the replay order is stable.
+        // The link counts commute, and the speed collector matches every enter with the leave of
+        // the same link, so both stay independent of that order.
         let Some((rank, time)) = heads
             .iter()
             .enumerate()
@@ -238,7 +241,7 @@ pub fn analyze_final_iteration(
         fs::remove_dir_all(&staging).map_err(io_error)?;
     }
     fs::create_dir_all(&staging).map_err(io_error)?;
-    write_tables(&staging, &ordered_links, &counts, &hours)?;
+    write_volume_tables(&staging, &ordered_links, &counts, &hours)?;
     speeds.write_tables(&staging, &hours)?;
     let manifest = Manifest {
         status: "complete",
@@ -293,9 +296,8 @@ pub fn analyze_final_iteration(
         .map_err(|e| AnalysisError(e.to_string()))?,
     )
     .map_err(io_error)?;
-    // Units and aggregation keys describe the exported tables of this module and of
-    // `analysis::link_speed`, whose CSV headers define the same metric names.
-    let metrics = [
+    // Every exported measure with its unit and the columns it is grouped by.
+    let metrics: Vec<Metric> = [
         Metric {
             name: "link_entry_vehicles",
             unit: "vehicles",
@@ -322,8 +324,18 @@ pub fn analyze_final_iteration(
             aggregation_key: "hour_start_seconds",
         },
         Metric {
-            name: "link_speed_observations",
+            name: "link_speed_traversals",
             unit: "traversals",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_total_distance",
+            unit: "m",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_total_duration",
+            unit: "s",
             aggregation_key: "link_id,hour_start_seconds",
         },
         Metric {
@@ -340,6 +352,16 @@ pub fn analyze_final_iteration(
             name: "link_vehicle_speed_population_std",
             unit: "m/s",
             aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "links_with_speed",
+            unit: "links",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "hourly_link_speed_traversals",
+            unit: "traversals",
+            aggregation_key: "hour_start_seconds",
         },
         Metric {
             name: "hourly_mean_link_speed",
@@ -361,12 +383,19 @@ pub fn analyze_final_iteration(
             unit: "traversals",
             aggregation_key: "hour_start_seconds,bin_index",
         },
-        Metric {
-            name: "speed_traversal_records",
-            unit: "records",
-            aggregation_key: "report",
-        },
-    ];
+    ]
+    .into_iter()
+    // The traversal records are counted by the module that writes the table, so it owns their names.
+    .chain(
+        link_speed::SpeedDiagnostics::METRICS
+            .iter()
+            .map(|name| Metric {
+                name,
+                unit: "records",
+                aggregation_key: "report",
+            }),
+    )
+    .collect();
     fs::write(
         staging.join("metric_catalog.json"),
         serde_json::to_vec_pretty(&metrics).map_err(|e| AnalysisError(e.to_string()))?,
@@ -470,6 +499,55 @@ impl PartitionReader {
     }
 }
 
+/// One recorded visit of a link. QSim reports the first and the last link of a network leg
+/// through the departure and the arrival instead of a plain link enter and leave, and both of
+/// those events carry the position along the link at which the visit starts or ends.
+enum LinkVisit<'a> {
+    Enter {
+        vehicle: &'a Id<InternalVehicle>,
+        link: &'a Id<Link>,
+        entry_position: f64,
+    },
+    Leave {
+        vehicle: &'a Id<InternalVehicle>,
+        link: &'a Id<Link>,
+        exit_position: f64,
+    },
+}
+
+/// Classifies the events that describe a link visit, so that link volumes and link speeds agree
+/// on which events are a link entry and which one is a link exit.
+fn link_visit(event: &dyn EventTrait) -> Option<LinkVisit<'_>> {
+    let event = event.as_any();
+    if let Some(event) = event.downcast_ref::<LinkEnterEvent>() {
+        Some(LinkVisit::Enter {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            entry_position: 0.0,
+        })
+    } else if let Some(event) = event.downcast_ref::<VehicleEntersTrafficEvent>() {
+        Some(LinkVisit::Enter {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            entry_position: event.relative_position,
+        })
+    } else if let Some(event) = event.downcast_ref::<LinkLeaveEvent>() {
+        Some(LinkVisit::Leave {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            exit_position: 1.0,
+        })
+    } else if let Some(event) = event.downcast_ref::<VehicleLeavesTrafficEvent>() {
+        Some(LinkVisit::Leave {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            exit_position: event.relative_position,
+        })
+    } else {
+        None
+    }
+}
+
 fn accumulate(
     event: &dyn EventTrait,
     time: SimTime,
@@ -477,16 +555,12 @@ fn accumulate(
     ids: &BTreeSet<String>,
     counts: &mut LinkVolumesByHour,
 ) {
-    let (link, entry) = if let Some(event) = event.as_any().downcast_ref::<LinkEnterEvent>() {
-        (&event.link, true)
-    } else if let Some(event) = event.as_any().downcast_ref::<LinkLeaveEvent>() {
-        (&event.link, false)
-    } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
-        (&event.link, true)
-    } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
-        (&event.link, false)
-    } else {
+    let Some(visit) = link_visit(event) else {
         return;
+    };
+    let (link, entry) = match &visit {
+        LinkVisit::Enter { link, .. } => (link, true),
+        LinkVisit::Leave { link, .. } => (link, false),
     };
     let id = link.external();
     if !ids.contains(id) {
@@ -512,13 +586,13 @@ fn hour_start_seconds(nanos: u64, interval: u32) -> u64 {
     nanos / 1_000_000_000 / u64::from(interval) * u64::from(interval)
 }
 
-fn write_tables(
+fn write_volume_tables(
     path: &Path,
     links: &[&Link],
     counts: &LinkVolumesByHour,
     hours: &[u64],
 ) -> Result<(), AnalysisError> {
-    let mut hourly = BufWriter::new(File::create(path.join("link_hourly.csv")).map_err(io_error)?);
+    let mut hourly = table_writer(path, "link_hourly.csv")?;
     writeln!(
         hourly,
         "link_id,hour_start_seconds,entry_vehicles,exit_vehicles"
@@ -544,7 +618,7 @@ fn write_tables(
             .map_err(io_error)?;
         }
     }
-    let mut coverage = BufWriter::new(File::create(path.join("coverage.csv")).map_err(io_error)?);
+    let mut coverage = table_writer(path, "coverage.csv")?;
     writeln!(
         coverage,
         "hour_start_seconds,eligible_links,used_links,unused_links,used_percent"
@@ -674,33 +748,46 @@ fn embed_tables<'a>(
         .collect()
 }
 
-fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), AnalysisError> {
-    let mut embedded = embed_tables(path, VOLUME_TABLES)?;
-    embedded.extend(embed_tables(path, SPEED_TABLES)?);
-    let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
-    let declarations = embedded
+/// The headings and mount points of all tables of one report section.
+fn sections(tables: &[EmbeddedTable<'_>]) -> String {
+    tables
         .iter()
+        .map(EmbeddedTable::section)
+        .collect::<String>()
+}
+
+fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), AnalysisError> {
+    let volumes = embed_tables(path, VOLUME_TABLES)?;
+    let speeds = embed_tables(path, SPEED_TABLES)?;
+    let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
+    // The module status is the one table that is not exported as CSV, so it is embedded as its
+    // JSON records instead of as lines of a table.
+    let declarations = volumes
+        .iter()
+        .chain(&speeds)
         .map(EmbeddedTable::declaration)
         .chain(std::iter::once(format!("const m={modules};")))
         .collect::<Vec<_>>()
         .join("");
-    let volume_sections = embedded[..VOLUME_TABLES.len()]
+    let volume_sections = sections(&volumes);
+    let speed_sections = sections(&speeds);
+    let renders = volumes
         .iter()
-        .map(EmbeddedTable::section)
-        .collect::<String>();
-    let speed_sections = embedded[VOLUME_TABLES.len()..]
-        .iter()
-        .map(EmbeddedTable::section)
-        .collect::<String>();
-    let renders = embedded
-        .iter()
+        .chain(&speeds)
         .map(EmbeddedTable::render)
         .collect::<Vec<_>>()
         .join("");
     let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p>{volume_sections}<h2>Hourly link speeds</h2><p>Speeds are reconstructed from full-link traversals and assigned to the hour in which the vehicle entered the link. The representative speed divides the total travelled distance by the total travel time; the arithmetic vehicle-speed mean and population standard deviation describe the single traversals. A link without a full-link traversal has no speed. Traversal records that cannot produce a full-link speed, such as departures from the middle of a link or traversals that never finished, are counted separately.</p>{speed_sections}<h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"link_speed_hourly.csv\">link speeds (CSV)</a>, <a href=\"link_speed_summary.csv\">hourly speed summary (CSV)</a>, <a href=\"link_speed_histogram.csv\">speed histogram (CSV)</a>, <a href=\"link_speed_diagnostics.csv\">speed traversal records (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>{declarations}function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}{renders}table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p>{volume_sections}<h2>Hourly link speeds</h2><p>Speeds are reconstructed from full-link traversals and assigned to the hour in which the vehicle entered the link. The representative speed divides the total travelled distance by the total travel time; the arithmetic vehicle-speed mean and population standard deviation describe the single traversals. A link without a full-link traversal has no speed: QSim inserts a vehicle at the end of the first link of a leg, so the first link of a network leg never covers its whole length and is reported as a partial traversal instead. The traversal records table lists every record that cannot produce a full-link speed, such as those partial traversals, traversals that never finished, and records without a positive duration.</p>{speed_sections}<h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"link_speed_hourly.csv\">link speeds (CSV)</a>, <a href=\"link_speed_summary.csv\">hourly speed summary (CSV)</a>, <a href=\"link_speed_histogram.csv\">speed histogram (CSV)</a>, <a href=\"link_speed_diagnostics.csv\">speed traversal records (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>{declarations}function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}{renders}table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
+/// Opens one of the exported CSV tables for writing.
+fn table_writer(path: &Path, name: &str) -> Result<BufWriter<File>, AnalysisError> {
+    Ok(BufWriter::new(
+        File::create(path.join(name)).map_err(io_error)?,
+    ))
 }
 
 fn json_for_script(value: &impl Serialize) -> Result<String, AnalysisError> {

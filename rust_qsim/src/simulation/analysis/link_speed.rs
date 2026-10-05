@@ -15,20 +15,16 @@
 //! Observations are assigned to the hour in which the vehicle entered its link, which keeps a
 //! traversal that crosses an hour boundary completely inside its entry hour.
 
-use crate::simulation::analysis::AnalysisError;
-use crate::simulation::events::{
-    EventTrait, LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent,
-    VehicleLeavesTrafficEvent,
-};
+use crate::simulation::analysis::{AnalysisError, LinkVisit};
+use crate::simulation::events::EventTrait;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::time::SimTime;
 use nohash_hasher::IntMap;
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::path::Path;
 
-use super::{csv, hour_start_seconds, io_error};
+use super::{csv, hour_start_seconds, io_error, link_visit, table_writer};
 
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 /// Width of one fixed link-speed histogram bin in m/s.
@@ -68,8 +64,9 @@ impl Moments {
 struct SpeedGroup {
     observations: u64,
     /// Summed traversal durations. Integer nanoseconds keep this total exact and independent of the
-    /// order in which the partitions are replayed, while the speed moments below follow the
-    /// replay order of the single traversals.
+    /// order in which the partitions are replayed, while the speed moments below follow the replay
+    /// order of the single traversals, which can move the exported mean and deviation in the last
+    /// digits.
     total_duration_nanos: u64,
     vehicle_speeds: Moments,
 }
@@ -82,7 +79,8 @@ impl SpeedGroup {
     }
 
     /// The representative speed is the total travelled distance divided by the total travel time.
-    /// It stays unavailable for a group without observations and for a group whose total overflows.
+    /// It stays unavailable for a group without observations and whenever the aggregate itself is
+    /// not finite.
     fn representative_speed(&self, length: f64) -> Option<f64> {
         let speed = (self.observations > 0 && self.total_duration_nanos > 0).then(|| {
             self.observations as f64 * length
@@ -96,10 +94,20 @@ impl SpeedGroup {
     }
 }
 
+/// The full-link traversals of one link within one analysis interval.
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 struct SpeedKey {
     hour_start_seconds: u64,
     link_index: usize,
+}
+
+impl SpeedKey {
+    fn new(hour_start_seconds: u64, link_index: usize) -> Self {
+        Self {
+            hour_start_seconds,
+            link_index,
+        }
+    }
 }
 
 /// One link traversal that has been entered but not yet left.
@@ -112,7 +120,7 @@ struct OpenTraversal {
 
 /// Records that cannot contribute a full-link speed, reported next to the speeds themselves.
 #[derive(Clone, Copy, Default)]
-struct SpeedDiagnostics {
+pub(super) struct SpeedDiagnostics {
     full_link_traversals: u64,
     partial_link_traversals: u64,
     unfinished_traversals: u64,
@@ -123,26 +131,29 @@ struct SpeedDiagnostics {
 }
 
 impl SpeedDiagnostics {
-    /// The exported metrics and their counts, in a stable order.
-    fn rows(&self) -> [(&'static str, u64); 7] {
-        [
-            ("full_link_traversals", self.full_link_traversals),
-            ("partial_link_traversals", self.partial_link_traversals),
-            ("unfinished_traversals", self.unfinished_traversals),
-            ("unmatched_leave_events", self.unmatched_leave_events),
-            (
-                "non_positive_duration_traversals",
-                self.non_positive_duration_traversals,
-            ),
-            (
-                "invalid_link_length_traversals",
-                self.invalid_link_length_traversals,
-            ),
-            (
-                "non_finite_speed_traversals",
-                self.non_finite_speed_traversals,
-            ),
-        ]
+    /// The exported counters, in the order in which they are reported.
+    pub(super) const METRICS: [&'static str; 7] = [
+        "full_link_traversals",
+        "partial_link_traversals",
+        "unfinished_traversals",
+        "unmatched_leave_events",
+        "non_positive_duration_traversals",
+        "invalid_link_length_traversals",
+        "non_finite_speed_traversals",
+    ];
+
+    /// The exported counters with their values.
+    fn rows(&self) -> Vec<(&'static str, u64)> {
+        let counts = [
+            self.full_link_traversals,
+            self.partial_link_traversals,
+            self.unfinished_traversals,
+            self.unmatched_leave_events,
+            self.non_positive_duration_traversals,
+            self.invalid_link_length_traversals,
+            self.non_finite_speed_traversals,
+        ];
+        Self::METRICS.iter().copied().zip(counts).collect()
     }
 }
 
@@ -180,29 +191,18 @@ impl<'a> LinkSpeedCollector<'a> {
     /// Feeds one replayed event. Events for links outside the reported network are ignored, the
     /// same way link volumes ignore them.
     pub(super) fn observe(&mut self, event: &dyn EventTrait, time: SimTime) {
-        let event = event.as_any();
-        if let Some(event) = event.downcast_ref::<LinkEnterEvent>() {
-            self.enter(event.vehicle.internal(), event.link.external(), 0.0, time);
-        } else if let Some(event) = event.downcast_ref::<VehicleEntersTrafficEvent>() {
-            // A leg starts with a departure, which inserts the vehicle at `relative_position` on
-            // its start link instead of at the link start.
-            self.enter(
-                event.vehicle.internal(),
-                event.link.external(),
-                event.relative_position,
-                time,
-            );
-        } else if let Some(event) = event.downcast_ref::<LinkLeaveEvent>() {
-            self.leave(event.vehicle.internal(), event.link.external(), 1.0, time);
-        } else if let Some(event) = event.downcast_ref::<VehicleLeavesTrafficEvent>() {
-            // A leg ends with an arrival, which stops the vehicle at `relative_position` on its
-            // end link instead of at the link end.
-            self.leave(
-                event.vehicle.internal(),
-                event.link.external(),
-                event.relative_position,
-                time,
-            );
+        match link_visit(event) {
+            Some(LinkVisit::Enter {
+                vehicle,
+                link,
+                entry_position,
+            }) => self.enter(vehicle.internal(), link.external(), entry_position, time),
+            Some(LinkVisit::Leave {
+                vehicle,
+                link,
+                exit_position,
+            }) => self.leave(vehicle.internal(), link.external(), exit_position, time),
+            None => {}
         }
     }
 
@@ -222,8 +222,8 @@ impl<'a> LinkSpeedCollector<'a> {
         // both are built from one pass over the reported links.
         let summaries: Vec<_> = hours.iter().map(|hour| self.hour_summary(*hour)).collect();
         self.write_hourly_speeds(path, hours)?;
-        self.write_hourly_summary(path, hours, &summaries)?;
-        self.write_speed_histogram(path, hours, &summaries)?;
+        self.write_hourly_summary(path, &summaries)?;
+        self.write_speed_histogram(path, &summaries)?;
         self.write_diagnostics(path)?;
         Ok(())
     }
@@ -284,6 +284,10 @@ impl<'a> LinkSpeedCollector<'a> {
             self.diagnostics.non_finite_speed_traversals += 1;
             return;
         }
+        // The event writer prints the relative position with the shortest representation that
+        // round-trips, so the positions of a full-link traversal are exactly the link ends. An
+        // exact comparison is the contract here: a tolerance would silently accept traversals
+        // that did not cover the whole link.
         if traversal.entry_position != 0.0 || exit_position != 1.0 {
             self.diagnostics.partial_link_traversals += 1;
             return;
@@ -299,10 +303,10 @@ impl<'a> LinkSpeedCollector<'a> {
             return;
         }
         self.diagnostics.full_link_traversals += 1;
-        let key = SpeedKey {
-            hour_start_seconds: hour_start_seconds(traversal.entry_nanos, self.interval_seconds),
-            link_index: traversal.link_index,
-        };
+        let key = SpeedKey::new(
+            hour_start_seconds(traversal.entry_nanos, self.interval_seconds),
+            traversal.link_index,
+        );
         self.groups
             .entry(key)
             .or_default()
@@ -318,11 +322,7 @@ impl<'a> LinkSpeedCollector<'a> {
         .map_err(io_error)?;
         for hour in hours {
             for (link_index, link) in self.links.iter().enumerate() {
-                let key = SpeedKey {
-                    hour_start_seconds: *hour,
-                    link_index,
-                };
-                let group = self.groups.get(&key).copied();
+                let group = self.groups.get(&SpeedKey::new(*hour, link_index)).copied();
                 let length = link.length;
                 // Counts and totals stay zero for a group without observations, while the speeds
                 // themselves remain unavailable.
@@ -351,7 +351,6 @@ impl<'a> LinkSpeedCollector<'a> {
     fn write_hourly_summary(
         &self,
         path: &Path,
-        hours: &[u64],
         summaries: &[HourSummary],
     ) -> Result<(), AnalysisError> {
         let mut writer = table_writer(path, "link_speed_summary.csv")?;
@@ -360,7 +359,8 @@ impl<'a> LinkSpeedCollector<'a> {
             "hour_start_seconds,links_with_speed,observations,mean_link_speed_mps,population_std_link_speed_mps"
         )
         .map_err(io_error)?;
-        for (hour, summary) in hours.iter().zip(summaries) {
+        for summary in summaries {
+            let hour = summary.hour_start_seconds;
             writeln!(
                 writer,
                 "{hour},{links},{observations},{mean},{deviation}",
@@ -377,7 +377,6 @@ impl<'a> LinkSpeedCollector<'a> {
     fn write_speed_histogram(
         &self,
         path: &Path,
-        hours: &[u64],
         summaries: &[HourSummary],
     ) -> Result<(), AnalysisError> {
         let mut writer = table_writer(path, "link_speed_histogram.csv")?;
@@ -386,7 +385,8 @@ impl<'a> LinkSpeedCollector<'a> {
             "hour_start_seconds,bin_index,bin_lower_mps,bin_upper_mps,link_count,observation_count"
         )
         .map_err(io_error)?;
-        for (hour, summary) in hours.iter().zip(summaries) {
+        for summary in summaries {
+            let hour = summary.hour_start_seconds;
             for bin in 0..=SPEED_BIN_COUNT {
                 let lower = bin as f64 * SPEED_BIN_WIDTH_MPS;
                 let (links, observations) = summary.bins[bin];
@@ -417,13 +417,9 @@ impl<'a> LinkSpeedCollector<'a> {
     }
 
     fn hour_summary(&self, hour: u64) -> HourSummary {
-        let mut summary = HourSummary::new();
+        let mut summary = HourSummary::new(hour);
         for (link_index, link) in self.links.iter().enumerate() {
-            let key = SpeedKey {
-                hour_start_seconds: hour,
-                link_index,
-            };
-            let Some(group) = self.groups.get(&key) else {
+            let Some(group) = self.groups.get(&SpeedKey::new(hour, link_index)) else {
                 continue;
             };
             let Some(speed) = group.representative_speed(link.length) else {
@@ -442,6 +438,7 @@ impl<'a> LinkSpeedCollector<'a> {
 
 /// Link counts and observation counts of one analysis interval, plus the across-link statistics.
 struct HourSummary {
+    hour_start_seconds: u64,
     links_with_speed: u64,
     observations: u64,
     link_speeds: Moments,
@@ -449,8 +446,9 @@ struct HourSummary {
 }
 
 impl HourSummary {
-    fn new() -> Self {
+    fn new(hour_start_seconds: u64) -> Self {
         Self {
+            hour_start_seconds,
             links_with_speed: 0,
             observations: 0,
             link_speeds: Moments::default(),
@@ -465,13 +463,6 @@ impl HourSummary {
     fn population_std(&self) -> Option<f64> {
         (self.links_with_speed > 0).then(|| self.link_speeds.population_std())
     }
-}
-
-/// Opens one of the exported CSV tables for writing.
-fn table_writer(path: &Path, name: &str) -> Result<BufWriter<File>, AnalysisError> {
-    Ok(BufWriter::new(
-        File::create(path.join(name)).map_err(io_error)?,
-    ))
 }
 
 /// Maps a speed onto its fixed bin; the last bin is the overflow bin for every faster speed.
