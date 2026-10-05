@@ -1,6 +1,7 @@
 //! Final-iteration link coverage, capacity and link speed reporting.
 
 pub mod capacity;
+mod cross_run;
 mod link_speed;
 mod validation;
 
@@ -59,10 +60,7 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("link_speed", None),
     ("agent_travel", None),
     ("validation", None),
-    (
-        "cross_run_comparison",
-        Some("No comparison runs are configured"),
-    ),
+    ("cross_run_comparison", None),
     (
         "transit_and_research",
         Some("Optional module inputs are not configured"),
@@ -141,6 +139,8 @@ pub struct Manifest {
     urban_boundary: Option<Vec<[f64; 2]>>,
     #[serde(default)]
     observed_data: Option<String>,
+    #[serde(default)]
+    comparison_runs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,6 +352,7 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
 /// building an owned key for every link and interval, which is the bulk of the
 /// work once the tables are written.
 type LinkVolumesByHour = BTreeMap<u64, BTreeMap<String, IntervalVolumes>>;
+type LinkVolumesByClass = BTreeMap<String, LinkVolumesByHour>;
 
 /// The observed volumes of one link in one interval, defaulting to no traffic.
 fn volumes_of(
@@ -445,6 +446,11 @@ pub fn analyze_final_iteration(
             .observed_data
             .as_ref()
             .map(|path| path.display().to_string()),
+        comparison_runs: settings
+            .comparison_runs
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
     };
 
     // Required inputs are validated before anything is staged, so an unreadable recording is
@@ -556,6 +562,7 @@ pub fn reanalyze_completed_run(
         link_labels: recorded.link_labels.clone(),
         urban_boundary: recorded.urban_boundary.clone(),
         observed_data: recorded.observed_data.as_ref().map(PathBuf::from),
+        comparison_runs: recorded.comparison_runs.iter().map(PathBuf::from).collect(),
     };
 
     analyze_final_iteration(
@@ -601,6 +608,17 @@ fn replay_partitions<'a>(
         .iter()
         .map(|vehicle| (vehicle.vehicle_id.as_str(), vehicle.pce))
         .collect();
+    let class_by_vehicle: BTreeMap<&str, &str> = run_metadata
+        .vehicles
+        .iter()
+        .filter(|vehicle| vehicle.vehicle_type_id != "all")
+        .map(|vehicle| {
+            (
+                vehicle.vehicle_id.as_str(),
+                vehicle.vehicle_type_id.as_str(),
+            )
+        })
+        .collect();
     let events_dir = output_dir
         .join("ITERS")
         .join(format!("it.{iteration}"))
@@ -639,6 +657,7 @@ fn replay_partitions<'a>(
         .map(PartitionReader::next_event)
         .collect::<Result<Vec<_>, _>>()?;
     let mut counts = LinkVolumesByHour::new();
+    let mut counts_by_class = LinkVolumesByClass::new();
     let expected: BTreeMap<_, _> = run_metadata
         .expected_travel
         .iter()
@@ -654,7 +673,7 @@ fn replay_partitions<'a>(
         })
         .collect();
     let mut agent_travel = AgentTravelAccumulator::new(interval, expected);
-    let mut speeds = LinkSpeedCollector::new(interval, ordered_links);
+    let mut speeds = LinkSpeedCollector::new(interval, ordered_links, &class_by_vehicle);
     loop {
         let Some(time) = heads
             .iter()
@@ -681,7 +700,9 @@ fn replay_partitions<'a>(
                     interval,
                     &ids,
                     &pce_by_vehicle,
+                    &class_by_vehicle,
                     &mut counts,
+                    &mut counts_by_class,
                 );
                 speeds.observe(event.as_ref(), time);
                 simultaneous_events.push(event);
@@ -693,6 +714,7 @@ fn replay_partitions<'a>(
     speeds.finish();
     Ok(ReplayedAnalysis {
         counts,
+        counts_by_class,
         agent_travel,
         speeds,
     })
@@ -702,6 +724,7 @@ fn replay_partitions<'a>(
 /// reported links, so the bundle carries the same lifetime as the network slice it was built over.
 struct ReplayedAnalysis<'a> {
     counts: LinkVolumesByHour,
+    counts_by_class: LinkVolumesByClass,
     agent_travel: AgentTravelAccumulator,
     speeds: LinkSpeedCollector<'a>,
 }
@@ -751,6 +774,14 @@ fn publish_complete(
         &link_hourly,
     )?;
     replayed.speeds.write_tables(&staging, &hours)?;
+    write_class_counts(
+        &staging,
+        ordered_links,
+        &hours,
+        &run_metadata.vehicle_types,
+        &replayed.counts_by_class,
+    )?;
+    replayed.speeds.write_class_hourly_speeds(&staging)?;
     write_classification(&staging, ordered_links, &classifications)?;
     write_group_coverage(
         &staging,
@@ -763,19 +794,42 @@ fn publish_complete(
     write_network_map(&staging, ordered_links, network, &classifications, counts)?;
     write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
     write_json(&staging.join(METRIC_CATALOG_FILE), &metrics())?;
+    let vehicle_classes: Vec<_> = run_metadata
+        .vehicle_types
+        .iter()
+        .filter(|vehicle_type| vehicle_type.vehicle_type_id != "all")
+        .map(|vehicle_type| vehicle_type.vehicle_type_id.clone())
+        .collect();
     let validation = settings.observed_data.as_ref().map(|source| {
         let source = if source.is_absolute() {
             source.clone()
         } else {
             output_dir.join(source)
         };
-        validation::write(&staging, &source, interval, run_metadata.sample_size())
-            .map_err(|error| error.to_string())
+        validation::write(
+            &staging,
+            &source,
+            interval,
+            run_metadata.sample_size(),
+            &vehicle_classes,
+        )
+        .map_err(|error| error.to_string())
     });
     if validation.as_ref().is_none_or(Result::is_err) {
         write_empty_validation(&staging)?;
     }
-    let statuses = module_statuses(&RequiredOutcome::Complete, validation.as_ref());
+    let comparison = (!settings.comparison_runs.is_empty()).then(|| {
+        cross_run::write(output_dir, &staging, &settings.comparison_runs)
+            .map_err(|error| error.to_string())
+    });
+    if comparison.as_ref().is_none_or(Result::is_err) {
+        cross_run::write_empty(&staging)?;
+    }
+    let statuses = module_statuses(
+        &RequiredOutcome::Complete,
+        validation.as_ref(),
+        comparison.as_ref(),
+    );
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
     write_report(&staging, manifest, &statuses, &link_hourly)?;
@@ -792,6 +846,46 @@ fn publish_complete(
     Ok(published.join("index.html"))
 }
 
+fn write_class_counts(
+    path: &Path,
+    links: &[&Link],
+    hours: &[u64],
+    classes: &[VehicleTypePce],
+    counts: &LinkVolumesByClass,
+) -> Result<(), AnalysisError> {
+    let mut writer = table_writer(path, "link_hourly_by_class.csv")?;
+    writeln!(
+        writer,
+        "vehicle_class,link_id,hour_start_seconds,entry_vehicles,exit_vehicles"
+    )
+    .map_err(io_error)?;
+    for class in classes
+        .iter()
+        .filter(|class| class.vehicle_type_id != "all")
+    {
+        let class_counts = counts.get(&class.vehicle_type_id);
+        for hour in hours {
+            for link in links {
+                let volumes = class_counts
+                    .and_then(|counts| counts.get(hour))
+                    .and_then(|links| links.get(link.id.external()))
+                    .copied()
+                    .unwrap_or_default();
+                writeln!(
+                    writer,
+                    "{},{},{hour},{},{}",
+                    csv(&class.vehicle_type_id),
+                    csv(link.id.external()),
+                    volumes.entries,
+                    volumes.exits
+                )
+                .map_err(io_error)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Publish the diagnostics of a failed attempt. The completed report in [`ANALYSIS_DIR`] is never
 /// touched, so a failed rerun cannot be mistaken for a completed index.
 fn publish_failure(
@@ -802,7 +896,7 @@ fn publish_failure(
     let mut failed = manifest.clone();
     failed.status = STATUS_FAILED.to_owned();
     failed.failure = Some(error.to_string());
-    let statuses = module_statuses(&RequiredOutcome::Failed(error.to_string()), None);
+    let statuses = module_statuses(&RequiredOutcome::Failed(error.to_string()), None, None);
     let staging = output_dir.join(FAILURE_STAGING_DIR);
     reset_staging(&staging)?;
     write_json(&staging.join(MANIFEST_FILE), &failed)?;
@@ -820,6 +914,7 @@ fn publish_failure(
 fn module_statuses(
     outcome: &RequiredOutcome,
     validation: Option<&Result<(), String>>,
+    comparison: Option<&Result<(), String>>,
 ) -> Vec<ModuleStatus> {
     let (status, reason) = match outcome {
         RequiredOutcome::Complete => (STATUS_COMPLETE, None),
@@ -832,36 +927,41 @@ fn module_statuses(
         reason: reason.clone(),
     }];
     statuses.extend(OPTIONAL_MODULES.iter().map(|(module, unavailable)| {
-        let validation_status = if *module == "validation" {
-            match validation {
+        let computed_status = match *module {
+            "validation" => match validation {
                 Some(Ok(())) => Some((STATUS_COMPLETE, None)),
                 Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No observed validation dataset is configured".to_owned()),
                 )),
-            }
-        } else {
-            None
+            },
+            "cross_run_comparison" => match comparison {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No comparison runs are configured".to_owned()),
+                )),
+            },
+            _ => None,
         };
         ModuleStatus {
             module,
             required: false,
             // A computed module shares the run's outcome, so a failed run cannot report it complete.
-            status: if let Some((status, _)) = &validation_status {
+            status: if let Some((status, _)) = &computed_status {
                 status
             } else if unavailable.is_none() {
                 status
             } else {
                 STATUS_UNAVAILABLE
             },
-            reason: validation_status
-                .and_then(|(_, reason)| reason)
-                .or_else(|| {
-                    unavailable
-                        .map(|reason| (*reason).to_owned())
-                        .or_else(|| reason.clone())
-                }),
+            reason: computed_status.and_then(|(_, reason)| reason).or_else(|| {
+                unavailable
+                    .map(|reason| (*reason).to_owned())
+                    .or_else(|| reason.clone())
+            }),
         }
     }));
     statuses
@@ -886,16 +986,32 @@ fn write_empty_validation(path: &Path) -> Result<(), AnalysisError> {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed validation data configured</text></svg>",
         ),
         (
-            "validation_scatter_count.svg",
+            "validation_scatter_count_calibration.svg",
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed count data configured</text></svg>",
         ),
         (
-            "validation_scatter_speed.svg",
+            "validation_scatter_count_holdout.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed count data configured</text></svg>",
+        ),
+        (
+            "validation_scatter_speed_calibration.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed speed data configured</text></svg>",
+        ),
+        (
+            "validation_scatter_speed_holdout.svg",
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed speed data configured</text></svg>",
         ),
         (
             "validation_time_profiles.svg",
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"400\"><text x=\"20\" y=\"30\">No observed validation data configured</text></svg>",
+        ),
+        (
+            "validation_time_profiles_calibration.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"400\"><text x=\"20\" y=\"30\">No calibration count data configured</text></svg>",
+        ),
+        (
+            "validation_time_profiles_holdout.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"400\"><text x=\"20\" y=\"30\">No holdout count data configured</text></svg>",
         ),
     ] {
         fs::write(path.join(name), content).map_err(io_error)?;
@@ -903,6 +1019,16 @@ fn write_empty_validation(path: &Path) -> Result<(), AnalysisError> {
     fs::copy(
         path.join("network_map.svg"),
         path.join("validation_residual_map.svg"),
+    )
+    .map_err(io_error)?;
+    fs::copy(
+        path.join("network_map.svg"),
+        path.join("validation_residual_map_calibration.svg"),
+    )
+    .map_err(io_error)?;
+    fs::copy(
+        path.join("network_map.svg"),
+        path.join("validation_residual_map_holdout.svg"),
     )
     .map_err(io_error)?;
     Ok(())
@@ -1350,7 +1476,9 @@ fn accumulate(
     interval: u32,
     ids: &BTreeSet<String>,
     pce_by_vehicle: &BTreeMap<&str, f64>,
+    class_by_vehicle: &BTreeMap<&str, &str>,
     counts: &mut LinkVolumesByHour,
+    counts_by_class: &mut LinkVolumesByClass,
 ) {
     let Some(visit) = link_visit(event) else {
         return;
@@ -1375,6 +1503,16 @@ fn accumulate(
         .entry(id.to_owned())
         .or_default()
         .record(side, pce);
+    if let Some(class) = class_by_vehicle.get(vehicle.external()) {
+        counts_by_class
+            .entry((*class).to_owned())
+            .or_default()
+            .entry(hour)
+            .or_default()
+            .entry(id.to_owned())
+            .or_default()
+            .record(side, None);
+    }
 }
 
 /// A link's three classification dimensions, always populated.
@@ -2505,6 +2643,28 @@ fn write_report(
             ("__VALIDATION_MATCHES__", &validation_matches),
             ("__LEGS_NOTE__", &legs_note),
         ],
+    );
+    let html = html
+        .replace(
+            "this report currently supports vehicle_class=all.",
+            "vehicle_class accepts all or a vehicle type ID. Calibration and holdout plots are kept separate.",
+        )
+        .replace(
+            "<h3>Count scatterplot</h3><img src=\"validation_scatter_count.svg\" alt=\"Observed versus simulated count scatterplot\"><h3>Speed scatterplot</h3><img src=\"validation_scatter_speed.svg\" alt=\"Observed versus simulated speed scatterplot\">",
+            "<h3>Calibration count</h3><img src=\"validation_scatter_count_calibration.svg\" alt=\"Calibration count scatterplot\"><h3>Holdout count</h3><img src=\"validation_scatter_count_holdout.svg\" alt=\"Holdout count scatterplot\"><h3>Calibration speed</h3><img src=\"validation_scatter_speed_calibration.svg\" alt=\"Calibration speed scatterplot\"><h3>Holdout speed</h3><img src=\"validation_scatter_speed_holdout.svg\" alt=\"Holdout speed scatterplot\">",
+        )
+        .replace(
+            "<h3>Time profile</h3><img src=\"validation_time_profiles.svg\" alt=\"Observed and simulated counts by period\"><h3>Residual map</h3><img src=\"validation_residual_map.svg\" alt=\"Link count residual map; red means simulation exceeds the observation, blue means it is below\">",
+            "<h3>Calibration time profile</h3><img src=\"validation_time_profiles_calibration.svg\" alt=\"Calibration observed and simulated counts by period\"><h3>Holdout time profile</h3><img src=\"validation_time_profiles_holdout.svg\" alt=\"Holdout observed and simulated counts by period\"><h3>Calibration residual map</h3><img src=\"validation_residual_map_calibration.svg\" alt=\"Calibration link count residual map\"><h3>Holdout residual map</h3><img src=\"validation_residual_map_holdout.svg\" alt=\"Holdout link count residual map\">",
+        );
+    let cross_run = csv_for_script(&path.join("cross_run_comparison.csv"))?;
+    let html = html.replace(
+        "<h2>Module status</h2>",
+        "<h2>Cross-run comparison</h2><p>Rows contain metrics from the latest completed report in each configured comparison run.</p><div id=\"cross-run\"></div><p><a href=\"cross_run_comparison.csv\">Cross-run comparison CSV</a></p><h2>Module status</h2>",
+    );
+    let html = html.replace(
+        "</body>",
+        &format!("<script>csvTable('#cross-run',{cross_run});</script></body>"),
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }

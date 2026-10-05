@@ -38,17 +38,31 @@ link-1,0,3600,all,speed,km/h,36,holdout
 ```
 
 `link_id` is the external network link ID. Periods must match the configured analysis interval
-exactly. `vehicle_class` currently accepts `all`, matching the aggregate link tables; other class
-values are listed as unmatched because the event replay does not yet export class-specific
-simulation totals. `metric` accepts `count` or `speed`; count units are `vehicles`, `vehicle`, or
+exactly. `vehicle_class` accepts `all` for aggregate results or a vehicle type ID from the run's
+vehicle definitions. Class-specific count and speed tables are exported alongside aggregate link
+tables. The class name `all` is reserved for aggregate observations. `metric` accepts `count` or
+`speed`; count units are `vehicles`, `vehicle`, or
 `veh`, and speed units are `m/s`, `mps`, `km/h`, or `kph`. Counts are expanded by the reciprocal
 of `qsim.sample_size`, while speeds are not expanded. `split` is `calibration` or `holdout`.
 
 The report exports matched rows, unmatched input rows, and per-split bias, MAE, RMSE, and count
-GEH in CSV. Relative error is blank when the observed reference is zero. It also writes observed
-versus simulated and time-profile SVGs and a link residual map. The input path is recorded as
+GEH in CSV. GEH scales matched count intervals to hourly rates before applying the formula, so
+its thresholds remain comparable when `interval_seconds` differs from 3600. Relative error is
+blank when the observed reference is zero. It also writes separate
+calibration and holdout scatterplots by metric, time profiles, and residual maps. These plots use
+aggregate `all` observations so vehicle classes are not counted again alongside the aggregate.
+The input path is recorded as
 observation provenance in each matched row. Validation input errors leave the core report intact
 and mark only the validation module failed.
+
+To compare completed runs, set `output.analysis.comparison_runs` to run output directories. Each
+directory's `analysis/manifest.json` selects its latest completed iteration, and its published
+aggregate and vehicle-class count and speed tables are combined in `cross_run_comparison.csv`.
+Count rows include both the simulated sample and the population-expanded value, using each run's
+recorded sample size; speed rows have identical sample and population values. Each row includes
+the full period start and end, so runs with different interval widths remain identifiable.
+Relative paths are resolved from the current run's output directory. A missing or incomplete
+comparison report marks only the cross-run comparison module failed.
 
 ## Link classification
 

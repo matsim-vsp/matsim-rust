@@ -123,6 +123,7 @@ fn analyze(
             link_labels: BTreeMap::new(),
             urban_boundary: None,
             observed_data: None,
+            comparison_runs: Vec::new(),
         },
     )
     .unwrap();

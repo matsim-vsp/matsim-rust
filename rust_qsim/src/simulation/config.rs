@@ -606,6 +606,8 @@ pub struct Analysis {
     /// Optional observed-data CSV used by the validation report. Relative paths are resolved
     /// against the configured output directory.
     pub observed_data: Option<PathBuf>,
+    /// Run directories whose latest published analysis reports are included in a comparison.
+    pub comparison_runs: Vec<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -624,6 +626,7 @@ impl Default for Analysis {
             link_labels: std::collections::BTreeMap::new(),
             urban_boundary: None,
             observed_data: None,
+            comparison_runs: Vec::new(),
         }
     }
 }

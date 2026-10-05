@@ -126,10 +126,36 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert!(validation_matches.contains("\"used\",3600,\"all\",\"speed\",\"holdout\",0.010000,0.010000,1.000000,0.010000,0.000000,0.000000"));
     let unmatched = fs::read_to_string(validation.join("validation_unmatched.csv")).unwrap();
     assert!(unmatched.contains("no_simulation_match"));
-    assert!(validation.join("validation_scatter_count.svg").is_file());
-    assert!(validation.join("validation_scatter_speed.svg").is_file());
+    for plot in [
+        "validation_scatter_count_calibration.svg",
+        "validation_scatter_count_holdout.svg",
+        "validation_scatter_speed_calibration.svg",
+        "validation_scatter_speed_holdout.svg",
+    ] {
+        assert!(validation.join(plot).is_file());
+    }
     assert!(validation.join("validation_time_profiles.svg").is_file());
     assert!(validation.join("validation_residual_map.svg").is_file());
+    assert!(
+        validation
+            .join("validation_time_profiles_calibration.svg")
+            .is_file()
+    );
+    assert!(
+        validation
+            .join("validation_time_profiles_holdout.svg")
+            .is_file()
+    );
+    assert!(
+        validation
+            .join("validation_residual_map_calibration.svg")
+            .is_file()
+    );
+    assert!(
+        validation
+            .join("validation_residual_map_holdout.svg")
+            .is_file()
+    );
     let html = fs::read_to_string(&report).unwrap();
     // The report embeds the hourly rows and the coverage CSV verbatim; assert the
     // payload's columns and values rather than a bare variable declaration.
@@ -621,7 +647,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 14] = [
+    const TABLES: [&str; 16] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -636,6 +662,8 @@ fn metric_catalog_names_match_the_exported_columns() {
         "daily_summary.csv",
         "legs.csv",
         "validation_summary.csv",
+        "link_hourly_by_class.csv",
+        "link_speed_by_class.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1141,6 +1169,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
             observed_data: None,
+            comparison_runs: Vec::new(),
         },
     )
     .unwrap();
@@ -1242,6 +1271,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             link_labels: labels,
             urban_boundary: None,
             observed_data: None,
+            comparison_runs: Vec::new(),
         },
     )
     .unwrap();
