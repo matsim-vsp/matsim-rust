@@ -1709,6 +1709,9 @@ fn service_performance_reports_outcomes_distance_and_constraints() {
             .all(|line| !line.contains("unavailable"))
     );
 
+    // The settings are recorded so a standalone reanalysis reads the same records.
+    let manifest = table("manifest.json");
+    assert!(manifest.contains("requests.csv") && manifest.contains("max_wait_seconds"));
     // The local report presents the tables, and each metric is catalogued.
     let html = fs::read_to_string(&report).unwrap();
     assert!(html.contains("id=\"service-summary\""));
@@ -1787,4 +1790,60 @@ fn service_performance_leaves_metrics_without_inputs_unavailable() {
     assert_eq!(status["status"], "failed");
     assert!(status["reason"].as_str().unwrap().contains("absent.csv"));
     assert_eq!(module_status(dir, "link_coverage")["status"], "complete");
+}
+
+#[deterministic_id_test(rust_qsim)]
+fn service_performance_rejects_invalid_inputs_in_its_own_module() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = temp.path();
+    let service = |requests: &str, fleet: Option<&str>| {
+        fs::write(output.join("requests.csv"), requests).unwrap();
+        fleet.map(|fleet| fs::write(output.join("fleet.csv"), fleet).unwrap());
+        ServiceInputs {
+            requests: PathBuf::from("requests.csv"),
+            passengers: None,
+            fleet: fleet.map(|_| PathBuf::from("fleet.csv")),
+            schedule: None,
+            service_area: None,
+            max_wait_seconds: None,
+        }
+    };
+    let header = "request_id,submission_seconds,origin_link,destination_link,status,party_size\n";
+    let failed_reason = |service: ServiceInputs| {
+        let dir = service_report(output, Some(service));
+        let status = module_status(dir.parent().unwrap(), "service_performance");
+        assert_eq!(status["status"], "failed");
+        status["reason"].as_str().unwrap().to_owned()
+    };
+    assert!(
+        failed_reason(service(&format!("{header}r1,NaN,in,in,,\n"), None)).contains("non-finite")
+    );
+    assert!(
+        failed_reason(service(&format!("{header}r1,0,in,in,lost,\n"), None))
+            .contains("unknown status")
+    );
+    assert!(
+        failed_reason(service(
+            &format!("{header}r1,0,in,in,,\nr1,1,in,in,,\n"),
+            None
+        ))
+        .contains("repeats request_id")
+    );
+    assert!(
+        failed_reason(service(&format!("{header}r1,0,in,in,,0\n"), None)).contains("party_size 0")
+    );
+    let ok = format!("{header}r1,0,in,in,,\n");
+    assert!(
+        failed_reason(service(
+            &ok,
+            Some("vehicle_id,capacity,service_start_seconds,service_end_seconds\nv1,2,0,inf\n")
+        ))
+        .contains("fleet row 2")
+    );
+    let mut bad_area = service(&ok, None);
+    bad_area.service_area = Some(vec![[0.0, 0.0], [1.0, 0.0]]);
+    assert!(failed_reason(bad_area).contains("service_area"));
+    let mut bad_wait = service(&ok, None);
+    bad_wait.max_wait_seconds = Some(-1.0);
+    assert!(failed_reason(bad_wait).contains("max_wait_seconds"));
 }

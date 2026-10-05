@@ -92,12 +92,16 @@ struct Association {
 struct Vehicle {
     capacity: Option<u64>,
     window: Option<f64>,
+    /// Service window start and end; busy time outside it is not counted towards utilization.
+    bounds: Option<(f64, f64)>,
     busy: f64,
     windowed_busy: f64,
     driven: f64,
     occupied: f64,
     passenger_meters: f64,
     capacity_meters: f64,
+    /// Passenger-metres of vehicles with a known capacity, the numerator matching `capacity_meters`.
+    capacity_passenger_meters: f64,
     exceeded: u64,
     served: u64,
 }
@@ -110,6 +114,7 @@ impl Vehicle {
         self.occupied += other.occupied;
         self.passenger_meters += other.passenger_meters;
         self.capacity_meters += other.capacity_meters;
+        self.capacity_passenger_meters += other.capacity_passenger_meters;
         self.exceeded += other.exceeded;
         self.served += other.served;
         self.window = Some(self.window.unwrap_or(0.0) + other.window.unwrap_or(0.0));
@@ -225,6 +230,19 @@ pub(super) fn write(
         finite(request.submission_seconds, "request", row)?;
         if let Some(direct) = request.direct_travel_seconds {
             finite(direct, "request", row)?;
+            if direct <= 0.0 {
+                diagnostics.add(
+                    "requests",
+                    row,
+                    "non_positive_direct_travel",
+                    &request.request_id,
+                );
+            }
+        }
+        if request.party_size == Some(0) {
+            return Err(AnalysisError::new(format!(
+                "request row {row} has party_size 0"
+            )));
         }
         let rejected = match request.status.as_deref().map(str::trim) {
             None | Some("") | Some("submitted") => false,
@@ -299,15 +317,20 @@ pub(super) fn write(
     let mut vehicles: BTreeMap<String, Vehicle> = BTreeMap::new();
     if let Some(path) = &inputs.fleet {
         for (row, vehicle) in read::<FleetRow>(&resolve(path), "fleet")? {
-            let window = match (vehicle.service_start_seconds, vehicle.service_end_seconds) {
-                (Some(start), Some(end)) if start.is_finite() && end.is_finite() && end > start => {
-                    Some(end - start)
-                }
+            for value in [vehicle.service_start_seconds, vehicle.service_end_seconds]
+                .into_iter()
+                .flatten()
+            {
+                finite(value, "fleet", row)?;
+            }
+            let bounds = match (vehicle.service_start_seconds, vehicle.service_end_seconds) {
+                (Some(start), Some(end)) if end > start => Some((start, end)),
                 _ => None,
             };
             let entry = Vehicle {
                 capacity: vehicle.capacity,
-                window,
+                window: bounds.map(|(start, end)| end - start),
+                bounds,
                 ..Vehicle::default()
             };
             if vehicles.insert(vehicle.vehicle_id.clone(), entry).is_some() {
@@ -319,11 +342,22 @@ pub(super) fn write(
         }
     }
     if supplied.fleet {
-        for association in associations.values() {
-            if !vehicles.contains_key(&association.vehicle) {
-                diagnostics.add("passengers", 0, "unknown_vehicle", &association.vehicle);
-            }
+        let unknown: BTreeSet<_> = associations
+            .values()
+            .map(|association| association.vehicle.as_str())
+            .filter(|vehicle| !vehicles.contains_key(*vehicle))
+            .collect();
+        for vehicle in unknown {
+            diagnostics.add("passengers", 0, "unknown_vehicle", vehicle);
         }
+    }
+    // Passengers by vehicle, so a drive task only looks at its own vehicle's riders.
+    let mut riders: BTreeMap<&str, Vec<(f64, f64, u64)>> = BTreeMap::new();
+    for (id, association) in &associations {
+        riders
+            .entry(association.vehicle.as_str())
+            .or_default()
+            .push((association.pickup, association.dropoff, requests[id].party));
     }
     for association in associations.values() {
         vehicles
@@ -334,10 +368,6 @@ pub(super) fn write(
 
     let mut load_meters: BTreeMap<u64, f64> = BTreeMap::new();
     if let Some(path) = &inputs.schedule {
-        let parties: BTreeMap<&str, u64> = requests
-            .iter()
-            .map(|(id, request)| (id.as_str(), request.party))
-            .collect();
         for (row, task) in read::<TaskRow>(&resolve(path), "schedule")? {
             let (start, end) = (
                 finite(task.start_seconds, "schedule", row)?,
@@ -360,8 +390,10 @@ pub(super) fn write(
                 end - start
             };
             vehicle.busy += busy;
-            if vehicle.window.is_some() {
-                vehicle.windowed_busy += busy;
+            if let Some((window_start, window_end)) = vehicle.bounds
+                && busy > 0.0
+            {
+                vehicle.windowed_busy += (end.min(window_end) - start.max(window_start)).max(0.0);
             }
             if task.task_type != "drive" {
                 continue;
@@ -375,14 +407,16 @@ pub(super) fn write(
                 );
                 continue;
             };
-            // Pickups and drop-offs happen at stops, so a passenger either rides a whole drive
-            // task or none of it.
-            let load: u64 = associations
-                .iter()
-                .filter(|(_, a)| {
-                    a.vehicle == task.vehicle_id && a.pickup <= start && a.dropoff >= end
-                })
-                .map(|(id, _)| parties[id.as_str()])
+            // Pickups and drop-offs happen at stops, so a passenger rides a whole drive task or
+            // none of it. The midpoint decides, so a boarding time that lands slightly inside
+            // a task does not turn the whole task into empty relocation.
+            let midpoint = (start + end) / 2.0;
+            let load: u64 = riders
+                .get(task.vehicle_id.as_str())
+                .into_iter()
+                .flatten()
+                .filter(|(pickup, dropoff, _)| *pickup <= midpoint && *dropoff >= midpoint)
+                .map(|(.., party)| party)
                 .sum();
             vehicle.driven += distance;
             if load > 0 {
@@ -391,6 +425,7 @@ pub(super) fn write(
             }
             if let Some(capacity) = vehicle.capacity {
                 vehicle.capacity_meters += capacity as f64 * distance;
+                vehicle.capacity_passenger_meters += load as f64 * distance;
                 if load > capacity {
                     vehicle.exceeded += 1;
                 }
@@ -634,7 +669,7 @@ fn vehicle_row(
         ),
         number_opt(
             occupancy
-                .then(|| ratio(v.passenger_meters, v.capacity_meters))
+                .then(|| ratio(v.capacity_passenger_meters, v.capacity_meters))
                 .flatten()
         ),
         if occupancy {

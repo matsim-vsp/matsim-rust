@@ -133,12 +133,14 @@ output:
 
 Wait is pickup minus submission; the detour ratio is in-vehicle time divided by
 `direct_travel_seconds` and is blank without it. Distributions use the mean, population standard
-deviation, median and nearest-rank 90th percentile. A drive task is occupied when a served request
-is on board for its whole span (pickups and drop-offs happen at stops); its load is the sum of
-`party_size` on board, so shared rides and groups both count. Empty distance is driven distance
+deviation, median and 90th percentile, taken at index `ceil((n - 1) * q)` of the sorted values
+like the journey tables. Pickups and drop-offs happen at stops, so a drive task is occupied by the
+served requests on board at its midpoint; its load is the sum of `party_size` on board, so shared
+rides and groups both count. Empty distance is driven distance
 with load zero, which includes relocation. Mean occupancy is passenger-metres over driven metres,
-load factor divides passenger-metres by capacity-metres, and utilization is non-`stay` task time
-over the fleet service window.
+load factor divides passenger-metres by capacity-metres (only vehicles with a fleet capacity
+contribute to either), and utilization is non-`stay` task time clipped to each vehicle's fleet
+service window over that window.
 
 Coverage is the share of requests whose origin and destination links are entirely inside
 `service_area`; links crossing the border or absent from the network count as outside or
@@ -151,7 +153,7 @@ recorded in `service_constraints.csv` and checked as `wait_limit_exceeded` and
 
 Tables: `service_summary.csv`, `service_requests.csv`, `service_vehicles.csv` (a `fleet` total row
 first), `service_occupancy.csv`, `service_constraints.csv`, `service_availability.csv`,
-`service_diagnostics.csv`. All appear in the local report.
+`service_diagnostics.csv` (which also lists non-positive `direct_travel_seconds`). All appear in the local report.
 
 ## Network distance, time and congestion
 
