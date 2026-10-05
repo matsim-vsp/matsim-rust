@@ -3,6 +3,27 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Link speeds
+
+`link_speed` reconstructs traversal speeds from the same replay that produces the link
+volumes. A speed observation needs a *full-link* traversal: the vehicle has to enter a
+link at its start and leave it at its end. QSim records the first link of a network leg
+with `vehicle enters traffic` and the last one with `vehicle leaves traffic` instead of
+`entered link` and `left link`, and both carry a relative position along the link, so a
+vehicle inserted at the end of its start link covers no distance. Such traversals are
+reported as partial records rather than folded into the statistics, which is a
+deliberate deviation from the MATSim link-speed analysis.
+
+An observation is assigned to the interval in which the vehicle *entered* the link, so
+a traversal crossing an interval boundary stays whole in its entry interval. Because an
+entry is what starts a traversal, every interval that can hold a speed also holds a link
+entry, and volume, coverage, group and speed tables therefore share one interval list.
+
+`link_speed_hourly.csv` holds the per-link statistics, `link_speed_summary.csv` the
+across-link mean and population standard deviation per interval,
+`link_speed_histogram.csv` the fixed-bin distribution, and
+`link_speed_diagnostics.csv` every record that could not produce a full-link speed.
+
 ## Link classification
 
 `output.analysis.link_labels` is a map keyed by external link ID. Each entry can

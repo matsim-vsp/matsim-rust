@@ -300,7 +300,7 @@ fn simulation_publishes_only_the_final_iteration_report_after_shutdown() {
 
 #[deterministic_id_test(rust_qsim)]
 fn protobuf_partition_replay_matches_compressed_xml_report() {
-    let run = |config_path: &str, output_dir: &str| {
+    let run = |config_path: &str, output_dir: &str, table: &str| {
         let mut config = Config::from_args(CommandLineArgs::new_with_path(config_path));
         config.controller_mut().last_iteration = 1;
         config.output_mut().output_dir = output_dir.into();
@@ -310,18 +310,31 @@ fn protobuf_partition_replay_matches_compressed_xml_report() {
             .build()
             .unwrap();
         controller.run();
-        fs::read_to_string(output.join("analysis/link_hourly.csv")).unwrap()
+        fs::read_to_string(output.join("analysis").join(table)).unwrap()
     };
 
-    let xml = run(
-        "./tests/resources/3-links/3-links-config-1.yml",
-        "./test_output/simulation/analysis_xml_equivalence",
-    );
-    let protobuf = run(
-        "./tests/resources/3-links/3-links-config-2.yml",
-        "./test_output/simulation/analysis_proto_equivalence",
-    );
-    assert_eq!(xml, protobuf);
+    // Link speeds are reconstructed from the replayed events, so they have to agree across the
+    // event formats just like the volumes they are derived from.
+    for table in [
+        "link_hourly.csv",
+        "coverage.csv",
+        "link_speed_hourly.csv",
+        "link_speed_summary.csv",
+        "link_speed_histogram.csv",
+        "link_speed_diagnostics.csv",
+    ] {
+        let xml = run(
+            "./tests/resources/3-links/3-links-config-1.yml",
+            "./test_output/simulation/analysis_xml_equivalence",
+            table,
+        );
+        let protobuf = run(
+            "./tests/resources/3-links/3-links-config-2.yml",
+            "./test_output/simulation/analysis_proto_equivalence",
+            table,
+        );
+        assert_eq!(xml, protobuf, "{table} differs between event formats");
+    }
 }
 
 #[deterministic_id_test(rust_qsim)]

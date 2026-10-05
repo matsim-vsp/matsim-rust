@@ -1,4 +1,6 @@
-//! Final-iteration link coverage reporting.
+//! Final-iteration link coverage and link speed reporting.
+
+mod link_speed;
 
 use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
 use crate::simulation::events::{
@@ -6,12 +8,14 @@ use crate::simulation::events::{
     PersonStuckEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id;
+use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_events::{ProtoEventsReader, event_from_proto};
 use crate::simulation::io::xml::events::XmlEventsReader;
 use crate::simulation::scenario::network::{Link, Network, Node};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
-use crate::simulation::scenario::vehicles::Garage;
+use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
+use link_speed::LinkSpeedCollector;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -45,10 +49,8 @@ const REQUIRED_MODULE: &str = "link_coverage";
 /// build computes, so it follows the run's outcome; `Some` carries the reason the module stays
 /// unavailable until its inputs or implementation exist.
 const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
-    (
-        "link_speed",
-        Some("Traversal timing metrics are not implemented yet"),
-    ),
+    // Both link metrics are computed from the same replay, so both follow the run's outcome.
+    ("link_speed", None),
     ("agent_travel", None),
     (
         "validation",
@@ -70,7 +72,7 @@ const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=doc
 
 /// Complete report shell. Substituted in one pass by [`substitute_template`], so a link
 /// label that happens to read like a token cannot corrupt the payloads.
-const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;__MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()</script></body></html>"#;
+const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()</script></body></html>"#;
 
 /// Renders the agent travel tables. They quote person identifiers, so the header and every row
 /// are split with a quote-aware parser instead of `String.split(',')`.
@@ -409,7 +411,7 @@ pub fn analyze_final_iteration(
 
     // Required inputs are validated before anything is staged, so an unreadable recording is
     // reported as a failed attempt instead of replacing a previously published report.
-    let (counts, agent_travel) = match replay_partitions(
+    let replayed = match replay_partitions(
         output_dir,
         iteration,
         partitions,
@@ -426,8 +428,7 @@ pub fn analyze_final_iteration(
         output_dir,
         &manifest,
         &ordered_links,
-        &counts,
-        &agent_travel,
+        &replayed,
         settings.interval_seconds,
         simulation_end_time,
         run_metadata,
@@ -545,15 +546,15 @@ fn sorted_links(network: &Network) -> Vec<&Link> {
     ordered_links
 }
 
-fn replay_partitions(
+fn replay_partitions<'a>(
     output_dir: &Path,
     iteration: u32,
     partitions: u32,
     compression: CompressionType,
     interval: u32,
-    ordered_links: &[&Link],
+    ordered_links: &'a [&'a Link],
     run_metadata: &AnalysisRunMetadata,
-) -> Result<(LinkVolumesByHour, AgentTravelAccumulator), AnalysisError> {
+) -> Result<ReplayedAnalysis<'a>, AnalysisError> {
     let events_dir = output_dir
         .join("ITERS")
         .join(format!("it.{iteration}"))
@@ -607,6 +608,7 @@ fn replay_partitions(
         })
         .collect();
     let mut agent_travel = AgentTravelAccumulator::new(interval, expected);
+    let mut speeds = LinkSpeedCollector::new(interval, ordered_links);
     loop {
         let Some(time) = heads
             .iter()
@@ -615,10 +617,11 @@ fn replay_partitions(
         else {
             break;
         };
-        // Link counts commute; process all same-time agent events together so that pairing an
-        // arrival with a same-time departure does not depend on which partition delivered
-        // either event first. Within a batch, an arrival still matches the person's open leg
-        // before any leg created in the same batch.
+        // Link counts and link speeds commute; process all same-time agent events together so that
+        // pairing an arrival with a same-time departure does not depend on which partition
+        // delivered either event first. Within a batch, an arrival still matches the person's
+        // open leg before any leg created in the same batch. Visiting the partitions in rank
+        // order keeps the replay itself reproducible.
         let mut simultaneous_events = Vec::new();
         for rank in 0..heads.len() {
             while heads[rank]
@@ -627,21 +630,34 @@ fn replay_partitions(
             {
                 let (_, event) = heads[rank].take().expect("selected reader head exists");
                 accumulate(event.as_ref(), time, interval, &ids, &mut counts);
+                speeds.observe(event.as_ref(), time);
                 simultaneous_events.push(event);
                 heads[rank] = readers[rank].next_event()?;
             }
         }
         agent_travel.process_timestamp(&simultaneous_events, time);
     }
-    Ok((counts, agent_travel))
+    speeds.finish();
+    Ok(ReplayedAnalysis {
+        counts,
+        agent_travel,
+        speeds,
+    })
+}
+
+/// Everything one replay of the final-iteration partitions yields. The speed collector borrows the
+/// reported links, so the bundle carries the same lifetime as the network slice it was built over.
+struct ReplayedAnalysis<'a> {
+    counts: LinkVolumesByHour,
+    agent_travel: AgentTravelAccumulator,
+    speeds: LinkSpeedCollector<'a>,
 }
 
 fn publish_complete(
     output_dir: &Path,
     manifest: &Manifest,
     ordered_links: &[&Link],
-    counts: &LinkVolumesByHour,
-    agent_travel: &AgentTravelAccumulator,
+    replayed: &ReplayedAnalysis<'_>,
     interval: u32,
     simulation_end_time: u32,
     run_metadata: &AnalysisRunMetadata,
@@ -650,6 +666,8 @@ fn publish_complete(
 ) -> Result<PathBuf, AnalysisError> {
     let staging = output_dir.join(STAGING_DIR);
     reset_staging(&staging)?;
+    let counts = &replayed.counts;
+    let agent_travel = &replayed.agent_travel;
     let classifications = classify_links(ordered_links, network, settings);
     let link_hourly = link_hourly_metrics(
         ordered_links,
@@ -658,6 +676,13 @@ fn publish_complete(
         interval,
         simulation_end_time,
     );
+    // Volume, coverage, group and speed tables all span the same intervals, taken once from the
+    // link counts. A speed observation starts with a link entry in the same interval, so the
+    // entry counts already cover every interval a speed can be reported for, and sharing the
+    // list keeps a row of one table aligned with the row of the other.
+    let hours: Vec<u64> = interval_starts(counts, interval, simulation_end_time)
+        .into_iter()
+        .collect();
     write_tables(
         &staging,
         ordered_links,
@@ -669,6 +694,7 @@ fn publish_complete(
         simulation_end_time,
         &link_hourly,
     )?;
+    replayed.speeds.write_tables(&staging, &hours)?;
     write_classification(&staging, ordered_links, &classifications)?;
     write_group_coverage(
         &staging,
@@ -752,7 +778,7 @@ fn module_statuses(outcome: &RequiredOutcome) -> Vec<ModuleStatus> {
     statuses
 }
 
-fn metrics() -> [Metric<'static>; 16] {
+fn metrics() -> Vec<Metric<'static>> {
     [
         Metric {
             name: "link_entry_vehicles",
@@ -834,7 +860,81 @@ fn metrics() -> [Metric<'static>; 16] {
             unit: "percent",
             aggregation_key: "dimension,category,hour_start_seconds",
         },
+        // Link speeds follow the volumes they are reconstructed from, so the catalog lists them
+        // next to the link metrics. The histogram bins are the grouped observation counts, and the
+        // traversal records are counted by the module that writes the table, so it owns their names.
+        Metric {
+            name: "link_speed_traversals",
+            unit: "traversals",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_total_distance",
+            unit: "m",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_total_duration",
+            unit: "s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_representative_speed",
+            unit: "m/s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_vehicle_speed_mean",
+            unit: "m/s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_vehicle_speed_population_std",
+            unit: "m/s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "links_with_speed",
+            unit: "links",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "hourly_link_speed_traversals",
+            unit: "traversals",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "hourly_mean_link_speed",
+            unit: "m/s",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "hourly_link_speed_population_std",
+            unit: "m/s",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "speed_histogram_link_count",
+            unit: "links",
+            aggregation_key: "hour_start_seconds,bin_index",
+        },
+        Metric {
+            name: "speed_histogram_observation_count",
+            unit: "traversals",
+            aggregation_key: "hour_start_seconds,bin_index",
+        },
     ]
+    .into_iter()
+    .chain(
+        link_speed::SpeedDiagnostics::METRICS
+            .iter()
+            .map(|name| Metric {
+                name,
+                unit: "records",
+                aggregation_key: "report",
+            }),
+    )
+    .collect()
 }
 
 /// Swap a fully staged directory into place.
@@ -930,6 +1030,61 @@ impl PartitionReader {
     }
 }
 
+/// One recorded visit of a link. QSim reports the first and the last link of a network leg
+/// through the departure and the arrival instead of a plain link enter and leave, and both of
+/// those events carry the position along the link at which the visit starts or ends.
+enum LinkVisit<'a> {
+    Enter {
+        vehicle: &'a Id<InternalVehicle>,
+        link: &'a Id<Link>,
+        entry_position: f64,
+    },
+    Leave {
+        vehicle: &'a Id<InternalVehicle>,
+        link: &'a Id<Link>,
+        exit_position: f64,
+    },
+}
+
+/// Classifies the events that describe a link visit, so that link volumes and link speeds agree
+/// on which events are a link entry and which one is a link exit.
+fn link_visit(event: &dyn EventTrait) -> Option<LinkVisit<'_>> {
+    let event = event.as_any();
+    if let Some(event) = event.downcast_ref::<LinkEnterEvent>() {
+        Some(LinkVisit::Enter {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            entry_position: 0.0,
+        })
+    } else if let Some(event) = event.downcast_ref::<VehicleEntersTrafficEvent>() {
+        Some(LinkVisit::Enter {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            entry_position: event.relative_position,
+        })
+    } else if let Some(event) = event.downcast_ref::<LinkLeaveEvent>() {
+        Some(LinkVisit::Leave {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            exit_position: 1.0,
+        })
+    } else if let Some(event) = event.downcast_ref::<VehicleLeavesTrafficEvent>() {
+        Some(LinkVisit::Leave {
+            vehicle: &event.vehicle,
+            link: &event.link,
+            exit_position: event.relative_position,
+        })
+    } else {
+        None
+    }
+}
+
+/// Start of the analysis interval that contains `nanos`; intervals include their start and
+/// exclude their end.
+fn hour_start_seconds(nanos: u64, interval: u32) -> u64 {
+    nanos / 1_000_000_000 / u64::from(interval) * u64::from(interval)
+}
+
 fn accumulate(
     event: &dyn EventTrait,
     time: SimTime,
@@ -937,22 +1092,18 @@ fn accumulate(
     ids: &BTreeSet<String>,
     counts: &mut LinkVolumesByHour,
 ) {
-    let (link, entry) = if let Some(event) = event.as_any().downcast_ref::<LinkEnterEvent>() {
-        (&event.link, true)
-    } else if let Some(event) = event.as_any().downcast_ref::<LinkLeaveEvent>() {
-        (&event.link, false)
-    } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
-        (&event.link, true)
-    } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
-        (&event.link, false)
-    } else {
+    let Some(visit) = link_visit(event) else {
         return;
+    };
+    let (link, entry) = match &visit {
+        LinkVisit::Enter { link, .. } => (link, true),
+        LinkVisit::Leave { link, .. } => (link, false),
     };
     let id = link.external();
     if !ids.contains(id) {
         return;
     }
-    let hour = time.as_nanos() / 1_000_000_000 / u64::from(interval) * u64::from(interval);
+    let hour = hour_start_seconds(time.as_nanos(), interval);
     let count = counts
         .entry(LinkHour {
             hour_start_seconds: hour,
@@ -1802,6 +1953,101 @@ fn write_tables(
     Ok(())
 }
 
+/// One exported CSV file rendered as a table of the report.
+struct ReportTable {
+    /// JavaScript variable and DOM id of the rendered table.
+    name: &'static str,
+    title: &'static str,
+    file: &'static str,
+}
+
+/// The speed tables hold no quoted field, so their lines split on commas. The agent travel tables
+/// quote person identifiers and are rendered with the quote-aware parser instead.
+const SPEED_TABLES: &[ReportTable] = &[
+    ReportTable {
+        name: "linkSpeeds",
+        title: "Per-link interval speed",
+        file: "link_speed_hourly.csv",
+    },
+    ReportTable {
+        name: "speedSummary",
+        title: "Across-link interval speed summary",
+        file: "link_speed_summary.csv",
+    },
+    ReportTable {
+        name: "speedHistogram",
+        title: "Interval link speed histogram",
+        file: "link_speed_histogram.csv",
+    },
+    ReportTable {
+        name: "speedRecords",
+        title: "Link speed traversal records",
+        file: "link_speed_diagnostics.csv",
+    },
+];
+
+/// A table of the report together with its embedded CSV lines.
+struct EmbeddedTable<'a> {
+    table: &'a ReportTable,
+    data: String,
+}
+
+impl<'a> EmbeddedTable<'a> {
+    fn read(path: &Path, table: &'a ReportTable) -> Result<Self, AnalysisError> {
+        let content = fs::read_to_string(path.join(table.file)).map_err(io_error)?;
+        let lines: Vec<_> = content.lines().collect();
+        Ok(Self {
+            table,
+            data: json_for_script(&lines)?,
+        })
+    }
+
+    /// The first embedded line holds the column names, the remaining lines the rows.
+    fn declaration(&self) -> String {
+        format!(
+            "const {name}={data};",
+            name = self.table.name,
+            data = self.data
+        )
+    }
+
+    fn section(&self) -> String {
+        format!(
+            "<h3>{title}</h3><div id=\"{name}\"></div>",
+            title = self.table.title,
+            name = self.table.name
+        )
+    }
+
+    fn render(&self) -> String {
+        let name = self.table.name;
+        format!(
+            "table(document.querySelector('#{name}'),{name}[0].split(','),{name}.slice(1).map(x=>x.split(',')));"
+        )
+    }
+}
+
+fn embed_tables<'a>(
+    path: &Path,
+    tables: &'a [ReportTable],
+) -> Result<Vec<EmbeddedTable<'a>>, AnalysisError> {
+    tables
+        .iter()
+        .map(|table| EmbeddedTable::read(path, table))
+        .collect()
+}
+
+/// The headings and mount points of all tables of one report section.
+fn sections(tables: &[EmbeddedTable<'_>]) -> String {
+    tables
+        .iter()
+        .map(EmbeddedTable::section)
+        .collect::<String>()
+}
+
+/// Explains how the link speeds are reconstructed, next to the tables they are rendered in.
+const SPEED_NOTE: &str = "Speeds are reconstructed from full-link traversals and assigned to the interval in which the vehicle entered the link. The representative speed divides the total travelled distance by the total travel time; the arithmetic vehicle-speed mean and population standard deviation describe the single traversals. A link without a full-link traversal has no speed: QSim inserts a vehicle at the end of the first link of a leg, so the first link of a network leg never covers its whole length and is reported as a partial traversal instead. The traversal records table lists every record that cannot produce a full-link speed, such as those partial traversals, traversals that never finished, and records without a positive duration.";
+
 fn write_report(
     path: &Path,
     manifest: &Manifest,
@@ -1817,6 +2063,7 @@ fn write_report(
     // dimension cannot be exported without also being offered as a filter.
     let dimensions = json_for_script(&FILTER_DIMENSIONS)?;
     let network_map = fs::read_to_string(path.join("network_map.svg")).map_err(io_error)?;
+    let speeds = embed_tables(path, SPEED_TABLES)?;
     let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
     let daily = csv_for_script(&path.join("daily_summary.csv"))?;
     let persons = csv_for_script(&path.join("person_daily.csv"))?;
@@ -1829,6 +2076,17 @@ fn write_report(
     } else {
         "Every observed and planned leg is listed in <a href=\"legs.csv\">legs.csv</a>.".to_owned()
     };
+    let speed_declarations = speeds
+        .iter()
+        .map(EmbeddedTable::declaration)
+        .collect::<Vec<_>>()
+        .join("");
+    let speed_sections = sections(&speeds);
+    let speed_renders = speeds
+        .iter()
+        .map(EmbeddedTable::render)
+        .collect::<Vec<_>>()
+        .join("");
     let html = substitute_template(
         REPORT_TEMPLATE,
         &[
@@ -1844,6 +2102,10 @@ fn write_report(
             ("__COVERAGE__", &coverage),
             ("__METRICS__", &metrics),
             ("__MODULES__", &modules),
+            ("__SPEED_DECLARATIONS__", &speed_declarations),
+            ("__SPEED_SECTIONS__", &speed_sections),
+            ("__SPEED_RENDERS__", &speed_renders),
+            ("__SPEED_NOTE__", SPEED_NOTE),
             ("__LEG_HOURLY__", &leg_hourly),
             ("__DAILY__", &daily),
             ("__PERSONS__", &persons),
@@ -1934,6 +2196,13 @@ fn escape_html(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// Opens one of the exported CSV tables for writing.
+fn table_writer(path: &Path, name: &str) -> Result<BufWriter<File>, AnalysisError> {
+    Ok(BufWriter::new(
+        File::create(path.join(name)).map_err(io_error)?,
+    ))
 }
 
 fn csv(value: &str) -> String {

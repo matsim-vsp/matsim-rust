@@ -63,9 +63,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .zip(times)
                 .filter_map(move |((destination_id, _), time)| {
-                    (origin_id != destination_id).then(|| {
-                        (origin_id, destination_id, time.as_secs_f64() / 60.0)
-                    })
+                    (origin_id != destination_id)
+                        .then(|| (origin_id, destination_id, time.as_secs_f64() / 60.0))
                 })
         })
         .collect();
