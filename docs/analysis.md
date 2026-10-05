@@ -82,6 +82,119 @@ supplied run's recorded `journey_mode_share.csv`, and writes a local comparison 
 table under `RUN/analysis/cross_run_comparison`. A comparison refuses a run whose report is failed
 or whose recorded iteration is not its latest output iteration.
 
+## Daily activity patterns
+
+`activity_durations.csv` holds one row per observed activity interval, and
+`activity_patterns.csv` one row per person for the simulated day. Activity times come from the
+recorded `actstart` and `actend` events; travel time comes from the observed leg completions in
+`legs.csv`. The chains are the activity types in the order they were observed, the observed leg
+modes in departure order, and the main modes of the observed journeys in order.
+
+A stage activity is one whose type contains `interaction` — a transit access, egress or transfer
+wait. `activity_durations.csv` flags these in the `stage` column and still reports them, so a day
+reconciles against every observed interval, but neither the plan's activity count nor the
+observed `observed_activities` counts them. Both sides therefore use the same rule as the journey
+definition, and a transfer that happened can never stand in for a destination that did not.
+
+### First and last day censoring
+
+The recording window opens at `qsim.start_time`, so an activity observed to begin exactly there
+was already in progress when the window did. Its total duration is only a lower bound and it is
+flagged `start_censored`. An activity with no observed end by the time the run shuts down is
+flagged `end_censored` for the same reason. Both flags are reported per activity and counted per
+person, and a censored interval never reaches a duration mean. Every boolean in these tables —
+`start_censored`, `end_censored`, `stage` and `crosses_zone_boundary` — is written as `true` or
+`false`. The window start is recorded in
+the run metadata, because the event files only contain events from the window onwards and cannot
+recover it. A start time after the end time is refused rather than reported.
+
+Censoring is separate from what is observable *inside* the window. A left-censored activity still
+contributes the seconds it was observed to last, reported as `in_window_seconds` alongside the
+unbounded `duration_seconds`. That is what lets a person's day be reconciled:
+`activity_seconds + travel_seconds` equals `observed_span_seconds`, the time between the first and
+the last thing the recording caught the person doing, and `timeline_gap_seconds` is whatever the
+recorded events leave over. A nonzero gap is time that neither activities nor completed legs
+account for. The bounds count every observed moment: an activity start or leg departure for the
+first, and an activity end, leg arrival or stuck event for the last, so a person who was recorded
+mid-leg and aborted keeps the aborted travel in the day and reports it as a gap.
+
+### Pattern status
+
+`status` is the first of these that applies, so the reason a day is short is the actionable one:
+
+- `not_observed`: the person emitted no activity event at all in the window, so there is no
+  observed day to classify. The plan and the observed events are separate sources and neither is
+  assumed to exist.
+- `stuck`: the person emitted a stuck event, so the rest of the day never happened.
+- `truncated`: fewer activities were observed than the recorded selected plan contains, so the
+  day stopped short of the plan.
+- `complete`: every planned activity was observed. A last activity without an observed end is
+  still `complete`; that is ordinary end-of-day right-censoring and is reported by the censoring
+  flags rather than by downgrading the pattern.
+
+The pattern totals are the ones a reader checks the day against: one pattern row per person, and
+the cohort's journey count equal to the journeys in `journeys.csv` that departed, its travel
+seconds equal to the completed legs in `legs.csv`, and the zone rows' origin and destination
+counts both total the journey table.
+
+`activity_type_summary.csv` groups activities by type and reports the uncensored count, both
+censoring counts, and the mean, median and in-window total. `activity_pattern_summary.csv` is a
+long-format table over three groupings — all persons, the supplied person zone, and the pattern
+status — so one table covers the cohort, geographic and completeness views.
+
+## Zones and origin-destination flows
+
+`output.analysis.zone_system` is the documented zone system the geographic reports are built
+from. It carries an optional `name` for provenance and two independent geographies, because a
+location can be described by either:
+
+```yaml
+output:
+  analysis:
+    enabled: true
+    zone_system:
+      name: berlin-2018
+      # External link ID to zone ID. Journey origins, journey destinations and activities are
+      # located through the links their recorded events and plans name.
+      link_zones:
+        link-1: zone-a
+        link-2: zone-b
+      # External person ID to zone ID, the person geography the summaries are grouped by.
+      person_zones:
+        person-1: zone-a
+```
+
+Zones are supplied, never inferred from the network. A link with no entry and a person with no
+entry are both reported as `unmapped`, and they still form OD rows, boundary crossings and zone
+rows, so a partial zone system still accounts for every observed journey instead of reporting a
+matrix that quietly adds up to less than `journeys.csv` does.
+
+`zone_od.csv` is the mode and departure-interval keyed OD matrix: one row per
+`(departure_hour_seconds, mode, origin_zone, destination_zone)` cell, with
+`crosses_zone_boundary` and the distinct people behind it. `zone_flows.csv` is the boundary
+crossing report: the same journeys collapsed onto the unordered zone pair, named
+`min|max` so both directions of one boundary share a name. `zone_summary.csv` reports per-zone
+link, resident-person, observing-person, activity and journey counts.
+
+Only journeys with an observed departure enter the matrix, because the matrix is keyed by
+departure interval and a journey that never moved has no interval to place. Those journeys keep
+their zone counts in `zone_summary.csv` and their row in `journeys.csv`.
+
+Without a zone system the three zone tables are published with their headers only, and the
+`zones` module reports itself `unavailable`.
+
+`urban_area_summary.csv` is grouped by the geography the run supplied, which the `geography`
+column names on every row. A configured zone system is the report's own definition of an urban
+area, so the summary is keyed by it and the person geography contributes `residents` and
+`unmapped_residents`. Without one it falls back to the link classification the report already
+computes, and the residents are zero because no person geography was supplied. Either way an
+activity whose link the report cannot place is counted as `unclassified` rather than attributed
+to an area it does not belong to, and every location is reported. The report embeds a bounded
+preview of `activity_patterns.csv`, `activity_durations.csv` and `zone_od.csv` and says so when a
+table is longer, as it does for `legs.csv`.
+
+The supplied zone system is recorded in `manifest.json`, so a standalone rerun rebuilds the same
+geographic report.
 ## Public transport performance and demand validation
 
 Public transport is modeled by teleportation in this build. A `travelled with pt` event records
@@ -410,6 +523,8 @@ green and unused links in gray. Dashed lines identify expressways, which means
 the exact, case-sensitive label `expressway`; any other road type is drawn solid.
 Hover over a map link to see its labels and usage.
 
+The same urban area is the grouping of `urban_area_summary.csv`, which adds the activities
+and journeys each area carries. See "Zones and origin-destination flows" above.
 ## Comparing completed runs
 
 The shared analysis interface can compare existing reports with an explicit baseline:

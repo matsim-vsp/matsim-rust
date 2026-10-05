@@ -14,6 +14,7 @@ pub(super) fn publish_failure(
         &RequiredOutcome::Failed(error.to_string()),
         None,
         None,
+        ZoneTables::NotPublished,
         None,
         None,
         None,

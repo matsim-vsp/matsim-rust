@@ -440,8 +440,17 @@ impl InternalActivity {
 
     // i think this should go into the utils module rather than being here. paul, mar'26
     pub fn is_interaction(&self) -> bool {
-        self.act_type.external().contains("interaction")
+        is_interaction_type(self.act_type.external())
     }
+}
+
+/// MATSim's stage-activity rule: an activity type containing `interaction` is a transit
+/// access, egress or transfer wait rather than something the person chose to do.
+///
+/// The report applies the same rule to recorded activity events, which name a type rather than
+/// an [`InternalActivity`], so the test lives here and both sides call it.
+pub fn is_interaction_type(act_type: &str) -> bool {
+    act_type.contains("interaction")
 }
 
 impl FromStr for InternalPtRouteDescription {
