@@ -506,8 +506,17 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
     let shares = fs::read_to_string(report_dir.join("journey_mode_share.csv")).unwrap();
     assert!(shares.contains("0,\"work\",5_to_10_km,\"pt\",1,1.000000"));
     assert!(shares.contains("0,\"work\",under_1_km,\"walk\",2,1.000000"));
+    let summary = fs::read_to_string(report_dir.join("journey_summary.csv")).unwrap();
+    assert!(summary.contains(
+        "\"pt\",\"work\",1,1,100.000000,0.000000,100.000000,100.000000,6700.000000,0.000000,6700.000000,6700.000000"
+    ));
+    assert!(summary.contains(
+        "\"walk\",\"work\",2,2,10.000000,0.000000,10.000000,10.000000,203.250000,196.750000,400.000000,400.000000"
+    ));
     let html = fs::read_to_string(report).unwrap();
     assert!(html.contains("journey_mode_share.csv"));
+    assert!(html.contains("Journey duration and distance distributions"));
+    assert!(html.contains("journey-summary"));
     assert!(html.contains("Journey mode share by hour, purpose, and distance"));
 }
 
