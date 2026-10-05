@@ -1,6 +1,6 @@
 //! Supplied modeled receiver sound, exposure and affected-population summaries.
 
-use crate::simulation::analysis::{AnalysisError, xml_escape};
+use crate::simulation::analysis::{AnalysisError, TableSpec, xml_escape};
 use crate::simulation::config::NoiseInputs;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -269,6 +269,16 @@ pub(super) fn write(
     availability.flush().map_err(noise_error)?;
     Ok(())
 }
+
+/// Tables of this module that a cross-run comparison can line up, as `core::cross_run` reads
+/// them.
+pub(super) const COMPARISON_TABLES: &[TableSpec] = &[TableSpec {
+    file: "noise_summary.csv",
+    metrics: &[
+        ("receiver_noise_value", "value"),
+        ("affected_population", "affected_population"),
+    ],
+}];
 
 pub(super) fn write_empty(dir: &Path) -> Result<(), AnalysisError> {
     std::fs::write(

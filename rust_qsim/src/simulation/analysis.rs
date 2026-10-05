@@ -5,8 +5,8 @@ mod activity_pattern;
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
-mod economic;
 mod demographic;
+mod economic;
 mod emissions;
 mod ensemble;
 mod link_speed;
@@ -25,6 +25,7 @@ pub use transit::TransitMetadata;
 
 mod network_distance;
 mod noise;
+mod publication;
 
 use crate::simulation::config::{
     Accessibility, Analysis, CompressionType, EmissionsInputs, LinkLabels, NoiseInputs,
@@ -82,6 +83,35 @@ const STATUS_UNAVAILABLE: &str = "unavailable";
 /// Module whose inputs must be readable for any report to be published.
 const REQUIRED_MODULE: &str = "link_coverage";
 
+/// Modules the report covers beyond the required one, in report order. `None` marks a module this
+/// build computes, so it follows the run's outcome; `Some` carries the reason the module stays
+/// unavailable until its inputs or implementation exist.
+const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
+    // Both link metrics are computed from the same replay, so both follow the run's outcome.
+    ("link_speed", None),
+    ("network_distance_time", None),
+    ("agent_travel", None),
+    ("activity_patterns", None),
+    ("urban_areas", None),
+    ("zones", None),
+    ("transit_performance", None),
+    ("transit_validation", None),
+    ("validation", None),
+    ("cross_run_comparison", None),
+    // Follows the run's outcome when its three supplied inputs are configured; otherwise
+    // unavailable, and `module_statuses` supplies the reason.
+    ("accessibility", None),
+    (
+        "transit_and_research",
+        Some("Optional module inputs are not configured"),
+    ),
+    (demographic::MODULE, None),
+    ("service_performance", None),
+    ("modeled_emissions", None),
+    ("noise_exposure", None),
+    ("economic_appraisal", None),
+];
+
 const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
 
 const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)});const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(x=>{const cell=tr.insertCell();cell.textContent=x})});root.replaceChildren(t)}table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))";
@@ -129,38 +159,16 @@ const ACCESSIBILITY_AGGREGATION_KEY: &str =
 const ACCESSIBILITY_SUMMARY_KEY: &str =
     "category,mode,departure_period_start_seconds,threshold_seconds";
 
-/// Modules the report covers beyond the required one, in report order. `None` marks a module this
-/// build computes, so it follows the run's outcome; `Some` carries the reason the module stays
-/// unavailable until its inputs or implementation exist.
-const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
-    // Both link metrics are computed from the same replay, so both follow the run's outcome.
-    ("link_speed", None),
-    ("network_distance_time", None),
-    ("agent_travel", None),
-    ("activity_patterns", None),
-    ("urban_areas", None),
-    ("zones", None),
-    ("transit_performance", None),
-    ("transit_validation", None),
-    ("validation", None),
-    ("cross_run_comparison", None),
-    ("accessibility", None),
-    (
-        "transit_and_research",
-        Some("Optional module inputs are not configured"),
-    ),
-    (demographic::MODULE, None),
-    ("service_performance", None),
-    ("modeled_emissions", None),
-    ("noise_exposure", None),
-    ("economic_appraisal", None),
-];
-
 #[derive(Serialize)]
 struct Metric<'a> {
     name: &'a str,
     unit: &'a str,
     aggregation_key: &'a str,
+}
+
+pub(super) struct TableSpec {
+    pub(super) file: &'static str,
+    pub(super) metrics: &'static [(&'static str, &'static str)],
 }
 
 /// Provenance of one published report attempt. Written into `manifest.json` and read back by
@@ -208,7 +216,9 @@ pub struct Manifest {
     #[serde(default)]
     economic_inputs: Option<String>,
     emissions: Option<EmissionsInputs>,
+    #[serde(default)]
     noise: Option<NoiseInputs>,
+    #[serde(default)]
     person_group_attributes: Vec<String>,
     #[serde(default)]
     person_weight_attribute: Option<String>,
@@ -839,7 +849,8 @@ pub fn reanalyze_completed_run(
     // A crash between the two renames of a previous publish strands the last good report in the
     // backup. Reclaim it before anything else, so even a run that cannot be reanalyzed keeps its
     // report rather than leaving it next to a broken one.
-    if let Err(error) = reclaim_backup(&output_dir.join(ANALYSIS_DIR), &output_dir.join(BACKUP_DIR))
+    if let Err(error) =
+        publication::reclaim_backup(&output_dir.join(ANALYSIS_DIR), &output_dir.join(BACKUP_DIR))
     {
         warn!("Could not reclaim the previous analysis report: {error}");
     }
@@ -953,7 +964,7 @@ pub fn compare_latest_run_reports(
         ));
     }
     let staging = output_dir.join(".cross-run-comparison-staging");
-    reset_staging(&staging)?;
+    publication::reset_staging(&staging)?;
     let mut combined = csv::Writer::from_path(staging.join("journey_mode_share.csv"))
         .map_err(|error| AnalysisError(error.to_string()))?;
     combined
@@ -1038,7 +1049,7 @@ pub fn compare_latest_run_reports(
         }],
     )?;
     report::write_cross_run_report(&staging)?;
-    publish(
+    publication::publish(
         &staging,
         &output_dir.join("cross_run_comparison"),
         &output_dir.join(".cross-run-comparison-backup"),
@@ -1072,7 +1083,7 @@ fn latest_output_iteration(run_dir: &Path) -> Result<u32, AnalysisError> {
 /// Record a failed attempt and hand the original error back to the caller. The module error is
 /// always the one returned; a secondary failure to write the diagnostics is logged, not dropped.
 fn record_failure(output_dir: &Path, recorded: &Manifest, error: AnalysisError) -> AnalysisError {
-    if let Err(write) = publish_failure(output_dir, recorded, &error) {
+    if let Err(write) = publication::publish_failure(output_dir, recorded, &error) {
         warn!("Could not record the analysis failure report: {write}");
     }
     error
@@ -1292,7 +1303,7 @@ fn publish_complete(
     analysis_started: std::time::Instant,
 ) -> Result<PathBuf, AnalysisError> {
     let staging = output_dir.join(STAGING_DIR);
-    reset_staging(&staging)?;
+    publication::reset_staging(&staging)?;
     let counts = &replayed.counts;
     let agent_travel = &replayed.agent_travel;
     let link_hourly = link_hourly_metrics(
@@ -1572,15 +1583,16 @@ fn publish_complete(
         &settings.zone_system,
     )?;
     report::write_report(&staging, manifest, &statuses, &link_hourly)?;
+    // The report is rendered before its own runtime is timed, so that measurement is
+    // patched in afterwards; a failed patch falls back to the tables written first.
     let initial_runtime = runtime.clone();
     runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
-    write_runtime_tables(&staging, &runtime)?;
-    if let Err(error) = report::refresh_runtime_report(&staging.join("index.html")) {
+    if let Err(error) = report::refresh_runtime_report(&staging.join("index.html"), &runtime) {
         warn!("Could not refresh runtime measurements in the staged report: {error}");
         write_runtime_tables(&staging, &initial_runtime)?;
         report::write_report(&staging, manifest, &statuses, &link_hourly)?;
     }
-    let published = publish(
+    let published = publication::publish(
         &staging,
         &output_dir.join(ANALYSIS_DIR),
         &output_dir.join(BACKUP_DIR),
@@ -1591,6 +1603,179 @@ fn publish_complete(
         fs::remove_dir_all(&failure_dir).map_err(io_error)?;
     }
     Ok(published.join("index.html"))
+}
+
+fn write_runtime_tables(
+    path: &Path,
+    runtime: &AnalysisRuntimeMetadata,
+) -> Result<(), AnalysisError> {
+    write_json(&path.join(RUNTIME_METADATA_FILE), runtime)?;
+    let mut writer = table_writer(path, "runtime.csv")?;
+    writeln!(writer, "field,value,unit,provenance").map_err(io_error)?;
+    let mut row = |field: &str, value: String, unit: &str, provenance: &str| {
+        writeln!(
+            writer,
+            "{},{},{},{}",
+            csv(field),
+            csv(&value),
+            csv(unit),
+            csv(provenance)
+        )
+        .map_err(io_error)
+    };
+    if let Some(value) = runtime.simulation_seconds {
+        row(
+            "simulation_runtime",
+            value.to_string(),
+            "seconds",
+            "measured wall clock",
+        )?;
+    }
+    if let Some(value) = runtime.analysis_seconds {
+        row(
+            "analysis_runtime",
+            value.to_string(),
+            "seconds",
+            "measured wall clock",
+        )?;
+    }
+    for (phase, seconds) in &runtime.phase_seconds {
+        row(
+            &format!("{phase}_runtime"),
+            seconds.to_string(),
+            "seconds",
+            "measured wall clock",
+        )?;
+    }
+    if let Some(value) = runtime.worker_count {
+        row(
+            "worker_count",
+            value.to_string(),
+            "workers",
+            "configured partitions",
+        )?;
+    }
+    if let Some(value) = runtime.available_logical_cpus {
+        row(
+            "available_logical_cpus",
+            value.to_string(),
+            "CPUs",
+            "host query",
+        )?;
+    }
+    for (field, value) in [
+        ("operating_system", runtime.operating_system.as_deref()),
+        ("architecture", runtime.architecture.as_deref()),
+        ("software_name", runtime.software_name.as_deref()),
+        ("software_version", runtime.software_version.as_deref()),
+    ] {
+        if let Some(value) = value {
+            row(field, value.to_owned(), "", "build metadata")?;
+        }
+    }
+    if let Some(value) = &runtime.cpu_model {
+        row("cpu_model", value.clone(), "", "host query")?;
+    }
+    for (field, value, unit, source) in [
+        (
+            "network_links",
+            runtime.network_links,
+            "links",
+            "output network",
+        ),
+        (
+            "population_persons",
+            runtime.population_persons,
+            "persons",
+            "final population",
+        ),
+        ("vehicles", runtime.vehicles, "vehicles", "vehicle catalog"),
+        (
+            "expected_legs",
+            runtime.expected_legs,
+            "legs",
+            "final selected plans",
+        ),
+    ] {
+        if let Some(value) = value {
+            row(field, value.to_string(), unit, source)?;
+        }
+    }
+    if let Some(value) = runtime.host_memory_bytes {
+        row("host_memory", value.to_string(), "bytes", "host query")?;
+    }
+    if let Some(value) = runtime.peak_memory_bytes {
+        row(
+            "peak_memory",
+            value.to_string(),
+            "bytes",
+            "process high-water mark",
+        )?;
+    }
+    writer.flush().map_err(io_error)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
+    fs::read_to_string("/proc/self/status")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("VmHWM:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+        })
+        .and_then(|kilobytes| kilobytes.checked_mul(1024))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn host_cpu_model() -> Option<String> {
+    fs::read_to_string("/proc/cpuinfo")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            ["model name", "Hardware", "Processor"]
+                .iter()
+                .find_map(|field| {
+                    line.strip_prefix(field)
+                        .and_then(|value| value.split_once(':'))
+                        .map(|(_, value)| value.trim())
+                })
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn host_cpu_model() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn host_memory_bytes() -> Option<u64> {
+    fs::read_to_string("/proc/meminfo")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("MemTotal:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+        })
+        .and_then(|kilobytes| kilobytes.checked_mul(1024))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn host_memory_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
+    None
 }
 
 /// Outcome of the accessibility module.
@@ -1657,46 +1842,6 @@ fn write_class_counts(
             }
         }
     }
-    Ok(())
-}
-
-/// Publish the diagnostics of a failed attempt. The completed report in [`ANALYSIS_DIR`] is never
-/// touched, so a failed rerun cannot be mistaken for a completed index.
-fn publish_failure(
-    output_dir: &Path,
-    manifest: &Manifest,
-    error: &AnalysisError,
-) -> Result<(), AnalysisError> {
-    let mut failed = manifest.clone();
-    failed.status = STATUS_FAILED.to_owned();
-    failed.failure = Some(error.to_string());
-    let statuses = module_statuses(
-        &RequiredOutcome::Failed(error.to_string()),
-        None,
-        None,
-        // A failed attempt publishes no zone tables, so the module cannot claim to have run
-        // against a supplied zone system.
-        ZoneTables::NotPublished,
-        None,
-        None,
-        None,
-        None,
-        &TransitOutcome::default(),
-        None,
-        None,
-        None,
-    );
-    let staging = output_dir.join(FAILURE_STAGING_DIR);
-    reset_staging(&staging)?;
-    write_json(&staging.join(MANIFEST_FILE), &failed)?;
-    write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
-    fs::write(staging.join("failure.txt"), format!("{error}\n")).map_err(io_error)?;
-    report::write_failure_report(&staging, &failed, &statuses)?;
-    publish(
-        &staging,
-        &output_dir.join(FAILURE_DIR),
-        &output_dir.join(FAILURE_BACKUP_DIR),
-    )?;
     Ok(())
 }
 
@@ -3006,53 +3151,6 @@ fn accessibility_metrics() -> Vec<Metric<'static>> {
         },
     ]
 }
-
-/// Swap a fully staged directory into place.
-fn publish(staging: &Path, published: &Path, backup: &Path) -> Result<PathBuf, AnalysisError> {
-    reclaim_backup(published, backup)?;
-    let had_published = published.exists();
-    if had_published {
-        fs::rename(published, backup).map_err(io_error)?;
-    }
-    if let Err(error) = fs::rename(staging, published) {
-        if had_published {
-            if let Err(restore) = fs::rename(backup, published) {
-                warn!(
-                    "Could not restore the previous report from {}: {restore}",
-                    backup.display()
-                );
-            }
-        }
-        return Err(io_error(error));
-    }
-    if had_published {
-        fs::remove_dir_all(backup).map_err(io_error)?;
-    }
-    Ok(published.to_path_buf())
-}
-
-/// Resolve a backup left behind by an interrupted publish: restore it when its published
-/// counterpart is gone, and drop it when the publish did land. Without this an interrupted publish
-/// would strand the last good report in the backup.
-fn reclaim_backup(published: &Path, backup: &Path) -> Result<(), AnalysisError> {
-    if backup.exists() {
-        if published.exists() {
-            fs::remove_dir_all(backup).map_err(io_error)?;
-        } else {
-            fs::rename(backup, published).map_err(io_error)?;
-        }
-    }
-    Ok(())
-}
-
-/// A staging directory left behind by an interrupted run is never a usable report.
-fn reset_staging(staging: &Path) -> Result<(), AnalysisError> {
-    if staging.exists() {
-        fs::remove_dir_all(staging).map_err(io_error)?;
-    }
-    fs::create_dir_all(staging).map_err(io_error)
-}
-
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, AnalysisError> {
     let bytes = fs::read(path)
         .map_err(|error| AnalysisError(format!("cannot read {}: {error}", path.display())))?;
@@ -4442,179 +4540,6 @@ struct IntervalHistograms {
 }
 
 /// A quantity that could not be computed is exported as an empty cell.
-fn write_runtime_tables(
-    path: &Path,
-    runtime: &AnalysisRuntimeMetadata,
-) -> Result<(), AnalysisError> {
-    write_json(&path.join(RUNTIME_METADATA_FILE), runtime)?;
-    let mut writer = table_writer(path, "runtime.csv")?;
-    writeln!(writer, "field,value,unit,provenance").map_err(io_error)?;
-    let mut row = |field: &str, value: String, unit: &str, provenance: &str| {
-        writeln!(
-            writer,
-            "{},{},{},{}",
-            csv(field),
-            csv(&value),
-            csv(unit),
-            csv(provenance)
-        )
-        .map_err(io_error)
-    };
-    if let Some(value) = runtime.simulation_seconds {
-        row(
-            "simulation_runtime",
-            value.to_string(),
-            "seconds",
-            "measured wall clock",
-        )?;
-    }
-    if let Some(value) = runtime.analysis_seconds {
-        row(
-            "analysis_runtime",
-            value.to_string(),
-            "seconds",
-            "measured wall clock",
-        )?;
-    }
-    for (phase, seconds) in &runtime.phase_seconds {
-        row(
-            &format!("{phase}_runtime"),
-            seconds.to_string(),
-            "seconds",
-            "measured wall clock",
-        )?;
-    }
-    if let Some(value) = runtime.worker_count {
-        row(
-            "worker_count",
-            value.to_string(),
-            "workers",
-            "configured partitions",
-        )?;
-    }
-    if let Some(value) = runtime.available_logical_cpus {
-        row(
-            "available_logical_cpus",
-            value.to_string(),
-            "CPUs",
-            "host query",
-        )?;
-    }
-    for (field, value) in [
-        ("operating_system", runtime.operating_system.as_deref()),
-        ("architecture", runtime.architecture.as_deref()),
-        ("software_name", runtime.software_name.as_deref()),
-        ("software_version", runtime.software_version.as_deref()),
-    ] {
-        if let Some(value) = value {
-            row(field, value.to_owned(), "", "build metadata")?;
-        }
-    }
-    if let Some(value) = &runtime.cpu_model {
-        row("cpu_model", value.clone(), "", "host query")?;
-    }
-    for (field, value, unit, source) in [
-        (
-            "network_links",
-            runtime.network_links,
-            "links",
-            "output network",
-        ),
-        (
-            "population_persons",
-            runtime.population_persons,
-            "persons",
-            "final population",
-        ),
-        ("vehicles", runtime.vehicles, "vehicles", "vehicle catalog"),
-        (
-            "expected_legs",
-            runtime.expected_legs,
-            "legs",
-            "final selected plans",
-        ),
-    ] {
-        if let Some(value) = value {
-            row(field, value.to_string(), unit, source)?;
-        }
-    }
-    if let Some(value) = runtime.host_memory_bytes {
-        row("host_memory", value.to_string(), "bytes", "host query")?;
-    }
-    if let Some(value) = runtime.peak_memory_bytes {
-        row(
-            "peak_memory",
-            value.to_string(),
-            "bytes",
-            "process high-water mark",
-        )?;
-    }
-    writer.flush().map_err(io_error)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
-    fs::read_to_string("/proc/self/status")
-        .ok()?
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("VmHWM:")?
-                .split_whitespace()
-                .next()?
-                .parse::<u64>()
-                .ok()
-        })
-        .and_then(|kilobytes| kilobytes.checked_mul(1024))
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn host_cpu_model() -> Option<String> {
-    fs::read_to_string("/proc/cpuinfo")
-        .ok()?
-        .lines()
-        .find_map(|line| {
-            ["model name", "Hardware", "Processor"]
-                .iter()
-                .find_map(|field| {
-                    line.strip_prefix(field)
-                        .and_then(|value| value.split_once(':'))
-                        .map(|(_, value)| value.trim())
-                })
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-        })
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn host_cpu_model() -> Option<String> {
-    None
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn host_memory_bytes() -> Option<u64> {
-    fs::read_to_string("/proc/meminfo")
-        .ok()?
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("MemTotal:")?
-                .split_whitespace()
-                .next()?
-                .parse::<u64>()
-                .ok()
-        })
-        .and_then(|kilobytes| kilobytes.checked_mul(1024))
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn host_memory_bytes() -> Option<u64> {
-    None
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn process_peak_memory_bytes() -> Option<u64> {
-    None
-}
-
 fn number_opt(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.6}"))
 }
@@ -4915,11 +4840,11 @@ fn write_report(
         Some(status) if status.status == STATUS_COMPLETE => "Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate; group and run net values require utility and all three costs at the same scope and currency. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.".to_owned(),
         Some(status) if status.status == STATUS_FAILED => format!(
             "Economic appraisal failed: {}. See module_status.json for details.",
-            escape_html(status.reason.as_deref().unwrap_or("unspecified error"))
+            report::escape_html(status.reason.as_deref().unwrap_or("unspecified error"))
         ),
         Some(status) => format!(
             "Economic appraisal is unavailable: {}.",
-            escape_html(status.reason.as_deref().unwrap_or("no input data was configured"))
+            report::escape_html(status.reason.as_deref().unwrap_or("no input data was configured"))
         ),
         None => "Economic appraisal status is unavailable.".to_owned(),
     };
@@ -4981,20 +4906,6 @@ fn csv_preview_for_script(path: &Path, rows: usize) -> Result<(String, bool), An
     Ok((json_for_script(&lines)?, truncated))
 }
 
-fn write_failure_report(
-    path: &Path,
-    manifest: &Manifest,
-    statuses: &[ModuleStatus],
-) -> Result<(), AnalysisError> {
-    let modules = json_for_script(statuses)?;
-    let reason = escape_html(manifest.failure.as_deref().unwrap_or_default());
-    let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis failed</title><style>{REPORT_STYLE}</style></head><body><h1>Analysis failed</h1><p>The required <code>{REQUIRED_MODULE}</code> module did not complete for final iteration {iteration}, so no completed report was published. The previously published report in <code>{ANALYSIS_DIR}</code> is unchanged.</p><h2>Failure</h2><pre>{reason}</pre><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"manifest.json\">failure manifest</a>, <a href=\"module_status.json\">module status</a>, <a href=\"failure.txt\">error text</a>.</p><script>const m={modules};{MODULE_TABLE_SCRIPT}</script></body></html>",
-        iteration = manifest.iteration,
-    );
-    fs::write(path.join("index.html"), html).map_err(io_error)
-}
-
 fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, AnalysisError> {
     serde_json::to_string(value)
         .map(|json| {
@@ -5003,13 +4914,6 @@ fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, Analysis
                 .replace('>', "\\u003e")
         })
         .map_err(|e| AnalysisError(e.to_string()))
-}
-
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 /// Opens one of the exported CSV tables for writing.
@@ -5022,6 +4926,7 @@ fn table_writer(path: &Path, name: &str) -> Result<BufWriter<File>, AnalysisErro
 fn csv(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
+
 fn io_error(error: std::io::Error) -> AnalysisError {
     AnalysisError(error.to_string())
 }

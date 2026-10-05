@@ -2,8 +2,8 @@
 //! association records. Nothing is simulated: every metric is derived from the supplied tables.
 
 use super::{
-    AnalysisError, classify_link_to_boundary, csv, io_error, label, mean, number_opt, quantile,
-    std_dev, table_writer,
+    AnalysisError, TableSpec, classify_link_to_boundary, csv, io_error, label, mean, number_opt,
+    quantile, std_dev, table_writer,
 };
 use crate::simulation::config::ServiceInputs;
 use crate::simulation::scenario::network::{Link, Network};
@@ -837,3 +837,56 @@ pub(super) fn write_empty(report_dir: &Path) -> Result<(), AnalysisError> {
     }
     Ok(())
 }
+
+/// Metrics from this module that completed-run comparison can compare.
+pub(super) const COMPARISON_TABLES: &[TableSpec] = &[
+    TableSpec {
+        file: "service_summary.csv",
+        metrics: &[
+            ("requests", "requests"),
+            ("served", "served"),
+            ("rejected", "rejected"),
+            ("unserved", "unserved"),
+            ("served_share", "served_share"),
+            ("rejected_share", "rejected_share"),
+            ("passengers_served", "passengers_served"),
+            ("wait_mean_seconds", "wait_mean_seconds"),
+            ("wait_std_seconds", "wait_std_seconds"),
+            ("wait_median_seconds", "wait_median_seconds"),
+            ("wait_p90_seconds", "wait_p90_seconds"),
+            ("detour_mean_ratio", "detour_mean_ratio"),
+            ("detour_std_ratio", "detour_std_ratio"),
+            ("detour_median_ratio", "detour_median_ratio"),
+            ("detour_p90_ratio", "detour_p90_ratio"),
+            ("wait_limit_exceeded", "wait_limit_exceeded"),
+            ("inside_area", "inside_area"),
+            ("outside_area", "outside_area"),
+            ("area_unknown", "area_unknown"),
+            ("coverage_share", "coverage_share"),
+        ],
+    },
+    TableSpec {
+        file: "service_vehicles.csv",
+        metrics: &[
+            ("service_seconds", "service_seconds"),
+            ("busy_seconds", "busy_seconds"),
+            ("utilization", "utilization"),
+            ("driven_meters", "driven_meters"),
+            ("occupied_meters", "occupied_meters"),
+            ("empty_meters", "empty_meters"),
+            ("empty_share", "empty_share"),
+            ("passenger_meters", "passenger_meters"),
+            ("mean_occupancy", "mean_occupancy"),
+            ("load_factor", "load_factor"),
+            ("capacity_exceeded_tasks", "capacity_exceeded_tasks"),
+            ("requests_served", "requests_served"),
+        ],
+    },
+    TableSpec {
+        file: "service_occupancy.csv",
+        metrics: &[
+            ("load_vehicle_meters", "load_vehicle_meters"),
+            ("load_share", "load_share"),
+        ],
+    },
+];

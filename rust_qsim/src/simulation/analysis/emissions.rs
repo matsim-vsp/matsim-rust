@@ -1,6 +1,6 @@
 //! Aggregation of externally modeled MATSim emission records.
 
-use super::{AnalysisError, csv, io_error};
+use super::{AnalysisError, TableSpec, csv, io_error};
 use crate::simulation::config::EmissionsInputs;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -193,6 +193,13 @@ pub(super) fn write(
     super::write_json(&out.join("emissions_provenance.json"), &provenance)?;
     Ok(seen)
 }
+
+/// Tables of this module that a cross-run comparison can line up, as `core::cross_run` reads
+/// them.
+pub(super) const COMPARISON_TABLES: &[TableSpec] = &[TableSpec {
+    file: "emissions_hourly.csv",
+    metrics: &[("emissions_total_expanded", "total_expanded")],
+}];
 
 pub(super) fn write_empty(out: &Path) -> Result<(), AnalysisError> {
     std::fs::write(out.join("emissions_hourly.csv"), "hour_start_seconds,pollutant,unit,vehicle_category,location_type,location_id,emission_type,records,total_sample,total_expanded\n").map_err(io_error)?;
