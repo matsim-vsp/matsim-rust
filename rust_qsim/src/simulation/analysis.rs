@@ -5,9 +5,9 @@ pub mod capacity;
 mod cross_run;
 mod link_speed;
 
-mod validation;
-
+pub use cross_run::compare_completed_runs;
 mod network_distance;
+mod validation;
 
 use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
 use crate::simulation::events::{
