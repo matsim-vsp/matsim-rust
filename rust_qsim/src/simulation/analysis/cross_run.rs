@@ -1589,11 +1589,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
         let alternative = run(temp.path(), "alternative", 1.0, "l1,0,15,0\n");
-        for (output, boardings) in [(&baseline, 4), (&alternative, 7)] {
+        for (output, boardings, passengers, missed, expanded) in
+            [(&baseline, 4, 4, 1, 4), (&alternative, 7, 6, 2, 7)]
+        {
             let analysis = output.join("analysis");
             fs::write(
                 analysis.join("metric_catalog.json"),
-                r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"boardings","unit":"persons","aggregation_key":"hour_start_seconds,line_id,stop_id"},{"name":"wait_seconds","unit":"seconds","aggregation_key":"person_id,departure_seconds"}]"#,
+                r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"boardings","unit":"persons","aggregation_key":"hour_start_seconds,line_id,stop_id"},{"name":"wait_seconds","unit":"seconds","aggregation_key":"person_id,departure_seconds"},{"name":"passengers","unit":"persons","aggregation_key":"line_id,route_id,departure_id,segment_index"},{"name":"load_factor","unit":"ratio","aggregation_key":"line_id,route_id,departure_id,segment_index"},{"name":"outcome_trips","unit":"trips","aggregation_key":"hour_start_seconds,service_modeling,outcome"},{"name":"transit_observed","unit":"persons","aggregation_key":"scope,line_id,stop_id,station_id,period_start_seconds,metric,source_row"},{"name":"transit_simulated_expanded","unit":"persons","aggregation_key":"scope,line_id,stop_id,station_id,period_start_seconds,metric,source_row"}]"#,
             )
             .unwrap();
             fs::write(
@@ -1608,6 +1610,21 @@ mod tests {
                 "person_id,departure_seconds,wait_seconds\np1,100,20\n",
             )
             .unwrap();
+            fs::write(
+                analysis.join("transit_occupancy.csv"),
+                format!("line_id,route_id,departure_id,segment_index,passengers,capacity_persons,load_factor\nBlue,r,dep1,0,{passengers},8,{:.2}\n", passengers as f64 / 8.0),
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("transit_outcomes.csv"),
+                format!("hour_start_seconds,service_modeling,outcome,outcome_trips\n0,teleported,missed_service,{missed}\n"),
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("transit_validation_matches.csv"),
+                format!("scope,line_id,stop_id,station_id,period_start_seconds,metric,source_row,observed,transit_simulated_expanded\nstop,Blue,stop-1,,0,boardings,2,10,{expanded}\n"),
+            )
+            .unwrap();
         }
 
         let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
@@ -1616,6 +1633,12 @@ mod tests {
         assert!(differences.contains("transit_stop_hourly.csv,boardings,persons"));
         assert!(differences.contains("4.000000,7.000000,3.000000,75.000000,4.000000,,,comparable"));
         assert!(differences.contains("transit_trips.csv,wait_seconds,seconds"));
+        assert!(differences.contains("transit_outcomes.csv,outcome_trips,trips"));
+        assert!(differences.contains("transit_validation_matches.csv,transit_observed"));
+        assert!(differences.contains("transit_validation_matches.csv,transit_simulated_expanded"));
+        assert!(differences.contains(
+            "0.500000,0.750000,0.250000,50.000000,0.500000,8.000000,8.000000,comparable"
+        ));
     }
 
     #[test]
