@@ -33,6 +33,15 @@ fn main() -> ExitCode {
                     }
                 }
             }
+            if let Some(manifest) = &args.ensemble_manifest {
+                match analysis::analyze_run_ensemble(&args.run_dir, manifest) {
+                    Ok(ensemble) => info!("Ensemble report: {}", ensemble.display()),
+                    Err(error) => {
+                        error!("{error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -55,4 +64,8 @@ struct AnalyzeArgs {
     /// Another completed run to include in a latest-iteration journey comparison. Repeat as needed.
     #[arg(long = "compare-run-dir")]
     compare_run_dirs: Vec<PathBuf>,
+    /// Ensemble manifest grouping completed runs by scenario, seed and parameter setting. Writes
+    /// `RUN/ensemble`; the runs it names are read, never simulated.
+    #[arg(long = "ensemble-manifest")]
+    ensemble_manifest: Option<PathBuf>,
 }

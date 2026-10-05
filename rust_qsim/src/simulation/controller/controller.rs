@@ -378,7 +378,11 @@ impl Controller {
                     vehicles: self.config.vehicles().path.as_deref(),
                 },
             )
-            .with_person_demographics(std::mem::take(&mut self.person_demographics));
+            .with_person_demographics(std::mem::take(&mut self.person_demographics))
+            .with_transit(
+                &self.scenario.core.transit_schedule,
+                &self.scenario.core.garage,
+            );
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
                 last_iteration,

@@ -607,8 +607,15 @@ pub struct Analysis {
     /// Optional observed-data CSV used by the validation report. Relative paths are resolved
     /// against the configured output directory.
     pub observed_data: Option<PathBuf>,
+    /// Optional weighted journey records from a comparable travel survey.
+    pub journey_survey: Option<PathBuf>,
     /// Run directories whose latest published analysis reports are included in a comparison.
     pub comparison_runs: Vec<PathBuf>,
+    /// Optional DRT/taxi service records analysed after the run.
+    pub service: Option<ServiceInputs>,
+    /// Optional CSV of observed boardings and alightings for the transit validation. Relative
+    /// paths are resolved against the configured output directory.
+    pub transit_observed_data: Option<PathBuf>,
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
@@ -623,6 +630,26 @@ pub struct Analysis {
     /// Person attribute holding a monetary travel cost for the day. Without it the cost burden
     /// is unavailable rather than zero, because the run supplies no monetary cost of its own.
     pub person_cost_attribute: Option<String>,
+}
+
+/// Supplied records for DRT and taxi service performance. The analysis only reads them; no
+/// service is simulated. Relative paths are resolved against the configured output directory.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ServiceInputs {
+    /// One row per request. This is the only source of rejections.
+    pub requests: PathBuf,
+    /// Request-to-vehicle association records with pickup and drop-off times.
+    pub passengers: Option<PathBuf>,
+    /// Vehicle capacity and service window records.
+    pub fleet: Option<PathBuf>,
+    /// Vehicle task records with drive distances.
+    pub schedule: Option<PathBuf>,
+    /// Service area polygon in network node coordinates.
+    #[serde(default)]
+    pub service_area: Option<Vec<[f64; 2]>>,
+    /// Configured maximum wait between request submission and pickup.
+    #[serde(default)]
+    pub max_wait_seconds: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -642,7 +669,10 @@ impl Default for Analysis {
             urban_boundary: None,
 
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
+            service: None,
+            transit_observed_data: None,
 
             excess_delay_clip_seconds: None,
 
