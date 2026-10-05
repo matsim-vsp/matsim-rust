@@ -595,6 +595,22 @@ pub struct Analysis {
     pub enabled: bool,
     /// Width of exported link-volume intervals in seconds.
     pub interval_seconds: u32,
+    /// Explicit per-link labels. Missing or blank labels are reported as `unknown`.
+    pub link_labels: std::collections::BTreeMap<String, LinkLabels>,
+    /// Optional polygon in the same coordinate system as network node coordinates.
+    /// A link is inner when both endpoints are inside, outer when both are outside
+    /// and the segment misses the polygon, and cross_boundary when one endpoint is
+    /// inside or the segment crosses the polygon. When set, this determines
+    /// `urban_area` instead of the per-link label of the same name.
+    pub urban_boundary: Option<Vec<[f64; 2]>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct LinkLabels {
+    pub urban_area: Option<String>,
+    pub road_type: Option<String>,
+    pub road_size: Option<String>,
 }
 
 impl Default for Analysis {
@@ -602,6 +618,8 @@ impl Default for Analysis {
         Self {
             enabled: false,
             interval_seconds: 3600,
+            link_labels: std::collections::BTreeMap::new(),
+            urban_boundary: None,
         }
     }
 }
