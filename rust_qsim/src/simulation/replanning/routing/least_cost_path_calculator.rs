@@ -29,6 +29,8 @@ pub struct LeastCostPathRequest<'r> {
     pub person: Option<&'r InternalPerson>,
     #[builder(default)]
     pub vehicle: Option<&'r InternalVehicle>,
+    #[builder(default)]
+    pub candidate_path: Option<Vec<Id<Link>>>,
 }
 
 /// A least cost path, given as a vector of network link ids, together with the travel time needed

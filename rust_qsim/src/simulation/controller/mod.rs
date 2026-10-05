@@ -501,9 +501,11 @@ impl MobsimWorker {
 pub(crate) struct ReplanningPool {
     pool: Option<rayon::ThreadPool>,
     strategy_manager: StrategyManager,
+    trip_router: TripRouter,
     first_iteration: u32,
     last_iteration: u32,
     innovation_disable_fraction: f64,
+    batch_previous_route_proposals: bool,
 }
 
 impl ReplanningPool {
@@ -525,14 +527,16 @@ impl ReplanningPool {
             pool,
             strategy_manager: StrategyManager::from_replanning_config(
                 config.replanning(),
-                trip_router,
+                trip_router.clone(),
                 scenario_core,
             ),
+            trip_router,
             first_iteration: config.controller().first_iteration,
             last_iteration: config.controller().last_iteration,
             innovation_disable_fraction: config
                 .replanning()
                 .fraction_of_iterations_to_disable_innovation,
+            batch_previous_route_proposals: config.replanning().batch_previous_route_proposals,
         }
     }
 
@@ -543,6 +547,11 @@ impl ReplanningPool {
         base_seed: u64,
     ) -> Population {
         let innovation_disabled = self.innovation_disabled(iteration);
+        if self.batch_previous_route_proposals {
+            self.trip_router
+                .prepare_previous_route_proposals(&population);
+        }
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
         match &self.pool {
             Some(pool) => pool.install(|| {
                 replan_population(
@@ -551,6 +560,7 @@ impl ReplanningPool {
                     base_seed,
                     &self.strategy_manager,
                     innovation_disabled,
+                    &dispatch,
                 )
             }),
             None => replan_population(
@@ -559,6 +569,7 @@ impl ReplanningPool {
                 base_seed,
                 &self.strategy_manager,
                 innovation_disabled,
+                &dispatch,
             ),
         }
     }

@@ -89,7 +89,11 @@ impl ActivityEngine {
                     .unwrap(),
             );
             ActivityEngine::notify_act_end(&mut agent, now);
-            res.push(agent);
+            // A final activity has no following leg. Keep it in the simulation only long
+            // enough to publish its end event, then retire the agent here.
+            if agent.next_leg().is_some() {
+                res.push(agent);
+            }
         }
         res
     }

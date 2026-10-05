@@ -694,6 +694,9 @@ pub struct Replanning {
     pub max_agent_plan_memory: u32,
     pub plan_selector_for_removal: String,
     pub strategy_settings: Vec<StrategySetting>,
+    pub adaptive_reroute_probability: Option<f64>,
+    pub adaptive_reroute_interval: u32,
+    pub batch_previous_route_proposals: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Builder)]
@@ -720,12 +723,34 @@ register_override!("replanning.plan_selector_for_removal", |config, value| {
     config.replanning_mut().plan_selector_for_removal = value.to_string();
 });
 
+register_override!(
+    "replanning.adaptive_reroute_probability",
+    |config, value| {
+        config.replanning_mut().adaptive_reroute_probability =
+            (value != "none").then(|| value.parse().unwrap());
+    }
+);
+
+register_override!("replanning.adaptive_reroute_interval", |config, value| {
+    config.replanning_mut().adaptive_reroute_interval = value.parse().unwrap();
+});
+
+register_override!(
+    "replanning.batch_previous_route_proposals",
+    |config, value| {
+        config.replanning_mut().batch_previous_route_proposals = value.parse().unwrap();
+    }
+);
+
 impl Default for Replanning {
     fn default() -> Self {
         Self {
             fraction_of_iterations_to_disable_innovation: 1.0,
             max_agent_plan_memory: 5,
             plan_selector_for_removal: WORST_SCORE_STRATEGY_NAME.to_string(),
+            adaptive_reroute_probability: None,
+            adaptive_reroute_interval: 5,
+            batch_previous_route_proposals: false,
             strategy_settings: vec![StrategySetting {
                 name: KEEP_LAST_SELECTED_STRATEGY_NAME.to_string(),
                 weight: 1.0,
@@ -1740,6 +1765,9 @@ mod tests {
                 fraction_of_iterations_to_disable_innovation: 0.8,
                 max_agent_plan_memory: 7,
                 plan_selector_for_removal: "BestScore".to_string(),
+                adaptive_reroute_probability: None,
+                adaptive_reroute_interval: 5,
+                batch_previous_route_proposals: false,
                 strategy_settings: vec![
                     StrategySetting {
                         name: "ReRoute".to_string(),
@@ -1766,6 +1794,9 @@ mod tests {
                 fraction_of_iterations_to_disable_innovation: 1.0,
                 max_agent_plan_memory: 5,
                 plan_selector_for_removal: WORST_SCORE_STRATEGY_NAME.to_string(),
+                adaptive_reroute_probability: None,
+                adaptive_reroute_interval: 5,
+                batch_previous_route_proposals: false,
                 strategy_settings: vec![StrategySetting {
                     name: KEEP_LAST_SELECTED_STRATEGY_NAME.to_string(),
                     weight: 1.0,

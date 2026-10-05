@@ -52,7 +52,7 @@ pub(crate) fn write_to_xml(garage: &Garage, path: &Path) {
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename = "vehicleDefinitions")]
 pub struct IOVehicleDefinitions {
-    #[serde(rename = "vehicleType")]
+    #[serde(rename = "vehicleType", default)]
     pub veh_types: Vec<IOVehicleType>,
     #[serde(rename = "vehicle", default)]
     pub vehicles: Vec<IOVehicle>,

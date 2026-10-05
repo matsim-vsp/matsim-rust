@@ -265,6 +265,7 @@ impl PartitionTravelTimeCollector {
 
 #[derive(Debug, Default)]
 struct TravelTimeSnapshot {
+    epoch: u64,
     bin_size: Duration,
     num_bins: usize,
     // Only links with observations need consolidated bins. Others use freespeed at lookup.
@@ -303,6 +304,7 @@ impl GlobalTravelTimeCalculator {
                 received: 0,
             }),
             snapshot: ArcSwap::from_pointee(TravelTimeSnapshot {
+                epoch: 0,
                 bin_size,
                 num_bins,
                 times_by_partition: vec![IntMap::default(); num_parts],
@@ -349,6 +351,7 @@ impl GlobalTravelTimeCalculator {
                 .collect();
             let current = self.snapshot.load();
             self.snapshot.store(Arc::new(TravelTimeSnapshot {
+                epoch: current.epoch + 1,
                 bin_size: current.bin_size,
                 num_bins: current.num_bins,
                 times_by_partition,
@@ -357,6 +360,10 @@ impl GlobalTravelTimeCalculator {
             pending.last_published_iteration = Some(iteration);
             pending.received = 0;
         }
+    }
+
+    pub(crate) fn snapshot_epoch(&self) -> u64 {
+        self.snapshot.load().epoch
     }
 
     pub fn get_link_travel_time(

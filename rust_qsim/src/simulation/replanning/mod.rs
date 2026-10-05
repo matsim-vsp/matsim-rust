@@ -15,8 +15,10 @@ use nohash_hasher::IntMap;
 use rand::RngExt;
 use rayon::prelude::*;
 use selectors::{DefaultSelector, KeepLastSelector, WorstScoreSelector};
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 pub mod routing;
 pub mod selectors;
@@ -29,6 +31,7 @@ pub const SELECT_RANDOM_STRATEGY_NAME: &str = "SelectRandom";
 pub const WORST_SCORE_STRATEGY_NAME: &str = "WorstScore";
 pub const RE_ROUTE_STRATEGY_NAME: &str = "ReRoute";
 pub const SELECT_EXP_BETA_STRATEGY_NAME: &str = "SelectExpBeta";
+const ADAPTIVE_REROUTE_RNG_PURPOSE: &str = "replanning.reroute.exploration";
 
 #[allow(dead_code)]
 /// This is responsible for picking a plan, copying it, and replanning it.
@@ -99,6 +102,7 @@ pub(crate) fn replan_population(
     base_seed: u64,
     strategy_manager: &StrategyManager,
     innovation_disabled: bool,
+    dispatch: &tracing::Dispatch,
 ) -> Population {
     let persons = population
         .persons
@@ -106,7 +110,9 @@ pub(crate) fn replan_population(
         .collect::<Vec<_>>()
         .into_par_iter()
         .map(|(id, mut person)| {
-            strategy_manager.run(iteration, base_seed, innovation_disabled, &mut person);
+            tracing::dispatcher::with_default(dispatch, || {
+                strategy_manager.run(iteration, base_seed, innovation_disabled, &mut person);
+            });
             (id, person)
         })
         .collect();
@@ -125,6 +131,10 @@ pub(crate) struct StrategyManager {
     max_memory_size: usize,
     #[builder(default = "default_plan_remover()")]
     plan_remover: Box<dyn PlanSelector>,
+    #[builder(default = "default_adaptive_reroute_policy()")]
+    adaptive_reroute_policy: Option<AdaptiveReroutePolicy>,
+    #[builder(default = "default_last_rerouted_iterations()")]
+    last_rerouted_iterations: Mutex<HashMap<Id<InternalPerson>, u32>>,
     #[builder(default = "default_strategies(TripRouter::default(), ScenarioCore::default())")]
     strategies: IntMap<Id<String>, Box<dyn PlanStrategy>>,
 }
@@ -144,6 +154,7 @@ impl StrategyManager {
             .plan_remover(plan_selector_from_config_name(
                 &replanning.plan_selector_for_removal,
             ))
+            .adaptive_reroute_policy(AdaptiveReroutePolicy::from_config(replanning))
             .strategies(default_strategies(trip_router, scenario_core.clone()))
             .build()
             .unwrap()
@@ -163,9 +174,42 @@ impl StrategyManager {
         };
 
         if let Some(strategy) = self.choose_strategy(&context, person) {
-            strategy.handle(person, &context);
+            let should_run = strategy.name().external() != RE_ROUTE_STRATEGY_NAME
+                || self.should_reroute(person, &context);
+            if should_run {
+                strategy.handle(person, &context);
+                if strategy.name().external() == RE_ROUTE_STRATEGY_NAME
+                    && self.adaptive_reroute_policy.is_some()
+                {
+                    self.last_rerouted_iterations
+                        .lock()
+                        .expect("adaptive reroute state lock poisoned")
+                        .insert(person.id().clone(), iteration);
+                }
+            }
         }
         self.remove_plans_if_needed(person, &context);
+    }
+
+    fn should_reroute(&self, person: &InternalPerson, context: &ReplanningContext) -> bool {
+        let Some(policy) = &self.adaptive_reroute_policy else {
+            return true;
+        };
+        let last_rerouted = self
+            .last_rerouted_iterations
+            .lock()
+            .expect("adaptive reroute state lock poisoned")
+            .get(person.id())
+            .copied();
+        if last_rerouted
+            .is_none_or(|last| context.iteration.saturating_sub(last) >= policy.full_check_interval)
+        {
+            return true;
+        }
+
+        let stream_id = format!("{}:{}", context.iteration, person.id().external());
+        let mut rng = get_rng(context.base_seed, ADAPTIVE_REROUTE_RNG_PURPOSE, &stream_id);
+        rng.random::<f64>() < policy.reroute_probability
     }
 
     /// Chooses a strategy and runs it.
@@ -243,6 +287,38 @@ fn default_weights_per_subpopulation() -> IntMap<Id<String>, StrategyWeights> {
 
 fn default_max_memory_size() -> usize {
     5
+}
+
+fn default_adaptive_reroute_policy() -> Option<AdaptiveReroutePolicy> {
+    None
+}
+
+fn default_last_rerouted_iterations() -> Mutex<HashMap<Id<InternalPerson>, u32>> {
+    Mutex::new(HashMap::new())
+}
+
+#[derive(Clone, Copy)]
+struct AdaptiveReroutePolicy {
+    reroute_probability: f64,
+    full_check_interval: u32,
+}
+
+impl AdaptiveReroutePolicy {
+    fn from_config(config: &config::Replanning) -> Option<Self> {
+        let probability = config.adaptive_reroute_probability?;
+        assert!(
+            probability.is_finite() && (0.0..=1.0).contains(&probability),
+            "adaptive reroute probability must be finite and in [0, 1]"
+        );
+        assert!(
+            config.adaptive_reroute_interval > 0,
+            "adaptive reroute interval must be greater than zero"
+        );
+        Some(Self {
+            reroute_probability: probability,
+            full_check_interval: config.adaptive_reroute_interval,
+        })
+    }
 }
 
 fn default_plan_remover() -> Box<dyn PlanSelector> {
@@ -492,6 +568,33 @@ mod tests {
 
         assert_eq!(1, person.plans().len());
         assert_eq!(Some(1.0), person.plans()[0].score);
+    }
+
+    #[deterministic_id_test]
+    fn adaptive_reroute_keeps_initial_and_periodic_checks() {
+        let replanning = Replanning {
+            adaptive_reroute_probability: Some(0.0),
+            adaptive_reroute_interval: 3,
+            ..Replanning::default()
+        };
+        let manager = StrategyManager::from_replanning_config(
+            &replanning,
+            TripRouter::default(),
+            &ScenarioCore::default(),
+        );
+        let person = person_with_scores([Some(1.0)]);
+        let mut context = context();
+
+        assert!(manager.should_reroute(&person, &context));
+        manager
+            .last_rerouted_iterations
+            .lock()
+            .unwrap()
+            .insert(person.id().clone(), 0);
+        context.iteration = 1;
+        assert!(!manager.should_reroute(&person, &context));
+        context.iteration = 3;
+        assert!(manager.should_reroute(&person, &context));
     }
 
     #[deterministic_id_test]

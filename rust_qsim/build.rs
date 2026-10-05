@@ -24,7 +24,10 @@ fn main() {
     let mut config = Config::new();
     // we use the protobuf-src which provides the protoc compiler. This line makes it available
     // to prost-build
-    config.protoc_executable(protobuf_src::protoc());
+    let protoc = std::env::var_os("PROTOC")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(protobuf_src::protoc);
+    config.protoc_executable(protoc);
 
     tonic_build::configure()
         .build_client(true)
