@@ -12,5 +12,7 @@ mod equil_teleport;
 mod iterations;
 #[path = "simulation/pt.rs"]
 mod pt;
+#[path = "simulation/standalone_analysis.rs"]
+mod standalone_analysis;
 #[path = "simulation/three_links.rs"]
 mod three_links;

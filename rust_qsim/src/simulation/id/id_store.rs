@@ -295,7 +295,7 @@ impl IdStore {
     }
 
     #[cfg(any(test, feature = "test_util"))]
-    pub(crate) fn reset(&self) {
+    pub fn reset(&self) {
         self.ids.clear();
         self.mapping.clear();
     }
