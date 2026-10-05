@@ -31,6 +31,7 @@ struct Totals {
     reference_time_seconds: f64,
     reference_observed_seconds: f64,
     delay_observations: u64,
+    ratio_observations: u64,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -137,9 +138,12 @@ impl<'a> NetworkDistanceCollector<'a> {
             return;
         }
         let elapsed_nanos = exit_nanos.saturating_sub(visit.entry_nanos);
-        if elapsed_nanos == 0 {
+        if exit_nanos < visit.entry_nanos {
             self.diagnostics.non_positive_durations += 1;
             return;
+        }
+        if elapsed_nanos == 0 {
+            self.diagnostics.non_positive_durations += 1;
         }
         let distance = link.length * (exit_position - visit.entry_position);
         let partial = visit.entry_position != 0.0 || exit_position != 1.0;
@@ -168,9 +172,12 @@ impl<'a> NetworkDistanceCollector<'a> {
         if let Some(delay) = delay {
             totals.free_flow_delay_seconds += delay;
             totals.positive_excess_delay_seconds += delay.max(0.0);
-            totals.reference_time_seconds += elapsed_seconds - delay;
-            totals.reference_observed_seconds += elapsed_seconds;
             totals.delay_observations += 1;
+            if elapsed_nanos > 0 {
+                totals.reference_time_seconds += elapsed_seconds - delay;
+                totals.reference_observed_seconds += elapsed_seconds;
+                totals.ratio_observations += 1;
+            }
         }
     }
 
@@ -219,6 +226,7 @@ impl<'a> NetworkDistanceCollector<'a> {
                 network.reference_time_seconds += value.reference_time_seconds;
                 network.reference_observed_seconds += value.reference_observed_seconds;
                 network.delay_observations += value.delay_observations;
+                network.ratio_observations += value.ratio_observations;
                 if value.delay_observations > 0 {
                     network_has_delay = true;
                     if let Some(clip) = clip_delay {
@@ -231,7 +239,7 @@ impl<'a> NetworkDistanceCollector<'a> {
                 let relative_speed = ratio(
                     value.reference_time_seconds,
                     value.reference_observed_seconds,
-                    value.delay_observations,
+                    value.ratio_observations,
                 );
                 let mut row = format!(
                     "{},{hour},{},{},{:.6},{:.6},{},{}",
@@ -254,7 +262,7 @@ impl<'a> NetworkDistanceCollector<'a> {
             let relative_speed = ratio(
                 network.reference_time_seconds,
                 network.reference_observed_seconds,
-                network.delay_observations,
+                network.ratio_observations,
             );
             let mut row = format!(
                 "{hour},{},{:.6},{:.6},{},{}",

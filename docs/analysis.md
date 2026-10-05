@@ -31,10 +31,13 @@ across-link mean and population standard deviation per interval,
 `link.length * (exit_position - entry_position)`, so first and last link portions count. Visits
 with entry position zero and exit position one are complete; other valid forward positions are
 partial and included. Positions outside `[0, 1]` or a decreasing position, non-finite or negative
-lengths, and visits without positive elapsed time are excluded and counted in
-`network_distance_time_diagnostics.csv`. Visits still open at the end are counted as unfinished
-and contribute no guessed distance or time. A same-link route is a regular visit and is counted
-when its entry and exit events are paired.
+lengths and decreasing event times are excluded and counted in
+`network_distance_time_diagnostics.csv`. A valid visit with zero elapsed time retains its observed
+distance and traversal count, reports zero vehicle time and signed delay when the reference speed
+is valid, and contributes no relative-speed ratio; it is counted in the non-positive-duration
+diagnostic. Visits still open at the end are counted as unfinished and contribute no guessed
+distance or time. A same-link route is a regular visit and is counted when its entry and exit
+events are paired.
 
 Vehicle time is the elapsed time between link entry and exit. A visit crossing an analysis
 interval boundary is assigned whole to its entry interval, as in the link-speed tables. This

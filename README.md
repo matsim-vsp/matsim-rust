@@ -209,8 +209,12 @@ cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-con
 ## Reanalyze a completed run
 
 A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. It
-covers link volumes and coverage, link classification, per-interval link speeds, and agent travel;
-see `docs/analysis.md` for the conventions. The `analyze` binary regenerates that report from the
+covers link volumes and coverage, link classification, per-interval link speeds, vehicle distance
+and travel time, free-flow-relative delay, relative-speed profiles, traversal diagnostics, and
+en-route agent travel; passenger distance and time are explicitly unavailable without link-level
+occupancy. An optional `output.analysis.excess_delay_clip_seconds` setting adds clipped positive
+delay columns to the CSV exports and metric catalog. See `docs/analysis.md` for allocation and
+metric conventions. The `analyze` binary regenerates that report from the
 run's saved outputs without rerunning QSim:
 
 ```shell
