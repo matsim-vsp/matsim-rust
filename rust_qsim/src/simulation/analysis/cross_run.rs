@@ -1,6 +1,7 @@
 //! Comparisons between reports from completed runs.
 
-use super::{AnalysisError, Manifest, csv, escape_html, read_json};
+use super::report::escape_html;
+use super::{AnalysisError, Manifest, csv, read_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -1233,6 +1234,13 @@ fn table_specs() -> &'static [TableSpec] {
             metrics: &[
                 ("load_vehicle_meters", "load_vehicle_meters"),
                 ("load_share", "load_share"),
+            ],
+        },
+        TableSpec {
+            file: "noise_summary.csv",
+            metrics: &[
+                ("receiver_noise_value", "value"),
+                ("affected_population", "affected_population"),
             ],
         },
     ]

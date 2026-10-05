@@ -1,5 +1,6 @@
 //! Final-iteration link coverage, capacity, speed, distance, delay and agent travel reporting.
 
+mod accessibility;
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
@@ -11,7 +12,6 @@ mod service;
 pub use cross_run::compare_completed_runs;
 pub use demographic::PersonDemographic;
 pub use ensemble::analyze_run_ensemble;
-use report::{CSV_TABLE_SCRIPT, REPORT_STYLE, csv_preview_for_script, escape_html};
 mod survey;
 mod validation;
 
@@ -19,8 +19,11 @@ mod transit;
 pub use transit::TransitMetadata;
 
 mod network_distance;
+mod noise;
 
-use crate::simulation::config::{Analysis, CompressionType, LinkLabels, ServiceInputs};
+use crate::simulation::config::{
+    Accessibility, Analysis, CompressionType, LinkLabels, NoiseInputs, ServiceInputs,
+};
 use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonStuckEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
@@ -95,6 +98,12 @@ const PERSON_DEMOGRAPHIC_PREVIEW_ROWS: usize = 200;
 const EXPRESSWAY: &str = "expressway";
 /// Leg rows embedded in the local report before it defers to the full `legs.csv`.
 const LEGS_PREVIEW_ROWS: usize = 200;
+/// Dimensions every accessibility row is grouped by, as the catalog declares them.
+const ACCESSIBILITY_AGGREGATION_KEY: &str =
+    "origin_zone,category,mode,departure_period_start_seconds,threshold_seconds";
+/// The same dimensions without the origin, which is how a summary row aggregates.
+const ACCESSIBILITY_SUMMARY_KEY: &str =
+    "category,mode,departure_period_start_seconds,threshold_seconds";
 
 /// Modules the report covers beyond the required one, in report order. `None` marks a module this
 /// build computes, so it follows the run's outcome; `Some` carries the reason the module stays
@@ -159,6 +168,7 @@ pub struct Manifest {
     #[serde(default)]
     transit_observed_data: Option<String>,
     #[serde(default)]
+    noise: Option<NoiseInputs>,
     person_group_attributes: Vec<String>,
     #[serde(default)]
     person_weight_attribute: Option<String>,
@@ -166,11 +176,22 @@ pub struct Manifest {
     person_cost_attribute: Option<String>,
 
     excess_delay_clip_seconds: Option<f64>,
+    /// Accessibility inputs, recorded so [`reanalyze_completed_run`] rebuilds the same
+    /// report. Absent in a manifest written before the module existed, which reads back as
+    /// "nothing configured" rather than failing the rerun.
+    #[serde(default)]
+    accessibility: Accessibility,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonExpectedTravel {
     person_id: String,
+    /// Coordinate of the person's first non-stage activity, or `None` for a plan without one.
+    /// Accessibility places a person in the zone nearest this point, so the coordinate has to
+    /// be recorded here rather than recovered later: the analysis pass never sees the
+    /// population, only this metadata.
+    #[serde(default)]
+    home_coord: Option<[f64; 2]>,
     legs: Vec<ExpectedLeg>,
     #[serde(default)]
     journeys: Vec<ExpectedJourney>,
@@ -512,6 +533,11 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
                 .collect();
             Some(PersonExpectedTravel {
                 person_id: person.id().external().to_owned(),
+                home_coord: activities
+                    .first()
+                    .and_then(|(_, activity)| activity.coord.as_ref())
+                    .map(|coordinate| [coordinate.x, coordinate.y])
+                    .filter(|[x, y]| x.is_finite() && y.is_finite()),
                 legs,
                 journeys,
             })
@@ -643,11 +669,13 @@ pub fn analyze_final_iteration(
             .transit_observed_data
             .as_ref()
             .map(|path| path.display().to_string()),
+        noise: settings.noise.clone(),
         person_group_attributes: settings.person_group_attributes.clone(),
         person_weight_attribute: settings.person_weight_attribute.clone(),
         person_cost_attribute: settings.person_cost_attribute.clone(),
 
         excess_delay_clip_seconds: settings.excess_delay_clip_seconds,
+        accessibility: settings.accessibility.clone(),
     };
 
     // Required inputs are validated before anything is staged, so an unreadable recording is
@@ -764,11 +792,13 @@ pub fn reanalyze_completed_run(
         comparison_runs: recorded.comparison_runs.iter().map(PathBuf::from).collect(),
         service: recorded.service.clone(),
         transit_observed_data: recorded.transit_observed_data.as_ref().map(PathBuf::from),
+        noise: recorded.noise.clone(),
         person_group_attributes: recorded.person_group_attributes.clone(),
         person_weight_attribute: recorded.person_weight_attribute.clone(),
         person_cost_attribute: recorded.person_cost_attribute.clone(),
 
         excess_delay_clip_seconds: recorded.excess_delay_clip_seconds,
+        accessibility: recorded.accessibility.clone(),
     };
 
     analyze_final_iteration(
@@ -1203,7 +1233,10 @@ fn publish_complete(
 
     write_json(
         &staging.join(METRIC_CATALOG_FILE),
-        &metrics(settings.excess_delay_clip_seconds.is_some()),
+        &metrics(
+            settings.excess_delay_clip_seconds.is_some(),
+            settings.accessibility.is_configured(),
+        ),
     )?;
     let vehicle_classes: Vec<_> = run_metadata
         .vehicle_types
@@ -1247,12 +1280,31 @@ fn publish_complete(
     if comparison.as_ref().is_none_or(Result::is_err) {
         cross_run::write_empty(&staging)?;
     }
+    // A partially configured accessibility input cannot produce a measure, so a bad setting
+    // fails only this module; the rest of the report is unaffected.
+    let accessibility = accessibility_result(output_dir, &staging, settings, run_metadata);
+    if !matches!(accessibility, Some(Ok(()))) {
+        // Replace whatever a half-written module left behind, so the report never mixes a
+        // partial accessibility result with an unavailable one.
+        accessibility::write_empty(
+            &staging,
+            accessibility
+                .as_ref()
+                .and_then(|result| result.as_ref().err().map(String::as_str)),
+        )?;
+    }
     let service = settings.service.as_ref().map(|inputs| {
         service::write(&staging, output_dir, inputs, network, ordered_links)
             .map_err(|error| error.to_string())
     });
     if service.as_ref().is_none_or(Result::is_err) {
         service::write_empty(&staging)?;
+    }
+    let noise = settings.noise.as_ref().map(|inputs| {
+        noise::write(&staging, output_dir, inputs).map_err(|error| error.to_string())
+    });
+    if noise.as_ref().is_none_or(Result::is_err) {
+        noise::write_empty(&staging)?;
     }
     let demographics = if settings.person_group_attributes.is_empty()
         || run_metadata.person_demographics.is_empty()
@@ -1271,6 +1323,7 @@ fn publish_complete(
         &RequiredOutcome::Complete,
         validation.as_ref(),
         comparison.as_ref(),
+        accessibility.as_ref(),
         service.as_ref(),
         demographics.as_ref(),
         &TransitOutcome {
@@ -1278,6 +1331,7 @@ fn publish_complete(
             validation: transit_validation.as_ref(),
         },
         survey.as_ref(),
+        noise.as_ref(),
     );
 
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
@@ -1294,6 +1348,33 @@ fn publish_complete(
         fs::remove_dir_all(&failure_dir).map_err(io_error)?;
     }
     Ok(published.join("index.html"))
+}
+
+/// Outcome of the accessibility module.
+///
+/// `None` means no accessibility input is configured, which leaves the module unavailable.
+/// A configured module either produces its tables or reports why it cannot; a partial set of
+/// inputs and an unreadable file are both that one failure, and neither touches the required
+/// module.
+fn accessibility_result(
+    output_dir: &Path,
+    staging: &Path,
+    settings: &Analysis,
+    run_metadata: &AnalysisRunMetadata,
+) -> Option<Result<(), String>> {
+    if !settings.accessibility.is_configured() {
+        return None;
+    }
+    Some(settings.accessibility.validate().and_then(|()| {
+        accessibility::write(
+            staging,
+            output_dir,
+            &settings.accessibility,
+            &run_metadata.expected_travel,
+            run_metadata.sample_size(),
+        )
+        .map_err(|error| error.to_string())
+    }))
 }
 
 fn write_class_counts(
@@ -1352,7 +1433,9 @@ fn publish_failure(
         None,
         None,
         None,
+        None,
         &TransitOutcome::default(),
+        None,
         None,
     );
     let staging = output_dir.join(FAILURE_STAGING_DIR);
@@ -1380,10 +1463,12 @@ fn module_statuses(
     outcome: &RequiredOutcome,
     validation: Option<&Result<(), String>>,
     comparison: Option<&Result<(), String>>,
+    accessibility: Option<&Result<(), String>>,
     service: Option<&Result<(), String>>,
     demographics: Option<&Result<(), String>>,
     transit: &TransitOutcome<'_>,
     survey: Option<&Result<(), String>>,
+    noise: Option<&Result<(), String>>,
 ) -> Vec<ModuleStatus> {
     let (status, reason) = match outcome {
         RequiredOutcome::Complete => (STATUS_COMPLETE, None),
@@ -1429,6 +1514,14 @@ fn module_statuses(
                     Some("No comparison runs are configured".to_owned()),
                 )),
             },
+            "accessibility" => match accessibility {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No accessibility inputs are configured".to_owned()),
+                )),
+            },
             "service_performance" => match service {
                 Some(Ok(())) => Some((STATUS_COMPLETE, None)),
                 Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
@@ -1451,6 +1544,14 @@ fn module_statuses(
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No journey survey dataset is configured".to_owned()),
+                )),
+            },
+            "noise_exposure" => match noise {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No modeled noise records are configured".to_owned()),
                 )),
             },
             _ => None,
@@ -1551,7 +1652,7 @@ fn write_empty_validation(path: &Path) -> Result<(), AnalysisError> {
 /// itself, because two tables can export the same column name for different metrics: coverage.csv
 /// and group_coverage.csv both carry `used_links`, which the catalog distinguishes as
 /// `used_links` and `group_used_links`.
-fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
+fn metrics(include_clipped_delay: bool, include_accessibility: bool) -> Vec<Metric<'static>> {
     vec![
         Metric {
             name: "entry_vehicles",
@@ -2299,6 +2400,18 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
                 aggregation_key,
             }),
     )
+    .chain([
+        Metric {
+            name: "receiver_noise_value",
+            unit: "input_unit",
+            aggregation_key: "receiver_id,period_start_seconds,period_end_seconds,metric,unit",
+        },
+        Metric {
+            name: "affected_population",
+            unit: "persons",
+            aggregation_key: "receiver_id,period_start_seconds,period_end_seconds,metric",
+        },
+    ])
     .chain(
         demographic::METRICS
             .iter()
@@ -2324,7 +2437,96 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
     } else {
         Vec::new()
     })
+    .chain(
+        include_accessibility
+            .then(accessibility_metrics)
+            .into_iter()
+            .flatten(),
+    )
     .collect()
+}
+
+/// Catalog entries of the accessibility module.
+///
+/// Registering the measure here is what makes it available to the comparison and equity
+/// consumers: they read the catalog rather than the module, so a metric that is computed but
+/// not registered would be invisible to them. The aggregation key names the origin, the
+/// category, the mode, the departure period and the threshold, which are exactly the
+/// dimensions a comparison needs to line two runs up on.
+///
+/// The catalog names the column, per the rule in `docs/architecture.md`, so the measure is
+/// registered as `opportunities` — the column that carries it. The declared measure name is in
+/// that table's own `measure` column, which is what tells a consumer which definition a
+/// `opportunities` value was computed under.
+fn accessibility_metrics() -> Vec<Metric<'static>> {
+    vec![
+        Metric {
+            name: "opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "reachable_opportunity_share",
+            unit: "proportion",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "reachable_opportunity_locations",
+            unit: "locations",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "unreachable_opportunity_locations",
+            unit: "locations",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "opportunity_locations_without_cost",
+            unit: "locations",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        Metric {
+            name: "total_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_AGGREGATION_KEY,
+        },
+        // The equity pair: the same measure summarised once per zone and once per person.
+        Metric {
+            name: "mean_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "population_weighted_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "median_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "min_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "max_opportunities",
+            unit: "opportunities",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "zones_without_costs",
+            unit: "zones",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+        Metric {
+            name: "persons_included",
+            unit: "persons",
+            aggregation_key: ACCESSIBILITY_SUMMARY_KEY,
+        },
+    ]
 }
 
 /// Swap a fully staged directory into place.
@@ -4198,9 +4400,64 @@ mod tests {
         assert!(hourly.contains("36000,\"car\",1,1,1,10.000000"));
     }
 
+    #[test]
+    fn noise_reports_through_the_shared_final_iteration_analysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("ITERS/it.0/events");
+        fs::create_dir_all(&events).unwrap();
+        fs::write(events.join("events.0.xml"), "<events></events>").unwrap();
+        fs::write(
+            dir.path().join("noise.csv"),
+            "receiver_id,period_start_seconds,period_end_seconds,metric,unit,value,x,y\nr1,0,3600,exposure,dB,42,10,20\n",
+        )
+        .unwrap();
+        let metadata = AnalysisRunMetadata::from_run(
+            0,
+            1.0,
+            &Garage::default(),
+            Vec::new(),
+            AnalysisInputPaths::default(),
+        );
+        let report = analyze_final_iteration(
+            dir.path(),
+            0,
+            1,
+            CompressionType::None,
+            3600,
+            &metadata,
+            &Network::new(),
+            &Analysis {
+                enabled: true,
+                interval_seconds: 3600,
+                noise: Some(NoiseInputs {
+                    records: "noise.csv".into(),
+                    affected_population: None,
+                }),
+                ..Analysis::default()
+            },
+        )
+        .unwrap();
+        let output = report.parent().unwrap();
+        let summary = fs::read_to_string(output.join("noise_summary.csv")).unwrap();
+        assert!(summary.contains("r1,0,3600,exposure,dB,42,energy_mean,,noise_map_0.svg"));
+        assert!(output.join("noise_map_0.svg").is_file());
+        let html = fs::read_to_string(&report).unwrap();
+        assert!(html.contains("id=\"noise-maps\""));
+        assert!(html.contains("noise_map_0.svg"));
+        let statuses: serde_json::Value = read_json(&output.join(MODULE_STATUS_FILE)).unwrap();
+        assert!(
+            statuses
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["module"] == "noise_exposure" && row["status"] == "complete")
+        );
+    }
+
     fn expected_person(person_id: &str, legs: &[(usize, &str)]) -> PersonExpectedTravel {
         PersonExpectedTravel {
             person_id: person_id.to_owned(),
+            home_coord: None,
             legs: legs
                 .iter()
                 .map(|(leg_index, mode)| ExpectedLeg {
