@@ -609,9 +609,31 @@ pub struct Analysis {
     pub observed_data: Option<PathBuf>,
     /// Run directories whose latest published analysis reports are included in a comparison.
     pub comparison_runs: Vec<PathBuf>,
+    /// Optional DRT/taxi service records analysed after the run.
+    pub service: Option<ServiceInputs>,
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
+}
+
+/// Supplied records for DRT and taxi service performance. The analysis only reads them; no
+/// service is simulated. Relative paths are resolved against the configured output directory.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ServiceInputs {
+    /// One row per request. This is the only source of rejections.
+    pub requests: PathBuf,
+    /// Request-to-vehicle association records with pickup and drop-off times.
+    pub passengers: Option<PathBuf>,
+    /// Vehicle capacity and service window records.
+    pub fleet: Option<PathBuf>,
+    /// Vehicle task records with drive distances.
+    pub schedule: Option<PathBuf>,
+    /// Service area polygon in network node coordinates.
+    #[serde(default)]
+    pub service_area: Option<Vec<[f64; 2]>>,
+    /// Configured maximum wait between request submission and pickup.
+    #[serde(default)]
+    pub max_wait_seconds: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -632,6 +654,7 @@ impl Default for Analysis {
 
             observed_data: None,
             comparison_runs: Vec::new(),
+            service: None,
 
             excess_delay_clip_seconds: None,
         }

@@ -154,6 +154,7 @@ fn analyze_with_clip(
             urban_boundary: None,
             observed_data: None,
             comparison_runs: Vec::new(),
+            service: None,
             excess_delay_clip_seconds: clip_delay,
         },
     )
