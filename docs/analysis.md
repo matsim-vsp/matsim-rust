@@ -65,6 +65,31 @@ green and unused links in gray. Dashed lines identify expressways, which means
 the exact, case-sensitive label `expressway`; any other road type is drawn solid.
 Hover over a map link to see its labels and usage.
 
+## Comparing completed runs
+
+The shared analysis interface can compare existing reports with an explicit baseline:
+
+```rust,ignore
+use rust_qsim::simulation::analysis::compare_completed_runs;
+use std::path::{Path, PathBuf};
+
+let report = compare_completed_runs(
+    Path::new("runs/baseline"),
+    &[PathBuf::from("runs/alternative-a"), PathBuf::from("runs/alternative-b")],
+)?;
+```
+
+Each input must contain a complete `analysis/manifest.json`, metric catalog and latest-iteration
+tables. The comparison is written to `baseline/analysis/comparison/` and leaves each input report
+unchanged. It exports one row per common aggregation key with both values, alternative-minus-
+baseline difference, relative difference and the baseline denominator. Relative differences are
+blank when the baseline is zero. Link rows are matched by external link ID; links missing from
+either network are excluded and the number of corresponding links appears in the HTML report.
+Runs with different interval widths, simulation end times, sample-size scales, or link
+classification/filter definitions are rejected. Agent duration comparisons include only people
+with a complete plan in both runs. Metrics without a compatible catalog definition or registered
+table are omitted.
+
 For example:
 
 ```yaml

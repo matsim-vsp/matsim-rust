@@ -1,7 +1,10 @@
 //! Final-iteration link coverage, capacity and link speed reporting.
 
 pub mod capacity;
+mod cross_run;
 mod link_speed;
+
+pub use cross_run::compare_completed_runs;
 
 use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
 use crate::simulation::events::{
