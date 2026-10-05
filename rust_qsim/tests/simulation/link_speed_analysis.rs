@@ -157,6 +157,7 @@ fn analyze_with_clip(
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            noise: None,
             excess_delay_clip_seconds: clip_delay,
         },
     )

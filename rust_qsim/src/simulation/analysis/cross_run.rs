@@ -1235,6 +1235,13 @@ fn table_specs() -> &'static [TableSpec] {
                 ("load_share", "load_share"),
             ],
         },
+        TableSpec {
+            file: "noise_summary.csv",
+            metrics: &[
+                ("receiver_noise_value", "value"),
+                ("affected_population", "affected_population"),
+            ],
+        },
     ]
 }
 
