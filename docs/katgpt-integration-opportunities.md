@@ -130,6 +130,29 @@ For larger comparisons, keep the same inputs, seed, worker count, output setting
 
 For exact changes, compare costs, routes, determinism, and vehicle events. For experimental adaptive replanning, also compare link volumes, travel-time distributions, stuck agents, and convergence across seeds. Profile smaller cases before allocating a ten-million-person run, then validate scale effects with a controlled population ladder.
 
+### Repeatable local runs
+
+`scripts/routing_experiment.py` runs a release `local_qsim` binary repeatedly with a warm-up, stable seed, worker counts, separate output directories, and elapsed-time / RSS ceilings. It writes `experiment.json` plus one captured log per attempt. Use the same scenario, capacity scaling, output settings, seed, and worker counts for baseline and optimized binaries; only the binary/revision should differ in an exact comparison. For adaptive comparisons, use independent seeds and report transport outcomes as well as resource use. Use separate configs and output directories for fixed-plan and route-active workloads. A route-active run is interpretable only when routing profile output records nonzero searches.
+
+Example on Linux after building the binary:
+
+```sh
+python3 scripts/routing_experiment.py \\
+  --config rust_qsim/assets/berlin-v6.4/config.yml \\
+  --input rust_qsim/assets/berlin-v6.4 \\
+  --output-dir /tmp/matsim-fixed-plan-current \\
+  --workload fixed-plan --population-size 5332 \\
+  --network-nodes 119174 --network-links 283885 \\
+  --sample-size 0.001 --simulated-duration-seconds 129600 --iterations 2 \\
+  --demand-provenance 'Bundled Berlin v6.4 filtered 0.1% population' \\
+  --seed 4711 --qsim-workers 2 --replanning-workers 2 \\
+  --build-profile release --build-settings 'cargo build --release; RUSTFLAGS=unset' \\
+  --warmups 1 --runs 3 --max-seconds 600 --max-rss-kib 8388608 \\
+  --set controller.last_iteration=1
+```
+
+The `--input` paths must cover the full input bundle; files and directory contents are hashed. The worker option maps to `partitioning.num_parts` (QSim workers); replanning threads are set separately. RSS and CPU values are sampled from Linux `/proc` at 100 ms intervals and may miss brief peaks or the final CPU fraction. For a formal result, also retain kernel-level process accounting and the generated routing profile outputs. The driver records config/input/binary hashes, source revision/dirty state, Rust toolchain, declared build settings, hardware, command lines, run logs, declared workload dimensions, and resource ceilings. It does not generate population sizes or verify declared build/workload metadata: provide a matching input/config per ladder rung and verify declarations. Set elapsed/RSS ceilings according to the machine allocation; the script does not prescribe a feasibility threshold.
+
 ## Initial runtime baseline
 
 Built the unchanged release binary with `cargo build --release --bin local_qsim` after confirming the apt-installed CMake is available. The build completed successfully (about 73 seconds).
@@ -157,4 +180,6 @@ For each population size, runs used the same input, the 119,174-node / 283,885-l
 
 The optimized runs consistently recorded 380 searches and 838,406 node expansions for 100 people, and 740 searches and 1,796,027 expansions for 200. The baseline predates those routing profile counters, so its per-search counts are unavailable. The first baseline and optimized runs produced identical serialized route records (2,286 for 100 people and 4,482 for 200) and byte-identical compressed vehicle-event files at each population size. Median user CPU time fell by 44% and 46%, and median peak RSS by 21% and 20%, respectively. Wall-time ranges overlap at both sizes and the optimized medians are higher. These runs support lower CPU and memory use on these cases, but do not establish a wall-time improvement or predict ten-million-person behavior. Route-cache and reverse-tree limits apply per router, and search scratch is retained per worker thread. Kernel profiling remains unavailable in this environment (`perf_event_paranoid=4`).
 
-Checks completed so far: `cargo check -p rust_qsim --lib` passed, all 91 replanning tests passed, and both CSV and Parquet routing profile tests passed. The runtime comparison used release builds from the archived baseline and optimized commits. Later correctness work on candidate validation, heuristic capabilities, and metric semantics sits uncommitted in the working tree and is not covered by those numbers.
+Checks recorded for the historical comparison: `cargo check -p rust_qsim --lib` passed, all 91 replanning tests passed, and both CSV and Parquet routing profile tests passed. The runtime comparison used release builds from the archived baseline and optimized commits. Subsequent correctness changes in the current source were not included in those measurements.
+
+The historical measurements above predate the experiment driver and are not a completed population ladder. This checkout has no recorded 10k/100k/500k/1M full-population runs or matched adaptive-policy outcome study. The existing adaptive option remains disabled by default, makes per-person seeded decisions with mandatory first and periodic checks, and still requires independent-seed measurements of link volumes, travel times, and stuck agents before its behavioral/resource tradeoff can be assessed. The full million-person feasibility claim remains unproven; do not extrapolate it from the 100/200-person routing subset.
