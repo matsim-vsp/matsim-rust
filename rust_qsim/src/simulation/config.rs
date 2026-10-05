@@ -625,18 +625,44 @@ pub struct Analysis {
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
 
+    /// Zone system the geographic reports are built from.
+    pub zone_system: ZoneSystem,
     /// Reachability of supplied opportunities from the run's zones and people.
     pub accessibility: Accessibility,
-    /// Person attributes the demographic module groups people by, in report order. Every person
-    /// is grouped under each configured attribute, and a person who does not supply one is
-    /// reported as `unknown` rather than dropped. An empty list leaves the module unavailable.
+    /// Person attributes the demographic module groups people by, in report order.
     pub person_group_attributes: Vec<String>,
-    /// Person attribute holding a person's weight. It has to be a finite, non-negative number;
-    /// a missing or unusable value is reported as a default weight of one.
+    /// Person attribute holding a person's weight.
     pub person_weight_attribute: Option<String>,
-    /// Person attribute holding a monetary travel cost for the day. Without it the cost burden
-    /// is unavailable rather than zero, because the run supplies no monetary cost of its own.
+    /// Person attribute holding a monetary travel cost for the day.
     pub person_cost_attribute: Option<String>,
+}
+
+/// Zone system supplied to the analysis, keyed by the external identifiers the recorded
+/// events carry.
+///
+/// Two independent geographies are accepted, because a location can be described by either:
+/// `link_zones` locates the links that journey origins, journey destinations and activities
+/// are reported on, and `person_zones` locates the people themselves. A location without an
+/// entry is reported as `unmapped` rather than dropped, so a partial zone system still
+/// accounts for every observed trip.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct ZoneSystem {
+    /// Identifier of the supplied zone system, recorded in the manifest and the report so a
+    /// reader knows which definition the reported zones came from.
+    pub name: Option<String>,
+    /// External link ID to zone ID.
+    pub link_zones: std::collections::BTreeMap<String, String>,
+    /// External person ID to zone ID.
+    pub person_zones: std::collections::BTreeMap<String, String>,
+}
+
+impl ZoneSystem {
+    /// A zone system only becomes usable once it maps at least one location; an empty one
+    /// leaves the geographic modules unavailable instead of reporting a single `unmapped` zone.
+    pub fn is_empty(&self) -> bool {
+        self.link_zones.is_empty() && self.person_zones.is_empty()
+    }
 }
 
 /// Inputs of the accessibility-to-opportunities measure, and the thresholds it reports.
@@ -788,6 +814,7 @@ impl Default for Analysis {
 
             excess_delay_clip_seconds: None,
 
+            zone_system: ZoneSystem::default(),
             accessibility: Accessibility::default(),
             person_group_attributes: Vec::new(),
             person_weight_attribute: None,
