@@ -14,7 +14,7 @@ struct Record {
     pollutant: String,
     unit: String,
     value: f64,
-    vehicle_category: String,
+    vehicle_id: String,
     link_id: Option<String>,
     area_id: Option<String>,
     emission_type: String,
@@ -57,9 +57,9 @@ pub(super) fn write(
     out: &Path,
     source: &Path,
     inputs: &EmissionsInputs,
+    vehicle_type_by_id: &BTreeMap<String, String>,
     iteration: u32,
     sample_size: f64,
-    interval: u32,
 ) -> Result<bool, AnalysisError> {
     if inputs.fleet_provenance.trim().is_empty()
         || inputs.emission_factor_provenance.trim().is_empty()
@@ -101,12 +101,23 @@ pub(super) fn write(
             || row.value < 0.0
             || row.pollutant.trim().is_empty()
             || row.unit.trim().is_empty()
-            || row.vehicle_category.trim().is_empty()
+            || row.vehicle_id.trim().is_empty()
         {
             return Err(AnalysisError::new(
-                "emissions records require finite non-negative time/value and non-empty pollutant, unit and vehicle_category",
+                "emissions records require finite non-negative time/value and non-empty pollutant, unit and vehicle_id",
             ));
         }
+        let vehicle_type = vehicle_type_by_id.get(&row.vehicle_id).ok_or_else(|| {
+            AnalysisError::new(format!(
+                "emissions record references unknown vehicle {}",
+                row.vehicle_id
+            ))
+        })?;
+        let vehicle_category = inputs.vehicle_categories.get(vehicle_type).ok_or_else(|| {
+            AnalysisError::new(format!(
+                "no emissions category configured for vehicle type {vehicle_type}"
+            ))
+        })?;
         match row.emission_type.as_str() {
             "warm" => warm += 1,
             "cold" => cold += 1,
@@ -125,10 +136,10 @@ pub(super) fn write(
             }
         };
         let key = Key {
-            hour: (row.time_seconds as u64 / interval as u64) * interval as u64,
+            hour: (row.time_seconds as u64 / 3600) * 3600,
             pollutant: row.pollutant,
             unit: row.unit,
-            category: row.vehicle_category,
+            category: vehicle_category.clone(),
             location_type: location_type.to_owned(),
             location_id,
             emission_type: row.emission_type,
@@ -209,22 +220,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("records.csv");
         fs::write(&input, concat!(
-            "iteration,time_seconds,pollutant,unit,value,vehicle_category,link_id,area_id,emission_type\n",
-            "2,3599,CO2,g,10,passenger_car,l1,,warm\n",
-            "2,3600,CO2,g,6,passenger_car,,city,cold\n",
-            "1,3600,CO2,g,not-a-number,passenger_car,l1,,warm\n",
-            "2,3600,NOx,mg,4,truck,l2,,warm\n",
+            "iteration,time_seconds,pollutant,unit,value,vehicle_id,link_id,area_id,emission_type\n",
+            "2,3599,CO2,g,10,v1,l1,,warm\n",
+            "2,3600,CO2,g,6,v1,,city,cold\n",
+            "1,3600,CO2,g,not-a-number,v1,l1,,warm\n",
+            "2,3600,NOx,mg,4,v2,l2,,warm\n",
         )).unwrap();
         let out = dir.path().join("out");
         fs::create_dir(&out).unwrap();
         let inputs = EmissionsInputs {
             records: input,
+            vehicle_categories: BTreeMap::from([
+                ("type1".to_owned(), "passenger_car".to_owned()),
+                ("type2".to_owned(), "truck".to_owned()),
+            ]),
             fleet_provenance: "fleet-v1".to_owned(),
             emission_factor_provenance: "factors-v1".to_owned(),
             accounting_boundary: "tailpipe".to_owned(),
         };
 
-        assert!(write(&out, &inputs.records, &inputs, 2, 0.5, 3600).unwrap());
+        let vehicle_types = BTreeMap::from([
+            ("v1".to_owned(), "type1".to_owned()),
+            ("v2".to_owned(), "type2".to_owned()),
+        ]);
+        assert!(write(&out, &inputs.records, &inputs, &vehicle_types, 2, 0.5).unwrap());
 
         let table = fs::read_to_string(out.join("emissions_hourly.csv")).unwrap();
         assert!(table.contains(
@@ -248,6 +267,6 @@ mod tests {
             provenance["interpretation"],
             "emitted mass; not concentration or exposure"
         );
-        assert!(!write(&out, &inputs.records, &inputs, 9, 0.5, 3600).unwrap());
+        assert!(!write(&out, &inputs.records, &inputs, &vehicle_types, 9, 0.5).unwrap());
     }
 }

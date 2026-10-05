@@ -648,6 +648,8 @@ pub struct ServiceInputs {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EmissionsInputs {
     pub records: PathBuf,
+    /// Category labels keyed by the vehicle type ID found in the run's vehicle catalog.
+    pub vehicle_categories: std::collections::BTreeMap<String, String>,
     pub fleet_provenance: String,
     pub emission_factor_provenance: String,
     pub accounting_boundary: String,

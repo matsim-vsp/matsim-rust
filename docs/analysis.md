@@ -7,16 +7,22 @@ It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
 Configure `output.analysis.emissions` to consume externally modeled emission records; this
 analysis does not calculate emissions. The CSV must include
-`iteration,time_seconds,pollutant,unit,value,vehicle_category,link_id,area_id,emission_type`. Set exactly one of `link_id` and `area_id`
+`iteration,time_seconds,pollutant,unit,value,vehicle_id,link_id,area_id,emission_type`. Set exactly one of `link_id` and `area_id`
 on each row, and use `warm` or `cold` for `emission_type`. Units are kept as supplied, so different
-units are never summed together. Only records for the completed iteration are included. Values are
-expanded by `1 / qsim.sample_size`; both sampled and expanded totals are exported.
+units are never summed together. `vehicle_id` joins through the run's vehicle catalog to a vehicle
+type ID; `vehicle_categories` maps those type IDs to reporting categories. Only records for the
+completed iteration are included. Totals use fixed 3600-second hours regardless of
+`analysis.interval_seconds`. Values are expanded by `1 / qsim.sample_size`; both sampled and
+expanded totals are exported.
 
 ```yaml
 output:
   analysis:
     emissions:
       records: emissions.csv
+      vehicle_categories:
+        vehicle-type-car: passenger_car
+        vehicle-type-truck: heavy_truck
       fleet_provenance: "vehicle categories from fleet-v3"
       emission_factor_provenance: "HBEFA 4.2"
       accounting_boundary: "tailpipe"

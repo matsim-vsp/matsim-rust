@@ -1254,13 +1254,18 @@ fn publish_complete(
         } else {
             output_dir.join(&inputs.records)
         };
+        let vehicle_type_by_id = run_metadata
+            .vehicles
+            .iter()
+            .map(|vehicle| (vehicle.vehicle_id.clone(), vehicle.vehicle_type_id.clone()))
+            .collect();
         emissions::write(
             &staging,
             &source,
             inputs,
+            &vehicle_type_by_id,
             manifest.iteration,
             run_metadata.sample_size(),
-            interval,
         )
         .map_err(|error| error.to_string())
     });
@@ -4494,7 +4499,7 @@ mod tests {
             expected_person("stuck_midway", &[(0, "walk"), (1, "car"), (2, "train")]),
         ];
         let garage = Garage::default();
-        let metadata = AnalysisRunMetadata::from_run(
+        let mut metadata = AnalysisRunMetadata::from_run(
             0,
             // An unsampled run, so the link tables scale nothing. These assertions cover the
             // agent travel tables, which do not depend on the fraction.
@@ -4508,6 +4513,16 @@ mod tests {
                 vehicles: None,
             },
         );
+        metadata.vehicles.push(VehiclePce {
+            vehicle_id: "emission-vehicle".to_owned(),
+            vehicle_type_id: "vehicle-type".to_owned(),
+            pce: 1.0,
+        });
+        fs::write(
+            dir.path().join("emissions.csv"),
+            "iteration,time_seconds,pollutant,unit,value,vehicle_id,link_id,area_id,emission_type\n0,3700,CO2,g,12,emission-vehicle,l,,warm\n",
+        )
+        .unwrap();
         let report = analyze_final_iteration(
             dir.path(),
             0,
@@ -4519,6 +4534,16 @@ mod tests {
             &Analysis {
                 enabled: true,
                 interval_seconds: 3600,
+                emissions: Some(EmissionsInputs {
+                    records: PathBuf::from("emissions.csv"),
+                    vehicle_categories: BTreeMap::from([(
+                        "vehicle-type".to_owned(),
+                        "passenger_car".to_owned(),
+                    )]),
+                    fleet_provenance: "test fleet".to_owned(),
+                    emission_factor_provenance: "test factors".to_owned(),
+                    accounting_boundary: "tailpipe".to_owned(),
+                }),
                 ..Analysis::default()
             },
         )
@@ -4567,6 +4592,9 @@ mod tests {
         assert!(report_html.contains("<h2>Agent travel</h2>"));
         assert!(report_html.contains("<h2>Modeled emissions</h2>"));
         assert!(report_html.contains("emissions-network-map"));
+        assert!(report_html.contains("csvTable('#emissions'"));
+        let emissions = fs::read_to_string(output.join("emissions_hourly.csv")).unwrap();
+        assert!(emissions.contains("3600,\"CO2\",\"g\",\"passenger_car\""));
         assert!(report_html.contains("href=\"legs.csv\""));
         assert!(report_html.contains("travelers,2,5.000000"));
         assert!(report_html.contains("missed_plan_leg"));
@@ -4574,6 +4602,13 @@ mod tests {
         assert!(report_html.contains("person_id,leg_index,mode,departure_seconds"));
         assert!(report_html.contains("stuck_midway"));
         let statuses: serde_json::Value = read_json(&output.join("module_status.json")).unwrap();
+        let emissions_status = statuses
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|status| status["module"] == "modeled_emissions")
+            .unwrap();
+        assert_eq!(emissions_status["status"], STATUS_COMPLETE);
         let agent_travel = statuses
             .as_array()
             .expect("module status is an array")
