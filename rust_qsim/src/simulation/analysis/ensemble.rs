@@ -7,9 +7,9 @@
 //! everything else is read from the reports that call leaves behind.
 
 use super::cross_run::compare_completed_runs;
+use super::report::{CSV_TABLE_SCRIPT, REPORT_STYLE, csv_preview_for_script, escape_html};
 use super::{
-    ANALYSIS_DIR, AnalysisError, CSV_TABLE_SCRIPT, Manifest, REPORT_STYLE, STATUS_COMPLETE,
-    csv_preview_for_script, escape_html, mean, quantile, read_json, write_json,
+    ANALYSIS_DIR, AnalysisError, Manifest, STATUS_COMPLETE, mean, quantile, read_json, write_json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

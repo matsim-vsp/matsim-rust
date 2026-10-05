@@ -1,6 +1,7 @@
 //! Comparisons between reports from completed runs.
 
-use super::{AnalysisError, Manifest, csv, escape_html, read_json};
+use super::report::escape_html;
+use super::{AnalysisError, Manifest, csv, read_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
