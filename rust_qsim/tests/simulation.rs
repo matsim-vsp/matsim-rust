@@ -10,6 +10,8 @@ mod equil;
 mod equil_teleport;
 #[path = "simulation/iterations.rs"]
 mod iterations;
+#[path = "simulation/link_speed_analysis.rs"]
+mod link_speed_analysis;
 #[path = "simulation/pt.rs"]
 mod pt;
 #[path = "simulation/three_links.rs"]

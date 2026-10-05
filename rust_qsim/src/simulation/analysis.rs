@@ -1,4 +1,6 @@
-//! Final-iteration link coverage reporting.
+//! Final-iteration link coverage and link speed reporting.
+
+mod link_speed;
 
 use crate::simulation::config::{Analysis, CompressionType};
 use crate::simulation::events::{
@@ -11,6 +13,7 @@ use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
+use link_speed::LinkSpeedCollector;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -197,6 +200,7 @@ pub fn analyze_final_iteration(
         .map(PartitionReader::next_event)
         .collect::<Result<Vec<_>, _>>()?;
     let mut counts = LinkVolumesByHour::new();
+    let mut speeds = LinkSpeedCollector::new(settings.interval_seconds, &ordered_links);
     loop {
         // Rank order breaks simultaneous timestamps consistently; these link counts commute.
         let Some((rank, time)) = heads
@@ -215,21 +219,27 @@ pub fn analyze_final_iteration(
             &ids,
             &mut counts,
         );
+        speeds.observe(event.as_ref(), time);
         heads[rank] = readers[rank].next_event()?;
     }
+    speeds.finish();
+
+    // Intervals include their start and exclude their end; the report keeps every interval that
+    // holds observations plus every interval up to the end of the simulated day. A link speed
+    // observation starts with a link entry in the same interval, so the entry counts already cover
+    // every interval that a speed can be reported for.
+    let mut hours: BTreeSet<u64> = counts.keys().map(|key| key.hour_start_seconds).collect();
+    hours.extend((0..u64::from(simulation_end_time)).step_by(settings.interval_seconds as usize));
+    hours.insert(0);
+    let hours: Vec<u64> = hours.into_iter().collect();
 
     let staging = output_dir.join(".analysis-staging");
     if staging.exists() {
         fs::remove_dir_all(&staging).map_err(io_error)?;
     }
     fs::create_dir_all(&staging).map_err(io_error)?;
-    write_tables(
-        &staging,
-        &ordered_links,
-        &counts,
-        settings.interval_seconds,
-        simulation_end_time,
-    )?;
+    write_tables(&staging, &ordered_links, &counts, &hours)?;
+    speeds.write_tables(&staging, &hours)?;
     let manifest = Manifest {
         status: "complete",
         iteration,
@@ -283,6 +293,8 @@ pub fn analyze_final_iteration(
         .map_err(|e| AnalysisError(e.to_string()))?,
     )
     .map_err(io_error)?;
+    // Units and aggregation keys describe the exported tables of this module and of
+    // `analysis::link_speed`, whose CSV headers define the same metric names.
     let metrics = [
         Metric {
             name: "link_entry_vehicles",
@@ -309,6 +321,51 @@ pub fn analyze_final_iteration(
             unit: "percent",
             aggregation_key: "hour_start_seconds",
         },
+        Metric {
+            name: "link_speed_observations",
+            unit: "traversals",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_representative_speed",
+            unit: "m/s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_vehicle_speed_mean",
+            unit: "m/s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "link_vehicle_speed_population_std",
+            unit: "m/s",
+            aggregation_key: "link_id,hour_start_seconds",
+        },
+        Metric {
+            name: "hourly_mean_link_speed",
+            unit: "m/s",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "hourly_link_speed_population_std",
+            unit: "m/s",
+            aggregation_key: "hour_start_seconds",
+        },
+        Metric {
+            name: "speed_histogram_link_count",
+            unit: "links",
+            aggregation_key: "hour_start_seconds,bin_index",
+        },
+        Metric {
+            name: "speed_histogram_observation_count",
+            unit: "traversals",
+            aggregation_key: "hour_start_seconds,bin_index",
+        },
+        Metric {
+            name: "speed_traversal_records",
+            unit: "records",
+            aggregation_key: "report",
+        },
     ];
     fs::write(
         staging.join("metric_catalog.json"),
@@ -323,8 +380,8 @@ pub fn analyze_final_iteration(
         },
         ModuleStatus {
             module: "link_speed",
-            status: "unavailable",
-            reason: Some("Traversal timing metrics are not implemented yet"),
+            status: "complete",
+            reason: None,
         },
         ModuleStatus {
             module: "agent_travel",
@@ -435,7 +492,7 @@ fn accumulate(
     if !ids.contains(id) {
         return;
     }
-    let hour = time.as_nanos() / 1_000_000_000 / u64::from(interval) * u64::from(interval);
+    let hour = hour_start_seconds(time.as_nanos(), interval);
     let count = counts
         .entry(LinkHour {
             hour_start_seconds: hour,
@@ -449,12 +506,17 @@ fn accumulate(
     }
 }
 
+/// Start of the analysis interval that contains `nanos`; intervals include their start and
+/// exclude their end.
+fn hour_start_seconds(nanos: u64, interval: u32) -> u64 {
+    nanos / 1_000_000_000 / u64::from(interval) * u64::from(interval)
+}
+
 fn write_tables(
     path: &Path,
     links: &[&Link],
     counts: &LinkVolumesByHour,
-    interval: u32,
-    simulation_end_time: u32,
+    hours: &[u64],
 ) -> Result<(), AnalysisError> {
     let mut hourly = BufWriter::new(File::create(path.join("link_hourly.csv")).map_err(io_error)?);
     writeln!(
@@ -462,10 +524,7 @@ fn write_tables(
         "link_id,hour_start_seconds,entry_vehicles,exit_vehicles"
     )
     .map_err(io_error)?;
-    let mut hours: BTreeSet<u64> = counts.keys().map(|key| key.hour_start_seconds).collect();
-    hours.extend((0..u64::from(simulation_end_time)).step_by(interval as usize));
-    hours.insert(0);
-    for hour in &hours {
+    for hour in hours {
         let hour = *hour;
         for link in links {
             let volumes = counts
@@ -492,6 +551,7 @@ fn write_tables(
     )
     .map_err(io_error)?;
     for hour in hours {
+        let hour = *hour;
         let used = links
             .iter()
             .filter(|link| {
@@ -519,14 +579,126 @@ fn write_tables(
     Ok(())
 }
 
+/// One exported CSV file rendered as a table of the report.
+struct ReportTable {
+    /// JavaScript variable and DOM id of the rendered table.
+    name: &'static str,
+    title: &'static str,
+    file: &'static str,
+}
+
+const VOLUME_TABLES: &[ReportTable] = &[
+    ReportTable {
+        name: "volumes",
+        title: "Per-link hourly entry and exit vehicles",
+        file: "link_hourly.csv",
+    },
+    ReportTable {
+        name: "coverage",
+        title: "Hourly coverage",
+        file: "coverage.csv",
+    },
+];
+
+const SPEED_TABLES: &[ReportTable] = &[
+    ReportTable {
+        name: "linkSpeeds",
+        title: "Per-link hourly speed",
+        file: "link_speed_hourly.csv",
+    },
+    ReportTable {
+        name: "speedSummary",
+        title: "Across-link hourly speed summary",
+        file: "link_speed_summary.csv",
+    },
+    ReportTable {
+        name: "speedHistogram",
+        title: "Hourly link speed histogram",
+        file: "link_speed_histogram.csv",
+    },
+    ReportTable {
+        name: "speedRecords",
+        title: "Link speed traversal records",
+        file: "link_speed_diagnostics.csv",
+    },
+];
+
+/// A table of the report together with its embedded CSV lines.
+struct EmbeddedTable<'a> {
+    table: &'a ReportTable,
+    data: String,
+}
+
+impl<'a> EmbeddedTable<'a> {
+    fn read(path: &Path, table: &'a ReportTable) -> Result<Self, AnalysisError> {
+        let content = fs::read_to_string(path.join(table.file)).map_err(io_error)?;
+        let lines: Vec<_> = content.lines().collect();
+        Ok(Self {
+            table,
+            data: json_for_script(&lines)?,
+        })
+    }
+
+    /// The first embedded line holds the column names, the remaining lines the rows.
+    fn declaration(&self) -> String {
+        format!(
+            "const {name}={data};",
+            name = self.table.name,
+            data = self.data
+        )
+    }
+
+    fn section(&self) -> String {
+        format!(
+            "<h3>{title}</h3><div id=\"{name}\"></div>",
+            title = self.table.title,
+            name = self.table.name
+        )
+    }
+
+    fn render(&self) -> String {
+        let name = self.table.name;
+        format!(
+            "table(document.querySelector('#{name}'),{name}[0].split(','),{name}.slice(1).map(x=>x.split(',')));"
+        )
+    }
+}
+
+fn embed_tables<'a>(
+    path: &Path,
+    tables: &'a [ReportTable],
+) -> Result<Vec<EmbeddedTable<'a>>, AnalysisError> {
+    tables
+        .iter()
+        .map(|table| EmbeddedTable::read(path, table))
+        .collect()
+}
+
 fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), AnalysisError> {
-    let coverage = fs::read_to_string(path.join("coverage.csv")).map_err(io_error)?;
-    let coverage = json_for_script(&coverage.lines().collect::<Vec<_>>())?;
+    let mut embedded = embed_tables(path, VOLUME_TABLES)?;
+    embedded.extend(embed_tables(path, SPEED_TABLES)?);
     let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
-    let hourly = fs::read_to_string(path.join("link_hourly.csv")).map_err(io_error)?;
-    let hourly = json_for_script(&hourly.lines().collect::<Vec<_>>())?;
+    let declarations = embedded
+        .iter()
+        .map(EmbeddedTable::declaration)
+        .chain(std::iter::once(format!("const m={modules};")))
+        .collect::<Vec<_>>()
+        .join("");
+    let volume_sections = embedded[..VOLUME_TABLES.len()]
+        .iter()
+        .map(EmbeddedTable::section)
+        .collect::<String>();
+    let speed_sections = embedded[VOLUME_TABLES.len()..]
+        .iter()
+        .map(EmbeddedTable::section)
+        .collect::<String>();
+    let renders = embedded
+        .iter()
+        .map(EmbeddedTable::render)
+        .collect::<Vec<_>>()
+        .join("");
     let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}table(document.querySelector('#hourly'),h[0].split(','),h.slice(1).map(x=>x.split(',')));table(document.querySelector('#coverage'),c[0].split(','),c.slice(1).map(x=>x.split(',')));table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p>{volume_sections}<h2>Hourly link speeds</h2><p>Speeds are reconstructed from full-link traversals and assigned to the hour in which the vehicle entered the link. The representative speed divides the total travelled distance by the total travel time; the arithmetic vehicle-speed mean and population standard deviation describe the single traversals. A link without a full-link traversal has no speed. Traversal records that cannot produce a full-link speed, such as departures from the middle of a link or traversals that never finished, are counted separately.</p>{speed_sections}<h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"link_speed_hourly.csv\">link speeds (CSV)</a>, <a href=\"link_speed_summary.csv\">hourly speed summary (CSV)</a>, <a href=\"link_speed_histogram.csv\">speed histogram (CSV)</a>, <a href=\"link_speed_diagnostics.csv\">speed traversal records (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>{declarations}function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}{renders}table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }

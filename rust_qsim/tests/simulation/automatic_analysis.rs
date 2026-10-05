@@ -109,7 +109,9 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     let coverage = fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap();
     assert!(coverage.contains("3600,200,5,195,2.500000"));
     let html = fs::read_to_string(&report).unwrap();
-    assert!(html.contains("const h=[\"link_id,hour_start_seconds,entry_vehicles,exit_vehicles\""));
+    assert!(
+        html.contains("const volumes=[\"link_id,hour_start_seconds,entry_vehicles,exit_vehicles\"")
+    );
     let status = fs::read_to_string(report.parent().unwrap().join("module_status.json")).unwrap();
     assert!(status.contains("\"status\": \"unavailable\""));
     let run_metadata =
