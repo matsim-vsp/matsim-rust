@@ -3,14 +3,15 @@
 mod agent_profile;
 pub mod capacity;
 mod cross_run;
+mod ensemble;
 mod link_speed;
 mod service;
-
+pub use cross_run::compare_completed_runs;
+pub use ensemble::analyze_run_ensemble;
 mod survey;
 mod validation;
 
 mod transit;
-pub use cross_run::compare_completed_runs;
 pub use transit::TransitMetadata;
 
 mod network_distance;
