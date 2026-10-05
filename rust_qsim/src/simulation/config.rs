@@ -612,6 +612,17 @@ pub struct Analysis {
 
     /// Optional upper bound, in seconds, applied to positive free-flow-relative delay totals.
     pub excess_delay_clip_seconds: Option<f64>,
+
+    /// Person attributes the demographic module groups people by, in report order. Every person
+    /// is grouped under each configured attribute, and a person who does not supply one is
+    /// reported as `unknown` rather than dropped. An empty list leaves the module unavailable.
+    pub person_group_attributes: Vec<String>,
+    /// Person attribute holding a person's weight. It has to be a finite, non-negative number;
+    /// a missing or unusable value is reported as a default weight of one.
+    pub person_weight_attribute: Option<String>,
+    /// Person attribute holding a monetary travel cost for the day. Without it the cost burden
+    /// is unavailable rather than zero, because the run supplies no monetary cost of its own.
+    pub person_cost_attribute: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -634,6 +645,10 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
 
             excess_delay_clip_seconds: None,
+
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         }
     }
 }
@@ -683,6 +698,35 @@ register_override!(
         Err(_) => warn!("Ignoring invalid excess delay clip '{value}': expected seconds"),
     }
 );
+
+// The grouping list is comma separated, so a run can add demographic dimensions without a
+// config file edit. Blank entries are dropped rather than grouping everyone under an empty name.
+register_override!(
+    "output.analysis.person_group_attributes",
+    |config, value| {
+        config.output_mut().analysis.person_group_attributes = value
+            .split(',')
+            .map(str::trim)
+            .filter(|attribute| !attribute.is_empty())
+            .map(str::to_owned)
+            .collect();
+    }
+);
+
+register_override!(
+    "output.analysis.person_weight_attribute",
+    |config, value| {
+        let attribute = value.trim();
+        config.output_mut().analysis.person_weight_attribute =
+            (!attribute.is_empty()).then(|| attribute.to_owned());
+    }
+);
+
+register_override!("output.analysis.person_cost_attribute", |config, value| {
+    let attribute = value.trim();
+    config.output_mut().analysis.person_cost_attribute =
+        (!attribute.is_empty()).then(|| attribute.to_owned());
+});
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Routing {

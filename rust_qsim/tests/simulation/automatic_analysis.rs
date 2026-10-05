@@ -873,7 +873,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 20] = [
+    const TABLES: [&str; 24] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -894,6 +894,12 @@ fn metric_catalog_names_match_the_exported_columns() {
         "link_hourly_by_class.csv",
         "link_speed_by_class.csv",
         "cross_run_comparison.csv",
+        // The demographic module writes its headers even when it is unavailable, so its catalog
+        // entries always have a table to be looked up in.
+        "person_demographics.csv",
+        "group_burdens.csv",
+        "group_module_outcomes.csv",
+        "equity_comparison.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1401,6 +1407,9 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             observed_data: None,
             comparison_runs: Vec::new(),
             excess_delay_clip_seconds: None,
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         },
     )
     .unwrap();
@@ -1504,6 +1513,9 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             observed_data: None,
             comparison_runs: Vec::new(),
             excess_delay_clip_seconds: None,
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         },
     )
     .unwrap();

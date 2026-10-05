@@ -53,6 +53,7 @@ pub struct Controller {
     adapter_handles: Vec<AdapterHandle>,
     trip_router: TripRouter,
     expected_travel: Vec<crate::simulation::analysis::PersonExpectedTravel>,
+    person_demographics: Vec<crate::simulation::analysis::PersonDemographic>,
 }
 
 pub struct ControllerBuilder {
@@ -144,6 +145,7 @@ impl ControllerBuilder {
             adapter_handles: self.adapter_handles,
             trip_router: router,
             expected_travel: Vec::new(),
+            person_demographics: Vec::new(),
         })
     }
 
@@ -375,7 +377,8 @@ impl Controller {
                     population: self.config.population().path.as_deref(),
                     vehicles: self.config.vehicles().path.as_deref(),
                 },
-            );
+            )
+            .with_person_demographics(std::mem::take(&mut self.person_demographics));
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
                 last_iteration,
@@ -443,6 +446,12 @@ impl Controller {
         if is_last_iteration && self.config.output().analysis.enabled {
             self.expected_travel =
                 crate::simulation::analysis::capture_expected_travel(&self.scenario.population);
+            // The grouping attributes are read here for the same reason: this is the last moment
+            // the population still holds the attributes the run supplied.
+            self.person_demographics = crate::simulation::analysis::capture_person_demographics(
+                &self.scenario.population,
+                &self.config.output().analysis,
+            );
         }
         let inputs = self
             .scenario

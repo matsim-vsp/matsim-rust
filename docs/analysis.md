@@ -102,6 +102,56 @@ Relative paths are resolved from the current run's output directory. A missing o
 comparison report marks only the cross-run comparison module failed.
 
 
+## Demographic outcomes and equity
+
+Set `output.analysis.person_group_attributes` to the person attributes the report groups people
+by -- for example `income`, `age`, `carAvailability` or `homeZone`. The list can be set in YAML
+or comma separated on the command line with
+`--set output.analysis.person_group_attributes=income,age`. Without it the module is unavailable
+and states that reason in `module_status.json`.
+
+The grouping labels, weights and costs are read from the population's person attributes before
+the final iteration's mobsim and recorded in `run_metadata.json`, because the event files cannot
+recover them. A person who does not supply an attribute is reported as `unknown` rather than
+dropped, so group sizes stay comparable, and a person with a non-scalar or blank attribute value
+is grouped as `unknown` too. `output.analysis.person_weight_attribute` names the attribute holding
+a person's weight; it has to be a finite, non-negative number, and a missing or unusable value
+counts as one. `output.analysis.person_cost_attribute` names an attribute holding a monetary
+travel cost. Without it, or without the person supplying one, the cost columns are blank and
+`persons_with_cost` records the coverage: the run scores plans with a placeholder and invents no
+monetary cost of its own.
+
+`group_burdens.csv` reports, per attribute and group, the number of persons, the sum of their
+weights, the weighted share of the dimension, how many fell back to the default weight, the
+travelling persons, and the mean, median and 90th percentile of the completed daily travel-time
+burden. Burdens use only days whose status is `complete` or `no_travel`; an `incomplete` or
+`stuck` person keeps their group size and is counted in `incomplete_persons` without pulling a
+mean down. Percentiles use the nearest-rank definition, as in the journey tables.
+`person_demographics.csv` lists every person with each of their groups, their weight, whether
+that weight was supplied, and their cost.
+
+`equity_comparison.csv` compares this run against every run in
+`output.analysis.comparison_runs`, reading each one's published latest-iteration report. Every row
+carries the criterion it applies, `lower_daily_completed_travel_time`: a person's daily burden is
+defined only when their day completed, and within that population a **winner** is a person whose
+completed daily travel time is lower in the comparison run, a **loser** one whose completed daily
+travel time is higher, and an **unchanged** person one whose burden agrees to within a
+microsecond. Differences of at most a microsecond are unchanged, because the same day's legs
+summed in a different order can differ in the last bits. The rows add up to the whole population
+under the `all`/`all` group, and they state what each count excludes: `baseline_only_persons`
+for persons the comparison run never simulated, `comparison_only_persons` for persons this run
+never simulated, and `not_comparable_persons` for persons the two runs group differently or whose
+day did not complete on one side. A comparison run that was not analyzed with a configured group
+attribute is rejected rather than compared as `unknown`, because the groups would not describe the
+same people on either side.
+
+`group_module_outcomes.csv` folds in the per-group outcomes of the other modules. A module
+publishes them by writing `<module>_group_outcomes.csv` with the columns
+`dimension,group,metric,unit,value` into the report directory, which is how the scenario and
+accessibility outcomes join the group tables once those modules land; a module that does not
+export that table contributes nothing and stays unavailable.
+
+
 ## Network distance, time and congestion
 
 `network_distance_time.csv` reports observed vehicle link traversals by link and interval;

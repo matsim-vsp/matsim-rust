@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+
+<population desc="single agent carrying the demographic attributes the analysis groups by">
+    <person id="100">
+        <attributes>
+            <attribute name="income" class="java.lang.String">low</attribute>
+            <attribute name="age" class="java.lang.Integer">42</attribute>
+            <attribute name="carAvailability" class="java.lang.String">available</attribute>
+            <attribute name="weight" class="java.lang.Double">2.5</attribute>
+            <attribute name="cost" class="java.lang.Double">3.75</attribute>
+        </attributes>
+        <plan score="92.61490939414003" selected="yes">
+            <activity type="home" link="link1" x="5" y="10" end_time="9:00:00"/>
+            <leg mode="walk" dep_time="09:17:00">
+                <attributes>
+                    <attribute name="routingMode" class="java.lang.String">car</attribute>
+                </attributes>
+                <route type="generic" start_link="link1" end_link="link1" trav_time="00:00:08"
+                       distance="10"/>
+            </leg>
+            <activity type="car interaction" link="link1" x="5" y="0" max_dur="00:00:00" >
+            </activity>
+            <leg mode="car" dep_time="9:00:00" trav_time="">
+                <attributes>
+                    <attribute name="routingMode" class="java.lang.String">car</attribute>
+                </attributes>
+                <route type="links" start_link="link1" end_link="link3" trav_time=""
+                       distance="1200" vehicleRefId="100_car">link1 link2 link3
+                </route>
+            </leg>
+            <activity type="car interaction" link="link3" x="1100" y="0" max_dur="00:00:00" >
+            </activity>
+            <leg mode="walk" dep_time="09:28:56">
+                <attributes>
+                    <attribute name="routingMode" class="java.lang.String">car</attribute>
+                </attributes>
+                <route type="generic" start_link="link3" end_link="link3" trav_time="00:00:16" distance="20"></route>
+            </leg>
+            <activity type="errands" link="link3" x="1100.0" y="20" start_time="15:51:00" />
+        </plan>
+    </person>
+</population>
