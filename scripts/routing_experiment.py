@@ -142,6 +142,7 @@ def main() -> int:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--input", required=True, action="append", type=Path, help="input file or directory; repeat for the full input bundle")
     parser.add_argument("--binary", type=Path, default=Path("target/release/local_qsim"))
+    parser.add_argument("--binary-source-revision", help="source revision used to build --binary; defaults to this checkout's HEAD")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--workload", required=True, choices=["fixed-plan", "route-active", "adaptive"])
     parser.add_argument("--population-size", required=True, type=int)
@@ -161,6 +162,11 @@ def main() -> int:
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--max-seconds", type=float, required=True)
     parser.add_argument("--max-rss-kib", type=int)
+    parser.add_argument(
+        "--allow-missing-routing-profile",
+        action="store_true",
+        help="permit legacy route-active binaries that predate A* CSV profiling",
+    )
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args()
 
@@ -184,7 +190,8 @@ def main() -> int:
         input_hashes = [hash_input(path.resolve()) for path in args.input]
     except ValueError as error:
         parser.error(str(error))
-    source_revision = git_value(root, "rev-parse", "HEAD")
+    runner_revision = git_value(root, "rev-parse", "HEAD")
+    binary_revision = args.binary_source_revision or runner_revision
     config_overrides = list(args.set)
     config_overrides += [
         f"computational_setup.random_seed={args.seed}",
@@ -210,7 +217,9 @@ def main() -> int:
             route_profile = routing_profile_summary(run_output_dir)
             route_profile["verified"] = route_profile["search_count"] > 0
             result["routing_profile"] = route_profile
-            if not route_profile["verified"]:
+            if not route_profile["verified"] and args.allow_missing_routing_profile:
+                route_profile["legacy_profile_unavailable"] = True
+            elif not route_profile["verified"]:
                 result["route_validation_error"] = (
                     "No A* search rows found. Enable CSV routing profiling and confirm the workload routes."
                 )
@@ -236,7 +245,9 @@ def main() -> int:
         "iterations": args.iterations,
         "demand_provenance": args.demand_provenance,
         "seed": args.seed,
-        "source_revision": source_revision,
+        "experiment_runner_revision": runner_revision,
+        "binary_source_revision": binary_revision,
+        "binary_source_revision_declared": args.binary_source_revision is not None,
         "source_dirty": bool(git_value(root, "status", "--short")),
         "binary": str(binary),
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
