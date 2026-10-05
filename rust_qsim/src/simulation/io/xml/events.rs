@@ -291,6 +291,18 @@ impl XmlEventsReader {
         Self { parser }
     }
     pub fn read_next(&mut self) -> Option<(SimTime, Box<dyn EventTrait>)> {
+        match self.try_read_next() {
+            Ok(event) => event,
+            Err(XmlEventsReadError::Xml(_)) => None,
+            Err(XmlEventsReadError::InvalidEvent(error)) => {
+                panic!("Could not parse event XML: {error}")
+            }
+        }
+    }
+
+    pub fn try_read_next(
+        &mut self,
+    ) -> Result<Option<(SimTime, Box<dyn EventTrait>)>, XmlEventsReadError> {
         loop {
             let result = self.parser.next();
             match result {
@@ -298,21 +310,51 @@ impl XmlEventsReader {
                     name, attributes, ..
                 }) => {
                     if name.local_name.eq("event") {
-                        let time = SimTime::parse_decimal_seconds(
-                            value_from_name(&attributes, "time").unwrap(),
-                        )
-                        .unwrap_or_else(|e| panic!("Could not parse event time: {e}"));
-                        let event = handle(attributes);
-                        return Some((time, event));
+                        let time_value = value_from_name(&attributes, "time").ok_or_else(|| {
+                            XmlEventsReadError::InvalidEvent("missing time attribute".into())
+                        })?;
+                        let time = SimTime::parse_decimal_seconds(time_value).map_err(|error| {
+                            XmlEventsReadError::InvalidEvent(format!("invalid event time: {error}"))
+                        })?;
+                        let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handle(attributes)
+                        }))
+                        .map_err(|panic| XmlEventsReadError::InvalidEvent(panic_message(panic)))?;
+                        return Ok(Some((time, event)));
                     }
                 }
-                Ok(XmlEvent::EndDocument) => return None,
-                Err(_) => return None,
+                Ok(XmlEvent::EndDocument) => return Ok(None),
+                Err(error) => return Err(XmlEventsReadError::Xml(error)),
                 _ => {
                     continue;
                 }
             }
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum XmlEventsReadError {
+    Xml(xml::reader::Error),
+    InvalidEvent(String),
+}
+
+impl std::fmt::Display for XmlEventsReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Xml(error) => write!(f, "{error}"),
+            Self::InvalidEvent(error) => f.write_str(error),
+        }
+    }
+}
+
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = panic.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = panic.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else {
+        "invalid event attributes".into()
     }
 }
 

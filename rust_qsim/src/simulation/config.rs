@@ -585,6 +585,25 @@ pub struct Output {
     pub logging: Logging,
     #[serde(default)]
     pub write_events: WriteEvents,
+    #[serde(default)]
+    pub analysis: Analysis,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Analysis {
+    pub enabled: bool,
+    /// Width of exported link-volume intervals in seconds.
+    pub interval_seconds: u32,
+}
+
+impl Default for Analysis {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_seconds: 3600,
+        }
+    }
 }
 
 impl Default for Output {
@@ -595,6 +614,7 @@ impl Default for Output {
             profiling: Profiling::None,
             logging: Logging::Info,
             write_events: WriteEvents::File,
+            analysis: Analysis::default(),
         }
     }
 }
@@ -1436,6 +1456,7 @@ fn default_profiling_level() -> String {
 #[cfg(test)]
 mod tests {
     use crate::simulation::config;
+    use crate::simulation::config::Analysis;
     use crate::simulation::config::Output;
     use crate::simulation::config::OverwriteFiles;
     use crate::simulation::config::PathBuf;
@@ -2213,6 +2234,7 @@ modules:
             profiling: Profiling::None,
             logging: Logging::Info,
             write_events: WriteEvents::None,
+            analysis: Analysis::default(),
         });
         config.set_partitioning(Partitioning {
             num_parts: 1,

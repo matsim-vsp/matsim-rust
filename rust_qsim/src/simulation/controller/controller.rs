@@ -262,6 +262,16 @@ impl Controller {
             self.config.controller().write_plans_interval > 0,
             "Invalid controller config: write_plans_interval must be greater than 0."
         );
+        if self.config.output().analysis.enabled {
+            assert!(
+                self.config.output().analysis.interval_seconds > 0,
+                "Invalid output.analysis.interval_seconds: must be greater than 0."
+            );
+            assert!(
+                self.config.output().write_events == WriteEvents::File,
+                "Automatic analysis requires output.write_events: File."
+            );
+        }
 
         self.controller_events_manager
             .reset_iteration(first_iteration);
@@ -315,6 +325,26 @@ impl Controller {
 
         self.controller_events_manager
             .process_event(ControllerEvent::shutdown(true));
+
+        if self.config.output().analysis.enabled {
+            let metadata = crate::simulation::analysis::AnalysisRunMetadata {
+                random_seed: self.config.computational_setup().random_seed,
+                network_input: self.config.network().path.as_deref(),
+                population_input: self.config.population().path.as_deref(),
+            };
+            let report = crate::simulation::analysis::analyze_final_iteration(
+                &output_path,
+                last_iteration,
+                self.config.partitioning().num_parts,
+                self.config.controller().compression_type,
+                self.config.qsim().end_time,
+                &metadata,
+                &self.scenario.core.network,
+                &self.config.output().analysis,
+            )
+            .unwrap_or_else(|err| panic!("Automatic analysis failed: {err}"));
+            info!("Analysis report: {}", report.display());
+        }
     }
 
     fn run_iteration(
