@@ -1,5 +1,7 @@
 use macros::deterministic_id_test;
-use rust_qsim::simulation::analysis::{AnalysisRunMetadata, analyze_final_iteration};
+use rust_qsim::simulation::analysis::{
+    AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
+};
 use rust_qsim::simulation::config::{Analysis, CommandLineArgs, CompressionType, Config};
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::id::Id;
@@ -94,14 +96,17 @@ fn analyze(
     network: &Network,
 ) -> BTreeMap<String, String> {
     let garage = Garage::default();
-    let metadata = AnalysisRunMetadata {
-        random_seed: 4711,
-        network_input: None,
-        population_input: None,
-        vehicles_input: None,
-        expected_travel: &[],
-        garage: &garage,
-    };
+    let metadata = AnalysisRunMetadata::from_run(
+        4711,
+        &garage,
+        Vec::new(),
+        AnalysisInputPaths {
+            network: None,
+            network_file: None,
+            population: None,
+            vehicles: None,
+        },
+    );
     let report = analyze_final_iteration(
         output,
         iteration,

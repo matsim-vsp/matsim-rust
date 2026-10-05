@@ -627,6 +627,23 @@ register_override!("output.overwrite_files", |config, value| {
     config.output_mut().overwrite_files = parse_overwrite_file(value);
 });
 
+// Analysis settings are opt-in and configurable, so both are reachable from the command line.
+register_override!(
+    "output.analysis.enabled",
+    |config, value| match value.parse() {
+        Ok(enabled) => config.output_mut().analysis.enabled = enabled,
+        Err(_) => warn!("Ignoring invalid analysis enabled flag '{value}': expected a boolean"),
+    }
+);
+
+register_override!(
+    "output.analysis.interval_seconds",
+    |config, value| match value.parse() {
+        Ok(interval) => config.output_mut().analysis.interval_seconds = interval,
+        Err(_) => warn!("Ignoring invalid analysis interval '{value}': expected seconds"),
+    }
+);
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Routing {
     pub mode: RoutingMode,
@@ -1301,6 +1318,17 @@ impl CompressionType {
         format!("{stem}.{}", self.extension())
     }
 
+    /// Inverse of [`CompressionType::extension`]; accepts the full recorded format string.
+    pub fn from_extension(extension: &str) -> Option<Self> {
+        match extension {
+            "xml" => Some(Self::None),
+            "xml.gz" => Some(Self::Gz),
+            "binpb" => Some(Self::Proto),
+            "xml.zst" => Some(Self::Zst),
+            _ => None,
+        }
+    }
+
     pub fn is_protobuf(self) -> bool {
         self == Self::Proto
     }
@@ -1570,6 +1598,24 @@ mod tests {
         assert_eq!(config.controller().write_events_interval, 50);
         assert_eq!(config.controller().write_plans_interval, 50);
         assert_eq!(config.controller().compression_type, CompressionType::Proto);
+    }
+
+    #[test]
+    fn compression_type_extension_round_trips() {
+        for compression in [
+            CompressionType::None,
+            CompressionType::Gz,
+            CompressionType::Proto,
+            CompressionType::Zst,
+        ] {
+            assert_eq!(
+                CompressionType::from_extension(compression.extension()),
+                Some(compression),
+                "{}",
+                compression.extension()
+            );
+        }
+        assert_eq!(CompressionType::from_extension("parquet"), None);
     }
 
     #[test]
