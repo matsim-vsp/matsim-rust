@@ -15,6 +15,7 @@ use tracing::instrument;
 pub struct ActivityEngine {
     asleep_q: TimeQueue<AsleepSimulationAgent, InternalPerson>,
     awake_q: Vec<AwakeSimulationAgent>,
+    completed_agents: Vec<SimulationAgent>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
 }
@@ -29,6 +30,7 @@ impl ActivityEngine {
         ActivityEngine {
             asleep_q,
             awake_q,
+            completed_agents: Vec::new(),
             comp_env,
             clock,
         }
@@ -39,6 +41,7 @@ impl ActivityEngine {
             .drain(..)
             .map(|a| a.agent)
             .chain(self.asleep_q.drain().into_iter().map(|a| a.agent))
+            .chain(self.completed_agents.drain(..))
             .collect()
     }
 
@@ -89,10 +92,10 @@ impl ActivityEngine {
                     .unwrap(),
             );
             ActivityEngine::notify_act_end(&mut agent, now);
-            // A final activity has no following leg. Keep it in the simulation only long
-            // enough to publish its end event, then retire the agent here.
             if agent.next_leg().is_some() {
                 res.push(agent);
+            } else {
+                self.completed_agents.push(agent);
             }
         }
         res
@@ -380,6 +383,22 @@ mod tests {
             assert_eq!(agents.len(), 1);
             assert_eq!(engine.awake_agents().len(), 0);
         }
+    }
+
+    #[deterministic_id_test]
+    fn completed_final_activity_agents_are_returned_when_drained() {
+        let person_id = Id::create("completed-person");
+        let mut agent =
+            SimulationAgent::new_plan_based(InternalPerson::new(person_id.clone(), create_plan()));
+        agent.advance_plan(SimTime::from_secs(10));
+        agent.advance_plan(SimTime::from_secs(11));
+
+        let mut engine = create_engine(vec![agent], Default::default());
+        assert!(engine.do_step(21, vec![]).is_empty());
+
+        let agents = engine.drain();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id(), &person_id);
     }
 
     #[deterministic_id_test]
