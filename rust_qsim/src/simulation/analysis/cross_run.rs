@@ -1026,6 +1026,92 @@ fn table_specs() -> &'static [TableSpec] {
             )],
         },
         TableSpec {
+            file: "transit_trips.csv",
+            metrics: &[
+                ("wait_seconds", "wait_seconds"),
+                ("in_vehicle_seconds", "in_vehicle_seconds"),
+                ("arrival_delay_seconds", "arrival_delay_seconds"),
+            ],
+        },
+        TableSpec {
+            file: "transit_stop_hourly.csv",
+            metrics: &[
+                ("boardings_sample", "boardings_sample"),
+                ("alightings_sample", "alightings_sample"),
+                ("boardings", "boardings"),
+                ("alightings", "alightings"),
+            ],
+        },
+        TableSpec {
+            file: "transit_line_summary.csv",
+            metrics: &[
+                ("trips_sample", "trips_sample"),
+                ("trips", "trips"),
+                ("missed_services_sample", "missed_services_sample"),
+                ("wait_observations", "wait_observations"),
+                ("mean_wait_seconds", "mean_wait_seconds"),
+                ("in_vehicle_observations", "in_vehicle_observations"),
+                ("mean_in_vehicle_seconds", "mean_in_vehicle_seconds"),
+                ("delay_observations", "delay_observations"),
+                ("mean_arrival_delay_seconds", "mean_arrival_delay_seconds"),
+            ],
+        },
+        TableSpec {
+            file: "transit_outcomes.csv",
+            metrics: &[
+                ("outcome_trips_sample", "outcome_trips_sample"),
+                ("outcome_trips", "outcome_trips"),
+            ],
+        },
+        TableSpec {
+            file: "transit_occupancy.csv",
+            metrics: &[
+                ("passengers_sample", "passengers_sample"),
+                ("passengers", "passengers"),
+                ("capacity_persons", "capacity_persons"),
+                ("load_factor", "load_factor"),
+            ],
+        },
+        TableSpec {
+            file: "transit_journeys.csv",
+            metrics: &[
+                ("transit_legs", "transit_legs"),
+                ("transfers", "transfers"),
+                ("access_seconds", "access_seconds"),
+                ("egress_seconds", "egress_seconds"),
+                ("transfer_seconds", "transfer_seconds"),
+                ("journey_wait_seconds", "journey_wait_seconds"),
+                ("journey_in_vehicle_seconds", "journey_in_vehicle_seconds"),
+            ],
+        },
+        TableSpec {
+            file: "transit_validation_matches.csv",
+            metrics: &[
+                ("transit_observed", "observed"),
+                ("transit_simulated_sample", "transit_simulated_sample"),
+                ("transit_simulated_expanded", "transit_simulated_expanded"),
+                ("transit_residual", "transit_residual"),
+                ("transit_relative_error", "transit_relative_error"),
+                (
+                    "transit_network_total_expanded",
+                    "transit_network_total_expanded",
+                ),
+            ],
+        },
+        TableSpec {
+            file: "transit_validation_summary.csv",
+            metrics: &[
+                ("transit_matched", "transit_matched"),
+                ("transit_unmatched", "transit_unmatched"),
+                ("transit_observed_total", "transit_observed_total"),
+                ("transit_simulated_total", "transit_simulated_total"),
+                ("transit_bias", "transit_bias"),
+                ("transit_mae", "transit_mae"),
+                ("transit_rmse", "transit_rmse"),
+                ("transit_relative_bias", "transit_relative_bias"),
+            ],
+        },
+        TableSpec {
             file: "link_speed_hourly.csv",
             metrics: &[
                 ("link_speed_traversals", "observations"),
@@ -1114,6 +1200,12 @@ fn denominator_column(metric: &str) -> Option<&'static str> {
         "link_vehicle_speed_mean" | "link_vehicle_speed_population_std" => Some("observations"),
         "hourly_mean_link_speed" | "hourly_link_speed_population_std" => Some("links_with_speed"),
         "person_completed_leg_duration_mean" => Some("completed_legs"),
+        "mean_wait_seconds" => Some("wait_observations"),
+        "mean_in_vehicle_seconds" => Some("in_vehicle_observations"),
+        "mean_arrival_delay_seconds" => Some("delay_observations"),
+        "load_factor" => Some("capacity_persons"),
+        "transit_relative_error" => Some("observed"),
+        "transit_relative_bias" => Some("transit_observed_total"),
         _ => None,
     }
 }
@@ -1490,6 +1582,40 @@ mod tests {
         let compatibility =
             fs::read_to_string(report.parent().unwrap().join("metric_compatibility.csv")).unwrap();
         assert!(compatibility.contains("unavailable_output"));
+    }
+
+    #[test]
+    fn compares_transit_metrics_from_each_latest_iteration_report() {
+        let temp = tempfile::tempdir().unwrap();
+        let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
+        let alternative = run(temp.path(), "alternative", 1.0, "l1,0,15,0\n");
+        for (output, boardings) in [(&baseline, 4), (&alternative, 7)] {
+            let analysis = output.join("analysis");
+            fs::write(
+                analysis.join("metric_catalog.json"),
+                r#"[{"name":"entry_vehicles","unit":"vehicles","aggregation_key":"link_id,interval_start_seconds"},{"name":"boardings","unit":"persons","aggregation_key":"hour_start_seconds,line_id,stop_id"},{"name":"wait_seconds","unit":"seconds","aggregation_key":"person_id,departure_seconds"}]"#,
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("transit_stop_hourly.csv"),
+                format!(
+                    "hour_start_seconds,line_id,stop_id,boardings\n0,Blue,stop-1,{boardings}\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("transit_trips.csv"),
+                "person_id,departure_seconds,wait_seconds\np1,100,20\n",
+            )
+            .unwrap();
+        }
+
+        let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
+        let differences =
+            fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
+        assert!(differences.contains("transit_stop_hourly.csv,boardings,persons"));
+        assert!(differences.contains("4.000000,7.000000,3.000000,75.000000,4.000000,,,comparable"));
+        assert!(differences.contains("transit_trips.csv,wait_seconds,seconds"));
     }
 
     #[test]
