@@ -685,7 +685,7 @@ pub fn analyze_final_iteration(
         Err(error) => return Err(record_failure(output_dir, &manifest, error)),
     };
 
-    let (report, mut runtime) = publish_complete(
+    publish_complete(
         output_dir,
         &manifest,
         &ordered_links,
@@ -696,12 +696,7 @@ pub fn analyze_final_iteration(
         network,
         settings,
         analysis_started,
-    )?;
-    runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
-    if let Err(error) = refresh_runtime_report(&report, &runtime) {
-        warn!("Could not refresh runtime measurements in the completed report: {error}");
-    }
-    Ok(report)
+    )
 }
 
 /// Regenerate the final-iteration report of a completed run from its recorded outputs.
@@ -1140,7 +1135,7 @@ fn publish_complete(
     network: &Network,
     settings: &Analysis,
     analysis_started: std::time::Instant,
-) -> Result<(PathBuf, AnalysisRuntimeMetadata), AnalysisError> {
+) -> Result<PathBuf, AnalysisError> {
     let staging = output_dir.join(STAGING_DIR);
     reset_staging(&staging)?;
     let counts = &replayed.counts;
@@ -1309,6 +1304,10 @@ fn publish_complete(
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
     write_report(&staging, manifest, &statuses, &link_hourly)?;
+    runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
+    if let Err(error) = refresh_runtime_report(&staging.join("index.html"), &runtime) {
+        warn!("Could not refresh runtime measurements in the staged report: {error}");
+    }
     let published = publish(
         &staging,
         &output_dir.join(ANALYSIS_DIR),
@@ -1319,7 +1318,7 @@ fn publish_complete(
     if failure_dir.exists() {
         fs::remove_dir_all(&failure_dir).map_err(io_error)?;
     }
-    Ok((published.join("index.html"), runtime))
+    Ok(published.join("index.html"))
 }
 
 fn write_class_counts(
