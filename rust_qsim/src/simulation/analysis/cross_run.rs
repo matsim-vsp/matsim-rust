@@ -1247,6 +1247,13 @@ fn table_specs() -> &'static [TableSpec] {
             file: "emissions_hourly.csv",
             metrics: &[("emissions_total_expanded", "total_expanded")],
         },
+        TableSpec {
+            file: "noise_summary.csv",
+            metrics: &[
+                ("receiver_noise_value", "value"),
+                ("affected_population", "affected_population"),
+            ],
+        },
     ]
 }
 

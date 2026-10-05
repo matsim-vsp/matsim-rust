@@ -158,7 +158,11 @@ fn analyze_with_clip(
             service: None,
             transit_observed_data: None,
             emissions: None,
+            noise: None,
             excess_delay_clip_seconds: clip_delay,
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         },
     )
     .unwrap();

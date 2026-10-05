@@ -209,6 +209,32 @@ Relative paths are resolved from the current run's output directory. A missing o
 comparison report marks only the cross-run comparison module failed.
 
 
+## Modeled noise and exposure
+
+Set `output.analysis.noise` to analyze supplied receiver records; this reads model outputs and
+does not add a noise simulation engine.
+
+```yaml
+output:
+  analysis:
+    noise:
+      records: noise.csv
+      affected_population: affected_population.csv  # optional
+```
+
+`noise.csv` has `receiver_id,period_start_seconds,period_end_seconds,metric,unit,value` columns;
+optional `x,y` columns give receiver coordinates in the supplied map coordinate system.
+Metrics named `source_sound` and `exposure` require `dB` and are combined by energy mean when
+multiple records share a receiver, period and metric. A supplied `damage` metric is summed in its
+input unit; no monetized damage is calculated. Other supplied metrics use an arithmetic mean.
+`affected_population.csv` has `receiver_id,period_start_seconds,period_end_seconds,affected_population`;
+values join only on the exact receiver and period, and duplicate rows sum. Receiver maps are
+written per sound/exposure metric and exact period only when coordinates are supplied; `noise_maps.csv`
+indexes them. Without that file the
+population column stays blank and availability says unavailable. Summary and availability tables
+are exported and included in the local report. Cross-run comparison reads the latest report's
+noise summary.
+
 ## DRT and taxi service performance
 
 Set `output.analysis.service` to analyse supplied DRT or taxi records. Nothing is simulated: the
@@ -445,3 +471,11 @@ output:
       - [1000.0, 1000.0]
       - [0.0, 1000.0]
 ```
+
+## Demographic outcomes and equity
+
+Set `output.analysis.person_group_attributes` to the person attributes the report groups people by, such as `income` or `age`. Missing or blank attributes are grouped as `unknown`. Optional weight and cost attributes are recorded with the run; invalid or missing weights default to one, while unavailable costs remain blank.
+
+`group_burdens.csv` reports weighted group sizes and completed daily travel-time burdens. Incomplete or stuck people remain in group counts without lowering the travel-time mean. `person_demographics.csv` lists each person's groups, weight, and cost. `equity_comparison.csv` compares completed daily burdens with configured runs; differences within one microsecond count as unchanged, and persons without comparable completed days are reported separately.
+
+`group_module_outcomes.csv` combines per-group outcomes exported by other modules using `<module>_group_outcomes.csv` with columns `dimension,group,metric,unit,value`.
