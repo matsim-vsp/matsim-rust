@@ -333,15 +333,26 @@ impl Controller {
             .process_event(ControllerEvent::shutdown(true));
 
         if self.config.output().analysis.enabled {
-            let metadata = crate::simulation::analysis::AnalysisRunMetadata {
-                random_seed: self.config.computational_setup().random_seed,
-                network_input: self.config.network().path.as_deref(),
-                population_input: self.config.population().path.as_deref(),
-                vehicles_input: self.config.vehicles().path.as_deref(),
-                expected_travel: &self.expected_travel,
-                garage: &self.scenario.core.garage,
-                sample_size: self.config.qsim().sample_size,
-            };
+            // The output network written above is the eligible-link set a standalone rerun reads.
+            let network_file = self
+                .config
+                .controller()
+                .compression_type
+                .with_extension("output_network");
+            let metadata = crate::simulation::analysis::AnalysisRunMetadata::from_run(
+                self.config.computational_setup().random_seed,
+                // The report scales observed volumes up by the reciprocal of this.
+                self.config.qsim().sample_size,
+                &self.scenario.core.garage,
+                // The run has finished, so the snapshot moves into the report instead of copied.
+                std::mem::take(&mut self.expected_travel),
+                crate::simulation::analysis::AnalysisInputPaths {
+                    network: self.config.network().path.as_deref(),
+                    network_file: Some(Path::new(&network_file)),
+                    population: self.config.population().path.as_deref(),
+                    vehicles: self.config.vehicles().path.as_deref(),
+                },
+            );
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
                 last_iteration,
@@ -544,7 +555,7 @@ impl Controller {
     }
 
     fn write_output_id_store(output_path: impl AsRef<Path>) {
-        id::store_to_file(&output_path.as_ref().join("output_ids.binpb"));
+        id::store_to_file(&output_path.as_ref().join(id::OUTPUT_FILE_NAME));
     }
 
     fn write_iteration_files(

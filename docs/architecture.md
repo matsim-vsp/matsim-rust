@@ -36,35 +36,119 @@ collection.
 
 ### Final-Iteration Analysis
 
-`output.analysis` publishes a local report once, after a successful run, from the last completed iteration only.
-It replays the written event partitions, so it requires `output.write_events: File`, and it needs a positive
-`qsim.sample_size` because observed volumes are scaled up to the unsampled population.
+`simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
+`analyze_final_iteration` once, which replays the final iteration's event partitions in
+chronological order and publishes per-interval link-volume and coverage tables plus a
+self-contained HTML report under `<output_dir>/analysis`. The interval width comes from
+`output.analysis.interval_seconds` (3600 by default), so the tables are hourly unless configured
+otherwise. Inputs that cannot be recovered from the event files -- the final-iteration
+expected-travel snapshot, the vehicle/PCE catalog and the simulated sample fraction -- are moved
+into a compact `AnalysisRunMetadata` rather than by borrowing or copying the scenario; the run has
+finished by then, so no population-scale clone happens. The report needs a positive
+`qsim.sample_size`, because observed volumes are scaled up by its reciprocal to describe the
+unsampled population.
 
-Volumes are passenger-car-equivalent weighted, which matches how `LocalLink` charges its flow cap, and the
-V/C denominator is the link's own whole-link capacity multiplied by the interval width. Lane counts are
-exported next to the capacity but never applied to it a second time. `link_capacity.csv` keeps raw vehicle
-counts, observed PCE volumes and sample-scaled volumes as separate columns, and exports
-`effective_capacity_pce`, the V/C denominator. A non-positive capacity leaves only the ratio blank, while
-the volumes stay reportable because they do not involve the capacity; missing PCE invalidates the PCE
-columns as well. Every case is reported per link through `entry_vc_status`/`exit_vc_status`, and
-`vc_histogram.csv` separates links whose ratio is unusable from links that genuinely carried no traffic.
-A link that carried no vehicles on a side is counted as unused whatever its capacity says, so an idle
-network is not hidden behind unavailable ratios.
+Reports distinguish three states:
 
-Each interval is credited only with the capacity of the window the simulation covered, so a final
-interval that is shorter than `analysis.interval_seconds` is not treated as a whole one.
+- **complete** -- the required `link_coverage` module finished; `manifest.json` says `complete` and
+  `analysis/index.html` presents the completed report.
+- **failed** -- a required module failed. Diagnostics go to `<output_dir>/analysis-failure`
+  (`manifest.json`, `module_status.json`, `failure.txt`, and its own `index.html`) and the completed
+  report in `analysis/` is left untouched, so a failed attempt never overwrites working output with
+  something that looks complete.
+- **unavailable** -- an optional module has no implementation or no configured input. These are
+  listed in `module_status.json` and do not fail the report. Each entry states whether it is
+  `required`, which is what makes the first two states machine-readable.
+
+All report directories are staged in a sibling `.analysis-*-staging` directory and swapped into
+place through `.analysis-*-backup`. A staging directory left by an interrupted run is discarded,
+and `reclaim_backup` restores a backup whose published counterpart is missing. That reclaim runs
+before a rerun inspects anything else, so an interrupted publish cannot strand the last good
+report even when the rerun then fails.
+
+`reanalyze_completed_run` regenerates a report from a completed run's saved outputs. It reads the
+recorded final iteration, partitions, event format, seed and interval from
+`<output_dir>/analysis/manifest.json`, the expected-travel, vehicle/PCE and sample-size metadata
+plus the output network name from `analysis/run_metadata.json`, and the run's `output_ids.binpb`
+when present, then calls the same `analyze_final_iteration` interface. Standalone and automatic
+reports therefore agree for the same settings. Because the replay parameters come from the recorded
+report rather than a config file, a rerun does not depend on the run's original inputs still being
+available. `interval_seconds` can override the recorded width so analysis settings change without
+rerunning QSim; only the analysis outputs are rewritten, while event files, plans, the output
+network and the ID store are read but left untouched.
+
+#### PCE volumes and capacity utilization
+
+`simulation::analysis::capacity` adds per-link capacity utilization. Volumes are weighted by PCE,
+which is the unit `LocalLink` charges its flow cap in, and are scaled up by the reciprocal of the
+sample size, so the ratio reproduces exactly the utilization the flow cap enforced:
+
+    expanded_pce / (capacity * interval_hours)
+
+Lane counts are exported next to the capacity but never applied to it a second time.
+`link_capacity.csv` keeps raw vehicle counts, observed PCE volumes and sample-scaled volumes as
+separate columns, and exports `effective_capacity_pce`, the ratio's denominator. Each interval is
+credited only with the capacity of the window the simulation covered, so a final interval shorter
+than `analysis.interval_seconds` is not treated as a whole one.
+
+A ratio is blank with a stated reason rather than estimated: a non-positive or non-finite capacity
+invalidates only the ratio, because the volumes do not involve the capacity, while missing or
+unusable PCE invalidates the PCE columns too. `entry_vc_status` and `exit_vc_status` carry the
+reason per link. A link that carried no vehicles on a side counts as unused whatever its capacity
+says, so an idle network is not hidden behind unavailable ratios; `vc_histogram.csv` keeps the two
+apart and bins only links that carried traffic.
+
+PCE totals are accumulated as exact integers at a fixed scale, not as running floating-point sums,
+because floating-point addition does not commute. Otherwise the same vehicles crossing a link
+simultaneously could produce totals differing in the last bit, and a ratio sitting exactly on a
+histogram bin edge would land in different bins depending on the order event partitions were
+replayed in.
 
 Every name in `metric_catalog.json` is the column it describes, so a consumer can look a metric up in
 the table that exports it.
 
-PCE totals are accumulated as exact integers at a fixed scale, not as running floating-point sums,
-because floating-point addition does not commute. Otherwise the same vehicles crossing a link
-simultaneously could produce totals that differ in the last bit, and a ratio sitting exactly on a
-histogram bin edge would land in different bins depending on the order in which event partitions were
-replayed.
-
 ### External Services
 
+`simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
+`analyze_final_iteration` once, which replays the final iteration's event partitions in
+chronological order and publishes per-interval link-volume and coverage tables plus a
+self-contained HTML report under `<output_dir>/analysis`. The interval width comes from
+`output.analysis.interval_seconds` (3600 by default), so the tables are hourly unless configured
+otherwise. Inputs that cannot be recovered from the event files -- the final-iteration
+expected-travel snapshot and the vehicle/PCE catalog -- are moved into a compact
+`AnalysisRunMetadata` rather than by borrowing or copying the scenario; the run has finished by
+then, so no population-scale clone happens.
+
+Reports distinguish three states:
+
+- **complete** -- the required `link_coverage` module finished; `manifest.json` says `complete` and
+  `analysis/index.html` presents the completed report.
+- **failed** -- a required module failed. Diagnostics go to `<output_dir>/analysis-failure`
+  (`manifest.json`, `module_status.json`, `failure.txt`, and its own `index.html`) and the completed
+  report in `analysis/` is left untouched, so a failed attempt never overwrites working output with
+  something that looks complete.
+- **unavailable** -- an optional module has no implementation or no configured input. These are
+  listed in `module_status.json` and do not fail the report. Each entry states whether it is
+  `required`, which is what makes the first two states machine-readable.
+
+All report directories are staged in a sibling `.analysis-*-staging` directory and swapped into
+place through `.analysis-*-backup`. A staging directory left by an interrupted run is discarded,
+and `reclaim_backup` restores a backup whose published counterpart is missing. That reclaim runs
+before a rerun inspects anything else, so an interrupted publish cannot strand the last good
+report even when the rerun then fails.
+
+`reanalyze_completed_run` regenerates a report from a completed run's saved outputs. It reads the
+recorded final iteration, partitions, event format, seed and interval from
+`<output_dir>/analysis/manifest.json`, the expected-travel and vehicle/PCE metadata plus the output
+network name from `analysis/run_metadata.json`, and the run's `output_ids.binpb` when present, then
+calls the same `analyze_final_iteration` interface. Standalone and automatic reports therefore
+agree for the same settings. Because the replay parameters come from the recorded report rather
+than a config file, a rerun does not depend on the run's original inputs still being available.
+`interval_seconds` can override the recorded width so analysis settings change without rerunning
+QSim; only the analysis outputs are rewritten, while event files, plans, the output network and the
+ID store are read but left untouched.
+
+### External Services
 As a next step, we integrated the ability to communicate to external services. They are intended to be used during the
 simulation for real-time updates of plans (like routing). We have seen in previous work that synchronous calls of such
 services slow down the simulation a lot. This is why we implemented a more complex architecture allowing asynchronous

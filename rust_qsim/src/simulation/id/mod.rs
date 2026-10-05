@@ -84,6 +84,10 @@ pub fn load_from_file(file_path: &Path) {
     ID_STORE.load_from_file(file_path)
 }
 
+/// Name of the ID store a run writes into its output directory. Readers and writers share it so a
+/// rename cannot silently stop restoring a run's mapping.
+pub const OUTPUT_FILE_NAME: &str = "output_ids.binpb";
+
 /// Mark Id as enabled for the nohash_hasher::NoHashHasher t
 impl<T: StableTypeId> nohash_hasher::IsEnabled for Id<T> {}
 impl<T: StableTypeId> nohash_hasher::IsEnabled for &Id<T> {}

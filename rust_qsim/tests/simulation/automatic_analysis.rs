@@ -1,6 +1,8 @@
 use macros::deterministic_id_test;
 use rust_qsim::simulation::analysis::capacity::VC_BIN_COUNT;
-use rust_qsim::simulation::analysis::{AnalysisRunMetadata, analyze_final_iteration};
+use rust_qsim::simulation::analysis::{
+    AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
+};
 use rust_qsim::simulation::config::{Analysis, CommandLineArgs, CompressionType, Config};
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::id::Id;
@@ -81,15 +83,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         network.add_link(Link::new_with_default(Id::create(&id), &from, &to));
     }
     let garage = Garage::default();
-    let metadata = AnalysisRunMetadata {
-        random_seed: 4711,
-        network_input: None,
-        population_input: None,
-        vehicles_input: None,
-        expected_travel: &[],
-        garage: &garage,
-        sample_size: 1.0,
-    };
+    let metadata = run_metadata(4711, 1.0, &garage, &[]);
 
     let report = analyze_final_iteration(
         output,
@@ -117,10 +111,12 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert!(html.contains("const h=[\"link_id,hour_start_seconds,entry_vehicles,exit_vehicles\""));
     let status = fs::read_to_string(report.parent().unwrap().join("module_status.json")).unwrap();
     assert!(status.contains("\"status\": \"unavailable\""));
-    let run_metadata =
+    let recorded_metadata =
         fs::read_to_string(report.parent().unwrap().join("run_metadata.json")).unwrap();
-    assert!(run_metadata.contains("\"expected_travel\": []"));
-    assert!(run_metadata.contains("\"vehicle_types\": []"));
+    assert!(recorded_metadata.contains("\"expected_travel\": []"));
+    assert!(recorded_metadata.contains("\"vehicle_types\": []"));
+    // The sample size is recorded so a standalone rerun scales the same way.
+    assert!(recorded_metadata.contains("\"sample_size\": 1.0"));
     let manifest = fs::read_to_string(report.parent().unwrap().join("manifest.json")).unwrap();
     assert!(manifest.contains("\"iteration\": 7"));
     assert!(manifest.contains("\"random_seed\": 4711"));
@@ -181,10 +177,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         2,
         CompressionType::None,
         7200,
-        &AnalysisRunMetadata {
-            sample_size: 0.0,
-            ..metadata
-        },
+        &run_metadata(4711, 0.0, &garage, &[]),
         &network,
         &Analysis {
             enabled: true,
@@ -218,6 +211,9 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .contains("missing final-iteration event partition")
     );
 
+    let recorded_events: Vec<Vec<u8>> = (0..2)
+        .map(|rank| fs::read(events.join(format!("events.{rank}.xml"))).unwrap())
+        .collect();
     fs::write(events.join("events.0.xml"), "<events><event").unwrap();
     let parse_error = analyze_final_iteration(
         output,
@@ -239,6 +235,19 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .contains("failed to parse event XML")
     );
     assert!(report.is_file());
+    // A required-module failure records its own diagnostics and leaves the completed report.
+    let failure_dir = output.join("analysis-failure");
+    let failure_manifest = fs::read_to_string(failure_dir.join("manifest.json")).unwrap();
+    assert!(failure_manifest.contains("\"status\": \"failed\""));
+    assert!(failure_manifest.contains("failed to parse event XML"));
+    let failure_status = fs::read_to_string(failure_dir.join("module_status.json")).unwrap();
+    assert!(failure_status.contains("\"module\": \"link_coverage\""));
+    assert!(failure_status.contains("\"required\": true"));
+    assert!(failure_status.contains("\"status\": \"failed\""));
+    assert!(failure_status.contains("\"required\": false"));
+    assert!(!failure_dir.join("link_hourly.csv").exists());
+    let failure_report = fs::read_to_string(failure_dir.join("index.html")).unwrap();
+    assert!(failure_report.contains("Analysis failed"));
 
     let proto_events = output.join("ITERS/it.8/events");
     fs::create_dir_all(&proto_events).unwrap();
@@ -263,6 +272,55 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .contains("failed to parse protobuf events")
     );
     assert!(report.is_file());
+
+    // Recovering from a failed attempt republishes the completed report and clears the failure.
+    fs::write(events.join("events.0.xml"), &recorded_events[0]).unwrap();
+    fs::write(events.join("events.1.xml"), &recorded_events[1]).unwrap();
+    analyze_final_iteration(
+        output,
+        7,
+        2,
+        CompressionType::None,
+        7200,
+        &metadata,
+        &network,
+        &Analysis {
+            enabled: true,
+            interval_seconds: 3600,
+        },
+    )
+    .unwrap();
+    assert!(!failure_dir.exists());
+    assert!(!output.join(".analysis-failure-staging").exists());
+    assert_eq!(
+        fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap(),
+        coverage,
+    );
+
+    // A crash between the two renames of a publish leaves only the backup. The next attempt
+    // reclaims it instead of losing the previous report.
+    fs::rename(report.parent().unwrap(), output.join(".analysis-backup")).unwrap();
+    assert!(!report.parent().unwrap().exists());
+    let republished = analyze_final_iteration(
+        output,
+        7,
+        2,
+        CompressionType::None,
+        7200,
+        &metadata,
+        &network,
+        &Analysis {
+            enabled: true,
+            interval_seconds: 3600,
+        },
+    )
+    .unwrap();
+    assert!(republished.is_file());
+    assert!(!output.join(".analysis-backup").exists());
+    assert_eq!(
+        fs::read_to_string(report.parent().unwrap().join("coverage.csv")).unwrap(),
+        coverage,
+    );
 }
 
 #[deterministic_id_test(rust_qsim)]
@@ -370,7 +428,7 @@ fn capacity_utilization_scales_by_sample_size_and_mixed_pce() {
 
 #[deterministic_id_test(rust_qsim)]
 fn capacity_utilization_keeps_genuinely_zero_flow_distinct_from_unusable_links() {
-    // No garage vehicles at all: a used link cannot be weighted, while a link that
+    // No vehicle catalog at all: a used link cannot be weighted, while a link that
     // never saw traffic keeps a real zero ratio.
     let temp = tempfile::tempdir().unwrap();
     let output = temp.path();
@@ -382,16 +440,7 @@ fn capacity_utilization_keeps_genuinely_zero_flow_distinct_from_unusable_links()
     )
     .unwrap();
     let network = two_link_network(&[("used", 1800.0), ("idle", 1800.0)]);
-    let garage = Garage::default();
-    let metadata = AnalysisRunMetadata {
-        random_seed: 1,
-        network_input: None,
-        population_input: None,
-        vehicles_input: None,
-        expected_travel: &[],
-        garage: &garage,
-        sample_size: 1.0,
-    };
+    let metadata = run_metadata(1, 1.0, &Garage::default(), &[]);
     let report = analyze_final_iteration(
         output,
         0,
@@ -652,6 +701,46 @@ fn capacity_row(csv: &str, link_id: &str, interval_start_seconds: u64) -> HashMa
         .collect()
 }
 
+/// Analysis metadata for a synthetic report, with the given sample size and vehicle PCEs.
+///
+/// The vehicles are what the analysis weights volumes with, so a test that wants a
+/// weighted volume has to put the vehicle in this catalog.
+fn run_metadata(
+    random_seed: u64,
+    sample_size: f64,
+    garage: &Garage,
+    pce_by_vehicle: &[(&str, f64)],
+) -> AnalysisRunMetadata {
+    let mut garage = garage.clone();
+    for (vehicle_id, pce) in pce_by_vehicle {
+        let type_id = Id::<InternalVehicleType>::create(&format!("{vehicle_id}-type"));
+        garage.add_veh_type(InternalVehicleType {
+            id: type_id.clone(),
+            length: 5.0,
+            width: 2.0,
+            max_v: 10.0,
+            pce: *pce,
+            fef: 1.0,
+            net_mode: Id::create("car"),
+            attributes: Default::default(),
+        });
+        garage.add_veh(InternalVehicle {
+            id: Id::create(vehicle_id),
+            max_v: 10.0,
+            pce: *pce,
+            vehicle_type: type_id,
+            attributes: Default::default(),
+        });
+    }
+    AnalysisRunMetadata::from_run(
+        random_seed,
+        sample_size,
+        &garage,
+        Vec::new(),
+        AnalysisInputPaths::default(),
+    )
+}
+
 /// A network with `link1` carrying the given capacity and any extra links.
 fn two_link_network(links: &[(&str, f64)]) -> Network {
     let from = Node::new(Id::create("from"), Coordinate::new_2d(0.0, 0.0), 0, 1);
@@ -736,37 +825,8 @@ fn capacity_report_until(
         format!("<events>{xml}</events>"),
     )
     .unwrap();
-    let mut garage = Garage::default();
-    for (vehicle, pce) in vehicles {
-        let type_id = Id::<InternalVehicleType>::create(&format!("{vehicle}-type"));
-        garage.add_veh_type(InternalVehicleType {
-            id: type_id.clone(),
-            length: 5.0,
-            width: 2.0,
-            max_v: 10.0,
-            pce: *pce,
-            fef: 1.0,
-            net_mode: Id::create("car"),
-            attributes: Default::default(),
-        });
-        garage.add_veh(InternalVehicle {
-            id: Id::create(vehicle),
-            max_v: 10.0,
-            pce: *pce,
-            vehicle_type: type_id,
-            attributes: Default::default(),
-        });
-    }
     let network = two_link_network(&[("link1", capacity)]);
-    let metadata = AnalysisRunMetadata {
-        random_seed: 1,
-        network_input: None,
-        population_input: None,
-        vehicles_input: None,
-        expected_travel: &[],
-        garage: &garage,
-        sample_size,
-    };
+    let metadata = run_metadata(1, sample_size, &Garage::default(), vehicles);
     let report = analyze_final_iteration(
         output,
         0,
