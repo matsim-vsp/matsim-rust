@@ -341,14 +341,14 @@ pub struct AnalysisRuntimeMetadata {
     pub phase_seconds: BTreeMap<String, f64>,
     pub worker_count: Option<usize>,
     pub available_logical_cpus: Option<usize>,
-    pub operating_system: String,
-    pub architecture: String,
-    pub software_name: String,
-    pub software_version: String,
-    pub network_links: usize,
-    pub population_persons: usize,
-    pub vehicles: usize,
-    pub expected_legs: usize,
+    pub operating_system: Option<String>,
+    pub architecture: Option<String>,
+    pub software_name: Option<String>,
+    pub software_version: Option<String>,
+    pub network_links: Option<usize>,
+    pub population_persons: Option<usize>,
+    pub vehicles: Option<usize>,
+    pub expected_legs: Option<usize>,
     pub peak_memory_bytes: Option<u64>,
     pub analysis_seconds: Option<f64>,
 }
@@ -414,11 +414,12 @@ impl AnalysisRunMetadata {
     /// Attach measurements collected by the controller for this completed run.
     pub fn with_runtime(mut self, runtime: AnalysisRuntimeMetadata) -> Self {
         let mut runtime = runtime;
-        runtime.expected_legs = self
-            .expected_travel
-            .iter()
-            .map(|person| person.legs.len())
-            .sum();
+        runtime.expected_legs.get_or_insert_with(|| {
+            self.expected_travel
+                .iter()
+                .map(|person| person.legs.len())
+                .sum()
+        });
         self.runtime = Some(runtime);
         self
     }
@@ -684,7 +685,7 @@ pub fn analyze_final_iteration(
         Err(error) => return Err(record_failure(output_dir, &manifest, error)),
     };
 
-    publish_complete(
+    let (report, mut runtime) = publish_complete(
         output_dir,
         &manifest,
         &ordered_links,
@@ -695,7 +696,12 @@ pub fn analyze_final_iteration(
         network,
         settings,
         analysis_started,
-    )
+    )?;
+    runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
+    if let Err(error) = refresh_runtime_report(&report, &runtime) {
+        warn!("Could not refresh runtime measurements in the completed report: {error}");
+    }
+    Ok(report)
 }
 
 /// Regenerate the final-iteration report of a completed run from its recorded outputs.
@@ -1134,7 +1140,7 @@ fn publish_complete(
     network: &Network,
     settings: &Analysis,
     analysis_started: std::time::Instant,
-) -> Result<PathBuf, AnalysisError> {
+) -> Result<(PathBuf, AnalysisRuntimeMetadata), AnalysisError> {
     let staging = output_dir.join(STAGING_DIR);
     reset_staging(&staging)?;
     let counts = &replayed.counts;
@@ -1228,19 +1234,9 @@ fn publish_complete(
     )?;
     write_network_map(&staging, ordered_links, network, &classifications, counts)?;
     write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
-    let mut runtime = run_metadata
-        .runtime
-        .clone()
-        .unwrap_or_else(|| AnalysisRuntimeMetadata {
-            operating_system: std::env::consts::OS.to_owned(),
-            architecture: std::env::consts::ARCH.to_owned(),
-            software_name: env!("CARGO_PKG_NAME").to_owned(),
-            software_version: env!("CARGO_PKG_VERSION").to_owned(),
-            available_logical_cpus: std::thread::available_parallelism().ok().map(usize::from),
-            ..AnalysisRuntimeMetadata::default()
-        });
+    let mut runtime = run_metadata.runtime.clone().unwrap_or_default();
     runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
-    if runtime.peak_memory_bytes.is_none() {
+    if run_metadata.runtime.is_some() && runtime.peak_memory_bytes.is_none() {
         runtime.peak_memory_bytes = process_peak_memory_bytes();
     }
     write_runtime_tables(&staging, &runtime)?;
@@ -1323,7 +1319,7 @@ fn publish_complete(
     if failure_dir.exists() {
         fs::remove_dir_all(&failure_dir).map_err(io_error)?;
     }
-    Ok(published.join("index.html"))
+    Ok((published.join("index.html"), runtime))
 }
 
 fn write_class_counts(
@@ -4002,54 +3998,41 @@ fn write_runtime_tables(
             "host query",
         )?;
     }
-    row(
-        "operating_system",
-        runtime.operating_system.clone(),
-        "",
-        "build target",
-    )?;
-    row(
-        "architecture",
-        runtime.architecture.clone(),
-        "",
-        "build target",
-    )?;
-    row(
-        "software_name",
-        runtime.software_name.clone(),
-        "",
-        "build metadata",
-    )?;
-    row(
-        "software_version",
-        runtime.software_version.clone(),
-        "",
-        "build metadata",
-    )?;
-    row(
-        "network_links",
-        runtime.network_links.to_string(),
-        "links",
-        "output network",
-    )?;
-    row(
-        "population_persons",
-        runtime.population_persons.to_string(),
-        "persons",
-        "final population",
-    )?;
-    row(
-        "vehicles",
-        runtime.vehicles.to_string(),
-        "vehicles",
-        "vehicle catalog",
-    )?;
-    row(
-        "expected_legs",
-        runtime.expected_legs.to_string(),
-        "legs",
-        "final selected plans",
-    )?;
+    for (field, value) in [
+        ("operating_system", runtime.operating_system.as_deref()),
+        ("architecture", runtime.architecture.as_deref()),
+        ("software_name", runtime.software_name.as_deref()),
+        ("software_version", runtime.software_version.as_deref()),
+    ] {
+        if let Some(value) = value {
+            row(field, value.to_owned(), "", "build metadata")?;
+        }
+    }
+    for (field, value, unit, source) in [
+        (
+            "network_links",
+            runtime.network_links,
+            "links",
+            "output network",
+        ),
+        (
+            "population_persons",
+            runtime.population_persons,
+            "persons",
+            "final population",
+        ),
+        ("vehicles", runtime.vehicles, "vehicles", "vehicle catalog"),
+        (
+            "expected_legs",
+            runtime.expected_legs,
+            "legs",
+            "final selected plans",
+        ),
+    ] {
+        if let Some(value) = value {
+            row(field, value.to_string(), unit, source)?;
+        }
+    }
     if let Some(value) = runtime.peak_memory_bytes {
         row(
             "peak_memory",
@@ -4079,6 +4062,28 @@ fn process_peak_memory_bytes() -> Option<u64> {
 #[cfg(not(target_os = "linux"))]
 fn process_peak_memory_bytes() -> Option<u64> {
     None
+}
+
+fn refresh_runtime_report(
+    report: &Path,
+    runtime: &AnalysisRuntimeMetadata,
+) -> Result<(), AnalysisError> {
+    let directory = report
+        .parent()
+        .ok_or_else(|| AnalysisError::new("analysis report has no parent directory"))?;
+    write_runtime_tables(directory, runtime)?;
+    let mut html = fs::read_to_string(report).map_err(io_error)?;
+    let start = "csvTable('#runtime',";
+    let begin = html
+        .find(start)
+        .ok_or_else(|| AnalysisError::new("report has no runtime table"))?;
+    let end = html[begin..]
+        .find(");")
+        .map(|offset| begin + offset + 2)
+        .ok_or_else(|| AnalysisError::new("report runtime table is incomplete"))?;
+    let table = csv_for_script(&directory.join("runtime.csv"))?;
+    html.replace_range(begin..end, &format!("csvTable('#runtime',{table});"));
+    fs::write(report, html).map_err(io_error)
 }
 
 fn write_report(

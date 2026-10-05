@@ -393,13 +393,13 @@ impl Controller {
                 phase_seconds,
                 worker_count: Some(self.config.partitioning().num_parts as usize),
                 available_logical_cpus: std::thread::available_parallelism().ok().map(usize::from),
-                operating_system: std::env::consts::OS.to_owned(),
-                architecture: std::env::consts::ARCH.to_owned(),
-                software_name: env!("CARGO_PKG_NAME").to_owned(),
-                software_version: env!("CARGO_PKG_VERSION").to_owned(),
-                network_links: self.scenario.core.network.links().len(),
-                population_persons: self.scenario.population.persons.len(),
-                vehicles: self.scenario.core.garage.vehicles.len(),
+                operating_system: Some(std::env::consts::OS.to_owned()),
+                architecture: Some(std::env::consts::ARCH.to_owned()),
+                software_name: Some(env!("CARGO_PKG_NAME").to_owned()),
+                software_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                network_links: Some(self.scenario.core.network.links().len()),
+                population_persons: Some(self.scenario.population.persons.len()),
+                vehicles: Some(self.scenario.core.garage.vehicles.len()),
                 ..crate::simulation::analysis::AnalysisRuntimeMetadata::default()
             });
             let report = crate::simulation::analysis::analyze_final_iteration(

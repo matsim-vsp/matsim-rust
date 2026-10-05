@@ -12,7 +12,8 @@ network, population, vehicle, and expected-leg counts. Each CSV value includes i
 Peak process memory is included only when the host provides a measurement; an unavailable memory
 measurement does not affect analysis. Reanalysis preserves the original simulation context and
 refreshes the analysis timing. Cross-run metric comparisons continue to use each run's latest
-completed iteration and do not aggregate runtime metadata as simulation output.
+completed iteration and do not aggregate runtime metadata as simulation output. Legacy reports
+without execution context retain unknown historical fields instead of inventing zero values.
 
 ## Journeys and travel distributions
 

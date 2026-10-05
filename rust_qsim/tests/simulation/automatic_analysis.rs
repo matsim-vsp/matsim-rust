@@ -96,14 +96,14 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         simulation_seconds: Some(12.5),
         phase_seconds: [("mobsim".to_owned(), 8.0)].into(),
         worker_count: Some(2),
-        operating_system: "test-os".to_owned(),
-        architecture: "test-arch".to_owned(),
-        software_name: "rust_qsim".to_owned(),
-        software_version: "test-version".to_owned(),
-        network_links: 200,
-        population_persons: 11,
-        vehicles: 3,
-        expected_legs: 5,
+        operating_system: Some("test-os".to_owned()),
+        architecture: Some("test-arch".to_owned()),
+        software_name: Some("rust_qsim".to_owned()),
+        software_version: Some("test-version".to_owned()),
+        network_links: Some(200),
+        population_persons: Some(11),
+        vehicles: Some(3),
+        expected_legs: Some(5),
         ..AnalysisRuntimeMetadata::default()
     });
     let observed_data = output.join("observed.csv");
