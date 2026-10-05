@@ -5,6 +5,7 @@ mod agent_profile;
 pub mod capacity;
 mod cross_run;
 mod demographic;
+mod emissions;
 mod ensemble;
 mod link_speed;
 mod service;
@@ -21,7 +22,8 @@ mod network_distance;
 mod noise;
 
 use crate::simulation::config::{
-    Accessibility, Analysis, CompressionType, LinkLabels, NoiseInputs, ServiceInputs,
+    Accessibility, Analysis, CompressionType, EmissionsInputs, LinkLabels, NoiseInputs,
+    ServiceInputs,
 };
 use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
@@ -94,6 +96,7 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ),
     (demographic::MODULE, None),
     ("service_performance", None),
+    ("modeled_emissions", None),
     ("noise_exposure", None),
 ];
 
@@ -189,6 +192,7 @@ pub struct Manifest {
     #[serde(default)]
     transit_observed_data: Option<String>,
     #[serde(default)]
+    emissions: Option<EmissionsInputs>,
     noise: Option<NoiseInputs>,
     person_group_attributes: Vec<String>,
     #[serde(default)]
@@ -690,6 +694,7 @@ pub fn analyze_final_iteration(
             .transit_observed_data
             .as_ref()
             .map(|path| path.display().to_string()),
+        emissions: settings.emissions.clone(),
         noise: settings.noise.clone(),
         person_group_attributes: settings.person_group_attributes.clone(),
         person_weight_attribute: settings.person_weight_attribute.clone(),
@@ -813,6 +818,7 @@ pub fn reanalyze_completed_run(
         comparison_runs: recorded.comparison_runs.iter().map(PathBuf::from).collect(),
         service: recorded.service.clone(),
         transit_observed_data: recorded.transit_observed_data.as_ref().map(PathBuf::from),
+        emissions: recorded.emissions.clone(),
         noise: recorded.noise.clone(),
         person_group_attributes: recorded.person_group_attributes.clone(),
         person_weight_attribute: recorded.person_weight_attribute.clone(),
@@ -1329,6 +1335,32 @@ fn publish_complete(
     if service.as_ref().is_none_or(Result::is_err) {
         service::write_empty(&staging)?;
     }
+    let emissions = settings.emissions.as_ref().map(|inputs| {
+        let source = if inputs.records.is_absolute() {
+            inputs.records.clone()
+        } else {
+            output_dir.join(&inputs.records)
+        };
+        let vehicle_type_by_id = run_metadata
+            .vehicles
+            .iter()
+            .map(|vehicle| (vehicle.vehicle_id.clone(), vehicle.vehicle_type_id.clone()))
+            .collect();
+        emissions::write(
+            &staging,
+            &source,
+            inputs,
+            &vehicle_type_by_id,
+            manifest.iteration,
+            run_metadata.sample_size(),
+        )
+        .map_err(|error| error.to_string())
+    });
+    if emissions.as_ref().is_none_or(|result| {
+        result.as_ref().is_err_and(|_| true) || result.as_ref().is_ok_and(|seen| !seen)
+    }) {
+        emissions::write_empty(&staging)?;
+    }
     let noise = settings.noise.as_ref().map(|inputs| {
         noise::write(&staging, output_dir, inputs).map_err(|error| error.to_string())
     });
@@ -1360,6 +1392,7 @@ fn publish_complete(
             validation: transit_validation.as_ref(),
         },
         survey.as_ref(),
+        emissions.as_ref(),
         noise.as_ref(),
     );
 
@@ -1466,6 +1499,7 @@ fn publish_failure(
         &TransitOutcome::default(),
         None,
         None,
+        None,
     );
     let staging = output_dir.join(FAILURE_STAGING_DIR);
     reset_staging(&staging)?;
@@ -1497,6 +1531,7 @@ fn module_statuses(
     demographics: Option<&Result<(), String>>,
     transit: &TransitOutcome<'_>,
     survey: Option<&Result<(), String>>,
+    emissions: Option<&Result<bool, String>>,
     noise: Option<&Result<(), String>>,
 ) -> Vec<ModuleStatus> {
     let (status, reason) = match outcome {
@@ -1573,6 +1608,18 @@ fn module_statuses(
                 None => Some((
                     STATUS_UNAVAILABLE,
                     Some("No journey survey dataset is configured".to_owned()),
+                )),
+            },
+            "modeled_emissions" => match emissions {
+                Some(Ok(true)) => Some((STATUS_COMPLETE, None)),
+                Some(Ok(false)) => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No modeled emissions records for the final iteration".to_owned()),
+                )),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No modeled emissions input is configured".to_owned()),
                 )),
             },
             "noise_exposure" => match noise {
@@ -2120,6 +2167,11 @@ fn metrics(include_clipped_delay: bool, include_accessibility: bool) -> Vec<Metr
             name: "period_end_seconds",
             unit: "seconds",
             aggregation_key: "run,iteration,link_id,period_start_seconds",
+        },
+        Metric {
+            name: "emissions_total_expanded",
+            unit: "declared pollutant unit",
+            aggregation_key: "hour_start_seconds,pollutant,unit,vehicle_category,location_type,location_id,emission_type",
         },
     ]
     .into_iter()
@@ -4413,6 +4465,15 @@ fn write_report(
             ("__NETWORK_ANALYSIS_SCRIPT__", &network_script),
         ],
     );
+    let emissions = csv_for_script(&path.join("emissions_hourly.csv"))?;
+    let html = html.replace(
+        "<h2>Module status</h2>",
+        "<h2>Modeled emissions</h2><p>Supplied modeled records report emitted mass, not concentration or exposure. Values keep their declared units and are grouped by pollutant, vehicle category, hour and link or area. The map shades links for the selected pollutant, unit, hour, category and start type; redder links have higher values, gray links have no records, and area-only records remain in the table.</p><label>Map selection <select id=\"emissions-filter\"></select></label><div id=\"emissions-map\"></div><div id=\"emissions\"></div><p><a href=\"emissions_hourly.csv\">Hourly totals</a> · <a href=\"emissions_provenance.json\">Provenance</a></p><h2>Module status</h2>",
+    );
+    let (body, script_end) = html.rsplit_once("</script>").expect("report script exists");
+    let html = format!(
+        "{body}const em={emissions};csvTable('#emissions',em);const emap=document.querySelector('#network-map').cloneNode(true);emap.setAttribute('id','emissions-network-map');document.querySelector('#emissions-map').append(emap);const eh=parseCsv(em[0]);const er=em.slice(1).map(parseCsv);const ei=n=>eh.indexOf(n);const lk=er.filter(r=>r[ei('location_type')]==='link');const choices=[...new Map(lk.map(r=>{{const k=[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]];return [JSON.stringify(k),k]}}))];const select=document.querySelector('#emissions-filter');choices.forEach(([key,k])=>select.add(new Option(k.join(' · '),key)));function colorEmissions(){{const chosen=select.value?JSON.parse(select.value):null;const values=new Map(lk.filter(r=>chosen&&[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]].every((v,i)=>v===chosen[i])).map(r=>[r[ei('location_id')],Number(r[ei('total_expanded')])]));const max=Math.max(0,...values.values());document.querySelectorAll('#emissions-network-map line').forEach(line=>{{const value=values.get(line.getAttribute('data-link-id'));if(value===undefined){{line.setAttribute('stroke','#c8ccd0')}}else{{const scale=max?value/max:0;line.setAttribute('stroke',`rgb(${{Math.round(255*scale)}},${{Math.round(210*(1-scale))}},0)`)}}}})}}select.addEventListener('change',colorEmissions);colorEmissions();</script>{script_end}"
+    );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
 
@@ -4823,7 +4884,7 @@ mod tests {
             expected_person("stuck_midway", &[(0, "walk"), (1, "car"), (2, "train")]),
         ];
         let garage = Garage::default();
-        let metadata = AnalysisRunMetadata::from_run(
+        let mut metadata = AnalysisRunMetadata::from_run(
             0,
             // An unsampled run, so the link tables scale nothing. These assertions cover the
             // agent travel tables, which do not depend on the fraction.
@@ -4837,6 +4898,16 @@ mod tests {
                 vehicles: None,
             },
         );
+        metadata.vehicles.push(VehiclePce {
+            vehicle_id: "emission-vehicle".to_owned(),
+            vehicle_type_id: "vehicle-type".to_owned(),
+            pce: 1.0,
+        });
+        fs::write(
+            dir.path().join("emissions.csv"),
+            "iteration,time_seconds,pollutant,unit,value,vehicle_id,link_id,area_id,emission_type\n0,3700,CO2,g,12,emission-vehicle,l,,warm\n",
+        )
+        .unwrap();
         let report = analyze_final_iteration(
             dir.path(),
             0,
@@ -4848,6 +4919,16 @@ mod tests {
             &Analysis {
                 enabled: true,
                 interval_seconds: 3600,
+                emissions: Some(EmissionsInputs {
+                    records: PathBuf::from("emissions.csv"),
+                    vehicle_categories: BTreeMap::from([(
+                        "vehicle-type".to_owned(),
+                        "passenger_car".to_owned(),
+                    )]),
+                    fleet_provenance: "test fleet".to_owned(),
+                    emission_factor_provenance: "test factors".to_owned(),
+                    accounting_boundary: "tailpipe".to_owned(),
+                }),
                 ..Analysis::default()
             },
         )
@@ -4894,6 +4975,11 @@ mod tests {
         // The local report presents the agent-travel tables, not only the CSVs.
         let report_html = fs::read_to_string(output.join("index.html")).unwrap();
         assert!(report_html.contains("<h2>Agent travel</h2>"));
+        assert!(report_html.contains("<h2>Modeled emissions</h2>"));
+        assert!(report_html.contains("emissions-network-map"));
+        assert!(report_html.contains("csvTable('#emissions'"));
+        let emissions = fs::read_to_string(output.join("emissions_hourly.csv")).unwrap();
+        assert!(emissions.contains("3600,\"CO2\",\"g\",\"passenger_car\""));
         assert!(report_html.contains("href=\"legs.csv\""));
         assert!(report_html.contains("travelers,2,5.000000"));
         assert!(report_html.contains("missed_plan_leg"));
@@ -4901,6 +4987,13 @@ mod tests {
         assert!(report_html.contains("person_id,leg_index,mode,departure_seconds"));
         assert!(report_html.contains("stuck_midway"));
         let statuses: serde_json::Value = read_json(&output.join("module_status.json")).unwrap();
+        let emissions_status = statuses
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|status| status["module"] == "modeled_emissions")
+            .unwrap();
+        assert_eq!(emissions_status["status"], STATUS_COMPLETE);
         let agent_travel = statuses
             .as_array()
             .expect("module status is an array")

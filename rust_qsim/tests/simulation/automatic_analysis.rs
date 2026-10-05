@@ -891,7 +891,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 37] = [
+    const TABLES: [&str; 38] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -929,6 +929,7 @@ fn metric_catalog_names_match_the_exported_columns() {
         "transit_availability.csv",
         "transit_validation_summary.csv",
         "transit_validation_matches.csv",
+        "emissions_hourly.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1439,6 +1440,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
             noise: None,
             excess_delay_clip_seconds: None,
             person_cost_attribute: None,
@@ -1550,6 +1552,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
             noise: None,
             excess_delay_clip_seconds: None,
             person_cost_attribute: None,

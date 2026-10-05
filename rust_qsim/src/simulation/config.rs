@@ -617,6 +617,8 @@ pub struct Analysis {
     /// paths are resolved against the configured output directory.
     pub transit_observed_data: Option<PathBuf>,
 
+    /// Optional modeled emission-event records CSV. Relative paths resolve from the output dir.
+    pub emissions: Option<EmissionsInputs>,
     /// Optional modeled receiver sound/exposure records and affected population data.
     pub noise: Option<NoiseInputs>,
 
@@ -739,6 +741,16 @@ pub struct ServiceInputs {
     pub max_wait_seconds: Option<f64>,
 }
 
+/// Supplied modeled emissions and the provenance needed to interpret their totals.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EmissionsInputs {
+    pub records: PathBuf,
+    /// Category labels keyed by the vehicle type ID found in the run's vehicle catalog.
+    pub vehicle_categories: std::collections::BTreeMap<String, String>,
+    pub fleet_provenance: String,
+    pub emission_factor_provenance: String,
+    pub accounting_boundary: String,
+}
 /// Supplied noise model outputs. Analysis never invents receiver locations or exposure.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct NoiseInputs {
@@ -771,6 +783,7 @@ impl Default for Analysis {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
             noise: None,
 
             excess_delay_clip_seconds: None,
