@@ -76,6 +76,7 @@ pub fn create_vehicle_type(
         pce: 0.0,
         fef: 0.0,
         net_mode,
+        capacity: None,
         attributes: InternalAttributes::default(),
     }
 }

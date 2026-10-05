@@ -2,10 +2,26 @@
 
 mod agent_profile;
 pub mod capacity;
+mod cross_run;
+mod demographic;
+mod ensemble;
 mod link_speed;
-mod network_distance;
+mod service;
+pub use cross_run::compare_completed_runs;
+pub use demographic::PersonDemographic;
+pub use ensemble::analyze_run_ensemble;
+mod survey;
+mod validation;
 
-use crate::simulation::config::{Analysis, CompressionType, LinkLabels};
+mod transit;
+pub use transit::TransitMetadata;
+
+mod network_distance;
+mod noise;
+
+use crate::simulation::config::{
+    Analysis, CompressionType, LinkLabels, NoiseInputs, ServiceInputs,
+};
 use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonStuckEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
@@ -16,6 +32,7 @@ use crate::simulation::io::proto::proto_events::{ProtoEventsReader, event_from_p
 use crate::simulation::io::xml::events::XmlEventsReader;
 use crate::simulation::scenario::network::{Link, Network, Node};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
+use crate::simulation::scenario::transit::TransitSchedule;
 use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
 use agent_profile::AgentProfileCollector;
@@ -32,6 +49,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::warn;
+use transit::TransitCollector;
 
 /// Published report of the latest completed iteration.
 const ANALYSIS_DIR: &str = "analysis";
@@ -62,18 +80,14 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("link_speed", None),
     ("network_distance_time", None),
     ("agent_travel", None),
-    (
-        "validation",
-        Some("No observed validation datasets are configured"),
-    ),
-    (
-        "cross_run_comparison",
-        Some("No comparison runs are configured"),
-    ),
-    (
-        "transit_and_research",
-        Some("Optional module inputs are not configured"),
-    ),
+    ("transit_performance", None),
+    ("transit_validation", None),
+    ("validation", None),
+    ("cross_run_comparison", None),
+    (demographic::MODULE, None),
+    ("service_performance", None),
+    ("transit_and_research", None),
+    ("noise_exposure", None),
 ];
 
 const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
@@ -82,7 +96,8 @@ const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=doc
 
 /// Complete report shell. Substituted in one pass by [`substitute_template`], so a link
 /// label that happens to read like a token cannot corrupt the payloads.
-const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Network distance, time and congestion</h2><p>Vehicle distance uses the observed fraction of each link. Partial and unfinished traversals are reported in diagnostics. A traversal crossing an interval boundary is assigned whole to its entry interval, so no within-link path is inferred. Relative delay is signed; clipped excess delay, when configured, sums positive link delay capped per link and interval. Passenger distance and time are unavailable because link-level passenger occupancy is not recorded. <a href="network_distance_time_diagnostics.csv">Traversal diagnostics (CSV)</a>.</p><h3>Network totals and peak-hour profile</h3><p id="peak-delay"></p><div id="network-summary"></div><h3>Per-link distance, time and relative speed</h3><div id="network-link-metrics"></div><h3>Traversal exclusions</h3><div id="network-distance-diagnostics"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs. Journeys run between substantive activities; stage activities such as transit transfers stay within the journey. Main mode follows the MATSim analysis hierarchy. Distances sum planned route distances, including prepared teleported routes, and report when any component is unavailable.</p><h3>En-route agent profile</h3><p>Counts use observed person departures, arrivals, and stuck events across all travel modes. Person-seconds are allocated by event timestamps; no within-link position or occupancy is inferred.</p><div id="en-route-agents"></div><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Journey mode share by hour, purpose, and distance</h3><div id="journey-shares"></div><h3>Journey duration and distance distributions</h3><div id="journey-summary"></div><h3>Journey components and completion</h3><div id="journeys"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="journeys.csv">journey components and completion (CSV)</a>, <a href="journey_mode_share.csv">journey mode shares (CSV)</a>, <a href="journey_summary.csv">journey distributions (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;const js=__JOURNEY_SHARES__;const jy=__JOURNEY_SUMMARY__;const jn=__JOURNEYS__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#journey-shares',js);csvTable('#journey-summary',jy);csvTable('#journeys',jn);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()__NETWORK_ANALYSIS_SCRIPT__</script></body></html>"#;
+
+const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Observed validation</h2><p>Count observations are expanded by the reciprocal of the simulated sample fraction. Only exact link, period, class and metric matches are compared; __VALIDATION_NOTE__ A blank relative error means the observed reference is zero.</p><h3>Validation summary</h3><div id="validation-summary"></div><h3>Matched observations</h3><div id="validation-matches"></div>__VALIDATION_PLOTS__<p><a href="validation_summary.csv">Summary CSV</a> · <a href="validation_matches.csv">Matched observations CSV</a> · <a href="validation_unmatched.csv">Unmatched observations CSV</a></p><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Network distance, time and congestion</h2><p>Vehicle distance uses the observed fraction of each link. Partial and unfinished traversals are reported in diagnostics. A traversal crossing an interval boundary is assigned whole to its entry interval, so no within-link path is inferred. Relative delay is signed; clipped excess delay, when configured, sums positive link delay capped per link and interval. Passenger distance and time are unavailable because link-level passenger occupancy is not recorded. <a href="network_distance_time_diagnostics.csv">Traversal diagnostics (CSV)</a>.</p><h3>Network totals and peak-hour profile</h3><p id="peak-delay"></p><div id="network-summary"></div><h3>Per-link distance, time and relative speed</h3><div id="network-link-metrics"></div><h3>Traversal exclusions</h3><div id="network-distance-diagnostics"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs. Journeys run between substantive activities; stage activities such as transit transfers stay within the journey. Main mode follows the MATSim analysis hierarchy. Distances sum planned route distances, including prepared teleported routes, and report when any component is unavailable.</p><h3>En-route agent profile</h3><p>Counts use observed person departures, arrivals, and stuck events across all travel modes. Person-seconds are allocated by event timestamps; no within-link position or occupancy is inferred.</p><div id="en-route-agents"></div><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Journey mode share by hour, purpose, and distance</h3><div id="journey-shares"></div><h3>Journey duration and distance distributions</h3><div id="journey-summary"></div><h3>Journey components and completion</h3><div id="journeys"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div>__SURVEY_SECTION____TRANSIT_SECTION____CROSS_RUN_SECTION____SERVICE_SECTION____NOISE_SECTION__<h2>Demographic outcomes and equity</h2><p>__DEMOGRAPHIC_NOTE__</p><h3>Group sizes and travel burdens</h3><div id="group-burdens"></div><h3>Person groups</h3><div id="person-demographics"></div><h3>Other modules' group outcomes</h3><div id="group-module-outcomes"></div><h3>Equity comparison</h3><div id="equity-comparison"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="journeys.csv">journey components and completion (CSV)</a>, <a href="journey_mode_share.csv">journey mode shares (CSV)</a>, <a href="journey_summary.csv">journey distributions (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="journey_survey_comparison.csv">journey survey (CSV)</a>, <a href="service_summary.csv">service summary (CSV)</a>, <a href="service_requests.csv">service requests (CSV)</a>, <a href="service_vehicles.csv">service vehicles (CSV)</a>, <a href="service_occupancy.csv">service occupancy (CSV)</a>, <a href="service_constraints.csv">service constraints (CSV)</a>, <a href="service_availability.csv">service availability (CSV)</a>, <a href="service_diagnostics.csv">service diagnostics (CSV)</a>, <a href="transit_trips.csv">transit trips (CSV)</a>, <a href="transit_stop_hourly.csv">transit boardings and alightings (CSV)</a>, <a href="transit_line_summary.csv">transit line summary (CSV)</a>, <a href="transit_occupancy.csv">transit occupancy (CSV)</a>, <a href="transit_journeys.csv">transit journeys (CSV)</a>, <a href="transit_outcomes.csv">transit outcomes (CSV)</a>, <a href="transit_availability.csv">transit availability (CSV)</a>, <a href="transit_validation_summary.csv">transit observed demand (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;const gb=__GROUP_BURDENS__;const pg=__PERSON_DEMOGRAPHICS__;const gm=__GROUP_MODULE_OUTCOMES__;const eq=__EQUITY_COMPARISON__;const js=__JOURNEY_SHARES__;const jy=__JOURNEY_SUMMARY__;const jn=__JOURNEYS__;const jsurvey=__JOURNEY_SURVEY__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;csvTable('#validation-summary',__VALIDATION_SUMMARY__);csvTable('#validation-matches',__VALIDATION_MATCHES__);__TRANSIT_RENDER____CROSS_RUN_RENDER____SERVICE_RENDER____NOISE_RENDER__table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#journey-shares',js);csvTable('#journey-survey',jsurvey);csvTable('#journey-summary',jy);csvTable('#journeys',jn);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);csvTable('#group-burdens',gb);csvTable('#person-demographics',pg);csvTable('#group-module-outcomes',gm);csvTable('#equity-comparison',eq);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()__NETWORK_ANALYSIS_SCRIPT__</script></body></html>"#;
 
 /// Renders the agent travel tables. They quote person identifiers, so the header and every row
 /// are split with a quote-aware parser instead of `String.split(',')`.
@@ -107,6 +122,7 @@ impl std::error::Error for AnalysisError {}
 
 /// Reported category for a link whose label is absent or only whitespace.
 const UNKNOWN: &str = "unknown";
+const PERSON_DEMOGRAPHIC_PREVIEW_ROWS: usize = 200;
 /// Road-type label the coverage map renders as a dashed expressway.
 const EXPRESSWAY: &str = "expressway";
 /// Leg rows embedded in the local report before it defers to the full `legs.csv`.
@@ -147,6 +163,24 @@ pub struct Manifest {
     #[serde(default)]
     urban_boundary: Option<Vec<[f64; 2]>>,
     #[serde(default)]
+    observed_data: Option<String>,
+    #[serde(default)]
+    journey_survey: Option<String>,
+    #[serde(default)]
+    comparison_runs: Vec<String>,
+    /// Service records, recorded so a standalone rerun analyses the same supplied inputs.
+    #[serde(default)]
+    service: Option<ServiceInputs>,
+    #[serde(default)]
+    transit_observed_data: Option<String>,
+    #[serde(default)]
+    noise: Option<NoiseInputs>,
+    person_group_attributes: Vec<String>,
+    #[serde(default)]
+    person_weight_attribute: Option<String>,
+    #[serde(default)]
+    person_cost_attribute: Option<String>,
+
     excess_delay_clip_seconds: Option<f64>,
 }
 
@@ -165,6 +199,9 @@ struct ExpectedLeg {
     departure_seconds: Option<f64>,
     expected_travel_seconds: Option<f64>,
     distance_meters: Option<f64>,
+    /// The plan routes this leg through the transit schedule.
+    #[serde(default)]
+    transit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,8 +336,14 @@ pub struct AnalysisRunMetadata {
     population_input: Option<String>,
     vehicles_input: Option<String>,
     expected_travel: Vec<PersonExpectedTravel>,
+    #[serde(default)]
+    pub person_demographics: Vec<PersonDemographic>,
     vehicles: Vec<VehiclePce>,
     vehicle_types: Vec<VehicleTypePce>,
+    /// Schedule and vehicle capacities for transit analysis. Absent for a run without a transit
+    /// schedule and for metadata written before transit analysis existed.
+    #[serde(default)]
+    transit: Option<TransitMetadata>,
 }
 
 #[derive(Serialize)]
@@ -354,15 +397,38 @@ impl AnalysisRunMetadata {
             population_input: inputs.population.map(|path| path.display().to_string()),
             vehicles_input: inputs.vehicles.map(|path| path.display().to_string()),
             expected_travel,
+            person_demographics: Vec::new(),
             vehicles,
             vehicle_types,
+            transit: None,
         }
+    }
+
+    /// Attach the demographics captured from the live population.
+    pub fn with_person_demographics(mut self, demographics: Vec<PersonDemographic>) -> Self {
+        self.person_demographics = demographics;
+        self
+    }
+
+    /// Record the transit schedule, with the capacity each departure's vehicle declares.
+    pub fn with_transit(mut self, schedule: &TransitSchedule, garage: &Garage) -> Self {
+        self.transit = (!schedule.lines().is_empty())
+            .then(|| TransitMetadata::from_schedule(schedule, garage));
+        self
     }
 
     /// Simulated fraction of the population the observed volumes were scaled up from.
     pub fn sample_size(&self) -> f64 {
         self.sample_size
     }
+}
+
+/// Capture grouping attributes, weights and costs while the population is available.
+pub fn capture_person_demographics(
+    population: &Population,
+    settings: &Analysis,
+) -> Vec<PersonDemographic> {
+    demographic::capture(population, settings)
 }
 
 /// Capture compact plan expectations immediately before the final iteration's mobsim.
@@ -398,6 +464,10 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
                         departure_seconds: leg.dep_time.map(|time| time.as_nanos() as f64 / 1e9),
                         expected_travel_seconds: expected.map(|time| time.as_secs_f64()),
                         distance_meters,
+                        transit: leg
+                            .route
+                            .as_ref()
+                            .is_some_and(|route| route.as_pt().is_some()),
                     };
                     legs_by_index.insert(element_index, expected_leg.clone());
                     Some(expected_leg)
@@ -472,6 +542,7 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
 /// building an owned key for every link and interval, which is the bulk of the
 /// work once the tables are written.
 type LinkVolumesByHour = BTreeMap<u64, BTreeMap<String, IntervalVolumes>>;
+type LinkVolumesByClass = BTreeMap<String, LinkVolumesByHour>;
 
 /// The observed volumes of one link in one interval, defaulting to no traffic.
 fn volumes_of(
@@ -569,6 +640,30 @@ pub fn analyze_final_iteration(
         software_version: env!("CARGO_PKG_VERSION").to_owned(),
         link_labels: settings.link_labels.clone(),
         urban_boundary: settings.urban_boundary.clone(),
+
+        observed_data: settings
+            .observed_data
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        journey_survey: settings
+            .journey_survey
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        comparison_runs: settings
+            .comparison_runs
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        service: settings.service.clone(),
+        transit_observed_data: settings
+            .transit_observed_data
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        noise: settings.noise.clone(),
+        person_group_attributes: settings.person_group_attributes.clone(),
+        person_weight_attribute: settings.person_weight_attribute.clone(),
+        person_cost_attribute: settings.person_cost_attribute.clone(),
+
         excess_delay_clip_seconds: settings.excess_delay_clip_seconds,
     };
 
@@ -680,6 +775,17 @@ pub fn reanalyze_completed_run(
         interval_seconds: interval_seconds.unwrap_or(recorded.interval_seconds),
         link_labels: recorded.link_labels.clone(),
         urban_boundary: recorded.urban_boundary.clone(),
+
+        observed_data: recorded.observed_data.as_ref().map(PathBuf::from),
+        journey_survey: recorded.journey_survey.as_ref().map(PathBuf::from),
+        comparison_runs: recorded.comparison_runs.iter().map(PathBuf::from).collect(),
+        service: recorded.service.clone(),
+        transit_observed_data: recorded.transit_observed_data.as_ref().map(PathBuf::from),
+        noise: recorded.noise.clone(),
+        person_group_attributes: recorded.person_group_attributes.clone(),
+        person_weight_attribute: recorded.person_weight_attribute.clone(),
+        person_cost_attribute: recorded.person_cost_attribute.clone(),
+
         excess_delay_clip_seconds: recorded.excess_delay_clip_seconds,
     };
 
@@ -864,6 +970,17 @@ fn replay_partitions<'a>(
         .iter()
         .map(|vehicle| (vehicle.vehicle_id.as_str(), vehicle.pce))
         .collect();
+    let class_by_vehicle: BTreeMap<&str, &str> = run_metadata
+        .vehicles
+        .iter()
+        .filter(|vehicle| vehicle.vehicle_type_id != "all")
+        .map(|vehicle| {
+            (
+                vehicle.vehicle_id.as_str(),
+                vehicle.vehicle_type_id.as_str(),
+            )
+        })
+        .collect();
     let events_dir = output_dir
         .join("ITERS")
         .join(format!("it.{iteration}"))
@@ -902,6 +1019,7 @@ fn replay_partitions<'a>(
         .map(PartitionReader::next_event)
         .collect::<Result<Vec<_>, _>>()?;
     let mut counts = LinkVolumesByHour::new();
+    let mut counts_by_class = LinkVolumesByClass::new();
     let expected: BTreeMap<_, _> = run_metadata
         .expected_travel
         .iter()
@@ -922,9 +1040,20 @@ fn replay_partitions<'a>(
         .map(|person| (person.person_id.clone(), person.journeys.clone()))
         .collect();
     let mut agent_travel = AgentTravelAccumulator::new(interval, expected);
-    let mut speeds = LinkSpeedCollector::new(interval, ordered_links);
+
+    let mut speeds = LinkSpeedCollector::new(interval, ordered_links, &class_by_vehicle);
     let mut network_distance = NetworkDistanceCollector::new(interval, ordered_links);
     let mut agent_profiles = AgentProfileCollector::new(interval);
+    let mut transit = TransitCollector::new(
+        run_metadata
+            .expected_travel
+            .iter()
+            .flat_map(|person| &person.legs)
+            .filter(|leg| leg.transit)
+            .map(|leg| leg.mode.clone())
+            .collect(),
+    );
+
     loop {
         let Some(time) = heads
             .iter()
@@ -951,7 +1080,9 @@ fn replay_partitions<'a>(
                     interval,
                     &ids,
                     &pce_by_vehicle,
+                    &class_by_vehicle,
                     &mut counts,
+                    &mut counts_by_class,
                 );
                 speeds.observe(event.as_ref(), time);
                 network_distance.observe(event.as_ref(), time);
@@ -961,16 +1092,20 @@ fn replay_partitions<'a>(
         }
         agent_travel.process_timestamp(&simultaneous_events, time);
         agent_profiles.process_timestamp(&simultaneous_events, time);
+        transit.process_timestamp(&simultaneous_events, time);
     }
+    transit.finish();
     speeds.finish();
     network_distance.finish();
     Ok(ReplayedAnalysis {
         counts,
+        counts_by_class,
         agent_travel,
         expected_journeys,
         speeds,
         network_distance,
         agent_profiles,
+        transit,
     })
 }
 
@@ -978,11 +1113,13 @@ fn replay_partitions<'a>(
 /// reported links, so the bundle carries the same lifetime as the network slice it was built over.
 struct ReplayedAnalysis<'a> {
     counts: LinkVolumesByHour,
+    counts_by_class: LinkVolumesByClass,
     agent_travel: AgentTravelAccumulator,
     expected_journeys: BTreeMap<String, Vec<ExpectedJourney>>,
     speeds: LinkSpeedCollector<'a>,
     network_distance: NetworkDistanceCollector<'a>,
     agent_profiles: AgentProfileCollector,
+    transit: TransitCollector,
 }
 
 fn publish_complete(
@@ -1031,12 +1168,53 @@ fn publish_complete(
         &link_hourly,
     )?;
     replayed.speeds.write_tables(&staging, &hours)?;
+
+    write_class_counts(
+        &staging,
+        ordered_links,
+        &hours,
+        &run_metadata.vehicle_types,
+        &replayed.counts_by_class,
+    )?;
+    replayed.speeds.write_class_hourly_speeds(&staging)?;
+
     replayed
         .network_distance
         .write_tables(&staging, &hours, settings.excess_delay_clip_seconds)?;
     replayed
         .agent_profiles
         .write_table(&staging, interval, simulation_end_time)?;
+
+    // The transit tables read the journeys and legs of the agent travel replay.
+    let (transit_summary, transit_stops) = transit::write_tables(
+        &staging,
+        run_metadata.transit.as_ref(),
+        &replayed.transit,
+        &agent_travel.observed_legs,
+        &replayed.expected_journeys,
+        interval,
+        run_metadata.sample_size(),
+    )?;
+    let transit_validation = settings.transit_observed_data.as_ref().map(|source| {
+        let source = if source.is_absolute() {
+            source.clone()
+        } else {
+            output_dir.join(source)
+        };
+        transit::write_observed(
+            &staging,
+            &source,
+            run_metadata.transit.as_ref(),
+            &transit_stops,
+            interval,
+            run_metadata.sample_size(),
+        )
+        .map_err(|error| error.to_string())
+    });
+    if transit_validation.as_ref().is_none_or(Result::is_err) {
+        transit::write_empty_observed(&staging)?;
+    }
+
     write_classification(&staging, ordered_links, &classifications)?;
     write_group_coverage(
         &staging,
@@ -1048,11 +1226,93 @@ fn publish_complete(
     )?;
     write_network_map(&staging, ordered_links, network, &classifications, counts)?;
     write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
+
     write_json(
         &staging.join(METRIC_CATALOG_FILE),
         &metrics(settings.excess_delay_clip_seconds.is_some()),
     )?;
-    let statuses = module_statuses(&RequiredOutcome::Complete);
+    let vehicle_classes: Vec<_> = run_metadata
+        .vehicle_types
+        .iter()
+        .filter(|vehicle_type| vehicle_type.vehicle_type_id != "all")
+        .map(|vehicle_type| vehicle_type.vehicle_type_id.clone())
+        .collect();
+    let validation = settings.observed_data.as_ref().map(|source| {
+        let source = if source.is_absolute() {
+            source.clone()
+        } else {
+            output_dir.join(source)
+        };
+        validation::write(
+            &staging,
+            &source,
+            interval,
+            run_metadata.sample_size(),
+            &vehicle_classes,
+        )
+        .map_err(|error| error.to_string())
+    });
+    if validation.as_ref().is_none_or(Result::is_err) {
+        write_empty_validation(&staging)?;
+    }
+    let survey = settings.journey_survey.as_ref().map(|source| {
+        let source = if source.is_absolute() {
+            source.clone()
+        } else {
+            output_dir.join(source)
+        };
+        survey::write(&staging, &source).map_err(|error| error.to_string())
+    });
+    if survey.as_ref().is_none_or(Result::is_err) {
+        survey::write_empty(&staging)?;
+    }
+    let comparison = (!settings.comparison_runs.is_empty()).then(|| {
+        cross_run::write(output_dir, &staging, &settings.comparison_runs)
+            .map_err(|error| error.to_string())
+    });
+    if comparison.as_ref().is_none_or(Result::is_err) {
+        cross_run::write_empty(&staging)?;
+    }
+    let service = settings.service.as_ref().map(|inputs| {
+        service::write(&staging, output_dir, inputs, network, ordered_links)
+            .map_err(|error| error.to_string())
+    });
+    if service.as_ref().is_none_or(Result::is_err) {
+        service::write_empty(&staging)?;
+    }
+    let noise = settings.noise.as_ref().map(|inputs| {
+        noise::write(&staging, output_dir, inputs).map_err(|error| error.to_string())
+    });
+    if noise.as_ref().is_none_or(Result::is_err) {
+        noise::write_empty(&staging)?;
+    }
+    let demographics = if settings.person_group_attributes.is_empty()
+        || run_metadata.person_demographics.is_empty()
+    {
+        None
+    } else {
+        Some(
+            demographic::write(&staging, output_dir, settings, run_metadata)
+                .map_err(|error| error.to_string()),
+        )
+    };
+    if demographics.as_ref().is_none_or(Result::is_err) {
+        demographic::write_empty(&staging)?;
+    }
+    let statuses = module_statuses(
+        &RequiredOutcome::Complete,
+        validation.as_ref(),
+        comparison.as_ref(),
+        service.as_ref(),
+        demographics.as_ref(),
+        &TransitOutcome {
+            has_service_records: transit_summary.has_service_records,
+            validation: transit_validation.as_ref(),
+        },
+        survey.as_ref(),
+        noise.as_ref(),
+    );
+
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
     write_report(&staging, manifest, &statuses, &link_hourly)?;
@@ -1069,6 +1329,46 @@ fn publish_complete(
     Ok(published.join("index.html"))
 }
 
+fn write_class_counts(
+    path: &Path,
+    links: &[&Link],
+    hours: &[u64],
+    classes: &[VehicleTypePce],
+    counts: &LinkVolumesByClass,
+) -> Result<(), AnalysisError> {
+    let mut writer = table_writer(path, "link_hourly_by_class.csv")?;
+    writeln!(
+        writer,
+        "vehicle_class,link_id,hour_start_seconds,entry_vehicles,exit_vehicles"
+    )
+    .map_err(io_error)?;
+    for class in classes
+        .iter()
+        .filter(|class| class.vehicle_type_id != "all")
+    {
+        let class_counts = counts.get(&class.vehicle_type_id);
+        for hour in hours {
+            for link in links {
+                let volumes = class_counts
+                    .and_then(|counts| counts.get(hour))
+                    .and_then(|links| links.get(link.id.external()))
+                    .copied()
+                    .unwrap_or_default();
+                writeln!(
+                    writer,
+                    "{},{},{hour},{},{}",
+                    csv(&class.vehicle_type_id),
+                    csv(link.id.external()),
+                    volumes.entries,
+                    volumes.exits
+                )
+                .map_err(io_error)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Publish the diagnostics of a failed attempt. The completed report in [`ANALYSIS_DIR`] is never
 /// touched, so a failed rerun cannot be mistaken for a completed index.
 fn publish_failure(
@@ -1079,7 +1379,16 @@ fn publish_failure(
     let mut failed = manifest.clone();
     failed.status = STATUS_FAILED.to_owned();
     failed.failure = Some(error.to_string());
-    let statuses = module_statuses(&RequiredOutcome::Failed(error.to_string()));
+    let statuses = module_statuses(
+        &RequiredOutcome::Failed(error.to_string()),
+        None,
+        None,
+        None,
+        None,
+        &TransitOutcome::default(),
+        None,
+        None,
+    );
     let staging = output_dir.join(FAILURE_STAGING_DIR);
     reset_staging(&staging)?;
     write_json(&staging.join(MANIFEST_FILE), &failed)?;
@@ -1094,7 +1403,23 @@ fn publish_failure(
     Ok(())
 }
 
-fn module_statuses(outcome: &RequiredOutcome) -> Vec<ModuleStatus> {
+/// What the transit modules computed, for their status rows.
+#[derive(Default)]
+struct TransitOutcome<'a> {
+    has_service_records: bool,
+    validation: Option<&'a Result<(), String>>,
+}
+
+fn module_statuses(
+    outcome: &RequiredOutcome,
+    validation: Option<&Result<(), String>>,
+    comparison: Option<&Result<(), String>>,
+    service: Option<&Result<(), String>>,
+    demographics: Option<&Result<(), String>>,
+    transit: &TransitOutcome<'_>,
+    survey: Option<&Result<(), String>>,
+    noise: Option<&Result<(), String>>,
+) -> Vec<ModuleStatus> {
     let (status, reason) = match outcome {
         RequiredOutcome::Complete => (STATUS_COMPLETE, None),
         RequiredOutcome::Failed(reason) => (STATUS_FAILED, Some(reason.clone())),
@@ -1106,21 +1431,159 @@ fn module_statuses(outcome: &RequiredOutcome) -> Vec<ModuleStatus> {
         reason: reason.clone(),
     }];
     statuses.extend(OPTIONAL_MODULES.iter().map(|(module, unavailable)| {
+        let computed_status = match *module {
+            "transit_performance" => Some(if transit.has_service_records {
+                (STATUS_COMPLETE, None)
+            } else {
+                (
+                    STATUS_UNAVAILABLE,
+                    Some("No transit service records in the final iteration".to_owned()),
+                )
+            }),
+            "transit_validation" => match transit.validation {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No transit observation dataset is configured".to_owned()),
+                )),
+            },
+            "validation" => match validation {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No observed validation dataset is configured".to_owned()),
+                )),
+            },
+            "cross_run_comparison" => match comparison {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No comparison runs are configured".to_owned()),
+                )),
+            },
+            "service_performance" => match service {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No service records are configured".to_owned()),
+                )),
+            },
+            demographic::MODULE => match demographics {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No person group attributes are configured".to_owned()),
+                )),
+            },
+            "transit_and_research" => match survey {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No journey survey dataset is configured".to_owned()),
+                )),
+            },
+            "noise_exposure" => match noise {
+                Some(Ok(())) => Some((STATUS_COMPLETE, None)),
+                Some(Err(reason)) => Some((STATUS_FAILED, Some(reason.clone()))),
+                None => Some((
+                    STATUS_UNAVAILABLE,
+                    Some("No modeled noise records are configured".to_owned()),
+                )),
+            },
+            _ => None,
+        };
         ModuleStatus {
             module,
             required: false,
             // A computed module shares the run's outcome, so a failed run cannot report it complete.
-            status: if unavailable.is_none() {
+            status: if let Some((status, _)) = &computed_status {
+                status
+            } else if unavailable.is_none() {
                 status
             } else {
                 STATUS_UNAVAILABLE
             },
-            reason: unavailable
-                .map(|reason| (*reason).to_owned())
-                .or_else(|| reason.clone()),
+            reason: computed_status.and_then(|(_, reason)| reason).or_else(|| {
+                unavailable
+                    .map(|reason| (*reason).to_owned())
+                    .or_else(|| reason.clone())
+            }),
         }
     }));
     statuses
+}
+
+fn write_empty_validation(path: &Path) -> Result<(), AnalysisError> {
+    for (name, content) in [
+        (
+            "validation_summary.csv",
+            "split,metric,vehicle_class,sample_size,bias,mae,rmse,geh_mean,geh_count,unmatched_observations,undefined_relative_errors\n",
+        ),
+        (
+            "validation_matches.csv",
+            "link_id,period_start_seconds,vehicle_class,metric,split,observed,simulated_sample,expansion_factor,simulated_expanded,residual,relative_error,observation_source,source_row\n",
+        ),
+        (
+            "validation_unmatched.csv",
+            "source_row,link_id,period_start_seconds,period_end_seconds,vehicle_class,split,metric,unit,value,source,reason\n",
+        ),
+        (
+            "validation_scatter.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed validation data configured</text></svg>",
+        ),
+        (
+            "validation_scatter_count_calibration.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed count data configured</text></svg>",
+        ),
+        (
+            "validation_scatter_count_holdout.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed count data configured</text></svg>",
+        ),
+        (
+            "validation_scatter_speed_calibration.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed speed data configured</text></svg>",
+        ),
+        (
+            "validation_scatter_speed_holdout.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"600\"><text x=\"20\" y=\"30\">No observed speed data configured</text></svg>",
+        ),
+        (
+            "validation_time_profiles.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"400\"><text x=\"20\" y=\"30\">No observed validation data configured</text></svg>",
+        ),
+        (
+            "validation_time_profiles_calibration.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"400\"><text x=\"20\" y=\"30\">No calibration count data configured</text></svg>",
+        ),
+        (
+            "validation_time_profiles_holdout.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"700\" height=\"400\"><text x=\"20\" y=\"30\">No holdout count data configured</text></svg>",
+        ),
+    ] {
+        fs::write(path.join(name), content).map_err(io_error)?;
+    }
+    fs::copy(
+        path.join("network_map.svg"),
+        path.join("validation_residual_map.svg"),
+    )
+    .map_err(io_error)?;
+    fs::copy(
+        path.join("network_map.svg"),
+        path.join("validation_residual_map_calibration.svg"),
+    )
+    .map_err(io_error)?;
+    fs::copy(
+        path.join("network_map.svg"),
+        path.join("validation_residual_map_holdout.svg"),
+    )
+    .map_err(io_error)?;
+    Ok(())
 }
 
 /// Every metric the report exports, so a consumer of the catalog can look a metric up in the
@@ -1329,6 +1792,31 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
             aggregation_key: "main_mode,purpose",
         },
         Metric {
+            name: "observed_journey_weight",
+            unit: "weighted_journeys",
+            aggregation_key: "split,metric,category",
+        },
+        Metric {
+            name: "observed_journey_share",
+            unit: "proportion",
+            aggregation_key: "split,metric,category",
+        },
+        Metric {
+            name: "simulated_journeys",
+            unit: "journeys",
+            aggregation_key: "split,metric,category",
+        },
+        Metric {
+            name: "simulated_journey_share",
+            unit: "proportion",
+            aggregation_key: "split,metric,category",
+        },
+        Metric {
+            name: "survey_uncertainty",
+            unit: "weighted_journeys",
+            aggregation_key: "split,metric,category",
+        },
+        Metric {
             name: "completed",
             unit: "journeys",
             aggregation_key: "main_mode,purpose",
@@ -1481,6 +1969,71 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
             unit: "traversals",
             aggregation_key: "hour_start_seconds,bin_index",
         },
+        Metric {
+            name: "sample_size",
+            unit: "observations",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "bias",
+            unit: "metric units",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "mae",
+            unit: "metric units",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "rmse",
+            unit: "metric units",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "geh_mean",
+            unit: "GEH",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "geh_count",
+            unit: "observations",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "unmatched_observations",
+            unit: "observations",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "undefined_relative_errors",
+            unit: "observations",
+            aggregation_key: "split,metric,vehicle_class",
+        },
+        Metric {
+            name: "iteration",
+            unit: "iterations",
+            aggregation_key: "run,iteration",
+        },
+        Metric {
+            name: "simulated_sample",
+            unit: "run metric unit",
+            aggregation_key: "run,iteration,metric,link_id,period_start_seconds,vehicle_class",
+        },
+        Metric {
+            name: "sample_size",
+            unit: "fraction",
+            aggregation_key: "run,iteration",
+        },
+        Metric {
+            name: "population_value",
+            unit: "vehicles or m/s",
+            aggregation_key: "run,iteration,metric,link_id,period_start_seconds,vehicle_class",
+        },
+        Metric {
+            name: "period_end_seconds",
+            unit: "seconds",
+            aggregation_key: "run,iteration,link_id,period_start_seconds",
+        },
     ]
     .into_iter()
     .chain(
@@ -1609,7 +2162,207 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
             unit: "traversals",
             aggregation_key: "metric",
         },
+        Metric {
+            name: "requests",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "served",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "rejected",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "unserved",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "served_share",
+            unit: "proportion",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "rejected_share",
+            unit: "proportion",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "passengers_served",
+            unit: "passengers",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "wait_mean_seconds",
+            unit: "seconds",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "wait_std_seconds",
+            unit: "seconds",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "wait_median_seconds",
+            unit: "seconds",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "wait_p90_seconds",
+            unit: "seconds",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "detour_mean_ratio",
+            unit: "ratio",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "detour_std_ratio",
+            unit: "ratio",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "detour_median_ratio",
+            unit: "ratio",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "detour_p90_ratio",
+            unit: "ratio",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "wait_limit_exceeded",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "inside_area",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "outside_area",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "area_unknown",
+            unit: "requests",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "coverage_share",
+            unit: "proportion",
+            aggregation_key: "scope,group",
+        },
+        Metric {
+            name: "service_seconds",
+            unit: "seconds",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "busy_seconds",
+            unit: "seconds",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "utilization",
+            unit: "proportion",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "driven_meters",
+            unit: "meters",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "occupied_meters",
+            unit: "meters",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "empty_meters",
+            unit: "meters",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "empty_share",
+            unit: "proportion",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "passenger_meters",
+            unit: "passenger-meters",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "mean_occupancy",
+            unit: "passengers",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "load_factor",
+            unit: "proportion",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "capacity_exceeded_tasks",
+            unit: "tasks",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "requests_served",
+            unit: "requests",
+            aggregation_key: "scope,vehicle_id",
+        },
+        Metric {
+            name: "load_vehicle_meters",
+            unit: "meters",
+            aggregation_key: "load_passengers",
+        },
+        Metric {
+            name: "load_share",
+            unit: "proportion",
+            aggregation_key: "load_passengers",
+        },
     ])
+    .chain(
+        transit::METRICS
+            .iter()
+            .map(|(name, unit, aggregation_key)| Metric {
+                name,
+                unit,
+                aggregation_key,
+            }),
+    )
+    .chain([
+        Metric {
+            name: "receiver_noise_value",
+            unit: "input_unit",
+            aggregation_key: "receiver_id,period_start_seconds,period_end_seconds,metric,unit",
+        },
+        Metric {
+            name: "affected_population",
+            unit: "persons",
+            aggregation_key: "receiver_id,period_start_seconds,period_end_seconds,metric",
+        },
+    ])
+    .chain(
+        demographic::METRICS
+            .iter()
+            .map(|(name, unit, aggregation_key)| Metric {
+                name,
+                unit,
+                aggregation_key,
+            }),
+    )
     .chain(if include_clipped_delay {
         vec![
             Metric {
@@ -1783,7 +2536,9 @@ fn accumulate(
     interval: u32,
     ids: &BTreeSet<String>,
     pce_by_vehicle: &BTreeMap<&str, f64>,
+    class_by_vehicle: &BTreeMap<&str, &str>,
     counts: &mut LinkVolumesByHour,
+    counts_by_class: &mut LinkVolumesByClass,
 ) {
     let Some(visit) = link_visit(event) else {
         return;
@@ -1808,6 +2563,16 @@ fn accumulate(
         .entry(id.to_owned())
         .or_default()
         .record(side, pce);
+    if let Some(class) = class_by_vehicle.get(vehicle.external()) {
+        counts_by_class
+            .entry((*class).to_owned())
+            .or_default()
+            .entry(hour)
+            .or_default()
+            .entry(id.to_owned())
+            .or_default()
+            .record(side, None);
+    }
 }
 
 /// A link's three classification dimensions, always populated.
@@ -2191,6 +2956,10 @@ fn write_network_map(
             })
             .collect::<Vec<_>>()
             .join(" ");
+        let data_attributes = format!(
+            "{data_attributes} data-link-id=\"{}\"",
+            xml_escape(link.id.external())
+        );
         writeln!(file, "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" {data_attributes} stroke=\"{color}\" stroke-width=\"3\"{road_style}><title>{}</title></line>", xml_escape(&title)).map_err(io_error)?;
     }
     writeln!(file, "</svg>").map_err(io_error)
@@ -2795,7 +3564,7 @@ fn analysis_main_mode(modes: &[String]) -> String {
     known.map_or_else(|| "undefined".to_owned(), |(_, mode)| mode.clone())
 }
 
-fn distance_class(distance_meters: Option<f64>) -> &'static str {
+pub(super) fn distance_class(distance_meters: Option<f64>) -> &'static str {
     match distance_meters {
         Some(distance) if distance < 1_000.0 => "under_1_km",
         Some(distance) if distance < 5_000.0 => "1_to_5_km",
@@ -3142,8 +3911,82 @@ fn sections(tables: &[EmbeddedTable<'_>]) -> String {
         .collect::<String>()
 }
 
+/// The transit tables of the report, each with the file that holds every row.
+const TRANSIT_TABLES: &[(&str, &str, &str)] = &[
+    (
+        "transit-availability",
+        "Metric availability",
+        "transit_availability.csv",
+    ),
+    ("transit-outcomes", "Trip outcomes", "transit_outcomes.csv"),
+    (
+        "transit-stops",
+        "Boardings and alightings by line and stop",
+        "transit_stop_hourly.csv",
+    ),
+    (
+        "transit-lines",
+        "Waiting, in-vehicle time and delay by line",
+        "transit_line_summary.csv",
+    ),
+    (
+        "transit-occupancy",
+        "Occupancy and load factor by departure and segment",
+        "transit_occupancy.csv",
+    ),
+    (
+        "transit-journeys",
+        "Access, egress and transfers by journey",
+        "transit_journeys.csv",
+    ),
+    (
+        "transit-trips",
+        "Passenger transit trips",
+        "transit_trips.csv",
+    ),
+    (
+        "transit-validation-summary",
+        "Observed demand summary",
+        "transit_validation_summary.csv",
+    ),
+    (
+        "transit-validation-matches",
+        "Matched observed demand",
+        "transit_validation_matches.csv",
+    ),
+    (
+        "transit-validation-unmatched",
+        "Unmatched observed demand",
+        "transit_validation_unmatched.csv",
+    ),
+];
+
+const TRANSIT_NOTE: &str = "Public transport is modeled by teleportation in this build: each passenger trip is recorded with its line, route, access and egress stop and scheduled boarding time, and no transit vehicle drives through the network. Waiting is the scheduled boarding time minus the passenger's departure at the stop, in-vehicle time is the arrival minus the boarding time, and arrival delay compares the arrival with the schedule. A passenger reaching the stop after the scheduled departure is a missed service and has no waiting time. Boardings, alightings and loads are expanded by the reciprocal of the sample size; load factors divide them by the vehicle capacity declared in the vehicle file. Metrics whose inputs are absent (service records, schedule, capacity, vehicle-level service events) are left blank and listed as unavailable instead of being inferred.";
+
+/// Section markup and script that render the transit tables.
+fn transit_report(path: &Path) -> Result<(String, String), AnalysisError> {
+    let mut section = format!("<h2>Public transport</h2><p>{TRANSIT_NOTE}</p>");
+    let mut render = String::new();
+    for (id, title, file) in TRANSIT_TABLES {
+        let (rows, truncated) = csv_preview_for_script(&path.join(file), LEGS_PREVIEW_ROWS)?;
+        let more = if truncated {
+            format!(" Showing the first {LEGS_PREVIEW_ROWS} rows.")
+        } else {
+            String::new()
+        };
+        section.push_str(&format!(
+            "<h3>{title}</h3><p><a href=\"{file}\">{file}</a>{more}</p><div id=\"{id}\"></div>"
+        ));
+        render.push_str(&format!("csvTable('#{id}',{rows});"));
+    }
+    Ok((section, render))
+}
+
 /// Explains how the link speeds are reconstructed, next to the tables they are rendered in.
 const SPEED_NOTE: &str = "Speeds are reconstructed from full-link traversals and assigned to the interval in which the vehicle entered the link. The representative speed divides the total travelled distance by the total travel time; the arithmetic vehicle-speed mean and population standard deviation describe the single traversals. A link without a full-link traversal has no speed: QSim inserts a vehicle at the end of the first link of a leg, so the first link of a network leg never covers its whole length and is reported as a partial traversal instead. The traversal records table lists every record that cannot produce a full-link speed, such as those partial traversals, traversals that never finished, and records without a positive duration.";
+
+/// Explains where the service tables come from, next to the tables themselves.
+const SERVICE_NOTE: &str = "Computed only from the supplied request, passenger, fleet and schedule records; no service is simulated. A request counts as rejected only when its request record says so, never because a completed leg is missing, and a request with neither a rejection nor a passenger record is unserved. Wait is pickup minus submission; the detour ratio is in-vehicle time over the supplied direct travel time. A drive task is occupied when a served request is on board for its whole span. Metrics whose inputs were not supplied stay blank and are listed as unavailable.";
 
 fn write_report(
     path: &Path,
@@ -3184,8 +4027,69 @@ fn write_report(
     let journeys = csv_for_script(&path.join("journeys.csv"))?;
     let journey_shares = csv_for_script(&path.join("journey_mode_share.csv"))?;
     let journey_summary = csv_for_script(&path.join("journey_summary.csv"))?;
+    let journey_survey = csv_for_script(&path.join("journey_survey_comparison.csv"))?;
     // One row per leg, so only a bounded preview is embedded and the rest stays in the CSV.
     let (legs, legs_truncated) = csv_preview_for_script(&path.join("legs.csv"), LEGS_PREVIEW_ROWS)?;
+    let validation_summary = csv_for_script(&path.join("validation_summary.csv"))?;
+    let validation_matches = csv_preview_for_script(&path.join("validation_matches.csv"), 500)?.0;
+    let cross_run = csv_for_script(&path.join("cross_run_comparison.csv"))?;
+    let group_burdens = csv_for_script(&path.join("group_burdens.csv"))?;
+    let group_module_outcomes = csv_for_script(&path.join("group_module_outcomes.csv"))?;
+    let equity_comparison = csv_for_script(&path.join("equity_comparison.csv"))?;
+    let (person_demographics, person_demographics_truncated) = csv_preview_for_script(
+        &path.join("person_demographics.csv"),
+        PERSON_DEMOGRAPHIC_PREVIEW_ROWS,
+    )?;
+    let demographic_note = format!(
+        "People are grouped by configured attributes; missing values are kept as {UNKNOWN}. Group sizes use the configured weight, defaulting to one when unavailable. Only completed days contribute travel burdens. The equity criterion is {}: {}",
+        demographic::EQUITY_CRITERION,
+        demographic::EQUITY_CRITERION_DESCRIPTION,
+    );
+    let demographic_note = if person_demographics_truncated {
+        format!(
+            "{demographic_note} The preview shows the first {PERSON_DEMOGRAPHIC_PREVIEW_ROWS} rows; the CSV contains all people."
+        )
+    } else {
+        demographic_note
+    };
+    let validation_note = "vehicle_class accepts all or a vehicle type ID. Calibration and holdout plots are kept separate.";
+    let validation_plots = "<h3>Calibration count</h3><img src=\"validation_scatter_count_calibration.svg\" alt=\"Calibration count scatterplot\"><h3>Holdout count</h3><img src=\"validation_scatter_count_holdout.svg\" alt=\"Holdout count scatterplot\"><h3>Calibration speed</h3><img src=\"validation_scatter_speed_calibration.svg\" alt=\"Calibration speed scatterplot\"><h3>Holdout speed</h3><img src=\"validation_scatter_speed_holdout.svg\" alt=\"Holdout speed scatterplot\"><h3>Calibration time profile</h3><img src=\"validation_time_profiles_calibration.svg\" alt=\"Calibration observed and simulated counts by period\"><h3>Holdout time profile</h3><img src=\"validation_time_profiles_holdout.svg\" alt=\"Holdout observed and simulated counts by period\"><h3>Calibration residual map</h3><img src=\"validation_residual_map_calibration.svg\" alt=\"Calibration link count residual map\"><h3>Holdout residual map</h3><img src=\"validation_residual_map_holdout.svg\" alt=\"Holdout link count residual map\">";
+    let cross_run_section = "<h2>Cross-run comparison</h2><p>Rows contain metrics from the latest completed report in each configured comparison run.</p><div id=\"cross-run\"></div><p><a href=\"cross_run_comparison.csv\">Cross-run comparison CSV</a></p>";
+    let (service_requests, service_requests_truncated) =
+        csv_preview_for_script(&path.join("service_requests.csv"), LEGS_PREVIEW_ROWS)?;
+    let service_section = format!(
+        "<h2>DRT and taxi service performance</h2><p>{SERVICE_NOTE}</p><h3>Requests by outcome</h3><div id=\"service-summary\"></div><h3>Fleet distance, occupancy and utilization</h3><div id=\"service-vehicles\"></div><h3>Driven distance by passengers on board</h3><div id=\"service-occupancy\"></div><h3>Service constraints</h3><div id=\"service-constraints\"></div><h3>Metric availability</h3><div id=\"service-availability\"></div><h3>Excluded records</h3><div id=\"service-diagnostics\"></div><h3>Requests</h3><p>{}</p><div id=\"service-requests\"></div>",
+        if service_requests_truncated {
+            format!(
+                "Showing the first {LEGS_PREVIEW_ROWS} rows of <a href=\"service_requests.csv\">service_requests.csv</a>, which holds every request."
+            )
+        } else {
+            "Every request is listed in <a href=\"service_requests.csv\">service_requests.csv</a>."
+                .to_owned()
+        }
+    );
+    let noise_section = "<h2>Modeled noise and exposure</h2><p>Supplied receiver records are grouped by receiver and exact period. Sound and exposure in dB use an energy mean; supplied damage is summed. Affected population is joined only by receiver and period. Maps are emitted only when receiver coordinates are supplied. No exposure or damage is inferred when inputs are absent.</p><h3>Receiver and period metrics</h3><div id=\"noise-summary\"></div><h3>Receiver maps</h3><div id=\"noise-maps\"></div><h3>Input availability</h3><div id=\"noise-availability\"></div><p><a href=\"noise_summary.csv\">Noise summary CSV</a> · <a href=\"noise_maps.csv\">Noise maps index CSV</a> · <a href=\"noise_availability.csv\">Availability CSV</a></p>";
+    let mut service_render = format!("csvTable('#service-requests',{service_requests});");
+    for (id, file) in [
+        ("service-summary", "service_summary.csv"),
+        ("service-vehicles", "service_vehicles.csv"),
+        ("service-occupancy", "service_occupancy.csv"),
+        ("service-constraints", "service_constraints.csv"),
+        ("service-availability", "service_availability.csv"),
+        ("service-diagnostics", "service_diagnostics.csv"),
+    ] {
+        service_render.push_str(&format!(
+            "csvTable('#{id}',{});",
+            csv_for_script(&path.join(file))?
+        ));
+    }
+    let noise_maps = csv_for_script(&path.join("noise_maps.csv"))?;
+    let noise_render = format!(
+        "csvTable('#noise-summary',{});csvTable('#noise-availability',{});const nm={noise_maps};nm.slice(1).forEach(row=>{{const fields=parseCsv(row),img=document.createElement('img');img.src=fields[3];img.alt=fields[0]+' noise map, '+fields[1]+' to '+fields[2]+' seconds';img.style.maxWidth='100%';document.querySelector('#noise-maps').appendChild(img)}});",
+        csv_for_script(&path.join("noise_summary.csv"))?,
+        csv_for_script(&path.join("noise_availability.csv"))?
+    );
+    let survey_section = "<h2>Travel survey comparison</h2><p>Weighted survey journeys are compared using the same journey definition and distribution bins. Calibration and holdout partition survey records; both use the same simulated distribution. Denominators are shown for each split and metric; unmatched groups remain visible.</p><div id=\"journey-survey\"></div><p><a href=\"journey_survey_comparison.csv\">Survey comparison CSV</a></p>";
     let legs_note = if legs_truncated {
         format!(
             "Showing the first {LEGS_PREVIEW_ROWS} rows of <a href=\"legs.csv\">legs.csv</a>, which holds every leg."
@@ -3193,6 +4097,7 @@ fn write_report(
     } else {
         "Every observed and planned leg is listed in <a href=\"legs.csv\">legs.csv</a>.".to_owned()
     };
+    let (transit_section, transit_render) = transit_report(path)?;
     let speed_declarations = speeds
         .iter()
         .map(EmbeddedTable::declaration)
@@ -3232,6 +4137,28 @@ fn write_report(
             ("__JOURNEY_SHARES__", &journey_shares),
             ("__JOURNEY_SUMMARY__", &journey_summary),
             ("__LEGS__", &legs),
+            ("__JOURNEY_SURVEY__", &journey_survey),
+            ("__SURVEY_SECTION__", survey_section),
+            ("__VALIDATION_SUMMARY__", &validation_summary),
+            ("__VALIDATION_MATCHES__", &validation_matches),
+            ("__VALIDATION_NOTE__", validation_note),
+            ("__VALIDATION_PLOTS__", validation_plots),
+            ("__CROSS_RUN_SECTION__", cross_run_section),
+            (
+                "__CROSS_RUN_RENDER__",
+                &format!("csvTable('#cross-run',{cross_run});"),
+            ),
+            ("__DEMOGRAPHIC_NOTE__", &demographic_note),
+            ("__GROUP_BURDENS__", &group_burdens),
+            ("__PERSON_DEMOGRAPHICS__", &person_demographics),
+            ("__GROUP_MODULE_OUTCOMES__", &group_module_outcomes),
+            ("__EQUITY_COMPARISON__", &equity_comparison),
+            ("__SERVICE_SECTION__", &service_section),
+            ("__SERVICE_RENDER__", &service_render),
+            ("__NOISE_SECTION__", noise_section),
+            ("__NOISE_RENDER__", &noise_render),
+            ("__TRANSIT_SECTION__", &transit_section),
+            ("__TRANSIT_RENDER__", &transit_render),
             ("__LEGS_NOTE__", &legs_note),
             ("__NETWORK_ANALYSIS_SCRIPT__", &network_script),
         ],
@@ -3757,6 +4684,60 @@ mod tests {
         assert!(hourly.contains("36000,\"car\",1,1,1,10.000000"));
     }
 
+    #[test]
+    fn noise_reports_through_the_shared_final_iteration_analysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("ITERS/it.0/events");
+        fs::create_dir_all(&events).unwrap();
+        fs::write(events.join("events.0.xml"), "<events></events>").unwrap();
+        fs::write(
+            dir.path().join("noise.csv"),
+            "receiver_id,period_start_seconds,period_end_seconds,metric,unit,value,x,y\nr1,0,3600,exposure,dB,42,10,20\n",
+        )
+        .unwrap();
+        let metadata = AnalysisRunMetadata::from_run(
+            0,
+            1.0,
+            &Garage::default(),
+            Vec::new(),
+            AnalysisInputPaths::default(),
+        );
+        let report = analyze_final_iteration(
+            dir.path(),
+            0,
+            1,
+            CompressionType::None,
+            3600,
+            &metadata,
+            &Network::new(),
+            &Analysis {
+                enabled: true,
+                interval_seconds: 3600,
+                noise: Some(NoiseInputs {
+                    records: "noise.csv".into(),
+                    affected_population: None,
+                }),
+                ..Analysis::default()
+            },
+        )
+        .unwrap();
+        let output = report.parent().unwrap();
+        let summary = fs::read_to_string(output.join("noise_summary.csv")).unwrap();
+        assert!(summary.contains("r1,0,3600,exposure,dB,42,energy_mean,,noise_map_0.svg"));
+        assert!(output.join("noise_map_0.svg").is_file());
+        let html = fs::read_to_string(&report).unwrap();
+        assert!(html.contains("id=\"noise-maps\""));
+        assert!(html.contains("noise_map_0.svg"));
+        let statuses: serde_json::Value = read_json(&output.join(MODULE_STATUS_FILE)).unwrap();
+        assert!(
+            statuses
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["module"] == "noise_exposure" && row["status"] == "complete")
+        );
+    }
+
     fn expected_person(person_id: &str, legs: &[(usize, &str)]) -> PersonExpectedTravel {
         PersonExpectedTravel {
             person_id: person_id.to_owned(),
@@ -3768,6 +4749,7 @@ mod tests {
                     departure_seconds: None,
                     expected_travel_seconds: None,
                     distance_meters: None,
+                    transit: false,
                 })
                 .collect(),
             journeys: Vec::new(),

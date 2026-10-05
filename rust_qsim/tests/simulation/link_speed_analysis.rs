@@ -152,7 +152,16 @@ fn analyze_with_clip(
             interval_seconds,
             link_labels: BTreeMap::new(),
             urban_boundary: None,
+            observed_data: None,
+            journey_survey: None,
+            comparison_runs: Vec::new(),
+            service: None,
+            transit_observed_data: None,
+            noise: None,
             excess_delay_clip_seconds: clip_delay,
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         },
     )
     .unwrap();

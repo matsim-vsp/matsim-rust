@@ -119,6 +119,25 @@ mode hierarchy, and journey distance sums the route distances captured from the 
 plan, including model-derived teleportation distances. Journeys with incomplete observed legs keep
 their completion and route-distance fields but have no duration.
 
+#### Demographic outcomes and equity
+
+`simulation::analysis::demographic` groups people by the person attributes
+`output.analysis.person_group_attributes` names. The group labels, the optional person weight and
+the optional monetary cost are read from the population next to the expected-travel capture,
+before the final mobsim is the only moment the attributes exist, and travel with
+`AnalysisRunMetadata` so a standalone rerun groups the same people.
+
+The module reads `person_daily.csv` -- the agent travel module's table -- for the person outcomes
+it aggregates, so the group burdens, the equity comparison and the person table cannot describe
+the same day differently. A burden is defined only for a person whose day is `complete` or
+`no_travel`; every other person keeps their group size and is counted in `incomplete_persons`
+instead of lowering a mean. The equity comparison reads each configured comparison run's
+published report and counts winners and losers per group under the stated criterion
+`lower_daily_completed_travel_time`, rejecting a comparison run that was not grouped by the same
+attributes, and reporting the persons each count excludes. Other modules join the group tables by
+writing `<module>_group_outcomes.csv` with the columns `dimension,group,metric,unit,value` into
+the report directory.
+
 #### PCE volumes and capacity utilization
 
 `simulation::analysis::capacity` adds per-link capacity utilization. Volumes are weighted by PCE,
