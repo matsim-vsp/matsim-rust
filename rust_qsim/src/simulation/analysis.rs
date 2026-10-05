@@ -2305,12 +2305,12 @@ fn metrics(include_clipped_delay: bool) -> Vec<Metric<'static>> {
     })
     .chain([
         Metric {
-            name: "economic_input_value",
+            name: "value",
             unit: "declared_input_unit",
             aggregation_key: "scope,entity_id,group,account,unit",
         },
         Metric {
-            name: "economic_money_equivalent",
+            name: "money_equivalent",
             unit: "declared_money_unit",
             aggregation_key: "scope,entity_id,group,account,money_unit",
         },

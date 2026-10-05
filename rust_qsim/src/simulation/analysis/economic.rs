@@ -153,7 +153,11 @@ pub(super) fn write(
                     }
                 }
                 "fare" | "toll" => {
-                    if get(unit_i).is_empty() || !get(mum_i).is_empty() || transfer.is_empty() {
+                    if get(unit_i).is_empty()
+                        || get(money_i) != get(unit_i)
+                        || !get(mum_i).is_empty()
+                        || transfer.is_empty()
+                    {
                         return Err(fail(
                             "fare and toll require a currency unit and transfer_id, and no marginal utility",
                         ));
@@ -198,6 +202,7 @@ pub(super) fn write(
                 | "operator_investment_cost"
                 | "external_cost" => {
                     if get(unit_i).is_empty()
+                        || get(money_i) != get(unit_i)
                         || !get(mum_i).is_empty()
                         || (account != "operator_revenue" && !transfer.is_empty())
                         || (account == "operator_revenue" && transfer.is_empty())
@@ -250,11 +255,20 @@ pub(super) fn write(
     let mut totals =
         BTreeMap::<(String, String, String, String, String, String), (f64, usize)>::new();
     let mut supplied_accounts = std::collections::BTreeSet::new();
+    let mut unavailable_conversions = Vec::new();
     let mut reader = csv::Reader::from_path(report.join("economic_appraisal.csv"))
         .map_err(|error| AnalysisError::new(error.to_string()))?;
     for record in reader.records() {
         let record = record.map_err(|error| AnalysisError::new(error.to_string()))?;
         supplied_accounts.insert(record.get(3).unwrap_or_default().to_owned());
+        if record.get(11) == Some("unavailable_missing_conversion") {
+            unavailable_conversions.push((
+                record[0].to_owned(),
+                record[1].to_owned(),
+                record[2].to_owned(),
+                record[7].to_owned(),
+            ));
+        }
         let Some(amount) = record
             .get(6)
             .filter(|field| !field.is_empty())
@@ -302,6 +316,23 @@ pub(super) fn write(
             quote_csv(account),
             quote_csv(unit),
             quote_csv(boundary)
+        )
+        .map_err(io_error)?;
+    }
+    for (scope, entity, group, unit) in unavailable_conversions {
+        writeln!(
+            summary,
+            "{},{},{},{},{},{},{},{},{},{},unavailable_missing_conversion",
+            quote_csv(&scope),
+            quote_csv(&entity),
+            quote_csv(&group),
+            quote_csv("traveler_utility_money_equivalent"),
+            quote_csv(&unit),
+            quote_csv("traveler welfare valuation"),
+            "",
+            "",
+            0,
+            true
         )
         .map_err(io_error)?;
     }
@@ -464,6 +495,35 @@ mod tests {
         assert_eq!(&utility[3], "traveler_utility");
         assert_eq!(&utility[11], "unavailable_missing_conversion");
         assert_eq!(ledger.records().count(), 0);
+    }
+
+    #[test]
+    fn mixed_utility_conversion_keeps_unavailable_entity_in_summary() {
+        let root =
+            std::env::temp_dir().join(format!("economic-analysis-mixed-{}", std::process::id()));
+        let report = root.join("report");
+        fs::create_dir_all(&report).unwrap();
+        fs::write(root.join("inputs.csv"), "scope,entity_id,group,account,value,unit,marginal_utility_of_money,money_unit,transfer_id,source\nperson,p1,workers,utility,10,utils,2,USD,,survey\nperson,p2,workers,utility,8,utils,,, ,survey\n").unwrap();
+        write(&report, Some(Path::new("inputs.csv")), &root).unwrap();
+        let summary = fs::read_to_string(report.join("economic_summary.csv")).unwrap();
+        let mut summary = csv::Reader::from_reader(summary.as_bytes());
+        let unavailable = summary
+            .records()
+            .map(Result::unwrap)
+            .find(|row| row.get(1) == Some("p2"))
+            .unwrap();
+        assert_eq!(&unavailable[3], "traveler_utility_money_equivalent");
+        assert_eq!(&unavailable[10], "unavailable_missing_conversion");
+    }
+
+    #[test]
+    fn monetary_account_rejects_conflicting_currency_units() {
+        let root =
+            std::env::temp_dir().join(format!("economic-analysis-currency-{}", std::process::id()));
+        let report = root.join("report");
+        fs::create_dir_all(&report).unwrap();
+        fs::write(root.join("inputs.csv"), "scope,entity_id,group,account,value,unit,marginal_utility_of_money,money_unit,transfer_id,source\nrun,,,external_cost,10,USD,,EUR,,accounts\n").unwrap();
+        assert!(write(&report, Some(Path::new("inputs.csv")), &root).is_err());
     }
 
     #[test]

@@ -1039,10 +1039,7 @@ fn table_specs() -> &'static [TableSpec] {
         },
         TableSpec {
             file: "economic_appraisal.csv",
-            metrics: &[
-                ("economic_input_value", "value"),
-                ("economic_money_equivalent", "money_equivalent"),
-            ],
+            metrics: &[("value", "value"), ("money_equivalent", "money_equivalent")],
         },
         TableSpec {
             file: "transit_trips.csv",
@@ -1718,7 +1715,7 @@ mod tests {
             let analysis = output.join("analysis");
             fs::write(
                 analysis.join("metric_catalog.json"),
-                r#"[{"name":"economic_money_equivalent","unit":"declared_money_unit","aggregation_key":"scope,entity_id,group,account,money_unit"}]"#,
+                r#"[{"name":"money_equivalent","unit":"declared_money_unit","aggregation_key":"scope,entity_id,group,account,money_unit"}]"#,
             )
             .unwrap();
             fs::write(
@@ -1730,7 +1727,7 @@ mod tests {
         let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
         let differences =
             fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
-        assert!(differences.contains("economic_money_equivalent"));
+        assert!(differences.contains("money_equivalent"));
         assert!(differences.contains("10.000000,15.000000,5.000000,50.000000"));
     }
 
