@@ -209,8 +209,9 @@ cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-con
 ## Reanalyze a completed run
 
 A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. It
-covers link volumes and coverage, per-interval link speeds, and agent travel. The `analyze` binary
-regenerates that report from the run's saved outputs without rerunning QSim:
+covers link volumes and coverage, link classification, per-interval link speeds, and agent travel;
+see `docs/analysis.md` for the conventions. The `analyze` binary regenerates that report from the
+run's saved outputs without rerunning QSim:
 
 ```shell
 cargo run --release --bin analyze -- --run-dir /path/to/output
@@ -227,7 +228,9 @@ The same setting applies to an automatic run's interval width via
 
 The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
 rewrites the analysis outputs; event files, plans, the output network and the ID store are left
-untouched. Without `--interval-seconds` the recorded interval width is reused.
+untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels and the
+urban boundary are restored from `manifest.json`, so a rerun reproduces the recorded classification
+rather than reporting every link as `unknown`.
 
 The standalone command needs a run that already recorded a report, so run the simulation once with
 `output.analysis.enabled: true`. It reads its replay parameters from the run's `analysis/manifest.json`

@@ -118,6 +118,8 @@ fn analyze(
         &Analysis {
             enabled: true,
             interval_seconds,
+            link_labels: BTreeMap::new(),
+            urban_boundary: None,
         },
     )
     .unwrap();
