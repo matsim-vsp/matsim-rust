@@ -77,7 +77,7 @@ const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=doc
 
 /// Complete report shell. Substituted in one pass by [`substitute_template`], so a link
 /// label that happens to read like a token cannot corrupt the payloads.
-const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()</script></body></html>"#;
+const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Journeys run between substantive activities; stage activities such as transit transfers stay within the journey. Main mode follows the MATSim analysis hierarchy. Distances sum planned route distances, including prepared teleported routes, and report when any component is unavailable.</p><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Journey mode share by hour, purpose, and distance</h3><div id="journey-shares"></div><h3>Journey duration and distance distributions</h3><div id="journey-summary"></div><h3>Journey components and completion</h3><div id="journeys"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div><h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="journeys.csv">journey components and completion (CSV)</a>, <a href="journey_mode_share.csv">journey mode shares (CSV)</a>, <a href="journey_summary.csv">journey distributions (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#journey-shares',__JOURNEY_SHARES__);csvTable('#journey-summary',__JOURNEY_SUMMARY__);csvTable('#journeys',__JOURNEYS__);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()</script></body></html>"#;
 
 /// Renders the agent travel tables. They quote person identifiers, so the header and every row
 /// are split with a quote-aware parser instead of `String.split(',')`.
@@ -147,6 +147,8 @@ pub struct Manifest {
 pub struct PersonExpectedTravel {
     person_id: String,
     legs: Vec<ExpectedLeg>,
+    #[serde(default)]
+    journeys: Vec<ExpectedJourney>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +157,21 @@ struct ExpectedLeg {
     mode: String,
     departure_seconds: Option<f64>,
     expected_travel_seconds: Option<f64>,
+    distance_meters: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExpectedJourney {
+    journey_index: usize,
+    origin: String,
+    destination: String,
+    origin_link: String,
+    destination_link: String,
+    purpose: String,
+    leg_indices: Vec<usize>,
+    component_modes: Vec<String>,
+    distance_meters: Option<f64>,
+    distance_provenance: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +243,26 @@ struct PersonActivity {
     completed_legs: usize,
 }
 
+#[derive(Debug)]
+struct JourneyRow {
+    person_id: String,
+    journey_index: usize,
+    departure_seconds: Option<f64>,
+    departure_hour: Option<u64>,
+    origin: String,
+    destination: String,
+    origin_link: String,
+    destination_link: String,
+    purpose: String,
+    main_mode: String,
+    component_modes: String,
+    component_leg_indices: String,
+    duration_seconds: Option<f64>,
+    completion: &'static str,
+    distance_meters: Option<f64>,
+    distance_provenance: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VehicleTypePce {
     vehicle_type_id: String,
@@ -257,6 +294,19 @@ pub struct AnalysisRunMetadata {
     expected_travel: Vec<PersonExpectedTravel>,
     vehicles: Vec<VehiclePce>,
     vehicle_types: Vec<VehicleTypePce>,
+}
+
+#[derive(Serialize)]
+struct CrossRunManifest {
+    status: &'static str,
+    module: &'static str,
+    runs: Vec<CrossRunReference>,
+}
+
+#[derive(Serialize)]
+struct CrossRunReference {
+    run_dir: String,
+    iteration: u32,
 }
 
 impl AnalysisRunMetadata {
@@ -316,6 +366,7 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
         .into_iter()
         .filter_map(|person| {
             let plan = person.selected_plan()?;
+            let mut legs_by_index = BTreeMap::new();
             let legs: Vec<_> = plan
                 .elements
                 .iter()
@@ -329,17 +380,79 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
                             .as_ref()
                             .and_then(|route| route.as_generic().trav_time())
                     });
-                    Some(ExpectedLeg {
+                    let distance_meters = leg
+                        .route
+                        .as_ref()
+                        .and_then(|route| route.as_generic().distance())
+                        .filter(|distance| distance.is_finite() && *distance >= 0.0);
+                    let expected_leg = ExpectedLeg {
                         leg_index: element_index,
                         mode: leg.mode.external().to_owned(),
                         departure_seconds: leg.dep_time.map(|time| time.as_nanos() as f64 / 1e9),
                         expected_travel_seconds: expected.map(|time| time.as_secs_f64()),
+                        distance_meters,
+                    };
+                    legs_by_index.insert(element_index, expected_leg.clone());
+                    Some(expected_leg)
+                })
+                .collect();
+            let activities: Vec<_> = plan
+                .elements
+                .iter()
+                .enumerate()
+                .filter_map(|(index, element)| match element {
+                    InternalPlanElement::Activity(activity) if !activity.is_interaction() => {
+                        Some((index, activity))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let journeys = activities
+                .windows(2)
+                .enumerate()
+                .filter_map(|(journey_index, pair)| {
+                    let (origin_index, origin) = pair[0];
+                    let (destination_index, destination) = pair[1];
+                    let expected_legs: Vec<_> = legs_by_index
+                        .range((origin_index + 1)..destination_index)
+                        .map(|(_, leg)| leg)
+                        .collect();
+                    if expected_legs.is_empty() {
+                        return None;
+                    }
+                    let distances: Vec<_> = expected_legs
+                        .iter()
+                        .filter_map(|leg| leg.distance_meters)
+                        .collect();
+                    let total_distance: f64 = distances.iter().sum();
+                    let all_distances_available = distances.len() == expected_legs.len();
+                    let distance_meters = (all_distances_available && total_distance.is_finite())
+                        .then_some(total_distance);
+                    let distance_provenance = if distance_meters.is_some() {
+                        "planned_route"
+                    } else if distances.is_empty() || all_distances_available {
+                        "unavailable"
+                    } else {
+                        "partial_planned_route"
+                    };
+                    Some(ExpectedJourney {
+                        journey_index,
+                        origin: origin.act_type.external().to_owned(),
+                        destination: destination.act_type.external().to_owned(),
+                        origin_link: origin.link_id.external().to_owned(),
+                        destination_link: destination.link_id.external().to_owned(),
+                        purpose: destination.act_type.external().to_owned(),
+                        leg_indices: expected_legs.iter().map(|leg| leg.leg_index).collect(),
+                        component_modes: expected_legs.iter().map(|leg| leg.mode.clone()).collect(),
+                        distance_meters,
+                        distance_provenance: distance_provenance.to_owned(),
                     })
                 })
                 .collect();
             Some(PersonExpectedTravel {
                 person_id: person.id().external().to_owned(),
                 legs,
+                journeys,
             })
         })
         .collect()
@@ -565,6 +678,144 @@ pub fn reanalyze_completed_run(
     )
 }
 
+/// Compare journey-mode shares from each supplied run's latest completed iteration report.
+///
+/// This consumes saved report tables, so comparison never replays or reruns the supplied
+/// simulations. The output is a self-contained local report under output_dir.
+pub fn compare_latest_run_reports(
+    output_dir: &Path,
+    run_dirs: &[PathBuf],
+) -> Result<PathBuf, AnalysisError> {
+    if run_dirs.is_empty() {
+        return Err(AnalysisError::new(
+            "cross-run comparison requires at least one completed run",
+        ));
+    }
+    let staging = output_dir.join(".cross-run-comparison-staging");
+    reset_staging(&staging)?;
+    let mut combined = csv::Writer::from_path(staging.join("journey_mode_share.csv"))
+        .map_err(|error| AnalysisError(error.to_string()))?;
+    combined
+        .write_record([
+            "run_dir",
+            "departure_hour_seconds",
+            "purpose",
+            "distance_class",
+            "main_mode",
+            "journeys",
+            "share",
+        ])
+        .map_err(|error| AnalysisError(error.to_string()))?;
+    let mut references = Vec::new();
+    for run_dir in run_dirs {
+        let report_dir = run_dir.join(ANALYSIS_DIR);
+        let manifest: Manifest = read_json(&report_dir.join(MANIFEST_FILE))?;
+        if manifest.status != STATUS_COMPLETE {
+            return Err(AnalysisError(format!(
+                "run {} has no completed latest-iteration analysis report",
+                run_dir.display()
+            )));
+        }
+        let latest_iteration = latest_output_iteration(run_dir)?;
+        if latest_iteration != manifest.iteration {
+            return Err(AnalysisError(format!(
+                "run {} report covers iteration {}, but its latest output is iteration {latest_iteration}",
+                run_dir.display(),
+                manifest.iteration
+            )));
+        }
+        let table_path = report_dir.join("journey_mode_share.csv");
+        let mut table = csv::Reader::from_path(&table_path).map_err(|error| {
+            AnalysisError(format!("cannot read {}: {error}", table_path.display()))
+        })?;
+        for row in table.records() {
+            let row = row.map_err(|error| AnalysisError(error.to_string()))?;
+            let mut combined_row = vec![run_dir.display().to_string()];
+            combined_row.extend(row.iter().map(str::to_owned));
+            combined
+                .write_record(combined_row)
+                .map_err(|error| AnalysisError(error.to_string()))?;
+        }
+        references.push(CrossRunReference {
+            run_dir: run_dir.display().to_string(),
+            iteration: manifest.iteration,
+        });
+    }
+    combined
+        .flush()
+        .map_err(|error| AnalysisError(error.to_string()))?;
+    write_json(
+        &staging.join("manifest.json"),
+        &CrossRunManifest {
+            status: STATUS_COMPLETE,
+            module: "cross_run_comparison",
+            runs: references,
+        },
+    )?;
+    write_json(
+        &staging.join(METRIC_CATALOG_FILE),
+        &[
+            Metric {
+                name: "journeys",
+                unit: "journeys",
+                aggregation_key: "run_dir,departure_hour_seconds,purpose,distance_class,main_mode",
+            },
+            Metric {
+                name: "share",
+                unit: "proportion",
+                aggregation_key: "run_dir,departure_hour_seconds,purpose,distance_class,main_mode",
+            },
+        ],
+    )?;
+    write_json(
+        &staging.join(MODULE_STATUS_FILE),
+        &[ModuleStatus {
+            module: "cross_run_comparison",
+            required: true,
+            status: STATUS_COMPLETE,
+            reason: None,
+        }],
+    )?;
+    write_cross_run_report(&staging)?;
+    publish(
+        &staging,
+        &output_dir.join("cross_run_comparison"),
+        &output_dir.join(".cross-run-comparison-backup"),
+    )
+    .map(|path| path.join("index.html"))
+}
+
+fn latest_output_iteration(run_dir: &Path) -> Result<u32, AnalysisError> {
+    let iterations = run_dir.join("ITERS");
+    let entries = fs::read_dir(&iterations)
+        .map_err(|error| AnalysisError(format!("cannot read {}: {error}", iterations.display())))?;
+    entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()?
+                .strip_prefix("it.")?
+                .parse()
+                .ok()
+        })
+        .max()
+        .ok_or_else(|| {
+            AnalysisError(format!(
+                "no output iterations found in {}",
+                run_dir.display()
+            ))
+        })
+}
+
+fn write_cross_run_report(path: &Path) -> Result<(), AnalysisError> {
+    let rows = csv_for_script(&path.join("journey_mode_share.csv"))?;
+    let html = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Cross-run journey comparison</title><style>{REPORT_STYLE}</style></head><body><h1>Cross-run journey mode shares</h1><p>Each row comes from the latest completed iteration report of its run. Shares are grouped by departure interval, purpose, distance class, and main mode.</p><div id=\"comparison\"></div><p><a href=\"journey_mode_share.csv\">CSV table</a> · <a href=\"manifest.json\">run iterations</a> · <a href=\"metric_catalog.json\">metric catalog</a></p><script>{CSV_TABLE_SCRIPT}csvTable('#comparison',{rows});</script></body></html>"
+    );
+    fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
 /// Record a failed attempt and hand the original error back to the caller. The module error is
 /// always the one returned; a secondary failure to write the diagnostics is logged, not dropped.
 fn record_failure(output_dir: &Path, recorded: &Manifest, error: AnalysisError) -> AnalysisError {
@@ -648,6 +899,11 @@ fn replay_partitions<'a>(
             )
         })
         .collect();
+    let expected_journeys: BTreeMap<_, _> = run_metadata
+        .expected_travel
+        .iter()
+        .map(|person| (person.person_id.clone(), person.journeys.clone()))
+        .collect();
     let mut agent_travel = AgentTravelAccumulator::new(interval, expected);
     let mut speeds = LinkSpeedCollector::new(interval, ordered_links);
     loop {
@@ -689,6 +945,7 @@ fn replay_partitions<'a>(
     Ok(ReplayedAnalysis {
         counts,
         agent_travel,
+        expected_journeys,
         speeds,
     })
 }
@@ -698,6 +955,7 @@ fn replay_partitions<'a>(
 struct ReplayedAnalysis<'a> {
     counts: LinkVolumesByHour,
     agent_travel: AgentTravelAccumulator,
+    expected_journeys: BTreeMap<String, Vec<ExpectedJourney>>,
     speeds: LinkSpeedCollector<'a>,
 }
 
@@ -738,6 +996,7 @@ fn publish_complete(
         &agent_travel.observed_legs,
         &agent_travel.expected,
         &agent_travel.stuck_people,
+        &replayed.expected_journeys,
         interval,
         simulation_end_time,
         // The same accessor the validation used, so the scale that was checked and
@@ -983,6 +1242,126 @@ fn metrics() -> Vec<Metric<'static>> {
             name: "leg_completion_status",
             unit: "category",
             aggregation_key: "person_id,leg_index",
+        },
+        Metric {
+            name: "share",
+            unit: "proportion",
+            aggregation_key: "departure_hour_seconds,purpose,distance_class,main_mode",
+        },
+        Metric {
+            name: "journeys",
+            unit: "journeys",
+            aggregation_key: "departure_hour_seconds,purpose,distance_class,main_mode",
+        },
+        Metric {
+            name: "mean_duration_seconds",
+            unit: "seconds",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "std_duration_seconds",
+            unit: "seconds",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "median_duration_seconds",
+            unit: "seconds",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "p90_duration_seconds",
+            unit: "seconds",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "mean_distance_meters",
+            unit: "meters",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "std_distance_meters",
+            unit: "meters",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "median_distance_meters",
+            unit: "meters",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "p90_distance_meters",
+            unit: "meters",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "completed",
+            unit: "journeys",
+            aggregation_key: "main_mode,purpose",
+        },
+        Metric {
+            name: "duration_seconds",
+            unit: "seconds",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "distance_meters",
+            unit: "meters",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "distance_class",
+            unit: "category",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "distance_provenance",
+            unit: "category",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "completion",
+            unit: "category",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "departure_hour_seconds",
+            unit: "seconds",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "purpose",
+            unit: "category",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "origin",
+            unit: "activity_type",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "destination",
+            unit: "activity_type",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "origin_link",
+            unit: "link_id",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "destination_link",
+            unit: "link_id",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "main_mode",
+            unit: "category",
+            aggregation_key: "person_id,journey_index",
+        },
+        Metric {
+            name: "component_modes",
+            unit: "category_list",
+            aggregation_key: "person_id,journey_index",
         },
         Metric {
             name: "group_eligible_links",
@@ -1884,6 +2263,7 @@ fn write_tables(
     observed_legs: &[ObservedLeg],
     expected: &BTreeMap<String, Vec<(usize, String)>>,
     stuck_people: &BTreeSet<String>,
+    expected_journeys: &BTreeMap<String, Vec<ExpectedJourney>>,
     interval: u32,
     simulation_end_time: u32,
     sample_size: f64,
@@ -1969,6 +2349,7 @@ fn write_tables(
     let mut by_mode_hour = BTreeMap::<ModeHour, HourlyLegs>::new();
     let mut person_totals = BTreeMap::<String, f64>::new();
     let mut person_activity = BTreeMap::<String, PersonActivity>::new();
+    let mut journey_rows = Vec::new();
     // Every observed leg, planned or not, occupies its `person_id,leg_index`
     // row, so planned legs are only added below when no observed leg covers them.
     let mut observed_leg_keys = BTreeSet::new();
@@ -2027,6 +2408,77 @@ fn write_tables(
             }
         }
     }
+    let observed_by_key: BTreeMap<_, _> = observed_legs
+        .iter()
+        .map(|leg| ((leg.person_id.as_str(), leg.leg_index), leg))
+        .collect();
+    for (person, journeys) in expected_journeys {
+        for journey in journeys {
+            let components: Vec<_> = journey
+                .leg_indices
+                .iter()
+                .filter_map(|index| observed_by_key.get(&(person.as_str(), *index)).copied())
+                .collect();
+            let complete = components.len() == journey.leg_indices.len()
+                && components
+                    .iter()
+                    .all(|leg| matches!(leg.completion, LegCompletion::Completed { .. }));
+            let departure_seconds = components.first().map(|leg| leg.departure_seconds);
+            let departure_hour = departure_seconds
+                .map(|seconds| (seconds as u64) / u64::from(interval) * u64::from(interval));
+            let duration_seconds = if complete {
+                components.first().and_then(|first| {
+                    components.last().and_then(|last| {
+                        last.completion
+                            .arrival_seconds()
+                            .map(|arrival| arrival - first.departure_seconds)
+                    })
+                })
+            } else {
+                None
+            };
+            journey_rows.push(JourneyRow {
+                person_id: person.clone(),
+                journey_index: journey.journey_index,
+                departure_seconds,
+                departure_hour,
+                origin: journey.origin.clone(),
+                destination: journey.destination.clone(),
+                origin_link: journey.origin_link.clone(),
+                destination_link: journey.destination_link.clone(),
+                purpose: journey.purpose.clone(),
+                main_mode: analysis_main_mode(&journey.component_modes),
+                component_modes: journey.component_modes.join("|"),
+                component_leg_indices: journey
+                    .leg_indices
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                duration_seconds,
+                completion: if components.is_empty() {
+                    "not_departed"
+                } else if complete {
+                    "completed"
+                } else if components
+                    .iter()
+                    .any(|leg| matches!(leg.completion, LegCompletion::Stuck))
+                {
+                    "stuck"
+                } else if components
+                    .iter()
+                    .any(|leg| matches!(leg.completion, LegCompletion::MissingArrival))
+                {
+                    "missing_arrival"
+                } else {
+                    "incomplete"
+                },
+                distance_meters: journey.distance_meters,
+                distance_provenance: journey.distance_provenance.clone(),
+            });
+        }
+    }
+    write_journeys(path, &journey_rows)?;
     let mut hourly_legs =
         BufWriter::new(File::create(path.join("leg_hourly.csv")).map_err(io_error)?);
     writeln!(hourly_legs, "departure_hour_seconds,mode,departures,departing_persons,completed_legs,mean_duration_seconds").map_err(io_error)?;
@@ -2115,6 +2567,224 @@ fn write_tables(
         writeln!(daily_summary, "{label},{},{}", values.len(), mean).map_err(io_error)?;
     }
     Ok(())
+}
+
+const ANALYSIS_MODE_HIERARCHY: &[&str] = &[
+    "non_network_walk",
+    "undefined",
+    "transit_walk",
+    "other",
+    "walk",
+    "bike",
+    "taxi",
+    "drt",
+    "ride",
+    "motorcycle",
+    "truck",
+    "car",
+    "pt",
+    "train",
+    "ship",
+    "airplane",
+    "freight",
+];
+
+/// Mirrors MATSim's default analysis hierarchy: the highest ranked component wins, so access
+/// walks collapse into transit journeys and repeated transit legs remain one journey.
+fn analysis_main_mode(modes: &[String]) -> String {
+    let known = modes
+        .iter()
+        .filter_map(|mode| {
+            ANALYSIS_MODE_HIERARCHY
+                .iter()
+                .position(|known| *known == mode)
+                .map(|rank| (rank, mode))
+        })
+        .max_by_key(|(rank, _)| *rank);
+    let mut unknown: Vec<_> = modes
+        .iter()
+        .filter(|mode| !ANALYSIS_MODE_HIERARCHY.contains(&mode.as_str()))
+        .collect();
+    unknown.sort();
+    unknown.dedup();
+    if !unknown.is_empty()
+        && known.is_none_or(|(rank, _)| {
+            rank <= ANALYSIS_MODE_HIERARCHY
+                .iter()
+                .position(|mode| *mode == "walk")
+                .unwrap()
+        })
+    {
+        return if unknown.len() == 1 {
+            unknown[0].to_string()
+        } else {
+            "multiple_unknown_modes".to_owned()
+        };
+    }
+    if !unknown.is_empty() {
+        return "unknown_mixed_modes".to_owned();
+    }
+    known.map_or_else(|| "undefined".to_owned(), |(_, mode)| mode.clone())
+}
+
+fn distance_class(distance_meters: Option<f64>) -> &'static str {
+    match distance_meters {
+        Some(distance) if distance < 1_000.0 => "under_1_km",
+        Some(distance) if distance < 5_000.0 => "1_to_5_km",
+        Some(distance) if distance < 10_000.0 => "5_to_10_km",
+        Some(distance) if distance < 25_000.0 => "10_to_25_km",
+        Some(_) => "25_km_or_more",
+        None => "unknown",
+    }
+}
+
+fn write_journeys(path: &Path, journeys: &[JourneyRow]) -> Result<(), AnalysisError> {
+    let mut journey_table =
+        BufWriter::new(File::create(path.join("journeys.csv")).map_err(io_error)?);
+    writeln!(journey_table, "person_id,journey_index,departure_seconds,departure_hour_seconds,origin,destination,origin_link,destination_link,purpose,main_mode,component_modes,component_leg_indices,duration_seconds,completion,distance_meters,distance_class,distance_provenance").map_err(io_error)?;
+    for journey in journeys {
+        writeln!(
+            journey_table,
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            csv(&journey.person_id),
+            journey.journey_index,
+            number_opt(journey.departure_seconds),
+            journey
+                .departure_hour
+                .map_or_else(String::new, |hour| hour.to_string()),
+            csv(&journey.origin),
+            csv(&journey.destination),
+            csv(&journey.origin_link),
+            csv(&journey.destination_link),
+            csv(&journey.purpose),
+            csv(&journey.main_mode),
+            csv(&journey.component_modes),
+            csv(&journey.component_leg_indices),
+            number_opt(journey.duration_seconds),
+            journey.completion,
+            number_opt(journey.distance_meters),
+            distance_class(journey.distance_meters),
+            journey.distance_provenance,
+        )
+        .map_err(io_error)?;
+    }
+
+    type ShareKey = (u64, String, String, String);
+    let mut totals = BTreeMap::<(u64, String, String), u64>::new();
+    let mut shares = BTreeMap::<ShareKey, u64>::new();
+    let mut durations = BTreeMap::<(String, String), Vec<f64>>::new();
+    let mut distances = BTreeMap::<(String, String), Vec<f64>>::new();
+    for journey in journeys {
+        let (Some(hour), Some(main_mode)) = (journey.departure_hour, Some(&journey.main_mode))
+        else {
+            continue;
+        };
+        let class = distance_class(journey.distance_meters).to_owned();
+        let key = (hour, journey.purpose.clone(), class.clone());
+        *totals.entry(key.clone()).or_default() += 1;
+        *shares
+            .entry((hour, journey.purpose.clone(), class, main_mode.clone()))
+            .or_default() += 1;
+        if let Some(duration) = journey.duration_seconds {
+            durations
+                .entry((main_mode.clone(), journey.purpose.clone()))
+                .or_default()
+                .push(duration);
+        }
+        if let Some(distance) = journey.distance_meters {
+            distances
+                .entry((main_mode.clone(), journey.purpose.clone()))
+                .or_default()
+                .push(distance);
+        }
+    }
+    let mut share_table =
+        BufWriter::new(File::create(path.join("journey_mode_share.csv")).map_err(io_error)?);
+    writeln!(
+        share_table,
+        "departure_hour_seconds,purpose,distance_class,main_mode,journeys,share"
+    )
+    .map_err(io_error)?;
+    for ((hour, purpose, class, mode), count) in shares {
+        let total = totals[&(hour, purpose.clone(), class.clone())];
+        writeln!(
+            share_table,
+            "{hour},{},{},{},{count},{:.6}",
+            csv(&purpose),
+            class,
+            csv(&mode),
+            count as f64 / total as f64,
+        )
+        .map_err(io_error)?;
+    }
+    let mut summary =
+        BufWriter::new(File::create(path.join("journey_summary.csv")).map_err(io_error)?);
+    writeln!(summary, "main_mode,purpose,journeys,completed,mean_duration_seconds,std_duration_seconds,median_duration_seconds,p90_duration_seconds,mean_distance_meters,std_distance_meters,median_distance_meters,p90_distance_meters").map_err(io_error)?;
+    let groups: BTreeSet<_> = journeys
+        .iter()
+        .map(|journey| (journey.main_mode.as_str(), journey.purpose.as_str()))
+        .collect();
+    for (mode, purpose) in groups {
+        let key = (mode.to_owned(), purpose.to_owned());
+        let mut times = durations.remove(&key).unwrap_or_default();
+        times.sort_by(f64::total_cmp);
+        let mean_duration = mean(&times);
+        let std = std_dev(&times);
+        let mut distances = distances.remove(&key).unwrap_or_default();
+        distances.sort_by(f64::total_cmp);
+        let completed = journeys
+            .iter()
+            .filter(|journey| {
+                journey.main_mode == mode
+                    && journey.purpose == purpose
+                    && journey.duration_seconds.is_some()
+            })
+            .count();
+        writeln!(
+            summary,
+            "{},{},{},{completed},{},{},{},{},{},{},{},{}",
+            csv(mode),
+            csv(purpose),
+            journeys
+                .iter()
+                .filter(|journey| journey.main_mode == mode && journey.purpose == purpose)
+                .count(),
+            number_opt(mean_duration),
+            number_opt(std),
+            number_opt(quantile(&times, 0.5)),
+            number_opt(quantile(&times, 0.9)),
+            number_opt(mean(&distances)),
+            number_opt(std_dev(&distances)),
+            number_opt(quantile(&distances, 0.5)),
+            number_opt(quantile(&distances, 0.9)),
+        )
+        .map_err(io_error)?;
+    }
+    Ok(())
+}
+
+fn mean(values: &[f64]) -> Option<f64> {
+    (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+}
+
+fn std_dev(values: &[f64]) -> Option<f64> {
+    let average = mean(values)?;
+    Some(
+        (values
+            .iter()
+            .map(|value| (value - average).powi(2))
+            .sum::<f64>()
+            / values.len() as f64)
+            .sqrt(),
+    )
+}
+
+fn quantile(sorted: &[f64], quantile: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let index = ((sorted.len() - 1) as f64 * quantile).ceil() as usize;
+    Some(sorted[index])
 }
 
 /// Write one `link_capacity.csv` row: PCE volumes, effective capacity and V/C.
@@ -2336,6 +3006,9 @@ fn write_report(
     let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
     let daily = csv_for_script(&path.join("daily_summary.csv"))?;
     let persons = csv_for_script(&path.join("person_daily.csv"))?;
+    let journeys = csv_for_script(&path.join("journeys.csv"))?;
+    let journey_shares = csv_for_script(&path.join("journey_mode_share.csv"))?;
+    let journey_summary = csv_for_script(&path.join("journey_summary.csv"))?;
     // One row per leg, so only a bounded preview is embedded and the rest stays in the CSV.
     let (legs, legs_truncated) = csv_preview_for_script(&path.join("legs.csv"), LEGS_PREVIEW_ROWS)?;
     let legs_note = if legs_truncated {
@@ -2380,6 +3053,9 @@ fn write_report(
             ("__LEG_HOURLY__", &leg_hourly),
             ("__DAILY__", &daily),
             ("__PERSONS__", &persons),
+            ("__JOURNEYS__", &journeys),
+            ("__JOURNEY_SHARES__", &journey_shares),
+            ("__JOURNEY_SUMMARY__", &journey_summary),
             ("__LEGS__", &legs),
             ("__LEGS_NOTE__", &legs_note),
         ],
@@ -2490,6 +3166,210 @@ mod tests {
     use crate::simulation::events::{PersonArrivalEvent, PersonDepartureEvent};
     use crate::simulation::id::Id;
     use macros::deterministic_id_test;
+
+    #[test]
+    fn analysis_main_mode_collapses_access_walk_and_transit_transfers() {
+        let modes = ["walk", "pt", "pt", "walk"].map(str::to_owned);
+        assert_eq!(analysis_main_mode(&modes), "pt");
+        assert_eq!(analysis_main_mode(&["walk".to_owned()]), "walk");
+        assert_eq!(
+            analysis_main_mode(&["custom_mode".to_owned(), "pt".to_owned()]),
+            "unknown_mixed_modes"
+        );
+        assert_eq!(distance_class(Some(4999.0)), "1_to_5_km");
+        assert_eq!(distance_class(None), "unknown");
+        assert_eq!(quantile(&[10.0, 20.0, 30.0, 40.0], 0.9), Some(40.0));
+    }
+
+    #[deterministic_id_test]
+    fn captures_one_journey_across_stage_activities_and_keeps_route_distance() {
+        use crate::simulation::scenario::network::Link;
+        use crate::simulation::scenario::population::{
+            InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
+            InternalPlanElement, InternalRoute, Population,
+        };
+
+        let link = || Id::<Link>::create("l");
+        let activity = |kind: &str| {
+            InternalPlanElement::Activity(InternalActivity::new(
+                None,
+                kind,
+                link(),
+                None,
+                None,
+                None,
+            ))
+        };
+        let leg = |mode: &str, distance: f64| {
+            InternalPlanElement::Leg(InternalLeg {
+                mode: Id::create(mode),
+                routing_mode: None,
+                dep_time: None,
+                trav_time: None,
+                route: Some(InternalRoute::Generic(InternalGenericRoute::new(
+                    link(),
+                    link(),
+                    None,
+                    Some(distance),
+                    None,
+                ))),
+                attributes: InternalAttributes::default(),
+            })
+        };
+        let plan = InternalPlan {
+            score: None,
+            selected: true,
+            elements: vec![
+                activity("home"),
+                leg("walk", 900.0),
+                activity("pt interaction"),
+                leg("pt", 3000.0),
+                activity("pt interaction"),
+                leg("pt", 2000.0),
+                activity("pt interaction"),
+                leg("walk", 800.0),
+                activity("work"),
+            ],
+        };
+        let overflow_plan = InternalPlan {
+            score: None,
+            selected: true,
+            elements: vec![
+                activity("home"),
+                leg("walk", f64::MAX),
+                activity("pt interaction"),
+                leg("walk", f64::MAX),
+                activity("work"),
+            ],
+        };
+        let population = Population::from_persons(vec![
+            InternalPerson::new(Id::create("person"), plan),
+            InternalPerson::new(Id::create("overflow"), overflow_plan),
+        ]);
+
+        let expected = capture_expected_travel(&population);
+
+        let person = expected
+            .iter()
+            .find(|person| person.person_id == "person")
+            .unwrap();
+        let overflow = expected
+            .iter()
+            .find(|person| person.person_id == "overflow")
+            .unwrap();
+        assert_eq!(person.journeys.len(), 1);
+        assert_eq!(person.journeys[0].origin, "home");
+        assert_eq!(person.journeys[0].destination, "work");
+        assert_eq!(person.journeys[0].purpose, "work");
+        assert_eq!(
+            person.journeys[0].component_modes,
+            ["walk", "pt", "pt", "walk"]
+        );
+        assert_eq!(person.journeys[0].leg_indices.len(), 4);
+        assert_eq!(person.journeys[0].distance_meters, Some(6700.0));
+        assert_eq!(person.journeys[0].distance_provenance, "planned_route");
+        assert_eq!(overflow.journeys[0].distance_meters, None);
+        assert_eq!(overflow.journeys[0].distance_provenance, "unavailable");
+    }
+
+    #[test]
+    fn journey_exports_include_incomplete_trips_without_fabricating_durations() {
+        let dir = tempfile::tempdir().unwrap();
+        let journeys = [
+            JourneyRow {
+                person_id: "person".to_owned(),
+                journey_index: 0,
+                departure_seconds: Some(3500.0),
+                departure_hour: Some(0),
+                origin: "home".to_owned(),
+                destination: "work".to_owned(),
+                origin_link: "home-link".to_owned(),
+                destination_link: "work-link".to_owned(),
+                purpose: "work".to_owned(),
+                main_mode: analysis_main_mode(&[
+                    "walk".to_owned(),
+                    "pt".to_owned(),
+                    "walk".to_owned(),
+                ]),
+                component_modes: "walk|pt|walk".to_owned(),
+                component_leg_indices: "1|3|5".to_owned(),
+                duration_seconds: Some(1800.0),
+                completion: "completed",
+                distance_meters: Some(5000.0),
+                distance_provenance: "planned_route".to_owned(),
+            },
+            JourneyRow {
+                person_id: "person".to_owned(),
+                journey_index: 1,
+                departure_seconds: Some(8000.0),
+                departure_hour: Some(7200),
+                origin: "work".to_owned(),
+                destination: "home".to_owned(),
+                origin_link: "work-link".to_owned(),
+                destination_link: "home-link".to_owned(),
+                purpose: "home".to_owned(),
+                main_mode: "car".to_owned(),
+                component_modes: "car".to_owned(),
+                component_leg_indices: "7".to_owned(),
+                duration_seconds: None,
+                completion: "incomplete",
+                distance_meters: None,
+                distance_provenance: "unavailable".to_owned(),
+            },
+        ];
+        write_journeys(dir.path(), &journeys).unwrap();
+
+        let exported = fs::read_to_string(dir.path().join("journeys.csv")).unwrap();
+        assert!(exported.lines().nth(1).unwrap().contains("5_to_10_km"));
+        assert!(exported.contains("\"work\",\"home\",\"work-link\",\"home-link\",\"home\",\"car\",\"car\",\"7\",,incomplete,,unknown,unavailable"));
+        let shares = fs::read_to_string(dir.path().join("journey_mode_share.csv")).unwrap();
+        assert!(shares.contains("0,\"work\",5_to_10_km,\"pt\",1,1.000000"));
+        let summary = fs::read_to_string(dir.path().join("journey_summary.csv")).unwrap();
+        assert!(summary.contains("\"pt\",\"work\",1,1,1800.000000,0.000000,1800.000000,1800.000000,5000.000000,0.000000,5000.000000,5000.000000"));
+        assert!(summary.contains("\"car\",\"home\",1,0,,,,,,,,"));
+    }
+
+    #[test]
+    fn cross_run_report_reads_only_each_runs_recorded_latest_iteration() {
+        let root = tempfile::tempdir().unwrap();
+        let mut runs = Vec::new();
+        for (name, iteration, mode) in [("run-a", 2, "pt"), ("run-b", 4, "walk")] {
+            let run = root.path().join(name);
+            fs::create_dir_all(run.join(format!("ITERS/it.{iteration}/events"))).unwrap();
+            let analysis = run.join(ANALYSIS_DIR);
+            fs::create_dir_all(&analysis).unwrap();
+            fs::write(
+                analysis.join(MANIFEST_FILE),
+                format!(
+                    r#"{{"status":"complete","failure":null,"iteration":{iteration},"interval_seconds":3600,"simulation_end_time":86400,"partitions":[0],"input_format":"xml","eligible_links":0,"random_seed":1,"sample_size":1.0,"network_input":null,"population_input":null,"software_version":"test","link_labels":{{}},"urban_boundary":null}}"#
+                ),
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("journey_mode_share.csv"),
+                format!(
+                    "departure_hour_seconds,purpose,distance_class,main_mode,journeys,share\n0,work,1_to_5_km,{mode},1,1.000000\n"
+                ),
+            )
+            .unwrap();
+            runs.push(run);
+        }
+        let output = root.path().join("comparison-output");
+        fs::create_dir_all(&output).unwrap();
+
+        let report = compare_latest_run_reports(&output, &runs).unwrap();
+
+        assert!(report.is_file());
+        let shares =
+            fs::read_to_string(report.parent().unwrap().join("journey_mode_share.csv")).unwrap();
+        assert!(shares.contains("run-a,0,work,1_to_5_km,pt,1,1.000000"));
+        assert!(shares.contains("run-b,0,work,1_to_5_km,walk,1,1.000000"));
+        let html = fs::read_to_string(&report).unwrap();
+        assert!(html.contains("latest completed iteration report"));
+        let manifest = fs::read_to_string(report.parent().unwrap().join(MANIFEST_FILE)).unwrap();
+        assert!(manifest.contains("\"iteration\": 2"));
+        assert!(manifest.contains("\"iteration\": 4"));
+    }
 
     #[deterministic_id_test]
     fn same_time_arrival_and_departure_pair_independently_of_partition_order() {
@@ -2709,8 +3589,10 @@ mod tests {
                     mode: (*mode).to_owned(),
                     departure_seconds: None,
                     expected_travel_seconds: None,
+                    distance_meters: None,
                 })
                 .collect(),
+            journeys: Vec::new(),
         }
     }
 }

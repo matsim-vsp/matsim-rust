@@ -8,9 +8,16 @@ use rust_qsim::simulation::config::{
 };
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::id::Id;
+use rust_qsim::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
+use rust_qsim::simulation::replanning::routing::{RoutingModule, RoutingRequestBuilder};
 use rust_qsim::simulation::scenario::Coordinate;
 use rust_qsim::simulation::scenario::Scenario;
+use rust_qsim::simulation::scenario::facilities::{ActivityFacility, Facility};
 use rust_qsim::simulation::scenario::network::{Link, Network, Node};
+use rust_qsim::simulation::scenario::population::{
+    InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
+    InternalPlanElement, InternalRoute, Population,
+};
 use rust_qsim::simulation::scenario::vehicles::{Garage, InternalVehicle, InternalVehicleType};
 use std::collections::HashMap;
 use std::fs;
@@ -342,6 +349,169 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
 }
 
 #[deterministic_id_test(rust_qsim)]
+fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = temp.path();
+    let events = output.join("ITERS/it.0/events");
+    fs::create_dir_all(&events).unwrap();
+    fs::write(
+        events.join("events.0.xml"),
+        r#"<events>
+          <event time="0" type="departure" person="p" link="l" legMode="walk" computationalRoutingMode="walk" />
+          <event time="10" type="arrival" person="p" link="l" legMode="walk" />
+          <event time="20" type="departure" person="p" link="l" legMode="pt" computationalRoutingMode="pt" />
+          <event time="50" type="arrival" person="p" link="l" legMode="pt" />
+          <event time="60" type="departure" person="p" link="l" legMode="pt" computationalRoutingMode="pt" />
+          <event time="80" type="arrival" person="p" link="l" legMode="pt" />
+          <event time="90" type="departure" person="p" link="l" legMode="walk" computationalRoutingMode="walk" />
+          <event time="100" type="arrival" person="p" link="l" legMode="walk" />
+          <event time="200" type="departure" person="p" link="l" legMode="car" computationalRoutingMode="car" />
+          <event time="30" type="departure" person="walker" link="l" legMode="walk" computationalRoutingMode="walk" />
+          <event time="40" type="arrival" person="walker" link="l" legMode="walk" />
+          <event time="40" type="departure" person="teleporter" link="l" legMode="walk" computationalRoutingMode="walk" />
+          <event time="50" type="arrival" person="teleporter" link="l" legMode="walk" />
+        </events>"#,
+    )
+    .unwrap();
+
+    let link = || Id::<Link>::create("l");
+    let activity = |kind: &str| {
+        InternalPlanElement::Activity(InternalActivity::new(None, kind, link(), None, None, None))
+    };
+    let leg = |mode: &str, distance: f64| {
+        InternalPlanElement::Leg(InternalLeg {
+            mode: Id::create(mode),
+            routing_mode: None,
+            dep_time: None,
+            trav_time: None,
+            route: Some(InternalRoute::Generic(InternalGenericRoute::new(
+                link(),
+                link(),
+                None,
+                Some(distance),
+                None,
+            ))),
+            attributes: Default::default(),
+        })
+    };
+    let plan = InternalPlan {
+        score: None,
+        selected: true,
+        elements: vec![
+            activity("home"),
+            leg("walk", 900.0),
+            activity("pt interaction"),
+            leg("pt", 3000.0),
+            activity("pt interaction"),
+            leg("pt", 2000.0),
+            activity("pt interaction"),
+            leg("walk", 800.0),
+            activity("work"),
+            leg("car", 7000.0),
+            activity("home"),
+        ],
+    };
+    let walking_plan = InternalPlan {
+        score: None,
+        selected: true,
+        elements: vec![
+            activity("home"),
+            leg("walk", 400.0),
+            activity("work"),
+            leg("car", 7000.0),
+            activity("home"),
+        ],
+    };
+    let from = Facility::ActivityFacility(ActivityFacility {
+        id: Id::create("from"),
+        coord: Coordinate::new_2d(0.0, 0.0),
+        link_id: link(),
+        mode_to_link: Default::default(),
+        desc: None,
+        activities: Vec::new(),
+        attributes: Default::default(),
+    });
+    let to = Facility::ActivityFacility(ActivityFacility {
+        id: Id::create("to"),
+        coord: Coordinate::new_2d(3.0, 4.0),
+        link_id: link(),
+        mode_to_link: Default::default(),
+        desc: None,
+        activities: Vec::new(),
+        attributes: Default::default(),
+    });
+    let teleported_leg = TeleportationRoutingModule::new(Id::create("walk"), 1.3, 2.0)
+        .calc_route(
+            RoutingRequestBuilder::default()
+                .from(&from)
+                .to(&to)
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+    let mut teleported_elements = vec![activity("home")];
+    teleported_elements.extend(teleported_leg);
+    teleported_elements.push(activity("work"));
+    let teleported_plan = InternalPlan {
+        score: None,
+        selected: true,
+        elements: teleported_elements,
+    };
+    let population = Population::from_persons(vec![
+        InternalPerson::new(Id::create("p"), plan),
+        InternalPerson::new(Id::create("walker"), walking_plan),
+        InternalPerson::new(Id::create("teleporter"), teleported_plan),
+    ]);
+    let metadata = AnalysisRunMetadata::from_run(
+        1,
+        1.0,
+        &Garage::default(),
+        rust_qsim::simulation::analysis::capture_expected_travel(&population),
+        AnalysisInputPaths::default(),
+    );
+    let report = analyze_final_iteration(
+        output,
+        0,
+        1,
+        CompressionType::None,
+        3600,
+        &metadata,
+        &Network::new(),
+        &Analysis {
+            enabled: true,
+            interval_seconds: 3600,
+            ..Analysis::default()
+        },
+    )
+    .unwrap();
+    let report_dir = report.parent().unwrap();
+    let journeys = fs::read_to_string(report_dir.join("journeys.csv")).unwrap();
+    assert!(journeys.contains(
+        "\"p\",0,0.000000,0,\"home\",\"work\",\"l\",\"l\",\"work\",\"pt\",\"walk|pt|pt|walk\",\"1|3|5|7\",100.000000,completed,6700.000000,5_to_10_km,planned_route"
+    ));
+    assert!(journeys.contains(
+        "\"p\",1,200.000000,0,\"work\",\"home\",\"l\",\"l\",\"home\",\"car\",\"car\",\"9\",,incomplete,7000.000000,5_to_10_km,planned_route"
+    ));
+    assert!(journeys.contains(
+        "\"walker\",0,30.000000,0,\"home\",\"work\",\"l\",\"l\",\"work\",\"walk\",\"walk\",\"1\",10.000000,completed,400.000000,under_1_km,planned_route"
+    ));
+    assert!(
+        journeys
+            .lines()
+            .any(|row| row.contains("walker") && row.contains(",not_departed,"))
+    );
+    assert!(journeys.contains(
+        "\"teleporter\",0,40.000000,0,\"home\",\"work\",\"l\",\"l\",\"work\",\"walk\",\"walk\",\"1\",10.000000,completed,6.500000,under_1_km,planned_route"
+    ), "{journeys}");
+    let shares = fs::read_to_string(report_dir.join("journey_mode_share.csv")).unwrap();
+    assert!(shares.contains("0,\"work\",5_to_10_km,\"pt\",1,1.000000"));
+    assert!(shares.contains("0,\"work\",under_1_km,\"walk\",2,1.000000"));
+    let html = fs::read_to_string(report).unwrap();
+    assert!(html.contains("journey_mode_share.csv"));
+    assert!(html.contains("Journey mode share by hour, purpose, and distance"));
+}
+
+#[deterministic_id_test(rust_qsim)]
 fn simulation_publishes_only_the_final_iteration_report_after_shutdown() {
     let mut config = Config::from_args(CommandLineArgs::new_with_path(
         "./tests/resources/3-links/3-links-config-1.yml",
@@ -601,7 +771,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 13] = [
+    const TABLES: [&str; 16] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -612,6 +782,9 @@ fn metric_catalog_names_match_the_exported_columns() {
         "link_speed_histogram.csv",
         "link_speed_diagnostics.csv",
         "leg_hourly.csv",
+        "journeys.csv",
+        "journey_mode_share.csv",
+        "journey_summary.csv",
         "person_daily.csv",
         "daily_summary.csv",
         "legs.csv",
