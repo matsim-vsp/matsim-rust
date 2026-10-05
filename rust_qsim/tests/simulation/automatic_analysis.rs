@@ -888,7 +888,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 20] = [
+    const TABLES: [&str; 29] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -909,6 +909,15 @@ fn metric_catalog_names_match_the_exported_columns() {
         "link_hourly_by_class.csv",
         "link_speed_by_class.csv",
         "cross_run_comparison.csv",
+        "transit_trips.csv",
+        "transit_stop_hourly.csv",
+        "transit_line_summary.csv",
+        "transit_outcomes.csv",
+        "transit_occupancy.csv",
+        "transit_journeys.csv",
+        "transit_availability.csv",
+        "transit_validation_summary.csv",
+        "transit_validation_matches.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1083,6 +1092,7 @@ fn run_metadata(
             pce: *pce,
             fef: 1.0,
             net_mode: Id::create("car"),
+            capacity: None,
             attributes: Default::default(),
         });
         garage.add_veh(InternalVehicle {
@@ -1416,6 +1426,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             observed_data: None,
             journey_survey: None,
             comparison_runs: Vec::new(),
+            transit_observed_data: None,
             excess_delay_clip_seconds: None,
         },
     )
@@ -1520,6 +1531,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             observed_data: None,
             journey_survey: None,
             comparison_runs: Vec::new(),
+            transit_observed_data: None,
             excess_delay_clip_seconds: None,
         },
     )

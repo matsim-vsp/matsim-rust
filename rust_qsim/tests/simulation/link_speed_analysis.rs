@@ -155,6 +155,7 @@ fn analyze_with_clip(
             observed_data: None,
             journey_survey: None,
             comparison_runs: Vec::new(),
+            transit_observed_data: None,
             excess_delay_clip_seconds: clip_delay,
         },
     )
