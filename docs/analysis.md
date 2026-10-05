@@ -3,6 +3,17 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Execution context
+
+The local report includes `runtime.csv` and `runtime_metadata.json`, separate from the deterministic
+simulation metric catalog. They record total simulation and analysis wall time, measured phase
+times, configured worker count, build target and software version, available logical CPUs, and
+network, population, vehicle, and expected-leg counts. Each CSV value includes its provenance.
+Peak process memory is included only when the host provides a measurement; an unavailable memory
+measurement does not affect analysis. Reanalysis preserves the original simulation context and
+refreshes the analysis timing. Cross-run metric comparisons continue to use each run's latest
+completed iteration and do not aggregate runtime metadata as simulation output.
+
 ## Journeys and travel distributions
 
 The final-iteration replay exports observed legs in `legs.csv` and planned journeys in

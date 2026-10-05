@@ -1,7 +1,7 @@
 use macros::deterministic_id_test;
 use rust_qsim::simulation::analysis::capacity::VC_BIN_COUNT;
 use rust_qsim::simulation::analysis::{
-    AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
+    AnalysisInputPaths, AnalysisRunMetadata, AnalysisRuntimeMetadata, analyze_final_iteration,
 };
 use rust_qsim::simulation::config::{
     Analysis, CommandLineArgs, CompressionType, Config, LinkLabels, ServiceInputs,
@@ -92,7 +92,20 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         network.add_link(Link::new_with_default(Id::create(&id), &from, &to));
     }
     let garage = Garage::default();
-    let metadata = run_metadata(4711, 1.0, &garage, &[]);
+    let metadata = run_metadata(4711, 1.0, &garage, &[]).with_runtime(AnalysisRuntimeMetadata {
+        simulation_seconds: Some(12.5),
+        phase_seconds: [("mobsim".to_owned(), 8.0)].into(),
+        worker_count: Some(2),
+        operating_system: "test-os".to_owned(),
+        architecture: "test-arch".to_owned(),
+        software_name: "rust_qsim".to_owned(),
+        software_version: "test-version".to_owned(),
+        network_links: 200,
+        population_persons: 11,
+        vehicles: 3,
+        expected_legs: 5,
+        ..AnalysisRuntimeMetadata::default()
+    });
     let observed_data = output.join("observed.csv");
     fs::write(
         &observed_data,
@@ -153,6 +166,23 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     .unwrap();
 
     assert!(report.is_file());
+    let runtime_dir = report.parent().unwrap();
+    let runtime_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(runtime_dir.join("runtime_metadata.json")).unwrap())
+            .unwrap();
+    assert_eq!(runtime_json["simulation_seconds"], 12.5);
+    assert_eq!(runtime_json["phase_seconds"]["mobsim"], 8.0);
+    assert_eq!(runtime_json["worker_count"], 2);
+    assert_eq!(runtime_json["network_links"], 200);
+    assert!(runtime_json["analysis_seconds"].as_f64().is_some());
+    let runtime_csv = fs::read_to_string(runtime_dir.join("runtime.csv")).unwrap();
+    assert!(
+        runtime_csv.contains("\"simulation_runtime\",\"12.5\",\"seconds\",\"measured wall clock\"")
+    );
+    assert!(runtime_csv.contains("\"worker_count\",\"2\",\"workers\",\"configured partitions\""));
+    let html = fs::read_to_string(&report).unwrap();
+    assert!(html.contains("Execution context"));
+    assert!(html.contains("simulation_runtime"));
     let hourly = fs::read_to_string(report.parent().unwrap().join("link_hourly.csv")).unwrap();
     assert!(hourly.contains("\"used\",3600,1,1"));
     assert!(hourly.contains("\"used\",86400,1,0"));

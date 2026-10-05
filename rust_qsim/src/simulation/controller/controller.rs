@@ -30,11 +30,11 @@ use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Barrier};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fs, mem};
 use tracing::info;
 
@@ -319,8 +319,10 @@ impl Controller {
         }
 
         let _controller_log_guards = init_controller_logging(&self.config);
+        let simulation_started = Instant::now();
         let mut mobsim_workers = self.start_mobsim_workers();
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
+        let mut phase_seconds = BTreeMap::new();
 
         for iteration in first_iteration..=last_iteration {
             self.run_iteration(
@@ -329,9 +331,11 @@ impl Controller {
                 &mut mobsim_workers,
                 &replanning_pool,
                 &iters_path,
+                &mut phase_seconds,
             );
         }
 
+        let finalization_started = Instant::now();
         mobsim_workers.shutdown();
         self.shutdown_adapters();
 
@@ -354,6 +358,10 @@ impl Controller {
 
         self.controller_events_manager
             .process_event(ControllerEvent::shutdown(true));
+        phase_seconds.insert(
+            "shutdown_and_output".to_owned(),
+            finalization_started.elapsed().as_secs_f64(),
+        );
 
         if self.config.output().analysis.enabled {
             // The output network written above is the eligible-link set a standalone rerun reads.
@@ -379,7 +387,21 @@ impl Controller {
             .with_transit(
                 &self.scenario.core.transit_schedule,
                 &self.scenario.core.garage,
-            );
+            )
+            .with_runtime(crate::simulation::analysis::AnalysisRuntimeMetadata {
+                simulation_seconds: Some(simulation_started.elapsed().as_secs_f64()),
+                phase_seconds,
+                worker_count: Some(self.config.partitioning().num_parts as usize),
+                available_logical_cpus: std::thread::available_parallelism().ok().map(usize::from),
+                operating_system: std::env::consts::OS.to_owned(),
+                architecture: std::env::consts::ARCH.to_owned(),
+                software_name: env!("CARGO_PKG_NAME").to_owned(),
+                software_version: env!("CARGO_PKG_VERSION").to_owned(),
+                network_links: self.scenario.core.network.links().len(),
+                population_persons: self.scenario.population.persons.len(),
+                vehicles: self.scenario.core.garage.vehicles.len(),
+                ..crate::simulation::analysis::AnalysisRuntimeMetadata::default()
+            });
             let report = crate::simulation::analysis::analyze_final_iteration(
                 &output_path,
                 last_iteration,
@@ -403,6 +425,7 @@ impl Controller {
         mobsim_workers: &mut MobsimWorkerPool,
         replanning_pool: &ReplanningPool,
         iters_path: impl AsRef<Path>,
+        phase_seconds: &mut BTreeMap<String, f64>,
     ) {
         let is_last_iteration = iteration == end_iter;
         info!("=========== Start Iteration {} ===========", iteration);
@@ -410,17 +433,26 @@ impl Controller {
         self.controller_events_manager
             .process_event(ControllerEvent::iteration_starts(is_last_iteration));
 
+        let started = Instant::now();
         let population = self.run_mobsim_phase(iteration, is_last_iteration, mobsim_workers);
+        add_phase_time(phase_seconds, "mobsim", started.elapsed());
+        let started = Instant::now();
         let population = self.run_scoring_phase(iteration, is_last_iteration, population);
+        add_phase_time(phase_seconds, "scoring", started.elapsed());
 
         if self.should_write_iteration_plans(iteration, is_last_iteration) {
+            let started = Instant::now();
             self.write_iteration_files(iteration, iters_path, &population);
+            add_phase_time(phase_seconds, "iteration_output", started.elapsed());
         }
 
         let population = if is_last_iteration {
             population
         } else {
-            self.run_replanning_phase(iteration, replanning_pool, population)
+            let started = Instant::now();
+            let population = self.run_replanning_phase(iteration, replanning_pool, population);
+            add_phase_time(phase_seconds, "replanning", started.elapsed());
+            population
         };
 
         self.scenario.replace_population(population);
@@ -608,6 +640,10 @@ impl Controller {
             || (iteration != 0
                 && iteration.is_multiple_of(self.config.controller().write_plans_interval))
     }
+}
+
+fn add_phase_time(phases: &mut BTreeMap<String, f64>, phase: &str, elapsed: Duration) {
+    *phases.entry(phase.to_owned()).or_default() += elapsed.as_secs_f64();
 }
 
 fn prepare_output_directory(
