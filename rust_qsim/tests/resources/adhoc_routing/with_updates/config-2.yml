@@ -1,4 +1,11 @@
 modules:
+  scoring:
+    type: Scoring
+    activity_params:
+      - activity_type: home_28800.0
+        typical_duration_s: 28800.0
+      - activity_type: errands_2400.0
+        typical_duration_s: 2400.0
   protofiles:
     type: ProtoFiles
     network: ./test_output/simulation/adhoc_routing/with_updates/two_parts/network.binpb

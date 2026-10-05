@@ -270,6 +270,7 @@ pub(super) fn write_report(
     // dimension cannot be exported without also being offered as a filter.
     let dimensions = json_for_script(&FILTER_DIMENSIONS)?;
     let network_map = fs::read_to_string(path.join("network_map.svg")).map_err(io_error)?;
+    let runtime = csv_for_script(&path.join("runtime.csv"))?;
     let speeds = embed_tables(path, SPEED_TABLES)?;
     let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
     let daily = csv_for_script(&path.join("daily_summary.csv"))?;
@@ -423,7 +424,40 @@ pub(super) fn write_report(
             ("__NETWORK_ANALYSIS_SCRIPT__", &network_script),
         ],
     );
+    let html = html.replace(
+        "<h2>Final-run network coverage map</h2>",
+        "<h2>Execution context</h2><p>Wall-clock timing, software, hardware and workload provenance. Peak memory appears only when measurable.</p><div id=\"runtime\"></div><h2>Final-run network coverage map</h2>",
+    );
+    let emissions = csv_for_script(&path.join("emissions_hourly.csv"))?;
+    let html = html.replace(
+        "<h2>Module status</h2>",
+        "<h2>Modeled emissions</h2><p>Supplied modeled records report emitted mass, not concentration or exposure. Values keep their declared units and are grouped by pollutant, vehicle category, hour and link or area. The map shades links for the selected pollutant, unit, hour, category and start type; redder links have higher values, gray links have no records, and area-only records remain in the table.</p><label>Map selection <select id=\"emissions-filter\"></select></label><div id=\"emissions-map\"></div><div id=\"emissions\"></div><p><a href=\"emissions_hourly.csv\">Hourly totals</a> · <a href=\"emissions_provenance.json\">Provenance</a></p><h2>Module status</h2>",
+    );
+    let (body, script_end) = html
+        .rsplit_once("</script>")
+        .ok_or_else(|| AnalysisError::new("report script is missing"))?;
+    let html = format!(
+        "{body}csvTable('#runtime',{runtime});const em={emissions};csvTable('#emissions',em);const emap=document.querySelector('#network-map').cloneNode(true);emap.setAttribute('id','emissions-network-map');document.querySelector('#emissions-map').append(emap);const eh=parseCsv(em[0]);const er=em.slice(1).map(parseCsv);const ei=n=>eh.indexOf(n);const lk=er.filter(r=>r[ei('location_type')]==='link');const choices=[...new Map(lk.map(r=>{{const k=[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]];return [JSON.stringify(k),k]}}))];const select=document.querySelector('#emissions-filter');choices.forEach(([key,k])=>select.add(new Option(k.join(' · '),key)));function colorEmissions(){{const chosen=select.value?JSON.parse(select.value):null;const values=new Map(lk.filter(r=>chosen&&[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]].every((v,i)=>v===chosen[i])).map(r=>[r[ei('location_id')],Number(r[ei('total_expanded')])]));const max=Math.max(0,...values.values());document.querySelectorAll('#emissions-network-map line').forEach(line=>{{const value=values.get(line.getAttribute('data-link-id'));if(value===undefined){{line.setAttribute('stroke','#c8ccd0')}}else{{const scale=max?value/max:0;line.setAttribute('stroke',`rgb(${{Math.round(255*scale)}},${{Math.round(210*(1-scale))}},0)`)}}}})}}select.addEventListener('change',colorEmissions);colorEmissions();</script>{script_end}"
+    );
     fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
+pub(super) fn refresh_runtime_report(report: &Path) -> Result<(), AnalysisError> {
+    let directory = report
+        .parent()
+        .ok_or_else(|| AnalysisError::new("analysis report has no parent directory"))?;
+    let mut html = fs::read_to_string(report).map_err(io_error)?;
+    let start = "csvTable('#runtime',";
+    let begin = html
+        .find(start)
+        .ok_or_else(|| AnalysisError::new("report has no runtime table"))?;
+    let end = html[begin..]
+        .find(");")
+        .map(|offset| begin + offset + 2)
+        .ok_or_else(|| AnalysisError::new("report runtime table is incomplete"))?;
+    let runtime = csv_for_script(&directory.join("runtime.csv"))?;
+    html.replace_range(begin..end, &format!("csvTable('#runtime',{runtime});"));
+    fs::write(report, html).map_err(io_error)
 }
 
 /// Fill `template` by scanning it once, left to right.

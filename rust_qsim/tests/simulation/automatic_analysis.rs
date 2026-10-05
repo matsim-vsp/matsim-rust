@@ -1,7 +1,7 @@
 use macros::deterministic_id_test;
 use rust_qsim::simulation::analysis::capacity::VC_BIN_COUNT;
 use rust_qsim::simulation::analysis::{
-    AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
+    AnalysisInputPaths, AnalysisRunMetadata, AnalysisRuntimeMetadata, analyze_final_iteration,
 };
 use rust_qsim::simulation::config::{
     Accessibility, Analysis, CommandLineArgs, CompressionType, Config, LinkLabels, ServiceInputs,
@@ -92,7 +92,22 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         network.add_link(Link::new_with_default(Id::create(&id), &from, &to));
     }
     let garage = Garage::default();
-    let metadata = run_metadata(4711, 1.0, &garage, &[]);
+    let metadata = run_metadata(4711, 1.0, &garage, &[]).with_runtime(AnalysisRuntimeMetadata {
+        simulation_seconds: Some(12.5),
+        phase_seconds: [("mobsim".to_owned(), 8.0)].into(),
+        worker_count: Some(2),
+        operating_system: Some("test-os".to_owned()),
+        architecture: Some("test-arch".to_owned()),
+        cpu_model: Some("test-cpu".to_owned()),
+        host_memory_bytes: Some(64000),
+        software_name: Some("rust_qsim".to_owned()),
+        software_version: Some("test-version".to_owned()),
+        network_links: Some(200),
+        population_persons: Some(11),
+        vehicles: Some(3),
+        expected_legs: Some(5),
+        ..AnalysisRuntimeMetadata::default()
+    });
     let observed_data = output.join("observed.csv");
     fs::write(
         &observed_data,
@@ -153,6 +168,29 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     .unwrap();
 
     assert!(report.is_file());
+    let runtime_dir = report.parent().unwrap();
+    let runtime_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(runtime_dir.join("runtime_metadata.json")).unwrap())
+            .unwrap();
+    assert_eq!(runtime_json["simulation_seconds"], 12.5);
+    assert_eq!(runtime_json["phase_seconds"]["mobsim"], 8.0);
+    assert_eq!(runtime_json["worker_count"], 2);
+    assert_eq!(runtime_json["network_links"], 200);
+    assert_eq!(runtime_json["cpu_model"], "test-cpu");
+    assert_eq!(runtime_json["host_memory_bytes"], 64000);
+    assert!(runtime_json["analysis_seconds"].as_f64().is_some());
+    assert!(runtime_json["peak_memory_bytes"].is_null());
+    let runtime_csv = fs::read_to_string(runtime_dir.join("runtime.csv")).unwrap();
+    assert!(
+        runtime_csv.contains("\"simulation_runtime\",\"12.5\",\"seconds\",\"measured wall clock\"")
+    );
+    assert!(runtime_csv.contains("\"worker_count\",\"2\",\"workers\",\"configured partitions\""));
+    assert!(runtime_csv.contains("\"cpu_model\",\"test-cpu\",\"\",\"host query\""));
+    assert!(runtime_csv.contains("\"host_memory\",\"64000\",\"bytes\",\"host query\""));
+    assert!(!runtime_csv.contains("peak_memory"));
+    let html = fs::read_to_string(&report).unwrap();
+    assert!(html.contains("Execution context"));
+    assert!(html.contains("simulation_runtime"));
     let hourly = fs::read_to_string(report.parent().unwrap().join("link_hourly.csv")).unwrap();
     assert!(hourly.contains("\"used\",3600,1,1"));
     assert!(hourly.contains("\"used\",86400,1,0"));
@@ -504,6 +542,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
             leg("car", 7000.0),
             activity("home"),
         ],
+        attributes: Default::default(),
     };
     let walking_plan = InternalPlan {
         score: None,
@@ -515,6 +554,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
             leg("car", 7000.0),
             activity("home"),
         ],
+        attributes: Default::default(),
     };
     let from = Facility::ActivityFacility(ActivityFacility {
         id: Id::create("from"),
@@ -550,6 +590,7 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
         score: None,
         selected: true,
         elements: teleported_elements,
+        attributes: Default::default(),
     };
     let population = Population::from_persons(vec![
         InternalPerson::new(Id::create("p"), plan),
@@ -888,7 +929,7 @@ fn metric_catalog_names_match_the_exported_columns() {
     // A name does not have to be a column, because two tables can export the same column name
     // for different metrics. The aggregation key does: it names the columns that identify one
     // of the metric's rows, so a consumer can look the metric up in the table that exports them.
-    const TABLES: [&str; 37] = [
+    const TABLES: [&str; 38] = [
         "link_hourly.csv",
         "coverage.csv",
         "link_capacity.csv",
@@ -926,6 +967,7 @@ fn metric_catalog_names_match_the_exported_columns() {
         "transit_availability.csv",
         "transit_validation_summary.csv",
         "transit_validation_matches.csv",
+        "emissions_hourly.csv",
     ];
     let headers: Vec<Vec<String>> = TABLES
         .iter()
@@ -1436,11 +1478,12 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
+            noise: None,
+            excess_delay_clip_seconds: None,
             person_group_attributes: Vec::new(),
             person_weight_attribute: None,
             person_cost_attribute: None,
-            noise: None,
-            excess_delay_clip_seconds: None,
             accessibility: Accessibility::default(),
         },
     )
@@ -1547,11 +1590,12 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             comparison_runs: Vec::new(),
             service: None,
             transit_observed_data: None,
+            emissions: None,
+            noise: None,
+            excess_delay_clip_seconds: None,
             person_group_attributes: Vec::new(),
             person_weight_attribute: None,
             person_cost_attribute: None,
-            noise: None,
-            excess_delay_clip_seconds: None,
             accessibility: Accessibility::default(),
         },
     )

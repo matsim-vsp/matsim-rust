@@ -3,6 +3,52 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Execution context
+
+The local report includes `runtime.csv` and `runtime_metadata.json`, separate from the deterministic
+simulation metric catalog. They record total simulation and analysis wall time, measured phase
+times, configured worker count, build target and software version, available logical CPUs, CPU
+model and host memory when exposed by the OS, and network, population, vehicle, and expected-leg
+counts. Each CSV value includes its provenance.
+Peak process memory is sampled after simulation and before analysis, and is included only when
+the host provides a measurement; an unavailable measurement does not affect analysis. Reanalysis
+preserves the original simulation context and refreshes the analysis timing. Cross-run metric
+comparisons continue to use each run's latest
+completed iteration and do not aggregate runtime metadata as simulation output. Legacy reports
+without execution context retain unknown historical fields instead of inventing zero values.
+
+
+## Modeled emissions
+
+Configure `output.analysis.emissions` to consume externally modeled emission records; this
+analysis does not calculate emissions. The CSV must include
+`iteration,time_seconds,pollutant,unit,value,vehicle_id,link_id,area_id,emission_type`. Set exactly one of `link_id` and `area_id`
+on each row, and use `warm` or `cold` for `emission_type`. Units are kept as supplied, so different
+units are never summed together. `vehicle_id` joins through the run's vehicle catalog to a vehicle
+type ID; `vehicle_categories` maps those type IDs to reporting categories. Only records for the
+completed iteration are included. Totals use fixed 3600-second hours regardless of
+`analysis.interval_seconds`. Values are expanded by `1 / qsim.sample_size`; both sampled and
+expanded totals are exported.
+
+```yaml
+output:
+  analysis:
+    emissions:
+      records: emissions.csv
+      vehicle_categories:
+        vehicle-type-car: passenger_car
+        vehicle-type-truck: heavy_truck
+      fleet_provenance: "vehicle categories from fleet-v3"
+      emission_factor_provenance: "HBEFA 4.2"
+      accounting_boundary: "tailpipe"
+```
+
+The report exports `emissions_hourly.csv` and `emissions_provenance.json`; link and area IDs are
+the location keys for mapping these totals onto supplied network or area geometries. Provenance
+records warm/cold record coverage, sample expansion, fleet and factor source, and the accounting
+boundary. These values describe emitted mass, not concentration or exposure. Missing records for
+the final iteration make `modeled_emissions` unavailable rather than reporting zero emissions.
+
 ## Journeys and travel distributions
 
 The final-iteration replay exports observed legs in `legs.csv` and planned journeys in

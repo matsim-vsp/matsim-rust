@@ -804,6 +804,7 @@ fn home_plan(home: [f64; 2]) -> InternalPlan {
             activity("pt interaction", Some(Coordinate::new_2d(2000.0, 2000.0))),
             activity("work", Some(Coordinate::new_2d(-50.0, -50.0))),
         ],
+        attributes: Default::default(),
     }
 }
 
@@ -837,6 +838,7 @@ fn population() -> Population {
             activity("pt interaction", Some(Coordinate::new_2d(2000.0, 2000.0))),
             activity("work", Some(Coordinate::new_2d(-50.0, -50.0))),
         ],
+        attributes: Default::default(),
     };
     Population::from_persons(vec![
         InternalPerson::new(
@@ -861,6 +863,7 @@ fn population() -> Population {
                     "pt interaction",
                     Some(Coordinate::new_2d(500.0, 500.0)),
                 )],
+                attributes: Default::default(),
             },
         ),
     ])

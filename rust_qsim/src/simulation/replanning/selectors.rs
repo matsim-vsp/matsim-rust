@@ -321,6 +321,35 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn select_exp_beta_prefers_higher_score_when_all_scores_are_negative() {
+        let selector = SelectExpBetaSelector::default();
+        let sample_count = 10_000;
+        // With beta = 1, P(score = -1) = exp(-1) / (exp(-1) + exp(-2)).
+        let expected_probability = std::f64::consts::E / (1.0 + std::f64::consts::E);
+
+        // Check both plan orders so a preference for the first plan cannot pass.
+        for (scores, higher_score_index) in
+            [([Some(-1.0), Some(-2.0)], 0), ([Some(-2.0), Some(-1.0)], 1)]
+        {
+            let person = person_with_scores(scores);
+            let mut context = context();
+            let mut selections = [0; 2];
+
+            for iteration in 0..sample_count {
+                context.iteration = iteration;
+                selections[selector.select(&person, &context)] += 1;
+            }
+
+            assert!(selections[higher_score_index] > selections[1 - higher_score_index]);
+            let actual_probability = selections[higher_score_index] as f64 / sample_count as f64;
+            assert!(
+                (actual_probability - expected_probability).abs() < 0.02,
+                "Expected probability {expected_probability} for score -1, got {actual_probability}"
+            );
+        }
+    }
+
+    #[deterministic_id_test]
     fn select_exp_beta_is_stable_and_translation_invariant_for_large_scores() {
         let ordinary_scores = person_with_scores([Some(0.0), Some(1.0)]);
         let large_scores = person_with_scores([Some(1000.0), Some(1001.0)]);
