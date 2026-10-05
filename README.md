@@ -230,6 +230,13 @@ cargo run --release --bin analyze -- --run-dir /path/to/output --interval-second
 The same setting applies to an automatic run's interval width via
 `--set output.analysis.interval_seconds=1800`.
 
+Setting `output.analysis.person_group_attributes` groups the report by person attributes such as
+`income`, `age`, `carAvailability` or `homeZone`, so travel burdens and, against
+`output.analysis.comparison_runs`, winner and loser counts are reported per group under a stated
+equity criterion. `output.analysis.person_weight_attribute` and
+`output.analysis.person_cost_attribute` name the person's weight and monetary cost when the
+population supplies them. See `docs/analysis.md` for the group and comparison definitions.
+
 The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
 rewrites the analysis outputs; event files, plans, the output network and the ID store are left
 untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels and the

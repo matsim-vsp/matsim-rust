@@ -414,3 +414,11 @@ output:
       - [1000.0, 1000.0]
       - [0.0, 1000.0]
 ```
+
+## Demographic outcomes and equity
+
+Set `output.analysis.person_group_attributes` to the person attributes the report groups people by, such as `income` or `age`. Missing or blank attributes are grouped as `unknown`. Optional weight and cost attributes are recorded with the run; invalid or missing weights default to one, while unavailable costs remain blank.
+
+`group_burdens.csv` reports weighted group sizes and completed daily travel-time burdens. Incomplete or stuck people remain in group counts without lowering the travel-time mean. `person_demographics.csv` lists each person's groups, weight, and cost. `equity_comparison.csv` compares completed daily burdens with configured runs; differences within one microsecond count as unchanged, and persons without comparable completed days are reported separately.
+
+`group_module_outcomes.csv` combines per-group outcomes exported by other modules using `<module>_group_outcomes.csv` with columns `dimension,group,metric,unit,value`.
