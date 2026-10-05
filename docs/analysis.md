@@ -221,7 +221,9 @@ labels; blank labels are grouped as `unknown`. Configured wait and fleet capacit
 recorded in `service_constraints.csv` and checked as `wait_limit_exceeded` and
 `capacity_exceeded_tasks`. A metric whose input was not supplied is blank, and
 `service_availability.csv` names the missing input. Invalid input fails only the
-`service_performance` module. Cross-run comparison of these tables is not provided.
+`service_performance` module. The completed-run comparison also compares the service summary,
+vehicle and occupancy metrics from each run's published latest-iteration report, keyed by group,
+vehicle and passenger load as appropriate.
 
 Tables: `service_summary.csv`, `service_requests.csv`, `service_vehicles.csv` (a `fleet` total row
 first), `service_occupancy.csv`, `service_constraints.csv`, `service_availability.csv`,

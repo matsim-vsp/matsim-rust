@@ -1100,6 +1100,55 @@ fn table_specs() -> &'static [TableSpec] {
                 ),
             ],
         },
+        TableSpec {
+            file: "service_summary.csv",
+            metrics: &[
+                ("requests", "requests"),
+                ("served", "served"),
+                ("rejected", "rejected"),
+                ("unserved", "unserved"),
+                ("served_share", "served_share"),
+                ("rejected_share", "rejected_share"),
+                ("passengers_served", "passengers_served"),
+                ("wait_mean_seconds", "wait_mean_seconds"),
+                ("wait_std_seconds", "wait_std_seconds"),
+                ("wait_median_seconds", "wait_median_seconds"),
+                ("wait_p90_seconds", "wait_p90_seconds"),
+                ("detour_mean_ratio", "detour_mean_ratio"),
+                ("detour_std_ratio", "detour_std_ratio"),
+                ("detour_median_ratio", "detour_median_ratio"),
+                ("detour_p90_ratio", "detour_p90_ratio"),
+                ("wait_limit_exceeded", "wait_limit_exceeded"),
+                ("inside_area", "inside_area"),
+                ("outside_area", "outside_area"),
+                ("area_unknown", "area_unknown"),
+                ("coverage_share", "coverage_share"),
+            ],
+        },
+        TableSpec {
+            file: "service_vehicles.csv",
+            metrics: &[
+                ("service_seconds", "service_seconds"),
+                ("busy_seconds", "busy_seconds"),
+                ("utilization", "utilization"),
+                ("driven_meters", "driven_meters"),
+                ("occupied_meters", "occupied_meters"),
+                ("empty_meters", "empty_meters"),
+                ("empty_share", "empty_share"),
+                ("passenger_meters", "passenger_meters"),
+                ("mean_occupancy", "mean_occupancy"),
+                ("load_factor", "load_factor"),
+                ("capacity_exceeded_tasks", "capacity_exceeded_tasks"),
+                ("requests_served", "requests_served"),
+            ],
+        },
+        TableSpec {
+            file: "service_occupancy.csv",
+            metrics: &[
+                ("load_vehicle_meters", "load_vehicle_meters"),
+                ("load_share", "load_share"),
+            ],
+        },
     ]
 }
 
@@ -1605,6 +1654,45 @@ mod tests {
             !differences.contains("bob"),
             "stuck or incomplete people must not enter duration comparisons"
         );
+    }
+
+    #[test]
+    fn compares_service_metrics_from_published_reports() {
+        let temp = tempfile::tempdir().unwrap();
+        let baseline = run(temp.path(), "baseline", 1.0, "l1,0,10,0\n");
+        let alternative = run(temp.path(), "alternative", 1.0, "l1,0,10,0\n");
+        let catalog = serde_json::to_string(&super::super::metrics(false)).unwrap();
+        for (dir, served, wait, empty, loaded) in [
+            (&baseline, 8, 100, 250, 700),
+            (&alternative, 10, 80, 300, 900),
+        ] {
+            let analysis = dir.join("analysis");
+            fs::write(analysis.join("metric_catalog.json"), &catalog).unwrap();
+            fs::write(
+                analysis.join("service_summary.csv"),
+                format!("scope,group,served,wait_mean_seconds\ntotal,,{served},{wait}\n"),
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("service_vehicles.csv"),
+                format!("scope,vehicle_id,empty_meters\nfleet,,{empty}\n"),
+            )
+            .unwrap();
+            fs::write(
+                analysis.join("service_occupancy.csv"),
+                format!("load_passengers,load_vehicle_meters\n1,{loaded}\n"),
+            )
+            .unwrap();
+        }
+
+        let report = compare_completed_runs(&baseline, &[alternative]).unwrap();
+        let differences =
+            fs::read_to_string(report.parent().unwrap().join("metric_differences.csv")).unwrap();
+        assert!(differences.contains("service_summary.csv,served"));
+        assert!(differences.contains("8.000000,10.000000,2.000000,25.000000"));
+        assert!(differences.contains("service_summary.csv,wait_mean_seconds"));
+        assert!(differences.contains("service_vehicles.csv,empty_meters"));
+        assert!(differences.contains("service_occupancy.csv,load_vehicle_meters"));
     }
 
     #[test]
