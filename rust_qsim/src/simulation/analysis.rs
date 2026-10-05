@@ -5,20 +5,81 @@ use crate::simulation::events::{
     EventTrait, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonStuckEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
 };
+use crate::simulation::id;
 use crate::simulation::io::proto::proto_events::{ProtoEventsReader, event_from_proto};
 use crate::simulation::io::xml::events::XmlEventsReader;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
-use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use tracing::warn;
+
+/// Published report of the latest completed iteration.
+const ANALYSIS_DIR: &str = "analysis";
+/// Report of the most recent failed attempt; never holds a completed index.
+const FAILURE_DIR: &str = "analysis-failure";
+const MANIFEST_FILE: &str = "manifest.json";
+const RUN_METADATA_FILE: &str = "run_metadata.json";
+const MODULE_STATUS_FILE: &str = "module_status.json";
+const METRIC_CATALOG_FILE: &str = "metric_catalog.json";
+const STAGING_DIR: &str = ".analysis-staging";
+const FAILURE_STAGING_DIR: &str = ".analysis-failure-staging";
+const BACKUP_DIR: &str = ".analysis-backup";
+const FAILURE_BACKUP_DIR: &str = ".analysis-failure-backup";
+const ID_STORE_FILE: &str = id::OUTPUT_FILE_NAME;
+
+const STATUS_COMPLETE: &str = "complete";
+const STATUS_FAILED: &str = "failed";
+const STATUS_UNAVAILABLE: &str = "unavailable";
+
+/// Module whose inputs must be readable for any report to be published.
+const REQUIRED_MODULE: &str = "link_coverage";
+
+/// Modules the report covers beyond the required one, in report order. `None` marks a module this
+/// build computes, so it follows the run's outcome; `Some` carries the reason the module stays
+/// unavailable until its inputs or implementation exist.
+const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
+    (
+        "link_speed",
+        Some("Traversal timing metrics are not implemented yet"),
+    ),
+    ("agent_travel", None),
+    (
+        "validation",
+        Some("No observed validation datasets are configured"),
+    ),
+    (
+        "cross_run_comparison",
+        Some("No comparison runs are configured"),
+    ),
+    (
+        "transit_and_research",
+        Some("Optional module inputs are not configured"),
+    ),
+];
+
+const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
+
+const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)});const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(x=>{const cell=tr.insertCell();cell.textContent=x})});root.appendChild(t)}table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))";
+
+/// Renders the agent travel tables. They quote person identifiers, so the header and every row
+/// are split with a quote-aware parser instead of `String.split(',')`.
+const CSV_TABLE_SCRIPT: &str = "function parseCsv(line){const fields=[];let field='',quoted=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch.charCodeAt(0)===34){if(quoted&&line.charCodeAt(i+1)===34){field+=String.fromCharCode(34);i++}else{quoted=!quoted}}else if(ch===','&&!quoted){fields.push(field);field=''}else{field+=ch}}fields.push(field);return fields}function csvTable(id,rows){table(document.querySelector(id),parseCsv(rows[0]),rows.slice(1).map(parseCsv))}";
 
 #[derive(Debug)]
 pub struct AnalysisError(String);
+
+impl AnalysisError {
+    pub fn new(message: impl Into<String>) -> Self {
+        AnalysisError(message.into())
+    }
+}
 
 impl std::fmt::Display for AnalysisError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -38,27 +99,33 @@ struct Metric<'a> {
     aggregation_key: &'a str,
 }
 
-#[derive(Serialize)]
-struct Manifest<'a> {
-    status: &'a str,
+/// Provenance of one published report attempt. Written into `manifest.json` and read back by
+/// [`reanalyze_completed_run`] so a rerun reuses the recorded final iteration and run settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Manifest {
+    /// `complete` for a published report, `failed` for a recorded failed attempt.
+    status: String,
+    /// Present only when `status` is `failed`.
+    failure: Option<String>,
     iteration: u32,
     interval_seconds: u32,
+    simulation_end_time: u32,
     partitions: Vec<u32>,
-    input_format: &'a str,
+    input_format: String,
     eligible_links: usize,
     random_seed: u64,
     network_input: Option<String>,
     population_input: Option<String>,
-    software_version: &'static str,
+    software_version: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonExpectedTravel {
     person_id: String,
     legs: Vec<ExpectedLeg>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExpectedLeg {
     leg_index: usize,
     mode: String,
@@ -66,7 +133,7 @@ struct ExpectedLeg {
     expected_travel_seconds: Option<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct VehiclePce {
     vehicle_id: String,
     vehicle_type_id: String,
@@ -135,20 +202,76 @@ struct PersonActivity {
     completed_legs: usize,
 }
 
-#[derive(Serialize)]
-struct ModuleStatus<'a> {
-    module: &'a str,
-    status: &'a str,
-    reason: Option<&'a str>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VehicleTypePce {
+    vehicle_type_id: String,
+    pce: f64,
 }
 
-pub struct AnalysisRunMetadata<'a> {
-    pub random_seed: u64,
-    pub network_input: Option<&'a Path>,
-    pub population_input: Option<&'a Path>,
-    pub vehicles_input: Option<&'a Path>,
-    pub expected_travel: &'a [PersonExpectedTravel],
-    pub garage: &'a Garage,
+/// Input files a run was configured with. Recorded for provenance and for standalone reruns.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AnalysisInputPaths<'a> {
+    pub network: Option<&'a Path>,
+    /// Output network written next to the events; the eligible-link set a rerun must use.
+    pub network_file: Option<&'a Path>,
+    pub population: Option<&'a Path>,
+    pub vehicles: Option<&'a Path>,
+}
+
+/// Compact run inputs an analysis pass needs but cannot recover from the event files. Serialized
+/// to `run_metadata.json` so a standalone rerun reproduces the automatic run's metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisRunMetadata {
+    random_seed: u64,
+    network_input: Option<String>,
+    network_file: Option<String>,
+    population_input: Option<String>,
+    vehicles_input: Option<String>,
+    expected_travel: Vec<PersonExpectedTravel>,
+    vehicles: Vec<VehiclePce>,
+    vehicle_types: Vec<VehicleTypePce>,
+}
+
+impl AnalysisRunMetadata {
+    /// Snapshot the live run's metadata without cloning the scenario: only the compact plan
+    /// expectations and the vehicle/PCE catalog cross into the report. The expectations are
+    /// taken by value because the run has finished and never reads them again.
+    pub fn from_run(
+        random_seed: u64,
+        garage: &Garage,
+        expected_travel: Vec<PersonExpectedTravel>,
+        inputs: AnalysisInputPaths<'_>,
+    ) -> Self {
+        let mut vehicles: Vec<_> = garage
+            .vehicles
+            .values()
+            .map(|vehicle| VehiclePce {
+                vehicle_id: vehicle.id.external().to_owned(),
+                vehicle_type_id: vehicle.vehicle_type.external().to_owned(),
+                pce: vehicle.pce,
+            })
+            .collect();
+        vehicles.sort_by(|a, b| a.vehicle_id.cmp(&b.vehicle_id));
+        let mut vehicle_types: Vec<_> = garage
+            .vehicle_types
+            .values()
+            .map(|vehicle_type| VehicleTypePce {
+                vehicle_type_id: vehicle_type.id.external().to_owned(),
+                pce: vehicle_type.pce,
+            })
+            .collect();
+        vehicle_types.sort_by(|a, b| a.vehicle_type_id.cmp(&b.vehicle_type_id));
+        AnalysisRunMetadata {
+            random_seed,
+            network_input: inputs.network.map(|path| path.display().to_string()),
+            network_file: inputs.network_file.map(|path| path.display().to_string()),
+            population_input: inputs.population.map(|path| path.display().to_string()),
+            vehicles_input: inputs.vehicles.map(|path| path.display().to_string()),
+            expected_travel,
+            vehicles,
+            vehicle_types,
+        }
+    }
 }
 
 /// Capture compact plan expectations immediately before the final iteration's mobsim.
@@ -202,25 +325,203 @@ struct LinkVolumes {
 
 type LinkVolumesByHour = BTreeMap<LinkHour, LinkVolumes>;
 
+#[derive(Serialize)]
+struct ModuleStatus {
+    module: &'static str,
+    /// A failing required module fails the whole report; optional ones only report unavailability.
+    required: bool,
+    status: &'static str,
+    reason: Option<String>,
+}
+
+/// Outcome of the required module. Optional modules are never failing; they are unavailable.
+enum RequiredOutcome {
+    Complete,
+    Failed(String),
+}
+
 /// Replay every final-iteration partition and publish deterministic coverage tables and HTML.
+///
+/// A required-module failure records a failed report next to the last completed one and returns
+/// the error, so a failed attempt never publishes a completed index over working output.
 pub fn analyze_final_iteration(
     output_dir: &Path,
     iteration: u32,
     partitions: u32,
     compression: CompressionType,
     simulation_end_time: u32,
-    run_metadata: &AnalysisRunMetadata<'_>,
+    run_metadata: &AnalysisRunMetadata,
     network: &Network,
     settings: &Analysis,
 ) -> Result<PathBuf, AnalysisError> {
     if !settings.enabled {
-        return Err(AnalysisError("analysis is disabled".into()));
+        return Err(AnalysisError::new("analysis is disabled"));
     }
     if settings.interval_seconds == 0 {
-        return Err(AnalysisError(
-            "analysis.interval_seconds must be greater than zero".into(),
+        return Err(AnalysisError::new(
+            "analysis.interval_seconds must be greater than zero",
         ));
     }
+
+    let ordered_links = sorted_links(network);
+    let manifest = Manifest {
+        status: STATUS_COMPLETE.to_owned(),
+        failure: None,
+        iteration,
+        interval_seconds: settings.interval_seconds,
+        simulation_end_time,
+        partitions: (0..partitions).collect(),
+        input_format: compression.extension().to_owned(),
+        eligible_links: ordered_links.len(),
+        random_seed: run_metadata.random_seed,
+        network_input: run_metadata.network_input.clone(),
+        population_input: run_metadata.population_input.clone(),
+        software_version: env!("CARGO_PKG_VERSION").to_owned(),
+    };
+
+    // Required inputs are validated before anything is staged, so an unreadable recording is
+    // reported as a failed attempt instead of replacing a previously published report.
+    let (counts, agent_travel) = match replay_partitions(
+        output_dir,
+        iteration,
+        partitions,
+        compression,
+        settings.interval_seconds,
+        &ordered_links,
+        run_metadata,
+    ) {
+        Ok(replayed) => replayed,
+        Err(error) => return Err(record_failure(output_dir, &manifest, error)),
+    };
+
+    publish_complete(
+        output_dir,
+        &manifest,
+        &ordered_links,
+        &counts,
+        &agent_travel,
+        settings.interval_seconds,
+        simulation_end_time,
+        run_metadata,
+    )
+}
+
+/// Regenerate the final-iteration report of a completed run from its recorded outputs.
+///
+/// Only the analysis outputs are rewritten; event files, plans, network and ID store are read but
+/// left untouched. `interval_seconds` overrides the recorded interval width so analysis settings
+/// can change without rerunning QSim; `None` reuses the width the recorded report used.
+pub fn reanalyze_completed_run(
+    output_dir: &Path,
+    interval_seconds: Option<u32>,
+) -> Result<PathBuf, AnalysisError> {
+    // A crash between the two renames of a previous publish strands the last good report in the
+    // backup. Reclaim it before anything else, so even a run that cannot be reanalyzed keeps its
+    // report rather than leaving it next to a broken one.
+    if let Err(error) = reclaim_backup(&output_dir.join(ANALYSIS_DIR), &output_dir.join(BACKUP_DIR))
+    {
+        warn!("Could not reclaim the previous analysis report: {error}");
+    }
+    let manifest_path = output_dir.join(ANALYSIS_DIR).join(MANIFEST_FILE);
+    if !manifest_path.is_file() {
+        return Err(AnalysisError(format!(
+            "no recorded analysis manifest at {}: run the simulation with output.analysis.enabled before requesting a reanalysis",
+            manifest_path.display()
+        )));
+    }
+    let recorded: Manifest = read_json(&manifest_path)?;
+    if recorded.partitions.is_empty() {
+        return Err(record_failure(
+            output_dir,
+            &recorded,
+            AnalysisError::new("recorded manifest does not list any event partition"),
+        ));
+    }
+    let compression = match CompressionType::from_extension(&recorded.input_format) {
+        Some(compression) => compression,
+        None => {
+            return Err(record_failure(
+                output_dir,
+                &recorded,
+                AnalysisError(format!(
+                    "unsupported recorded input format: {}",
+                    recorded.input_format
+                )),
+            ));
+        }
+    };
+
+    let run_metadata: AnalysisRunMetadata =
+        match read_json(&output_dir.join(ANALYSIS_DIR).join(RUN_METADATA_FILE)) {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(record_failure(output_dir, &recorded, error)),
+        };
+    let Some(network_file) = run_metadata.network_file.as_ref() else {
+        return Err(record_failure(
+            output_dir,
+            &recorded,
+            AnalysisError::new("recorded run metadata does not name an output network file"),
+        ));
+    };
+    let network_path = output_dir.join(network_file);
+    if !network_path.is_file() {
+        return Err(record_failure(
+            output_dir,
+            &recorded,
+            AnalysisError(format!(
+                "missing recorded output network: {}",
+                network_path.display()
+            )),
+        ));
+    }
+    // Restoring the run's ID mapping keeps rerun link identifiers consistent with the recorded
+    // events; runs that stored no ID store simply build one from the output network.
+    let id_store = output_dir.join(ID_STORE_FILE);
+    if id_store.is_file() {
+        id::load_from_file(&id_store);
+    }
+    let network = Network::from_file_as_is(&network_path);
+    let settings = Analysis {
+        enabled: true,
+        interval_seconds: interval_seconds.unwrap_or(recorded.interval_seconds),
+    };
+
+    analyze_final_iteration(
+        output_dir,
+        recorded.iteration,
+        recorded.partitions.len() as u32,
+        compression,
+        recorded.simulation_end_time,
+        &run_metadata,
+        &network,
+        &settings,
+    )
+}
+
+/// Record a failed attempt and hand the original error back to the caller. The module error is
+/// always the one returned; a secondary failure to write the diagnostics is logged, not dropped.
+fn record_failure(output_dir: &Path, recorded: &Manifest, error: AnalysisError) -> AnalysisError {
+    if let Err(write) = publish_failure(output_dir, recorded, &error) {
+        warn!("Could not record the analysis failure report: {write}");
+    }
+    error
+}
+
+fn sorted_links(network: &Network) -> Vec<&Link> {
+    let mut ordered_links: Vec<_> = network.links().into_iter().collect();
+    ordered_links.sort_by(|a, b| a.id.external().cmp(b.id.external()));
+    ordered_links
+}
+
+fn replay_partitions(
+    output_dir: &Path,
+    iteration: u32,
+    partitions: u32,
+    compression: CompressionType,
+    interval: u32,
+    ordered_links: &[&Link],
+    run_metadata: &AnalysisRunMetadata,
+) -> Result<(LinkVolumesByHour, AgentTravelAccumulator), AnalysisError> {
     let events_dir = output_dir
         .join("ITERS")
         .join(format!("it.{iteration}"))
@@ -238,9 +539,6 @@ pub fn analyze_final_iteration(
         }
     }
 
-    let links = network.links();
-    let mut ordered_links: Vec<_> = links.into_iter().collect();
-    ordered_links.sort_by(|a, b| a.id.external().cmp(b.id.external()));
     let ids: BTreeSet<_> = ordered_links
         .iter()
         .map(|link| link.id.external().to_owned())
@@ -276,7 +574,7 @@ pub fn analyze_final_iteration(
             )
         })
         .collect();
-    let mut agent_travel = AgentTravelAccumulator::new(settings.interval_seconds, expected);
+    let mut agent_travel = AgentTravelAccumulator::new(interval, expected);
     loop {
         let Some(time) = heads
             .iter()
@@ -296,89 +594,113 @@ pub fn analyze_final_iteration(
                 .is_some_and(|(event_time, _)| *event_time == time)
             {
                 let (_, event) = heads[rank].take().expect("selected reader head exists");
-                accumulate(
-                    event.as_ref(),
-                    time,
-                    settings.interval_seconds,
-                    &ids,
-                    &mut counts,
-                );
+                accumulate(event.as_ref(), time, interval, &ids, &mut counts);
                 simultaneous_events.push(event);
                 heads[rank] = readers[rank].next_event()?;
             }
         }
         agent_travel.process_timestamp(&simultaneous_events, time);
     }
+    Ok((counts, agent_travel))
+}
 
-    let staging = output_dir.join(".analysis-staging");
-    if staging.exists() {
-        fs::remove_dir_all(&staging).map_err(io_error)?;
-    }
-    fs::create_dir_all(&staging).map_err(io_error)?;
+fn publish_complete(
+    output_dir: &Path,
+    manifest: &Manifest,
+    ordered_links: &[&Link],
+    counts: &LinkVolumesByHour,
+    agent_travel: &AgentTravelAccumulator,
+    interval: u32,
+    simulation_end_time: u32,
+    run_metadata: &AnalysisRunMetadata,
+) -> Result<PathBuf, AnalysisError> {
+    let staging = output_dir.join(STAGING_DIR);
+    reset_staging(&staging)?;
     write_tables(
         &staging,
-        &ordered_links,
-        &counts,
+        ordered_links,
+        counts,
         &agent_travel.observed_legs,
         &agent_travel.expected,
         &agent_travel.stuck_people,
-        settings.interval_seconds,
+        interval,
         simulation_end_time,
     )?;
-    let manifest = Manifest {
-        status: "complete",
-        iteration,
-        interval_seconds: settings.interval_seconds,
-        partitions: (0..partitions).collect(),
-        input_format: ext,
-        eligible_links: ordered_links.len(),
-        random_seed: run_metadata.random_seed,
-        network_input: run_metadata
-            .network_input
-            .map(|path| path.display().to_string()),
-        population_input: run_metadata
-            .population_input
-            .map(|path| path.display().to_string()),
-        software_version: env!("CARGO_PKG_VERSION"),
+    write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
+    write_json(&staging.join(METRIC_CATALOG_FILE), &metrics())?;
+    let statuses = module_statuses(&RequiredOutcome::Complete);
+    write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
+    write_json(&staging.join(MANIFEST_FILE), manifest)?;
+    write_report(&staging, manifest, &statuses)?;
+    let published = publish(
+        &staging,
+        &output_dir.join(ANALYSIS_DIR),
+        &output_dir.join(BACKUP_DIR),
+    )?;
+    // A complete report supersedes any failure recorded by an earlier attempt.
+    let failure_dir = output_dir.join(FAILURE_DIR);
+    if failure_dir.exists() {
+        fs::remove_dir_all(&failure_dir).map_err(io_error)?;
+    }
+    Ok(published.join("index.html"))
+}
+
+/// Publish the diagnostics of a failed attempt. The completed report in [`ANALYSIS_DIR`] is never
+/// touched, so a failed rerun cannot be mistaken for a completed index.
+fn publish_failure(
+    output_dir: &Path,
+    manifest: &Manifest,
+    error: &AnalysisError,
+) -> Result<(), AnalysisError> {
+    let mut failed = manifest.clone();
+    failed.status = STATUS_FAILED.to_owned();
+    failed.failure = Some(error.to_string());
+    let statuses = module_statuses(&RequiredOutcome::Failed(error.to_string()));
+    let staging = output_dir.join(FAILURE_STAGING_DIR);
+    reset_staging(&staging)?;
+    write_json(&staging.join(MANIFEST_FILE), &failed)?;
+    write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
+    fs::write(staging.join("failure.txt"), format!("{error}\n")).map_err(io_error)?;
+    write_failure_report(&staging, &failed, &statuses)?;
+    publish(
+        &staging,
+        &output_dir.join(FAILURE_DIR),
+        &output_dir.join(FAILURE_BACKUP_DIR),
+    )?;
+    Ok(())
+}
+
+fn module_statuses(outcome: &RequiredOutcome) -> Vec<ModuleStatus> {
+    let (status, reason) = match outcome {
+        RequiredOutcome::Complete => (STATUS_COMPLETE, None),
+        RequiredOutcome::Failed(reason) => (STATUS_FAILED, Some(reason.clone())),
     };
-    fs::write(
-        staging.join("manifest.json"),
-        serde_json::to_vec_pretty(&manifest).map_err(|e| AnalysisError(e.to_string()))?,
-    )
-    .map_err(io_error)?;
-    let mut vehicles: Vec<_> = run_metadata
-        .garage
-        .vehicles
-        .values()
-        .map(|vehicle| VehiclePce {
-            vehicle_id: vehicle.id.external().to_owned(),
-            vehicle_type_id: vehicle.vehicle_type.external().to_owned(),
-            pce: vehicle.pce,
-        })
-        .collect();
-    vehicles.sort_by(|a, b| a.vehicle_id.cmp(&b.vehicle_id));
-    let mut vehicle_types: Vec<_> = run_metadata
-        .garage
-        .vehicle_types
-        .values()
-        .map(|vehicle_type| (vehicle_type.id.external().to_owned(), vehicle_type.pce))
-        .collect();
-    vehicle_types.sort_by(|a, b| a.0.cmp(&b.0));
-    fs::write(
-        staging.join("run_metadata.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "expected_travel": run_metadata.expected_travel,
-            "vehicles": vehicles,
-            "vehicle_types": vehicle_types.iter().map(|(id, pce)| serde_json::json!({
-                "vehicle_type_id": id,
-                "pce": pce,
-            })).collect::<Vec<_>>(),
-            "vehicles_input": run_metadata.vehicles_input.map(|path| path.display().to_string()),
-        }))
-        .map_err(|e| AnalysisError(e.to_string()))?,
-    )
-    .map_err(io_error)?;
-    let metrics = [
+    let mut statuses = vec![ModuleStatus {
+        module: REQUIRED_MODULE,
+        required: true,
+        status,
+        reason: reason.clone(),
+    }];
+    statuses.extend(OPTIONAL_MODULES.iter().map(|(module, unavailable)| {
+        ModuleStatus {
+            module,
+            required: false,
+            // A computed module shares the run's outcome, so a failed run cannot report it complete.
+            status: if unavailable.is_none() {
+                status
+            } else {
+                STATUS_UNAVAILABLE
+            },
+            reason: unavailable
+                .map(|reason| (*reason).to_owned())
+                .or_else(|| reason.clone()),
+        }
+    }));
+    statuses
+}
+
+fn metrics() -> [Metric<'static>; 12] {
+    [
         Metric {
             name: "link_entry_vehicles",
             unit: "vehicles",
@@ -439,73 +761,65 @@ pub fn analyze_final_iteration(
             unit: "category",
             aggregation_key: "person_id,leg_index",
         },
-    ];
-    fs::write(
-        staging.join("metric_catalog.json"),
-        serde_json::to_vec_pretty(&metrics).map_err(|e| AnalysisError(e.to_string()))?,
-    )
-    .map_err(io_error)?;
-    let statuses = [
-        ModuleStatus {
-            module: "link_coverage",
-            status: "complete",
-            reason: None,
-        },
-        ModuleStatus {
-            module: "link_speed",
-            status: "unavailable",
-            reason: Some("Traversal timing metrics are not implemented yet"),
-        },
-        ModuleStatus {
-            module: "agent_travel",
-            status: "complete",
-            reason: None,
-        },
-        ModuleStatus {
-            module: "validation",
-            status: "unavailable",
-            reason: Some("No observed validation datasets are configured"),
-        },
-        ModuleStatus {
-            module: "cross_run_comparison",
-            status: "unavailable",
-            reason: Some("No comparison runs are configured"),
-        },
-        ModuleStatus {
-            module: "transit_and_research",
-            status: "unavailable",
-            reason: Some("Optional module inputs are not configured"),
-        },
-    ];
-    fs::write(
-        staging.join("module_status.json"),
-        serde_json::to_vec_pretty(&statuses).map_err(|e| AnalysisError(e.to_string()))?,
-    )
-    .map_err(io_error)?;
-    write_report(&staging, iteration, ordered_links.len())?;
-    let published = output_dir.join("analysis");
-    let backup = output_dir.join(".analysis-backup");
-    if backup.exists() {
-        if published.exists() {
-            fs::remove_dir_all(&backup).map_err(io_error)?;
-        } else {
-            fs::rename(&backup, &published).map_err(io_error)?;
-        }
-    }
+    ]
+}
+
+/// Swap a fully staged directory into place.
+fn publish(staging: &Path, published: &Path, backup: &Path) -> Result<PathBuf, AnalysisError> {
+    reclaim_backup(published, backup)?;
     let had_published = published.exists();
     if had_published {
-        fs::rename(&published, &backup).map_err(io_error)?;
+        fs::rename(published, backup).map_err(io_error)?;
     }
-    if let Err(error) = fs::rename(&staging, &published) {
+    if let Err(error) = fs::rename(staging, published) {
         if had_published {
-            let _ = fs::rename(&backup, &published);
+            if let Err(restore) = fs::rename(backup, published) {
+                warn!(
+                    "Could not restore the previous report from {}: {restore}",
+                    backup.display()
+                );
+            }
         }
         return Err(io_error(error));
     }
     if had_published {
-        fs::remove_dir_all(&backup).map_err(io_error)?;
+        fs::remove_dir_all(backup).map_err(io_error)?;
     }
-    Ok(published.join("index.html"))
+    Ok(published.to_path_buf())
+}
+
+/// Resolve a backup left behind by an interrupted publish: restore it when its published
+/// counterpart is gone, and drop it when the publish did land. Without this an interrupted publish
+/// would strand the last good report in the backup.
+fn reclaim_backup(published: &Path, backup: &Path) -> Result<(), AnalysisError> {
+    if backup.exists() {
+        if published.exists() {
+            fs::remove_dir_all(backup).map_err(io_error)?;
+        } else {
+            fs::rename(backup, published).map_err(io_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// A staging directory left behind by an interrupted run is never a usable report.
+fn reset_staging(staging: &Path) -> Result<(), AnalysisError> {
+    if staging.exists() {
+        fs::remove_dir_all(staging).map_err(io_error)?;
+    }
+    fs::create_dir_all(staging).map_err(io_error)
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, AnalysisError> {
+    let bytes = fs::read(path)
+        .map_err(|error| AnalysisError(format!("cannot read {}: {error}", path.display())))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| AnalysisError(format!("cannot parse {}: {error}", path.display())))
+}
+
+fn write_json(path: &Path, value: &impl Serialize) -> Result<(), AnalysisError> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| AnalysisError(e.to_string()))?;
+    fs::write(path, bytes).map_err(io_error)
 }
 
 enum PartitionReader {
@@ -994,10 +1308,16 @@ fn write_tables(
     Ok(())
 }
 
-fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), AnalysisError> {
-    let coverage = csv_for_script(&path.join("coverage.csv"))?;
-    let modules = fs::read_to_string(path.join("module_status.json")).map_err(io_error)?;
-    let hourly = csv_for_script(&path.join("link_hourly.csv"))?;
+fn write_report(
+    path: &Path,
+    manifest: &Manifest,
+    statuses: &[ModuleStatus],
+) -> Result<(), AnalysisError> {
+    let coverage = fs::read_to_string(path.join("coverage.csv")).map_err(io_error)?;
+    let coverage = json_for_script(&coverage.lines().collect::<Vec<_>>())?;
+    let modules = json_for_script(statuses)?;
+    let hourly = fs::read_to_string(path.join("link_hourly.csv")).map_err(io_error)?;
+    let hourly = json_for_script(&hourly.lines().collect::<Vec<_>>())?;
     let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
     let daily = csv_for_script(&path.join("daily_summary.csv"))?;
     let persons = csv_for_script(&path.join("person_daily.csv"))?;
@@ -1011,7 +1331,10 @@ fn write_report(path: &Path, iteration: u32, links: usize) -> Result<(), Analysi
         "Every observed and planned leg is listed in <a href=\"legs.csv\">legs.csv</a>.".to_owned()
     };
     let html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}}table{{border-collapse:collapse;margin-bottom:2rem}}td,th{{border:1px solid #ccd;padding:.5rem}}a{{color:#075ea8}}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links.</p><h2>Hourly volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end.</p><h3>Per-link hourly entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Hourly coverage</h3><div id=\"coverage\"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by hour/mode</h3><div id=\"leg-hourly\"></div><h3>Daily cohort means</h3><div id=\"daily\"></div><h3>Person daily totals and status</h3><div id=\"persons\"></div><h3>Observed and planned legs</h3><p>{legs_note}</p><div id=\"legs\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const a={leg_hourly};const d={daily};const p={persons};const g={legs};const m={modules};function table(root,headers,rows){{const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)}});const body=t.createTBody();rows.forEach(row=>{{const tr=body.insertRow();row.forEach(x=>{{const cell=tr.insertCell();cell.textContent=x}})}});root.appendChild(t)}}function parseCsv(line){{const fields=[];let field='',quoted=false;for(let i=0;i<line.length;i++){{const ch=line[i];if(ch.charCodeAt(0)===34){{if(quoted&&line.charCodeAt(i+1)===34){{field+=String.fromCharCode(34);i++}}else{{quoted=!quoted}}}}else if(ch===','&&!quoted){{fields.push(field);field=''}}else{{field+=ch}}}}fields.push(field);return fields}}function csvTable(id,rows){{table(document.querySelector(id),parseCsv(rows[0]),rows.slice(1).map(parseCsv))}}csvTable('#hourly',h);csvTable('#coverage',c);csvTable('#leg-hourly',a);csvTable('#daily',d);csvTable('#persons',p);csvTable('#legs',g);table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))</script></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis</title><style>{REPORT_STYLE}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration {iteration}; {links} eligible directed links in {interval}-second intervals.</p><h2>Interval volumes and coverage</h2><p>Zero-volume links are retained in every interval. Intervals include their start and exclude their end. Both result tables and module status are embedded for offline viewing.</p><h3>Per-link interval entry and exit vehicles</h3><div id=\"hourly\"></div><h3>Interval coverage</h3><div id=\"coverage\"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs.</p><h3>Departures and duration by interval and mode</h3><div id=\"leg-hourly\"></div><h3>Daily cohort means</h3><div id=\"daily\"></div><h3>Person daily totals and status</h3><div id=\"persons\"></div><h3>Observed and planned legs</h3><p>{legs_note}</p><div id=\"legs\"></div><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"link_hourly.csv\">link volumes (CSV)</a>, <a href=\"coverage.csv\">coverage (CSV)</a>, <a href=\"leg_hourly.csv\">legs by interval and mode (CSV)</a>, <a href=\"person_daily.csv\">person daily totals (CSV)</a>, <a href=\"daily_summary.csv\">daily cohort means (CSV)</a>, <a href=\"legs.csv\">legs (CSV)</a>, <a href=\"run_metadata.json\">expected travel and vehicle/PCE metadata (JSON)</a>, <a href=\"manifest.json\">run manifest</a>, <a href=\"metric_catalog.json\">metric catalog</a>.</p><script>const h={hourly};const c={coverage};const a={leg_hourly};const d={daily};const p={persons};const g={legs};const m={modules};{MODULE_TABLE_SCRIPT};{CSV_TABLE_SCRIPT}table(document.querySelector('#hourly'),h[0].split(','),h.slice(1).map(x=>x.split(',')));table(document.querySelector('#coverage'),c[0].split(','),c.slice(1).map(x=>x.split(',')));csvTable('#leg-hourly',a);csvTable('#daily',d);csvTable('#persons',p);csvTable('#legs',g)</script></body></html>",
+        iteration = manifest.iteration,
+        links = manifest.eligible_links,
+        interval = manifest.interval_seconds,
     );
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
@@ -1037,7 +1360,21 @@ fn csv_preview_for_script(path: &Path, rows: usize) -> Result<(String, bool), An
     Ok((json_for_script(&lines)?, truncated))
 }
 
-fn json_for_script(value: &impl Serialize) -> Result<String, AnalysisError> {
+fn write_failure_report(
+    path: &Path,
+    manifest: &Manifest,
+    statuses: &[ModuleStatus],
+) -> Result<(), AnalysisError> {
+    let modules = json_for_script(statuses)?;
+    let reason = escape_html(manifest.failure.as_deref().unwrap_or_default());
+    let html = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>MATSim analysis failed</title><style>{REPORT_STYLE}</style></head><body><h1>Analysis failed</h1><p>The required <code>{REQUIRED_MODULE}</code> module did not complete for final iteration {iteration}, so no completed report was published. The previously published report in <code>{ANALYSIS_DIR}</code> is unchanged.</p><h2>Failure</h2><pre>{reason}</pre><h2>Module status</h2><div id=\"modules\"></div><p>Machine-readable data: <a href=\"manifest.json\">failure manifest</a>, <a href=\"module_status.json\">module status</a>, <a href=\"failure.txt\">error text</a>.</p><script>const m={modules};{MODULE_TABLE_SCRIPT}</script></body></html>",
+        iteration = manifest.iteration,
+    );
+    fs::write(path.join("index.html"), html).map_err(io_error)
+}
+
+fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, AnalysisError> {
     serde_json::to_string(value)
         .map(|json| {
             json.replace('&', "\\u0026")
@@ -1045,6 +1382,13 @@ fn json_for_script(value: &impl Serialize) -> Result<String, AnalysisError> {
                 .replace('>', "\\u003e")
         })
         .map_err(|e| AnalysisError(e.to_string()))
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn csv(value: &str) -> String {
@@ -1159,14 +1503,17 @@ mod tests {
             expected_person("stuck_midway", &[(0, "walk"), (1, "car"), (2, "train")]),
         ];
         let garage = Garage::default();
-        let metadata = AnalysisRunMetadata {
-            random_seed: 0,
-            network_input: None,
-            population_input: None,
-            vehicles_input: None,
-            expected_travel: &expected_travel,
-            garage: &garage,
-        };
+        let metadata = AnalysisRunMetadata::from_run(
+            0,
+            &garage,
+            expected_travel,
+            AnalysisInputPaths {
+                network: None,
+                network_file: None,
+                population: None,
+                vehicles: None,
+            },
+        );
         let report = analyze_final_iteration(
             dir.path(),
             0,
@@ -1229,7 +1576,7 @@ mod tests {
         // Leg rows are embedded, so the leg-level metric has a presentation and not just a link.
         assert!(report_html.contains("person_id,leg_index,mode,departure_seconds"));
         assert!(report_html.contains("stuck_midway"));
-        let statuses = read_json(&output.join("module_status.json"));
+        let statuses: serde_json::Value = read_json(&output.join("module_status.json")).unwrap();
         let agent_travel = statuses
             .as_array()
             .expect("module status is an array")
@@ -1238,7 +1585,7 @@ mod tests {
             .expect("agent_travel module status is reported");
         assert_eq!(agent_travel["status"], "complete");
         assert!(agent_travel["reason"].is_null());
-        let catalog = read_json(&output.join("metric_catalog.json"));
+        let catalog: serde_json::Value = read_json(&output.join("metric_catalog.json")).unwrap();
         let names: BTreeSet<&str> = catalog
             .as_array()
             .expect("metric catalog is an array")
@@ -1261,11 +1608,6 @@ mod tests {
         assert!(hourly.contains("0,\"walk\",2,2,1,0.000000"));
         assert!(hourly.contains("82800,\"car\",1,1,1,10.000000"));
         assert!(hourly.contains("36000,\"car\",1,1,1,10.000000"));
-    }
-
-    fn read_json(path: &Path) -> serde_json::Value {
-        let raw = fs::read_to_string(path).unwrap();
-        serde_json::from_str(&raw).unwrap()
     }
 
     fn expected_person(person_id: &str, legs: &[(usize, &str)]) -> PersonExpectedTravel {
