@@ -128,7 +128,6 @@ struct HourlyLegs {
 struct PersonActivity {
     departures: usize,
     completed_legs: usize,
-    stuck: bool,
 }
 
 #[derive(Serialize)]
@@ -315,6 +314,7 @@ pub fn analyze_final_iteration(
         &counts,
         &agent_travel.observed_legs,
         &agent_travel.expected,
+        &agent_travel.stuck_people,
         settings.interval_seconds,
         simulation_end_time,
     )?;
@@ -578,6 +578,7 @@ struct AgentTravelAccumulator {
     departure_counts: BTreeMap<String, usize>,
     pending: BTreeMap<String, usize>,
     observed_legs: Vec<ObservedLeg>,
+    stuck_people: BTreeSet<String>,
 }
 
 impl AgentTravelAccumulator {
@@ -588,6 +589,7 @@ impl AgentTravelAccumulator {
             departure_counts: BTreeMap::new(),
             pending: BTreeMap::new(),
             observed_legs: Vec::new(),
+            stuck_people: BTreeSet::new(),
         }
     }
 
@@ -613,77 +615,110 @@ impl AgentTravelAccumulator {
             if let Some(leg_id) = self.pending.get(person).copied()
                 && self.observed_legs[leg_id].mode == *mode
             {
-                self.observed_legs[leg_id].completion = LegCompletion::Completed {
-                    arrival_seconds: seconds,
-                };
-                self.pending.remove(person);
+                self.complete_leg(person, leg_id, seconds);
                 matched_arrivals.insert(arrival_index);
             }
         }
 
-        let departures: Vec<_> = events
-            .iter()
-            .filter_map(|event| {
-                event
-                    .as_any()
-                    .downcast_ref::<PersonDepartureEvent>()
-                    .map(|event| {
-                        (
-                            event.person.external().to_owned(),
-                            event.leg_mode.external().to_owned(),
-                        )
-                    })
-            })
-            .collect();
-        let mut created_legs = BTreeSet::new();
-        for (person, mode) in departures {
+        let mut departures = BTreeMap::<String, Vec<String>>::new();
+        for event in events {
+            if let Some(event) = event.as_any().downcast_ref::<PersonDepartureEvent>() {
+                departures
+                    .entry(event.person.external().to_owned())
+                    .or_default()
+                    .push(event.leg_mode.external().to_owned());
+            }
+        }
+        let mut created_legs = BTreeMap::<String, Vec<usize>>::new();
+        for (person, mut modes) in departures {
             if let Some(previous_leg) = self.pending.remove(&person) {
                 self.observed_legs[previous_leg].completion = LegCompletion::MissingArrival;
             }
-            let offset = self.departure_counts.entry(person.clone()).or_default();
-            let leg_index = self
-                .expected
+            let offset = self
+                .departure_counts
                 .get(&person)
-                .and_then(|person_legs| person_legs.get(*offset))
-                .map_or(*offset, |(leg_index, _)| *leg_index);
-            *offset += 1;
-            let leg_id = self.observed_legs.len();
-            self.observed_legs.push(ObservedLeg {
-                person_id: person.clone(),
-                leg_index,
-                mode,
-                departure_seconds: seconds,
-                departure_hour: time.as_nanos() / 1_000_000_000 / u64::from(self.interval)
-                    * u64::from(self.interval),
-                completion: LegCompletion::Pending,
-            });
-            self.pending.insert(person, leg_id);
-            created_legs.insert(leg_id);
+                .copied()
+                .unwrap_or_default();
+            let expected_legs = self.expected.get(&person).map_or(&[][..], Vec::as_slice);
+            let mut ordered_modes = Vec::with_capacity(modes.len());
+            for (_, expected_mode) in expected_legs.iter().skip(offset) {
+                if let Some(mode_index) = modes.iter().position(|mode| mode == expected_mode) {
+                    ordered_modes.push(modes.remove(mode_index));
+                }
+            }
+            modes.sort();
+            ordered_modes.extend(modes);
+            for mode in ordered_modes {
+                let offset = self.departure_counts.entry(person.clone()).or_default();
+                let leg_index = expected_legs
+                    .get(*offset)
+                    .map_or(*offset, |(leg_index, _)| *leg_index);
+                *offset += 1;
+                let leg_id = self.observed_legs.len();
+                self.observed_legs.push(ObservedLeg {
+                    person_id: person.clone(),
+                    leg_index,
+                    mode,
+                    departure_seconds: seconds,
+                    departure_hour: time.as_nanos() / 1_000_000_000 / u64::from(self.interval)
+                        * u64::from(self.interval),
+                    completion: LegCompletion::Pending,
+                });
+                created_legs.entry(person.clone()).or_default().push(leg_id);
+            }
         }
 
         for (arrival_index, (person, mode)) in arrivals.iter().enumerate() {
             if matched_arrivals.contains(&arrival_index) {
                 continue;
             }
-            if let Some(leg_id) = self.pending.get(person).copied()
-                && created_legs.contains(&leg_id)
-                && self.observed_legs[leg_id].mode == *mode
+            if let Some(leg_ids) = created_legs.get(person)
+                && let Some(leg_id) = leg_ids.iter().find(|&&leg_id| {
+                    self.observed_legs[leg_id].mode == *mode
+                        && matches!(
+                            self.observed_legs[leg_id].completion,
+                            LegCompletion::Pending
+                        )
+                })
             {
-                self.observed_legs[leg_id].completion = LegCompletion::Completed {
+                self.observed_legs[*leg_id].completion = LegCompletion::Completed {
                     arrival_seconds: seconds,
                 };
-                self.pending.remove(person);
+            }
+        }
+
+        for (person, leg_ids) in created_legs {
+            let mut incomplete: Vec<_> = leg_ids
+                .into_iter()
+                .filter(|&leg_id| {
+                    matches!(
+                        self.observed_legs[leg_id].completion,
+                        LegCompletion::Pending
+                    )
+                })
+                .collect();
+            if let Some(last_leg) = incomplete.pop() {
+                for leg_id in incomplete {
+                    self.observed_legs[leg_id].completion = LegCompletion::MissingArrival;
+                }
+                self.pending.insert(person, last_leg);
             }
         }
 
         for event in events {
             if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
-                let person = event.person.external();
-                if let Some(leg_id) = self.pending.remove(person) {
+                let person = event.person.external().to_owned();
+                self.stuck_people.insert(person.clone());
+                if let Some(leg_id) = self.pending.remove(&person) {
                     self.observed_legs[leg_id].completion = LegCompletion::Stuck;
                 }
             }
         }
+    }
+
+    fn complete_leg(&mut self, person: &str, leg_id: usize, arrival_seconds: f64) {
+        self.observed_legs[leg_id].completion = LegCompletion::Completed { arrival_seconds };
+        self.pending.remove(person);
     }
 }
 
@@ -693,6 +728,7 @@ fn write_tables(
     counts: &LinkVolumesByHour,
     observed_legs: &[ObservedLeg],
     expected: &BTreeMap<String, Vec<(usize, String)>>,
+    stuck_people: &BTreeSet<String>,
     interval: u32,
     simulation_end_time: u32,
 ) -> Result<(), AnalysisError> {
@@ -792,7 +828,6 @@ fn write_tables(
         let activity = person_activity.entry(leg.person_id.clone()).or_default();
         activity.departures += 1;
         activity.completed_legs += usize::from(duration.is_some());
-        activity.stuck |= matches!(leg.completion, LegCompletion::Stuck);
         if let Some(duration) = duration {
             aggregate.duration_sum += duration;
             aggregate.completed += 1;
@@ -804,10 +839,15 @@ fn write_tables(
             if !observed_plan_legs.contains(&(person.clone(), *leg_index)) {
                 writeln!(
                     legs,
-                    "{},{},{},,,,,not_departed",
+                    "{},{},{},,,,,{}",
                     csv(person),
                     leg_index,
-                    csv(mode)
+                    csv(mode),
+                    if stuck_people.contains(person) {
+                        "stuck"
+                    } else {
+                        "not_departed"
+                    }
                 )
                 .map_err(io_error)?;
             }
@@ -840,20 +880,20 @@ fn write_tables(
     let mut complete_travelers = Vec::new();
     let mut person_ids: BTreeSet<_> = expected.keys().cloned().collect();
     person_ids.extend(person_activity.keys().cloned());
+    person_ids.extend(stuck_people.iter().cloned());
     for person in person_ids {
         let expected_legs = expected.get(&person).map_or(&[][..], Vec::as_slice);
         let default_activity = PersonActivity::default();
         let activity = person_activity.get(&person).unwrap_or(&default_activity);
         let sum = person_totals.get(&person).copied().unwrap_or_default();
-        let status = if expected_legs.is_empty() && activity.departures == 0 {
+        let status = if stuck_people.contains(&person) {
+            "stuck"
+        } else if expected_legs.is_empty() && activity.departures == 0 {
             "no_travel"
         } else if activity.departures == expected_legs.len()
             && activity.completed_legs == expected_legs.len()
-            && !activity.stuck
         {
             "complete"
-        } else if activity.stuck {
-            "stuck"
         } else {
             "incomplete"
         };
@@ -991,6 +1031,8 @@ mod tests {
                 <event time="120" type="departure" person="partial" link="l" legMode="car" computationalRoutingMode="car" />
                 <event time="130" type="departure" person="partial" link="l" legMode="walk" computationalRoutingMode="walk" />
                 <event time="140" type="departure" person="stuck" link="l" legMode="car" computationalRoutingMode="car" />
+                <event time="200" type="arrival" person="zero" link="l" legMode="walk" />
+                <event time="200" type="arrival" person="zero" link="l" legMode="car" />
                 <event time="86390" type="departure" person="traveler" link="l" legMode="car" computationalRoutingMode="car" />
             </events>"#,
         )
@@ -1000,6 +1042,10 @@ mod tests {
             r#"<events>
                 <event time="125" type="arrival" person="partial" link="l" legMode="car" />
                 <event time="150" type="stuckAndAbort" person="stuck" />
+                <event time="160" type="stuckAndAbort" person="stuck_no_departure" />
+                <event time="170" type="stuckAndAbort" person="orphan_stuck" />
+                <event time="200" type="departure" person="zero" link="l" legMode="walk" computationalRoutingMode="walk" />
+                <event time="200" type="departure" person="zero" link="l" legMode="car" computationalRoutingMode="car" />
                 <event time="86400" type="arrival" person="traveler" link="l" legMode="car" />
             </events>"#,
         )
@@ -1010,6 +1056,8 @@ mod tests {
             expected_person("stuck", &[(0, "car")]),
             expected_person("nontraveler", &[]),
             expected_person("missing", &[(0, "bike")]),
+            expected_person("zero", &[(0, "walk"), (1, "car")]),
+            expected_person("stuck_no_departure", &[(0, "car")]),
         ];
         let garage = Garage::default();
         let metadata = AnalysisRunMetadata {
@@ -1041,15 +1089,19 @@ mod tests {
         assert!(persons.contains("\"stuck\",1,1,0,0.000000,,stuck"));
         assert!(persons.contains("\"nontraveler\",0,0,0,0.000000,,no_travel"));
         assert!(persons.contains("\"missing\",1,0,0,0.000000,,incomplete"));
+        assert!(persons.contains("\"zero\",2,2,2,0.000000,0.000000,complete"));
+        assert!(persons.contains("\"stuck_no_departure\",1,0,0,0.000000,,stuck"));
+        assert!(persons.contains("\"orphan_stuck\",0,0,0,0.000000,,stuck"));
         let legs = fs::read_to_string(output.join("legs.csv")).unwrap();
         assert!(legs.contains("\"partial\",0,\"car\",100.000000,0,,,missing_arrival"));
         assert!(legs.contains("\"missing\",0,\"bike\",,,,,not_departed"));
+        assert!(legs.contains("\"stuck_no_departure\",0,\"car\",,,,,stuck"));
         let summary = fs::read_to_string(output.join("daily_summary.csv")).unwrap();
-        assert!(summary.contains("all_complete_persons,2,5.000000"));
-        assert!(summary.contains("travelers,1,10.000000"));
+        assert!(summary.contains("all_complete_persons,3,3.333333"));
+        assert!(summary.contains("travelers,2,5.000000"));
         let hourly = fs::read_to_string(output.join("leg_hourly.csv")).unwrap();
-        assert!(hourly.contains("0,\"car\",3,2,1,5.000000"));
-        assert!(hourly.contains("0,\"walk\",1,1,0,"));
+        assert!(hourly.contains("0,\"car\",4,3,2,2.500000"));
+        assert!(hourly.contains("0,\"walk\",2,2,1,0.000000"));
         assert!(hourly.contains("82800,\"car\",1,1,1,10.000000"));
     }
 
