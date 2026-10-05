@@ -58,14 +58,24 @@ fn leaves_traffic(time: f64, link: &str, vehicle: &str, relative_position: f64) 
 }
 
 fn network_with_links(lengths: &[(&str, f64)]) -> Network {
+    network_with_link_specs(
+        &lengths
+            .iter()
+            .map(|(id, length)| (*id, *length, 10.0))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn network_with_link_specs(specs: &[(&str, f64, f64)]) -> Network {
     let from = Node::new(Id::create("from"), Coordinate::new_2d(0.0, 0.0), 0, 1);
     let to = Node::new(Id::create("to"), Coordinate::new_2d(1.0, 0.0), 0, 1);
     let mut network = Network::new();
     network.add_node(from.clone());
     network.add_node(to.clone());
-    for (id, length) in lengths {
+    for (id, length, freespeed) in specs {
         let mut link = Link::new_with_default(Id::create(id), &from, &to);
         link.length = *length;
+        link.freespeed = *freespeed;
         network.add_link(link);
     }
     network
@@ -95,6 +105,26 @@ fn analyze(
     interval_seconds: u32,
     network: &Network,
 ) -> BTreeMap<String, String> {
+    analyze_with_clip(
+        output,
+        iteration,
+        partitions,
+        simulation_end_time,
+        interval_seconds,
+        network,
+        None,
+    )
+}
+
+fn analyze_with_clip(
+    output: &Path,
+    iteration: u32,
+    partitions: u32,
+    simulation_end_time: u32,
+    interval_seconds: u32,
+    network: &Network,
+    clip_delay: Option<f64>,
+) -> BTreeMap<String, String> {
     let garage = Garage::default();
     let metadata = AnalysisRunMetadata::from_run(
         4711,
@@ -122,6 +152,7 @@ fn analyze(
             interval_seconds,
             link_labels: BTreeMap::new(),
             urban_boundary: None,
+            excess_delay_clip_seconds: clip_delay,
         },
     )
     .unwrap();
@@ -132,6 +163,10 @@ fn analyze(
         "link_speed_summary.csv",
         "link_speed_histogram.csv",
         "link_speed_diagnostics.csv",
+        "network_distance_time.csv",
+        "network_distance_time_summary.csv",
+        "network_distance_time_diagnostics.csv",
+        "en_route_agents.csv",
         "metric_catalog.json",
         "module_status.json",
         "index.html",
@@ -146,6 +181,92 @@ fn analyze(
     .collect()
 }
 
+#[deterministic_id_test(rust_qsim)]
+fn network_distance_time_conserves_partial_and_cross_interval_traversals() {
+    let temp = tempfile::tempdir().unwrap();
+    let network = network_with_link_specs(&[
+        ("alpha", 100.0, 10.0),
+        ("beta", 100.0, 10.0),
+        ("instant", 50.0, 10.0),
+        ("broken", 40.0, f64::NAN),
+    ]);
+    write_partitions(
+        temp.path(),
+        0,
+        &[vec![
+            "<event time=\"55\" type=\"departure\" person=\"traveler\" link=\"alpha\" legMode=\"walk\" computationalRoutingMode=\"walk\"/>".to_owned(),
+            enters_traffic(55.0, "alpha", "partial", 0.5),
+            "<event time=\"65\" type=\"arrival\" person=\"traveler\" link=\"alpha\" legMode=\"walk\"/>".to_owned(),
+            leaves_traffic(65.0, "alpha", "partial", 0.75),
+            entered(70.0, "alpha", "full"),
+            enters_traffic(70.0, "broken", "broken", 0.0),
+            left(75.0, "alpha", "full"),
+            entered(75.0, "alpha", "same-link"),
+            leaves_traffic(75.0, "broken", "broken", 1.0),
+            left(80.0, "alpha", "same-link"),
+            entered(80.0, "alpha", "slow"),
+            entered(80.0, "alpha", "unfinished"),
+            entered(80.0, "beta", "slow-beta"),
+            left(95.0, "alpha", "slow"),
+            left(95.0, "beta", "slow-beta"),
+            entered(96.0, "instant", "instant"),
+            left(96.0, "instant", "instant"),
+        ]],
+    );
+    let tables = analyze_with_clip(temp.path(), 0, 1, 120, 60, &network, Some(2.0));
+    let link_rows = rows(
+        &tables["network_distance_time.csv"],
+        "link_id,hour_start_seconds,vehicle_traversals,partial_traversals,vehicle_distance_meters,vehicle_time_seconds,free_flow_relative_delay_seconds,relative_speed_ratio,clipped_excess_delay_seconds,passenger_distance_meters,passenger_time_seconds,passenger_data_status",
+    );
+    assert_row(
+        &link_rows,
+        "\"alpha\",0,1,1,25.000000,10.000000,7.500000,0.250000,2.000000,,,unavailable",
+    );
+    assert_row(
+        &link_rows,
+        "\"alpha\",60,3,0,300.000000,25.000000,-5.000000,1.200000,2.000000,,,unavailable",
+    );
+    assert_row(
+        &link_rows,
+        "\"beta\",60,1,0,100.000000,15.000000,5.000000,0.666667,2.000000,,,unavailable",
+    );
+    assert_row(
+        &link_rows,
+        "\"broken\",60,1,0,40.000000,5.000000,,,,,,unavailable",
+    );
+    assert_row(
+        &link_rows,
+        "\"instant\",60,1,0,50.000000,0.000000,-5.000000,,0.000000,,,unavailable",
+    );
+    let summary_rows = rows(
+        &tables["network_distance_time_summary.csv"],
+        "hour_start_seconds,vehicle_traversals,vehicle_distance_meters,vehicle_time_seconds,free_flow_relative_delay_seconds,relative_speed_ratio,network_clipped_excess_delay_seconds,passenger_distance_meters,passenger_time_seconds,passenger_data_status",
+    );
+    assert_row(
+        &summary_rows,
+        "0,1,25.000000,10.000000,7.500000,0.250000,2.000000,,,unavailable",
+    );
+    assert_row(
+        &summary_rows,
+        "60,6,490.000000,45.000000,-5.000000,1.000000,4.000000,,,unavailable",
+    );
+    assert!(tables["network_distance_time_diagnostics.csv"].contains("unfinished_traversals,1"));
+    assert!(tables["network_distance_time_diagnostics.csv"].contains("invalid_reference_speeds,1"));
+    assert!(tables["network_distance_time_diagnostics.csv"].contains("non_positive_durations,1"));
+    assert!(tables["en_route_agents.csv"].contains("0,1,0,0,0,1,5.000000"));
+    assert!(tables["en_route_agents.csv"].contains("60,0,1,0,1,1,5.000000"));
+    assert!(tables["index.html"].contains("Network distance, time and congestion"));
+    assert!(tables["index.html"].contains("Peak interval by total signed free-flow delay"));
+    assert!(tables["index.html"].contains("En-route agent profile"));
+    assert!(tables["index.html"].contains("Traversal exclusions"));
+    assert!(tables["index.html"].contains("Lowest relative-speed interval"));
+    assert!(tables["module_status.json"].contains("network_distance_time"));
+    assert!(tables["metric_catalog.json"].contains("relative_speed_ratio"));
+    assert!(tables["metric_catalog.json"].contains("network_clipped_excess_delay_seconds"));
+    assert!(tables["metric_catalog.json"].contains("passenger_distance_meters"));
+    assert!(tables["metric_catalog.json"].contains("invalid_reference_speeds"));
+}
+
 fn rows<'a>(table: &'a str, header: &str) -> Vec<&'a str> {
     let mut lines = table.lines();
     assert_eq!(lines.next(), Some(header), "unexpected table header");
@@ -153,7 +274,10 @@ fn rows<'a>(table: &'a str, header: &str) -> Vec<&'a str> {
 }
 
 fn assert_row(table: &[&str], expected: &str) {
-    assert!(table.contains(&expected), "missing row {expected}");
+    assert!(
+        table.contains(&expected),
+        "missing row {expected}; rows: {table:?}"
+    );
 }
 
 #[deterministic_id_test(rust_qsim)]
@@ -233,6 +357,23 @@ fn link_speed_reports_representative_and_vehicle_speed_metrics() {
     ];
     write_partitions(temp.path(), 4, &[events]);
     let tables = analyze(temp.path(), 4, 1, 18_000, 3600, &network);
+    let distance_rows = rows(
+        &tables["network_distance_time.csv"],
+        "link_id,hour_start_seconds,vehicle_traversals,partial_traversals,vehicle_distance_meters,vehicle_time_seconds,free_flow_relative_delay_seconds,relative_speed_ratio,passenger_distance_meters,passenger_time_seconds,passenger_data_status",
+    );
+    // Includes one ordinary traversal and two visits that start and end on gamma.
+    assert_row(
+        &distance_rows,
+        "\"gamma\",7200,3,1,120.000000,70.000000,58.000000,0.171429,,,unavailable",
+    );
+    assert!(
+        !tables["network_distance_time.csv"]
+            .lines()
+            .next()
+            .unwrap()
+            .contains("clipped_excess_delay_seconds")
+    );
+    assert!(!tables["metric_catalog.json"].contains("clipped_excess_delay_seconds"));
 
     let speeds = rows(
         &tables["link_speed_hourly.csv"],

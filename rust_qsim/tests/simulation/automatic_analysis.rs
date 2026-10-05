@@ -1301,6 +1301,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             interval_seconds: 3600,
             link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
+            excess_delay_clip_seconds: None,
         },
     )
     .unwrap();
@@ -1401,6 +1402,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             interval_seconds: 3600,
             link_labels: labels,
             urban_boundary: None,
+            excess_delay_clip_seconds: None,
         },
     )
     .unwrap();

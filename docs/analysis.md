@@ -57,6 +57,45 @@ across-link mean and population standard deviation per interval,
 `link_speed_histogram.csv` the fixed-bin distribution, and
 `link_speed_diagnostics.csv` every record that could not produce a full-link speed.
 
+## Network distance, time and congestion
+
+`network_distance_time.csv` reports observed vehicle link traversals by link and interval;
+`network_distance_time_summary.csv` reports network totals by interval. Traversal distance is
+`link.length * (exit_position - entry_position)`, so first and last link portions count. Visits
+with entry position zero and exit position one are complete; other valid forward positions are
+partial and included. Positions outside `[0, 1]` or a decreasing position, non-finite or negative
+lengths and decreasing event times are excluded and counted in
+`network_distance_time_diagnostics.csv`. A valid visit with zero elapsed time retains its observed
+distance and traversal count, reports zero vehicle time and signed delay when the reference speed
+is valid, and contributes no relative-speed ratio; it is counted in the non-positive-duration
+diagnostic. Visits still open at the end are counted as unfinished and contribute no guessed
+distance or time. A same-link route is a regular visit and is counted when its entry and exit
+events are paired.
+
+Vehicle time is the elapsed time between link entry and exit. A visit crossing an analysis
+interval boundary is assigned whole to its entry interval, as in the link-speed tables. This
+avoids assuming how the vehicle moved inside the link. Distance and signed free-flow-relative
+delay are kept with that visit. Free-flow-relative delay is `observed time - distance /
+freespeed`, so it can be negative. `relative_speed_ratio` is free-flow travel time divided by
+observed time, so values below one indicate slower than free flow and values above one indicate
+faster travel. Network ratios use the sums over visits with valid free speeds. A non-finite or non-positive free speed leaves delay blank for
+that traversal while retaining its distance and time. The optional
+`output.analysis.excess_delay_clip_seconds` setting exports separately labeled clipped excess
+delay: per link and interval it sums positive traversal delay, then caps that sum at the configured
+value. The network total sums those capped per-link values, so it matches the per-link export.
+The default is unset, in which case the clipped-delay column and catalog entry are omitted.
+It can be set in YAML or with `--set output.analysis.excess_delay_clip_seconds=120`.
+
+The event stream records vehicles and person travel events but does not provide reliable
+link-level passenger occupancy. Passenger distance and time are therefore explicitly unavailable;
+PCE is a capacity weight and is not treated as a passenger count. Existing leg departure and
+completion metrics provide agent travel profiles. `en_route_agents.csv` counts distinct people
+with an observed departure not yet matched by an arrival or stuck event, reports departures,
+arrivals, stuck events, interval-start and peak concurrent counts, and apportions person-seconds
+from event timestamps. It covers travel modes in the person event stream and does not claim
+link-level network occupancy. Link speed tables remain a
+separate view and only include complete full-link traversals.
+
 ## Link classification
 
 `output.analysis.link_labels` is a map keyed by external link ID. Each entry can
