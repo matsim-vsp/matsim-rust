@@ -607,6 +607,8 @@ pub struct Analysis {
     /// Optional observed-data CSV used by the validation report. Relative paths are resolved
     /// against the configured output directory.
     pub observed_data: Option<PathBuf>,
+    /// Optional weighted journey records from a comparable travel survey.
+    pub journey_survey: Option<PathBuf>,
     /// Run directories whose latest published analysis reports are included in a comparison.
     pub comparison_runs: Vec<PathBuf>,
 
@@ -631,6 +633,7 @@ impl Default for Analysis {
             urban_boundary: None,
 
             observed_data: None,
+            journey_survey: None,
             comparison_runs: Vec::new(),
 
             excess_delay_clip_seconds: None,

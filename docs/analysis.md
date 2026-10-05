@@ -102,6 +102,31 @@ Relative paths are resolved from the current run's output directory. A missing o
 comparison report marks only the cross-run comparison module failed.
 
 
+## Travel survey comparison
+
+Set `output.analysis.journey_survey` to a weighted journey-record CSV. Relative paths are
+resolved from the run output directory and recorded in the manifest for standalone reanalysis.
+Each row must contain `study_population`, `journey_definition`, `split`, `mode`, `purpose`,
+`departure_seconds`, `duration_seconds`, `distance_meters`, and `weight`; `uncertainty` is
+optional. The study population must be positive and identical across rows. Weights and
+uncertainty must be finite and non-negative. Split is `calibration` or `holdout`.
+
+The comparable journey definition is `matsim-substantive-activities-v1`: consecutive
+substantive activities form a journey, interaction activities remain inside it, main mode uses
+the MATSim hierarchy (including transit), and purpose is the destination activity type. Survey
+mode labels must use the same categories as the simulated `main_mode`. Other
+definitions are retained in the output but marked `non_comparable_definition`, with observed
+shares withheld. The output compares weighted mode and purpose categories, departure hour,
+distance class, and duration class. Departure uses fixed clock hours; distance uses the journey
+classes above; duration bins are under 15, 15–30, 30–60, 60–120, and 120 or more minutes.
+Duration distributions use survey records with a duration and simulated journeys marked
+completed. Calibration and holdout refer to survey records; the same simulated distribution is
+shown against each split. The `journey_survey_comparison.csv` table
+includes observed and simulated denominators, shares, split, population, supplied uncertainty,
+and missing-category status. `uncertainty` is the standard error for that record's weight; the
+reported group uncertainty combines weighted record standard errors in quadrature. Its rows are
+embedded in the local report. Input errors fail only this optional module.
+
 ## Network distance, time and congestion
 
 `network_distance_time.csv` reports observed vehicle link traversals by link and interval;
