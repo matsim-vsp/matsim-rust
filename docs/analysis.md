@@ -3,6 +3,39 @@
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
 It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
 
+## Journeys and travel distributions
+
+The final-iteration replay exports observed legs in `legs.csv` and planned journeys in
+`journeys.csv`. A journey spans consecutive substantive activities. Activity types containing
+`interaction` are treated as stage activities, so transit access, egress, and transfer waits stay
+inside one journey. Journey duration is elapsed time from the first observed component departure
+to the last component arrival; incomplete journeys keep their mode and distance but have no duration.
+The purpose is the destination activity type.
+
+The main mode uses MATSim's default analysis hierarchy: the highest-ranked component mode wins,
+which folds walk-transit-walk and transit transfers into one transit journey. An entirely walked
+journey remains walk. When a custom mode is mixed with a known non-walk mode, the report marks the
+main mode `unknown_mixed_modes` rather than guessing at a hierarchy the run has not configured.
+`journey_mode_share.csv` groups journey counts and shares by departure
+interval, purpose, distance class, and main mode. Distance classes are under 1 km, 1–5 km, 5–10 km,
+10–25 km, 25 km or more, and unknown. `journey_summary.csv` reports count, completion, and mean,
+population standard deviation, median, and 90th percentile for duration and distance by main mode
+and destination purpose. Percentiles use the nearest-rank definition.
+
+Journey distance sums the prepared plan's route distance for every component leg. This includes
+model-derived distances assigned to teleported routes during plan preparation. If any component
+has no finite non-negative route distance, the total is blank; `distance_provenance` distinguishes
+`planned_route`, `partial_planned_route`, and `unavailable`. Component leg indices and modes
+link each journey to `legs.csv`. A journey with no observed components is `not_departed`; observed
+journeys distinguish `completed`, `stuck`, `missing_arrival`, and `incomplete`. These tables
+describe the recorded selected plan and replayed events of the latest completed iteration only.
+
+To compare saved journey mode shares, run `analyze --run-dir RUN --compare-run-dir OTHER`; repeat
+`--compare-run-dir` for more runs. The command refreshes RUN's latest-iteration report, reads each
+supplied run's recorded `journey_mode_share.csv`, and writes a local comparison report and combined
+table under `RUN/analysis/cross_run_comparison`. A comparison refuses a run whose report is failed
+or whose recorded iteration is not its latest output iteration.
+
 ## Link speeds
 
 `link_speed` reconstructs traversal speeds from the same replay that produces the link
