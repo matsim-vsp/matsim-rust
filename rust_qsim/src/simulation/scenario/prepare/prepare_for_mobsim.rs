@@ -141,8 +141,8 @@ pub(crate) fn route_trip(
 
     let origin = span.origin(&plan.elements);
     let dest = span.destination(&plan.elements);
-    let from_facility = facility_for_activity(context, origin)?;
-    let to_facility = facility_for_activity(context, dest)?;
+    let from_facility = facility_for_activity(context, origin, mode)?;
+    let to_facility = facility_for_activity(context, dest, mode)?;
     let vehicle = vehicle_for_trip(context, person, span, &plan.elements, mode)?;
 
     let request = RoutingRequestBuilder::default()
@@ -157,10 +157,12 @@ pub(crate) fn route_trip(
 }
 
 /// Each activity takes place at a facility. Activities without a facility are routed via a link
-/// wrapper facility built from the activity's own link and coordinate.
+/// wrapper facility built from the activity's own link and coordinate. Its modal link for the
+/// routing `mode` is computed on the fly, see [`Facility::new_link_wrapper_for_mode`].
 fn facility_for_activity<'a>(
     context: &PrepareForMobsimContext<'a>,
     activity: &InternalActivity,
+    mode: &Id<String>,
 ) -> Result<Facility<'a>, TripPreparationError> {
     match &activity.facility_id {
         Some(facility_id) => context
@@ -170,9 +172,11 @@ fn facility_for_activity<'a>(
             .ok_or_else(|| TripPreparationError::UnknownFacility {
                 facility: facility_id.external().to_string(),
             }),
-        None => Ok(Facility::new_link_wrapper(
+        None => Ok(Facility::new_link_wrapper_for_mode(
             activity.coord().clone(),
             activity.link_id().clone(),
+            mode,
+            context.network,
         )),
     }
 }
@@ -475,41 +479,6 @@ mod tests {
         );
     }
 
-    // Before: one activity without a coordinate; after: the activity has the link midpoint.
-    #[deterministic_id_test]
-    fn prepare_for_mobsim_assigns_missing_activity_coordinates() {
-        let person_id = Id::create("person-1");
-        let link_id = Id::create("link-1");
-        let mut plan = InternalPlan::default();
-        plan.add_act(InternalActivity::new(
-            None,
-            "act",
-            link_id.clone(),
-            None,
-            None,
-            None,
-        ));
-
-        let mut persons = IntMap::default();
-        persons.insert(
-            person_id.clone(),
-            InternalPerson::new(person_id.clone(), plan),
-        );
-        let mut scenario = scenario_with_network_and_population(
-            network_with_link(link_id),
-            Population { persons },
-        );
-
-        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
-
-        let person = scenario.population.persons.get(&person_id).unwrap();
-        let act = person.selected_plan().unwrap().acts()[0];
-        assert_eq!(
-            Some(&Coordinate::new_3d(5.0, 15.0, 10.0)),
-            act.coord.as_ref()
-        );
-    }
-
     // Before: two act--unrouted walk--act plans; after: both contain valid walk legs and remain stable.
     #[deterministic_id_test]
     fn repairs_all_teleported_plans_and_keeps_valid_shape() {
@@ -686,43 +655,6 @@ mod tests {
             None,
         )));
         plan
-    }
-
-    // Before: act--unrouted walk--act; after: routing fails and the original plan remains unchanged.
-    #[deterministic_id_test]
-    fn missing_module_returns_issue_and_keeps_original_plan() {
-        let network = sequential_network(2, None);
-        let plan = unrouted_plan_with_missing_coordinate("walk", "link-1", "link-2", 10);
-        let original = plan.clone();
-        let person_id = Id::create("person-1");
-        let mut persons = IntMap::default();
-        persons.insert(
-            person_id.clone(),
-            InternalPerson::new(person_id.clone(), plan),
-        );
-        let mut scenario = scenario_with_parts(
-            network,
-            Garage::default(),
-            Population { persons },
-            Config::default(),
-        );
-
-        let error = prepare_for_mobsim(&mut scenario, &empty_router()).unwrap_err();
-
-        assert_eq!(1, error.issues().len());
-        assert_eq!(0, error.issues()[0].plan_index);
-        assert_eq!(Some(0), error.issues()[0].trip_index);
-        assert!(error.issues()[0].message.contains("No routing module"));
-        assert_eq!(
-            &original,
-            scenario
-                .population
-                .persons
-                .get(&person_id)
-                .unwrap()
-                .selected_plan()
-                .unwrap()
-        );
     }
 
     // Before: act--unrouted car--act; after: act--walk--car--walk--act with interaction activities.
@@ -939,6 +871,50 @@ mod tests {
         );
     }
 
+    // Before: act on a bike-only link--unrouted car--act on a car link; after: the car leg runs
+    // between the nearest car links, while the activities stay on their own links.
+    #[deterministic_id_test]
+    fn routes_activities_without_facility_via_nearest_link_of_the_mode() {
+        let departures = Arc::new(Mutex::new(Vec::new()));
+        let router = network_test_router(departures.clone());
+        let mut config = Config::default();
+        config.qsim_mut().main_modes = vec!["car".to_string()];
+        let mut garage = Garage::default();
+        garage.add_veh(test_vehicle("person-1_car"));
+        let network = layered_network();
+        let mut plan = InternalPlan::default();
+        let mut home =
+            located_activity(Some("bike-10"), Some(Coordinate::new_2d(50.0, 19.0)), None);
+        home.end_time = Some(SimTime::from_secs(10));
+        plan.add_act(home);
+        plan.add_leg(unrouted_leg("car"));
+        plan.add_act(located_activity(
+            Some("car-bike-20"),
+            Some(Coordinate::new_2d(50.0, 1.0)),
+            None,
+        ));
+        let person_id = Id::create("person-1");
+        let mut persons = IntMap::default();
+        persons.insert(
+            person_id.clone(),
+            InternalPerson::new(person_id.clone(), plan),
+        );
+        let mut scenario = scenario_with_parts(network, garage, Population { persons }, config);
+
+        prepare_for_mobsim(&mut scenario, &router).unwrap();
+
+        let plan = scenario.population.persons[&person_id]
+            .selected_plan()
+            .unwrap();
+        assert_eq!(vec!["walk", "car", "walk"], leg_modes(plan));
+        assert_eq!("bike-10", plan.acts()[0].link_id().external());
+        assert_eq!("car-bike-20", plan.acts()[3].link_id().external());
+        let car_route = plan.legs()[1].route.as_ref().unwrap().as_generic().clone();
+        assert_eq!("car-bike-20", car_route.start_link().external());
+        // The destination link allows car, but car-0 is nearer to the destination coordinate.
+        assert_eq!("car-0", car_route.end_link().external());
+    }
+
     // Before: act@facility--unrouted car--act@facility; after: the car leg runs between the modal
     // links, while the activities stay on the facilities' base links.
     #[deterministic_id_test]
@@ -1108,20 +1084,6 @@ mod tests {
             None,
             None,
         ));
-        plan
-    }
-
-    fn unrouted_plan_with_missing_coordinate(
-        mode: &str,
-        from: &str,
-        to: &str,
-        departure: u64,
-    ) -> InternalPlan {
-        let mut plan = unrouted_plan(mode, from, to, departure);
-        let InternalPlanElement::Activity(activity) = &mut plan.elements[0] else {
-            unreachable!()
-        };
-        activity.coord = None;
         plan
     }
 

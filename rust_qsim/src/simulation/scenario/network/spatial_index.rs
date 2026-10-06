@@ -250,6 +250,30 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn links_without_modes_allow_no_mode() {
+        // "no-modes" at y=4.5 is the nearest link, but only when no mode is requested.
+        let mut network = parallel_network();
+        add_node(&mut network, "u0", 0.0, 4.5);
+        add_node(&mut network, "u1", 100.0, 4.5);
+        add_link(&mut network, "no-modes", "u0", "u1", &[]);
+        let index = NetworkSpatialIndex::new(&network);
+        let coord = Coordinate::new_2d(50.0, 5.0);
+
+        assert_eq!(
+            Some(Id::get_from_ext("no-modes")),
+            index.nearest_link(&coord, None)
+        );
+        assert_eq!(
+            Some(Id::get_from_ext("bike")),
+            index.nearest_link(&coord, Some(&Id::get_from_ext("bike")))
+        );
+        assert_eq!(
+            None,
+            index.nearest_link(&coord, Some(&Id::<String>::create("walk")))
+        );
+    }
+
+    #[deterministic_id_test]
     fn empty_network_has_no_nearest_link_or_modes() {
         let index = NetworkSpatialIndex::new(&Network::new());
 

@@ -29,23 +29,40 @@ pub struct InputArgs {
     pub facilities: Option<PathBuf>,
 }
 
-pub fn run(args: &InputArgs) {
+pub fn run(
+    args: &InputArgs,
+    f: impl FnOnce(
+        &mut Network,
+        &mut Population,
+        &mut Garage,
+        Option<&mut TransitSchedule>,
+        Option<&mut ActivityFacilities>,
+    ),
+) {
     let mut veh = Garage::from_file(&args.vehicles);
     let mut net = Network::from_file_path(&args.network, 1, &PartitionMethod::None);
-    let transit_schedule = args
+    let mut transit_schedule = args
         .transit_schedule
         .as_ref()
         .map(|path| TransitSchedule::from_file(path));
     // Facilities are loaded before the population, so that their ids exist when activities
     // reference them. Their modal links are derived in prepare_for_sim and not converted.
-    let facilities = args
+    let mut facilities = args
         .facilities
         .as_ref()
         .map(|path| ActivityFacilities::from_file(path));
-    let pop = Population::from_file(&args.population, &mut veh);
+    let mut pop = Population::from_file(&args.population, &mut veh);
 
     let cmp_weights = compute_computational_weights(&pop);
     assign_computational_weights(&mut net, cmp_weights);
+
+    f(
+        &mut net,
+        &mut pop,
+        &mut veh,
+        transit_schedule.as_mut(),
+        facilities.as_mut(),
+    );
 
     crate::simulation::id::store_to_file(&create_file_path(&args, "ids"));
     net.to_file(&create_file_path(&args, "network"));
