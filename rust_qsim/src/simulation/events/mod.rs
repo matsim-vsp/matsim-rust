@@ -6,6 +6,9 @@ use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::transit::{
+    TransitDeparture, TransitLine, TransitRoute, TransitStopFacility,
+};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use macros::event_struct;
@@ -557,6 +560,119 @@ impl PtTeleportationArrivalEvent {
             ))
             .access_facility(Id::create(&event.attributes["accessFacility"].as_string()))
             .egress_facility(Id::create(&event.attributes["egressFacility"].as_string()))
+            .attributes(attrs)
+            .build()
+            .unwrap()
+    }
+}
+
+/// A transit driver starts serving a departure. MATSim's `TransitDriverStartsEvent`.
+#[event_struct]
+pub struct TransitDriverStartsEvent {
+    pub time: SimTime,
+    pub driver: Id<InternalPerson>,
+    pub vehicle: Id<InternalVehicle>,
+    pub line: Id<TransitLine>,
+    pub route: Id<TransitRoute>,
+    pub departure: Id<TransitDeparture>,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl TransitDriverStartsEvent {
+    pub const TYPE: &'static str = "TransitDriverStarts";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        TransitDriverStartsEventBuilder::default()
+            .time(time)
+            .driver(Id::create(&event.attributes["driverId"].as_string()))
+            .vehicle(Id::create(&event.attributes["vehicleId"].as_string()))
+            .line(Id::create(&event.attributes["transitLineId"].as_string()))
+            .route(Id::create(&event.attributes["transitRouteId"].as_string()))
+            .departure(Id::create(&event.attributes["departureId"].as_string()))
+            .attributes(attrs)
+            .build()
+            .unwrap()
+    }
+}
+
+/// A transit vehicle reaches a stop. `delay` is the time behind schedule, negative when early.
+/// MATSim's `VehicleArrivesAtFacilityEvent`.
+#[event_struct]
+pub struct VehicleArrivesAtFacilityEvent {
+    pub time: SimTime,
+    pub vehicle: Id<InternalVehicle>,
+    pub facility: Id<TransitStopFacility>,
+    pub delay: f64,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl VehicleArrivesAtFacilityEvent {
+    pub const TYPE: &'static str = "VehicleArrivesAtFacility";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        VehicleArrivesAtFacilityEventBuilder::default()
+            .time(time)
+            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
+            .facility(Id::create(&event.attributes["facility"].as_string()))
+            .delay(event.attributes["delay"].as_double())
+            .attributes(attrs)
+            .build()
+            .unwrap()
+    }
+}
+
+/// A transit vehicle leaves a stop. MATSim's `VehicleDepartsAtFacilityEvent`.
+#[event_struct]
+pub struct VehicleDepartsAtFacilityEvent {
+    pub time: SimTime,
+    pub vehicle: Id<InternalVehicle>,
+    pub facility: Id<TransitStopFacility>,
+    pub delay: f64,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl VehicleDepartsAtFacilityEvent {
+    pub const TYPE: &'static str = "VehicleDepartsAtFacility";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        VehicleDepartsAtFacilityEventBuilder::default()
+            .time(time)
+            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
+            .facility(Id::create(&event.attributes["facility"].as_string()))
+            .delay(event.attributes["delay"].as_double())
+            .attributes(attrs)
+            .build()
+            .unwrap()
+    }
+}
+
+/// A passenger starts waiting at a stop for a transit vehicle. MATSim's `AgentWaitingForPtEvent`.
+#[event_struct]
+pub struct AgentWaitingForPtEvent {
+    pub time: SimTime,
+    pub person: Id<InternalPerson>,
+    pub at_stop: Id<TransitStopFacility>,
+    pub destination_stop: Id<TransitStopFacility>,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl AgentWaitingForPtEvent {
+    pub const TYPE: &'static str = "waitingForPt";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        AgentWaitingForPtEventBuilder::default()
+            .time(time)
+            .person(Id::create(&event.attributes["person"].as_string()))
+            .at_stop(Id::create(&event.attributes["atStop"].as_string()))
+            .destination_stop(Id::create(&event.attributes["destinationStop"].as_string()))
             .attributes(attrs)
             .build()
             .unwrap()

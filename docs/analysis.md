@@ -245,24 +245,34 @@ The supplied zone system is recorded in `manifest.json`, so a standalone rerun r
 geographic report.
 ## Public transport performance and demand validation
 
-Public transport is modeled by teleportation in this build. A `travelled with pt` event records
-the line, route, access and egress stop and scheduled boarding time of one passenger trip, and no
-transit vehicle drives through the network. The transit tables come from those records, the
-person departure, arrival and stuck events, and the schedule and vehicle capacities recorded in
-`run_metadata.json` (`transit`). The run's vehicle file is the only capacity source: a departure's
-`vehicleRefId` is looked up in it, and the vehicle type's `<capacity>` (seats plus standing room)
-is the capacity. Both XML and protobuf vehicle files carry it.
+Public transport is simulated: transit vehicles drive through the network, board and alight
+passengers, and compete with every other vehicle for capacity. One passenger trip is rebuilt from
+the events that record it: the run a vehicle starts (`TransitDriverStarts` names its line, route
+and departure), the stop a passenger waits at (`waitingForPt`), the boarding
+(`PersonEntersVehicle`) and the alighting (`PersonLeavesVehicle`). A run always starts before
+anyone boards it, so the run in place when a passenger boards is the run it rode. A
+`travelled with pt` event, which an earlier build wrote when passengers teleported, is still read
+so that an event file recorded before vehicle simulation keeps producing its tables.
+`service_modeling` in `transit_trips.csv` says which of the two a leg used: `simulated` for a
+ride recorded by the vehicle events, `teleported` for a `travelled with pt` record. The transit
+tables also use the person departure, arrival and stuck events, and the schedule and vehicle
+capacities recorded in `run_metadata.json` (`transit`). The run's vehicle file is the only
+capacity source: a departure's `vehicleRefId` is looked up in it, and the vehicle type's
+`<capacity>` (seats plus standing room) is the capacity. Both XML and protobuf vehicle files
+carry it.
 
-`transit_trips.csv` has one row per passenger transit leg. `service_modeling` is `teleported`
+`transit_trips.csv` has one row per passenger transit leg. `service_modeling` is `simulated`
 for a leg with a service record and `unrecorded` otherwise. `outcome` is `boarded`,
-`missed_service` (the passenger reached the stop after the scheduled boarding time),
-`no_service_record` (the leg arrived with no service record), `stuck` or `incomplete`.
-Waiting is the scheduled boarding time minus the passenger's departure; in-vehicle time is the
-arrival minus the boarding time. A missed service has no waiting time. Arrival delay is the
-arrival minus the scheduled arrival at the egress stop, found by matching the recorded boarding
-time and stop pair to a scheduled departure; teleported service follows the schedule, so delay
-is only a consistency check. Vehicle-level delay and missed stops would need transit vehicle
-service events, which this build does not record, so they are always unavailable.
+`missed_service` (the service record's boarding time precedes the passenger's departure, so the
+record cannot describe that leg), `no_service_record` (the leg arrived with no service record),
+`stuck` or `incomplete`. Waiting is the boarding time minus the passenger's departure; in-vehicle
+time is the arrival minus the boarding time. A missed service has no waiting time. Arrival delay
+is the arrival minus the scheduled arrival at the egress stop of the departure the run names, so
+it measures the delay the vehicle actually accumulated. Vehicle-level stop delay and missed stops
+would need the vehicles' own `VehicleArrivesAtFacility` and `VehicleDepartsAtFacility` events,
+which this module does not read, so they are always unavailable. A passenger who waits for a
+later departure after missing one is indistinguishable from a passenger whose vehicle was late
+without those events, so `missed_service` stays a record-consistency check.
 
 | Table | Content |
 | --- | --- |

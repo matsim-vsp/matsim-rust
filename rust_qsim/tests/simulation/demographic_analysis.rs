@@ -138,6 +138,7 @@ fn publish_run(
     let metadata = AnalysisRunMetadata::from_run(
         1,
         1.0,
+        0,
         &Garage::default(),
         capture_expected_travel(population),
         AnalysisInputPaths::default(),
@@ -630,6 +631,7 @@ fn a_standalone_rerun_reuses_the_recorded_grouping() {
     let metadata = AnalysisRunMetadata::from_run(
         1,
         1.0,
+        0,
         &Garage::default(),
         capture_expected_travel(&population),
         AnalysisInputPaths {

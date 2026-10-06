@@ -62,7 +62,7 @@ impl NetworkEngine {
         &mut self,
         now: Tick,
         net_message_broker: &mut NetMessageBroker<C>,
-    ) -> Vec<SimulationVehicle> {
+    ) -> (Vec<SimulationVehicle>, Vec<SimulationAgent>) {
         let move_links_result = self.network.move_links(&mut self.comp_env, now);
 
         for veh in move_links_result.vehicles_exit_partition {
@@ -92,6 +92,9 @@ impl NetworkEngine {
             net_message_broker.add_cap_update(cap, now);
         }
 
-        move_links_result.vehicles_end_leg
+        (
+            move_links_result.vehicles_end_leg,
+            move_links_result.passengers_end_leg,
+        )
     }
 }

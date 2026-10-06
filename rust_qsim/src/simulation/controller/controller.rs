@@ -281,13 +281,16 @@ impl ControllerBuilder {
             let car_fallback = routers.get(&Id::create("car")).cloned();
             routers.insert(
                 mode,
-                Arc::new(TransitRoutingModule::new(
-                    controller_scenario.core.transit_schedule.clone(),
-                    walk.teleported_mode_speed,
-                    walk.beeline_distance_factor,
-                    controller_scenario.core.garage.clone(),
-                    car_fallback,
-                )),
+                Arc::new(
+                    TransitRoutingModule::new(
+                        controller_scenario.core.transit_schedule.clone(),
+                        walk.teleported_mode_speed,
+                        walk.beeline_distance_factor,
+                        controller_scenario.core.garage.clone(),
+                        car_fallback,
+                    )
+                    .with_stop_to_stop_legs(config.transit().simulate_vehicles),
+                ),
             );
         }
 

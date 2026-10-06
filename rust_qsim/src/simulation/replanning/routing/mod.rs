@@ -2,9 +2,10 @@ use crate::simulation::InternalAttributes;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::facilities::Facility;
+use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
-    InternalGenericRoute, InternalLeg, InternalPerson, InternalPlanElement, InternalPtRoute,
-    InternalPtRouteDescription, InternalRoute, Population,
+    InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlanElement,
+    InternalPtRoute, InternalPtRouteDescription, InternalRoute, Population,
 };
 use crate::simulation::scenario::transit::{TransitSchedule, TransitStopFacility};
 use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
@@ -319,6 +320,10 @@ pub struct TransitRoutingModule {
     walk_distance_factor: f64,
     garage: Arc<Garage>,
     fallback: Option<Arc<dyn RoutingModule>>,
+    /// Emit a walk leg to the first stop, one `pt` leg per ride between stops and a walk leg
+    /// from the last stop, as MATSim's transit router does. Simulated transit vehicles need
+    /// this; teleported PT gets a single door-to-door leg.
+    stop_to_stop_legs: bool,
 }
 
 #[derive(Clone)]
@@ -328,14 +333,32 @@ struct RouteStopRef {
     stop_index: usize,
 }
 
+/// One ride in a transit vehicle from boarding to alighting.
+#[derive(Clone)]
+struct Ride {
+    line: Id<crate::simulation::scenario::transit::TransitLine>,
+    route: Id<crate::simulation::scenario::transit::TransitRoute>,
+    board: Id<TransitStopFacility>,
+    alight: Id<TransitStopFacility>,
+    boarding_time: SimTime,
+    alighting_time: SimTime,
+    distance: f64,
+}
+
+/// A door-to-door transit connection.
+#[derive(Clone)]
+struct TransitPath {
+    arrival: SimTime,
+    access_distance: f64,
+    egress_distance: f64,
+    rides: Vec<Ride>,
+}
+
 #[derive(Clone)]
 struct TransitPathState {
     arrival: SimTime,
-    distance: f64,
-    first_boarding_time: Option<SimTime>,
-    first_route_id: Option<String>,
-    first_line_id: Option<String>,
-    first_access_id: Option<String>,
+    access_distance: f64,
+    rides: Vec<Ride>,
 }
 
 impl RoutingModule for TransitRoutingModule {
@@ -351,13 +374,12 @@ impl RoutingModule for TransitRoutingModule {
             .into_iter()
             .map(|(stop_id, _)| stop_id)
             .collect();
-        let mut best: Option<(SimTime, SimTime, f64, String, String, String, String)> = None;
+        let mut best: Option<TransitPath> = None;
 
         for (access_id, access_distance) in &access_stops {
             let Some(routes) = self.routes_by_stop.get(access_id) else {
                 continue;
             };
-            let access_facility = self.schedule.get_facility(access_id);
             let access_walk_time = self.walk_time(*access_distance);
             let earliest_boarding = request.departure_time.saturating_add(access_walk_time);
 
@@ -410,22 +432,24 @@ impl RoutingModule for TransitRoutingModule {
                         let final_arrival = arrival_time.saturating_add(egress_walk_time);
                         if best
                             .as_ref()
-                            .is_some_and(|(best_arrival, ..)| final_arrival >= *best_arrival)
+                            .is_some_and(|best| final_arrival >= best.arrival)
                         {
                             continue;
                         }
-                        let distance = access_distance * self.walk_distance_factor
-                            + ride_distance
-                            + egress_distance * self.walk_distance_factor;
-                        best = Some((
-                            final_arrival,
-                            boarding_time,
-                            distance,
-                            route.id.external().to_string(),
-                            line.id.external().to_string(),
-                            access_facility.id.external().to_string(),
-                            egress_facility.id.external().to_string(),
-                        ));
+                        best = Some(TransitPath {
+                            arrival: final_arrival,
+                            access_distance: *access_distance,
+                            egress_distance,
+                            rides: vec![Ride {
+                                line: line.id.clone(),
+                                route: route.id.clone(),
+                                board: access_id.clone(),
+                                alight: egress_facility.id.clone(),
+                                boarding_time,
+                                alighting_time: arrival_time,
+                                distance: ride_distance,
+                            }],
+                        });
                     }
                 }
             }
@@ -434,9 +458,7 @@ impl RoutingModule for TransitRoutingModule {
         let best = best.or_else(|| {
             self.find_transfer_path(to, request.departure_time, &access_stops, &egress_stops)
         });
-        let Some((arrival_time, boarding_time, distance, route_id, line_id, access_id, egress_id)) =
-            best
-        else {
+        let Some(path) = best else {
             // An origin/destination pair that no transit line connects is not an error: SILO
             // expects a car trip instead of teleporting the agent across the city on foot.
             // Callers that do not carry a person (skims, travel-time matrices) still get an
@@ -464,7 +486,15 @@ impl RoutingModule for TransitRoutingModule {
                 mode: self.mode.external().to_string(),
             });
         };
-        let travel_time = arrival_time.duration_since(request.departure_time);
+        if self.stop_to_stop_legs {
+            return Ok(self.stop_to_stop_trip(&request, &path));
+        }
+
+        let first = path.rides.first().unwrap();
+        let last = path.rides.last().unwrap();
+        let distance = (path.access_distance + path.egress_distance) * self.walk_distance_factor
+            + path.rides.iter().map(|ride| ride.distance).sum::<f64>();
+        let travel_time = path.arrival.duration_since(request.departure_time);
         let generic_route = InternalGenericRoute::new(
             request.from.link().clone(),
             request.to.link().clone(),
@@ -475,11 +505,11 @@ impl RoutingModule for TransitRoutingModule {
         let route = InternalRoute::Pt(InternalPtRoute {
             generic_delegate: generic_route,
             description: InternalPtRouteDescription {
-                transit_route_id: route_id,
-                boarding_time: Some(boarding_time),
-                transit_line_id: line_id,
-                access_facility_id: access_id,
-                egress_facility_id: egress_id,
+                transit_route_id: first.route.external().to_string(),
+                boarding_time: Some(first.boarding_time),
+                transit_line_id: first.line.external().to_string(),
+                access_facility_id: first.board.external().to_string(),
+                egress_facility_id: last.alight.external().to_string(),
             },
         });
         Ok(vec![InternalPlanElement::Leg(InternalLeg::new(
@@ -499,6 +529,114 @@ impl RoutingModule for TransitRoutingModule {
 impl TransitRoutingModule {
     const CELL_SIZE: f64 = 1_000.0;
     const CANDIDATE_COUNT: usize = 12;
+    const WALK_MODE: &'static str = "walk";
+    const INTERACTION: &'static str = "pt interaction";
+
+    /// Routes PT trips as separate stop-to-stop legs. See `stop_to_stop_legs`.
+    pub(crate) fn with_stop_to_stop_legs(mut self, enabled: bool) -> Self {
+        self.stop_to_stop_legs = enabled;
+        if enabled {
+            // Replanning routes on several threads; create the ids the trips use up front.
+            Id::<String>::create(Self::WALK_MODE);
+            Id::<String>::create(Self::INTERACTION);
+        }
+        self
+    }
+
+    /// The trip MATSim's transit router returns: walk to the first stop, one `pt` leg per ride
+    /// with a `pt interaction` at every stop, and walk from the last stop. A `pt` leg's travel
+    /// time includes the wait for its vehicle.
+    fn stop_to_stop_trip(
+        &self,
+        request: &RoutingRequest,
+        path: &TransitPath,
+    ) -> Vec<InternalPlanElement> {
+        let walk_leg = |from: &Id<Link>, to: &Id<Link>, distance: f64, departure: SimTime| {
+            let travel_time = self.walk_time(distance);
+            InternalPlanElement::Leg(InternalLeg::new(
+                InternalRoute::Generic(InternalGenericRoute::new(
+                    from.clone(),
+                    to.clone(),
+                    Some(travel_time),
+                    Some(distance * self.walk_distance_factor),
+                    None,
+                )),
+                Self::WALK_MODE,
+                self.mode.external(),
+                travel_time,
+                Some(departure),
+            ))
+        };
+        let interaction = |stop: &Id<TransitStopFacility>| {
+            let facility = self.schedule.get_facility(stop);
+            InternalPlanElement::Activity(InternalActivity::new(
+                Some(facility.coord.clone()),
+                Self::INTERACTION,
+                self.stop_link(stop).clone(),
+                None,
+                None,
+                Some(Duration::ZERO),
+            ))
+        };
+
+        let first_stop = &path.rides[0].board;
+        let mut elements = vec![
+            walk_leg(
+                request.from.link(),
+                self.stop_link(first_stop),
+                path.access_distance,
+                request.departure_time,
+            ),
+            interaction(first_stop),
+        ];
+        let mut time = request
+            .departure_time
+            .saturating_add(self.walk_time(path.access_distance));
+        for ride in &path.rides {
+            let travel_time = ride.alighting_time.duration_since(time);
+            let route = InternalRoute::Pt(InternalPtRoute {
+                generic_delegate: InternalGenericRoute::new(
+                    self.stop_link(&ride.board).clone(),
+                    self.stop_link(&ride.alight).clone(),
+                    Some(travel_time),
+                    Some(ride.distance),
+                    None,
+                ),
+                description: InternalPtRouteDescription {
+                    transit_route_id: ride.route.external().to_string(),
+                    boarding_time: Some(ride.boarding_time),
+                    transit_line_id: ride.line.external().to_string(),
+                    access_facility_id: ride.board.external().to_string(),
+                    egress_facility_id: ride.alight.external().to_string(),
+                },
+            });
+            elements.push(InternalPlanElement::Leg(InternalLeg::new(
+                route,
+                self.mode.external(),
+                self.mode.external(),
+                travel_time,
+                Some(time),
+            )));
+            elements.push(interaction(&ride.alight));
+            time = ride.alighting_time;
+        }
+        let last_stop = &path.rides.last().unwrap().alight;
+        elements.push(walk_leg(
+            self.stop_link(last_stop),
+            request.to.link(),
+            path.egress_distance,
+            time,
+        ));
+        elements
+    }
+
+    fn stop_link(&self, stop: &Id<TransitStopFacility>) -> &Id<Link> {
+        self.schedule
+            .get_facility(stop)
+            .link_ref_id
+            .as_ref()
+            .unwrap_or_else(|| panic!("Transit stop {stop} has no link to walk to."))
+    }
 
     pub(crate) fn new(
         schedule: Arc<TransitSchedule>,
@@ -543,6 +681,7 @@ impl TransitRoutingModule {
             walk_distance_factor,
             garage,
             fallback,
+            stop_to_stop_legs: false,
         }
     }
 
@@ -737,33 +876,27 @@ impl TransitRoutingModule {
         departure_time: SimTime,
         access_stops: &[(Id<TransitStopFacility>, f64)],
         egress_stops: &HashSet<Id<TransitStopFacility>>,
-    ) -> Option<(SimTime, SimTime, f64, String, String, String, String)> {
+    ) -> Option<TransitPath> {
         let mut states: HashMap<Id<TransitStopFacility>, TransitPathState> = HashMap::new();
         let mut queue = BinaryHeap::new();
         for (stop_id, access_distance) in access_stops {
             let state = TransitPathState {
                 arrival: departure_time.saturating_add(self.walk_time(*access_distance)),
-                distance: *access_distance * self.walk_distance_factor,
-                first_boarding_time: None,
-                first_route_id: None,
-                first_line_id: None,
-                first_access_id: None,
+                access_distance: *access_distance,
+                rides: Vec::new(),
             };
             if states
                 .get(stop_id)
                 .is_none_or(|old| state.arrival < old.arrival)
             {
-                states.insert(stop_id.clone(), state.clone());
                 queue.push(Reverse((state.arrival, stop_id.clone())));
+                states.insert(stop_id.clone(), state);
             }
         }
 
-        let mut best: Option<(SimTime, SimTime, f64, String, String, String, String)> = None;
+        let mut best: Option<TransitPath> = None;
         while let Some(Reverse((arrival, stop_id))) = queue.pop() {
-            if best
-                .as_ref()
-                .is_some_and(|(best_arrival, ..)| arrival >= *best_arrival)
-            {
+            if best.as_ref().is_some_and(|best| arrival >= best.arrival) {
                 break;
             }
             let Some(current) = states.get(&stop_id).cloned() else {
@@ -773,26 +906,15 @@ impl TransitRoutingModule {
                 continue;
             }
 
-            if egress_stops.contains(&stop_id)
-                && let (Some(boarding_time), Some(route_id), Some(line_id), Some(access_id)) = (
-                    current.first_boarding_time,
-                    current.first_route_id.clone(),
-                    current.first_line_id.clone(),
-                    current.first_access_id.clone(),
-                )
-            {
+            if egress_stops.contains(&stop_id) && !current.rides.is_empty() {
                 let facility = self.schedule.get_facility(&stop_id);
                 let egress_distance = Coordinate::euclidean_distance(&facility.coord, destination);
-                let final_arrival = arrival.saturating_add(self.walk_time(egress_distance));
-                best = Some((
-                    final_arrival,
-                    boarding_time,
-                    current.distance + egress_distance * self.walk_distance_factor,
-                    route_id,
-                    line_id,
-                    access_id,
-                    stop_id.external().to_string(),
-                ));
+                best = Some(TransitPath {
+                    arrival: arrival.saturating_add(self.walk_time(egress_distance)),
+                    access_distance: current.access_distance,
+                    egress_distance,
+                    rides: current.rides.clone(),
+                });
             }
 
             let Some(route_refs) = self.routes_by_stop.get(&stop_id) else {
@@ -837,6 +959,12 @@ impl TransitRoutingModule {
                     let Some((stop_arrival, boarding_time)) = next else {
                         continue;
                     };
+                    if states
+                        .get(&alight_stop.facility_id)
+                        .is_some_and(|old| stop_arrival >= old.arrival)
+                    {
+                        continue;
+                    }
                     let ride_distance = route.stops[route_ref.stop_index..=alight_index]
                         .windows(2)
                         .map(|pair| {
@@ -845,31 +973,26 @@ impl TransitRoutingModule {
                             Coordinate::euclidean_distance(&a.coord, &b.coord)
                         })
                         .sum::<f64>();
-                    let state = TransitPathState {
-                        arrival: stop_arrival,
-                        distance: current.distance + ride_distance,
-                        first_boarding_time: current.first_boarding_time.or(Some(boarding_time)),
-                        first_route_id: current
-                            .first_route_id
-                            .clone()
-                            .or_else(|| Some(route.id.external().to_string())),
-                        first_line_id: current
-                            .first_line_id
-                            .clone()
-                            .or_else(|| Some(line.id.external().to_string())),
-                        first_access_id: current
-                            .first_access_id
-                            .clone()
-                            .or_else(|| Some(stop_id.external().to_string())),
-                    };
-                    if states
-                        .get(&alight_stop.facility_id)
-                        .is_none_or(|old| state.arrival < old.arrival)
-                    {
-                        let next_stop = alight_stop.facility_id.clone();
-                        states.insert(next_stop.clone(), state.clone());
-                        queue.push(Reverse((state.arrival, next_stop)));
-                    }
+                    let mut rides = current.rides.clone();
+                    rides.push(Ride {
+                        line: line.id.clone(),
+                        route: route.id.clone(),
+                        board: stop_id.clone(),
+                        alight: alight_stop.facility_id.clone(),
+                        boarding_time,
+                        alighting_time: stop_arrival,
+                        distance: ride_distance,
+                    });
+                    let next_stop = alight_stop.facility_id.clone();
+                    queue.push(Reverse((stop_arrival, next_stop.clone())));
+                    states.insert(
+                        next_stop,
+                        TransitPathState {
+                            arrival: stop_arrival,
+                            access_distance: current.access_distance,
+                            rides,
+                        },
+                    );
                 }
             }
         }

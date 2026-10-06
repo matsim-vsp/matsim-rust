@@ -1,16 +1,18 @@
 use crate::simulation::Identifiable;
 use crate::simulation::events::{
-    ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
-    PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
-    PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
-    VehicleLeavesTrafficEvent,
+    ActivityEndEvent, ActivityStartEvent, AgentWaitingForPtEvent, EventTrait, LinkEnterEvent,
+    PersonArrivalEvent, PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
+    PersonStuckEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
+    VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeEntity;
+use crate::simulation::pt::runs::TransitVehicleRuns;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::scoring::backpacking::backpack::{Backpack, PersonExperience};
 use nohash_hasher::{IntMap, IntSet};
+use std::sync::Arc;
 
 pub(crate) struct BackpackingAttachment {
     backpacks: Vec<Backpack>,
@@ -18,14 +20,20 @@ pub(crate) struct BackpackingAttachment {
 
 pub struct BackpackingDataCollector {
     home_person_ids: Vec<Id<InternalPerson>>,
+    /// Transit drivers are synthetic agents without a plan to experience.
+    transit_runs: Arc<TransitVehicleRuns>,
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
 }
 
 impl BackpackingDataCollector {
-    pub fn new(home_person_ids: Vec<Id<InternalPerson>>) -> Self {
+    pub fn new(
+        home_person_ids: Vec<Id<InternalPerson>>,
+        transit_runs: Arc<TransitVehicleRuns>,
+    ) -> Self {
         Self {
             home_person_ids,
+            transit_runs,
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
         }
@@ -41,6 +49,9 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
+        if self.transit_runs.is_driver(&event.person) {
+            return;
+        }
         self.vehicle_id2person_ids
             .entry(event.vehicle.clone())
             .or_default()
@@ -87,6 +98,8 @@ impl BackpackingDataCollector {
             vec![event.person.clone()]
         } else if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
             vec![event.person.clone()]
+        } else if let Some(event) = event.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
+            vec![event.person.clone()]
         } else if let Some(event) = event.as_any().downcast_ref::<VehicleEntersTrafficEvent>() {
             self.vehicle_id2person_ids
                 .get(&event.vehicle)
@@ -102,6 +115,9 @@ impl BackpackingDataCollector {
         };
 
         for person in affected_persons {
+            if self.transit_runs.is_driver(&person) {
+                continue;
+            }
             self.person_id2backpack
                 .get_mut(&person)
                 .unwrap_or_else(|| {
@@ -115,7 +131,7 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn send(&mut self, entity: PartitionChangeEntity<'_>) -> BackpackingAttachment {
-        let person_ids = Self::person_ids(entity);
+        let person_ids = self.person_ids(entity);
         if let PartitionChangeEntity::Vehicle(vehicle) = entity {
             self.vehicle_id2person_ids.remove(vehicle.id());
         }
@@ -141,7 +157,7 @@ impl BackpackingDataCollector {
         entity: PartitionChangeEntity<'_>,
         attachment: BackpackingAttachment,
     ) {
-        let expected_person_ids = Self::person_ids(entity);
+        let expected_person_ids = self.person_ids(entity);
         assert_eq!(
             attachment.backpacks.len(),
             expected_person_ids.len(),
@@ -177,9 +193,10 @@ impl BackpackingDataCollector {
         }
     }
 
-    fn person_ids(entity: PartitionChangeEntity<'_>) -> Vec<Id<InternalPerson>> {
+    fn person_ids(&self, entity: PartitionChangeEntity<'_>) -> Vec<Id<InternalPerson>> {
         match entity {
             PartitionChangeEntity::Vehicle(vehicle) => std::iter::once(vehicle.driver().id())
+                .filter(|driver| !self.transit_runs.is_driver(driver))
                 .chain(vehicle.passengers().iter().map(Identifiable::id))
                 .cloned()
                 .collect(),
@@ -214,8 +231,10 @@ mod tests {
             Some(driver),
             vec![passenger],
         );
-        let mut departing =
-            BackpackingDataCollector::new(vec![driver_id.clone(), passenger_id.clone()]);
+        let mut departing = BackpackingDataCollector::new(
+            vec![driver_id.clone(), passenger_id.clone()],
+            Default::default(),
+        );
         departing.reset_iteration();
         departing.vehicle_id2person_ids.insert(
             vehicle.id().clone(),
@@ -228,7 +247,7 @@ mod tests {
         assert!(departing.person_id2backpack.is_empty());
         assert!(departing.vehicle_id2person_ids.is_empty());
 
-        let mut arriving = BackpackingDataCollector::new(Vec::new());
+        let mut arriving = BackpackingDataCollector::new(Vec::new(), Default::default());
         arriving.receive(PartitionChangeEntity::Vehicle(&vehicle), attachment);
         assert_eq!(arriving.person_id2backpack.len(), 2);
         let expected: IntSet<_> = [driver_id, passenger_id].into_iter().collect();

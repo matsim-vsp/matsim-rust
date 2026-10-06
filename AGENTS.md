@@ -28,8 +28,9 @@ Read these files before making broad changes:
 - `rust_qsim/src/simulation/`: core simulation code.
 - `rust_qsim/src/simulation/controller/`: iteration orchestration and scenario
   transitions.
-- `rust_qsim/src/simulation/engines/`: activity, leg, network, and teleportation
-  engines.
+- `rust_qsim/src/simulation/engines/`: activity, leg, network, transit, and
+  teleportation engines.
+- `rust_qsim/src/simulation/pt/`: transit runs, drivers, stops and boarding doors.
 - `rust_qsim/src/simulation/network/`: the runtime network, capacities,
   partitioning, and link dynamics.
 - `rust_qsim/src/simulation/replanning/`: selectors, strategies, routing, and

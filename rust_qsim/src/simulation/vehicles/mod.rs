@@ -3,6 +3,7 @@ use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
 use crate::simulation::id::Id;
+use crate::simulation::pt::driver::TransitDriver;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
@@ -80,6 +81,19 @@ impl SimulationVehicle {
 
     pub fn internal_vehicle(&self) -> &InternalVehicle {
         &self.vehicle
+    }
+
+    /// The driver's transit state together with the passengers and the vehicle id, borrowed at
+    /// once so a stop can move people between the vehicle and the platform.
+    pub(crate) fn transit_parts_mut(
+        &mut self,
+    ) -> Option<(
+        &mut TransitDriver,
+        &mut Vec<SimulationAgent>,
+        &Id<InternalVehicle>,
+    )> {
+        let driver = self.driver.as_mut()?.transit_driver_mut()?;
+        Some((driver, &mut self.passengers, &self.vehicle.id))
     }
 
     pub fn into_agents(mut self) -> Vec<SimulationAgent> {

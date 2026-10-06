@@ -8,6 +8,7 @@ use crate::simulation::id::serializable_type::StableTypeId;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::link::LinkPosition::{QStart, Waiting};
 use crate::simulation::network::signals::Signals;
+use crate::simulation::pt::stops::TransitStops;
 use crate::simulation::scenario::network::{Link, Network, Node};
 use crate::simulation::time::{SimClock, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
@@ -88,6 +89,8 @@ pub struct SimNetworkPartition {
     /// Green windows of the signalised approach links this partition owns. Empty when
     /// the run has no signals, in which case every approach discharges freely.
     signals: Signals,
+    /// Passengers waiting at the stops on this partition's links.
+    pub(crate) transit_stops: TransitStops,
 }
 
 #[derive(Debug)]
@@ -214,6 +217,7 @@ impl SimNetworkPartition {
             .values_mut()
             .flat_map(|link| link.drain())
             .flat_map(SimulationVehicle::into_agents)
+            .chain(self.transit_stops.drain())
             .collect()
     }
 
@@ -278,6 +282,7 @@ impl SimNetworkPartition {
             partition,
             clock,
             signals,
+            transit_stops: TransitStops::default(),
         }
     }
 
@@ -413,15 +418,20 @@ impl SimNetworkPartition {
         for id in &self.active_links {
             let link = self.links.get_mut(id).unwrap();
             let mut res = match link {
-                SimLink::Local(ll) => {
-                    Self::move_local_link(ll, &mut self.active_nodes, now, comp_env)
-                }
+                SimLink::Local(ll) => Self::move_local_link(
+                    ll,
+                    &mut self.active_nodes,
+                    now,
+                    comp_env,
+                    &mut self.transit_stops,
+                ),
                 SimLink::In(il) => Self::move_in_link(
                     il,
                     &mut self.active_nodes,
                     &mut storage_cap_updates,
                     now,
                     comp_env,
+                    &mut self.transit_stops,
                 ),
                 SimLink::Out(ol) => Self::move_out_link(ol, &mut vehicles_exit_partition),
             };
@@ -444,6 +454,7 @@ impl SimNetworkPartition {
         MoveAllLinksResult {
             vehicles_exit_partition,
             vehicles_end_leg,
+            passengers_end_leg: self.transit_stops.take_alighted(),
             storage_cap_updates,
         }
     }
@@ -453,8 +464,9 @@ impl SimNetworkPartition {
         active_nodes: &mut ActiveCache<Node>,
         now: Tick,
         comp_env: &mut ThreadLocalComputationalEnvironment,
+        transit: &mut TransitStops,
     ) -> MoveSingleLinkResult {
-        let vehicles_end_leg = link.do_sim_step(now, comp_env);
+        let vehicles_end_leg = link.do_sim_step(now, comp_env, transit);
         if link.to_nodes_active() {
             active_nodes.activate(link.to.clone());
         }
@@ -474,11 +486,13 @@ impl SimNetworkPartition {
         storage_cap_updates: &mut Vec<StorageUpdate>,
         now: Tick,
         events: &mut ThreadLocalComputationalEnvironment,
+        transit: &mut TransitStops,
     ) -> MoveSingleLinkResult {
         // if anything has changed on the link, we want to report the updated storage capacity to the
         // upstream partition.
         let before = link.occupied_storage();
-        let result = Self::move_local_link(&mut link.local_link, active_nodes, now, events);
+        let result =
+            Self::move_local_link(&mut link.local_link, active_nodes, now, events, transit);
         let diff = before - link.occupied_storage();
 
         assert!(
@@ -765,6 +779,8 @@ impl SimNetworkPartition {
 pub struct MoveAllLinksResult {
     pub vehicles_exit_partition: Vec<SimulationVehicle>,
     pub vehicles_end_leg: Vec<SimulationVehicle>,
+    /// Transit passengers who got off at a stop; their arrival has been published already.
+    pub passengers_end_leg: Vec<SimulationAgent>,
     pub storage_cap_updates: Vec<StorageUpdate>,
 }
 
