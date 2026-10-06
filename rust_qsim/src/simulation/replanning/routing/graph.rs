@@ -60,11 +60,12 @@ pub trait IndexableGraph: Graph {
 /// A directed graph, stored in Compressed sparse row (CSR) format.
 /// That is, contains the two vectors:
 /// - `first_out`: a vector such that `first_out[i]` is the index of the first outgoing edge of
-///     node i in `head`, and `first_out[i+1]` is the index of the first outgoing edge of node i+1,
-///     i.e., the outgoing edges of node i are exactly those in
-///     `head[first_out[i]..first_out[i+1]]`.
+///   node i in `head`, and `first_out[i+1]` is the index of the first outgoing edge of node i+1,
+///   i.e., the outgoing edges of node i are exactly those in
+///   `head[first_out[i]..first_out[i+1]]`.
 /// - `head`: a vector such that `head[j]` is the node index of the end node of the edge with
-///     index j
+///   index j
+///
 /// This structure allows to efficiently look up the outgoing edges of a node. To efficiently look
 /// up incoming edges, use `ForwardBackwardGraph`s, that contain two `CsrGraph`s, one for the
 /// forward and one for the backward graph, with the latter allowing to access incoming edges cheaply.
@@ -95,6 +96,7 @@ impl CsrGraph {
 /// node indices, or link ids, link indices or a range of link indices, are passed to be used in
 /// some operation but are not found in the graph on which the operation takes place.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::enum_variant_names)] // public error API; the suffix names what was missing
 pub enum GraphError {
     LinkIdNotFound(Id<Link>),
     LinkIndexNotFound(LinkIndex),
@@ -164,6 +166,7 @@ pub(crate) struct ForwardBackwardRoutingGraph {
 }
 
 impl ForwardBackwardRoutingGraph {
+    #[allow(clippy::too_many_arguments)] // constructor mirrors the struct's fields one to one
     pub fn new(
         forward_graph: CsrGraph,
         backward_graph: CsrGraph,
@@ -669,15 +672,17 @@ pub(crate) mod tests {
 
         let true_end_node_indices = [vec![], vec![2, 3], vec![2, 3], vec![1, 2]];
 
+        assert_eq!(graph.num_nodes(), true_end_node_indices.len());
+
         // For all outgoing edges, get_end_node_as_idx should not panic, since they are all valid (exist in the graph)
-        for node_idx in 0..graph.num_nodes() {
+        for (node_idx, true_end_nodes) in true_end_node_indices.iter().enumerate() {
             let outgoing_edge_indices = graph.outgoing_edges_as_idx(node_idx);
             for (j, edge_idx) in outgoing_edge_indices.iter().enumerate() {
                 let end_node = graph.get_end_node_as_idx(*edge_idx).unwrap(); // Should not panic
                 assert_eq!(
-                    end_node, true_end_node_indices[node_idx][j],
+                    end_node, true_end_nodes[j],
                     "End node is incorrect, expected {}, got {}",
-                    true_end_node_indices[node_idx][j], end_node
+                    true_end_nodes[j], end_node
                 );
             }
         }

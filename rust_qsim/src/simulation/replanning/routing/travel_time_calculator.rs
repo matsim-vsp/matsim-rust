@@ -645,7 +645,7 @@ pub(crate) mod test {
     #[deterministic_id_test]
     fn running_mean_uses_enter_slot_and_clamps_late_times() {
         let link = link("observed", 100.0, 100.0);
-        let net = network(&[link.clone()]);
+        let net = network(std::slice::from_ref(&link));
         let car = Id::create("car");
         let mut collector = collector(10, 25);
         let global = global(1, 10, 25);
@@ -695,7 +695,7 @@ pub(crate) mod test {
     #[deterministic_id_test]
     fn consolidation_cascades_previous_bin_minus_bin_size() {
         let link = link("slow", 100.0, 100.0);
-        let net = network(&[link.clone()]);
+        let net = network(std::slice::from_ref(&link));
         let car = Id::create("car");
         let mut collector = collector(900, 3600);
         observe(&mut collector, &car, &link.id, &Id::create("v1"), 0, 3000);
@@ -713,7 +713,7 @@ pub(crate) mod test {
     #[deterministic_id_test]
     fn interpolation_and_vehicle_max_speed_are_preserved() {
         let link = link("interpolated", 100.0, 100.0);
-        let net = network(&[link.clone()]);
+        let net = network(std::slice::from_ref(&link));
         let car = Id::create("car");
         let mut collector = collector(10, 100);
         observe(&mut collector, &car, &link.id, &Id::create("first"), 0, 10);
@@ -856,7 +856,7 @@ pub(crate) mod test {
     #[deterministic_id_test]
     fn leaving_traffic_discards_active_link_enter() {
         let link = link("left", 100.0, 100.0);
-        let net = network(&[link.clone()]);
+        let net = network(std::slice::from_ref(&link));
         let car = Id::create("car");
         let vehicle = vehicle("v1", 20.0);
         let mut collector = collector(10, 100);

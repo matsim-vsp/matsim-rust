@@ -12,8 +12,8 @@ use std::time::Duration;
 /// calculation, that is
 /// - from- and to-links
 /// - the departure time at the from-node and optionally a person and vehicle. These are passed to
-///     travel time and disutility functions in routing (the latter being used as cost, and the
-///     former used to determine the arrival times at specific nodes)
+///   travel time and disutility functions in routing (the latter being used as cost, and the
+///   former used to determine the arrival times at specific nodes)
 ///
 /// This is what an implementation of `LeastCostPathCalculator` receives as input when calculating
 /// a least cost path. Note that the router owns its graph, so the request does not specifiy the

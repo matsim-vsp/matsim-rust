@@ -758,7 +758,7 @@ mod tests {
         assert_eq!(persons.len(), 100);
 
         for i in 1u32..101 {
-            assert!(persons.get(&Id::get_from_ext(&format!("{}", i))).is_some());
+            assert!(persons.contains_key(&Id::get_from_ext(&format!("{}", i))));
         }
     }
 
@@ -797,20 +797,18 @@ mod tests {
     /// Sorts given (optional) IOAttributes by name and changes any attribute class "Integer" to
     /// "Long"
     fn canonicalize_attributes(attrs: &mut Option<IOAttributes>) -> &Option<IOAttributes> {
-        match attrs {
-            Some(attrs) => {
-                // sort attributes by name
-                attrs.attributes.sort_by(|a, b| a.name.cmp(&b.name));
+        // if no attributes present, do nothing
+        if let Some(attrs) = attrs {
+            // sort attributes by name
+            attrs.attributes.sort_by(|a, b| a.name.cmp(&b.name));
 
-                // change any attribute class "Integer" to "Long"
-                // (since when writing, we always write integers as "Long")
-                for attr in attrs.attributes.iter_mut() {
-                    if attr.class == "java.lang.Integer" {
-                        attr.class = "java.lang.Long".to_string();
-                    }
+            // change any attribute class "Integer" to "Long"
+            // (since when writing, we always write integers as "Long")
+            for attr in attrs.attributes.iter_mut() {
+                if attr.class == "java.lang.Integer" {
+                    attr.class = "java.lang.Long".to_string();
                 }
             }
-            None => {} // if no attributes present, do nothing
         }
 
         attrs

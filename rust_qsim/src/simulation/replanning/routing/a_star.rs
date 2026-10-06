@@ -290,7 +290,7 @@ impl<H: AStarHeuristic> AStar<H> {
     /// i.e., the routers for any other modes are discarded.
     pub fn new_for_modes(
         network: Arc<Network>,
-        modes: &Vec<Id<String>>,
+        modes: &[Id<String>],
         travel_time: Arc<dyn TravelTime>,
         travel_disutility: Arc<dyn TravelDisutility>,
     ) -> Result<IntMap<Id<String>, Self>, GraphError> {
@@ -1019,7 +1019,7 @@ mod tests {
         let travel_cost = Arc::new(FreeSpeedTravelTimeAndDisutility {});
         let router_by_mode = Alt::new_for_modes(
             Arc::new(network),
-            &vec![car_mode_id, bike_mode_id],
+            &[car_mode_id, bike_mode_id],
             travel_cost.clone(),
             travel_cost,
         )

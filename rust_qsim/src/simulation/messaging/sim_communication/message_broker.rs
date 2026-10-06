@@ -395,9 +395,7 @@ mod tests {
 
         assert_eq!(partition.get_node_ids().len(), 1);
 
-        if rank == 0 {
-            assert_eq!(partition.get_link_ids().len(), 2);
-        } else if rank == 1 {
+        if rank == 0 || rank == 1 {
             assert_eq!(partition.get_link_ids().len(), 2);
         } else if rank == 2 {
             assert_eq!(partition.get_link_ids().len(), 3);

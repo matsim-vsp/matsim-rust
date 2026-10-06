@@ -1185,9 +1185,10 @@ pub struct ModeParameter {
 
 impl ModeParameter {
     pub fn default_for_mode(mode: &str) -> Self {
-        let mut default_mode_params = Self::default();
-        default_mode_params.mode = mode.to_string();
-        default_mode_params
+        Self {
+            mode: mode.to_string(),
+            ..Self::default()
+        }
     }
 }
 

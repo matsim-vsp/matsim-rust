@@ -650,7 +650,7 @@ mod tests {
 
         assert_eq!(2, network.nodes.len());
         assert_eq!(0, network.links.len());
-        assert!(network.nodes.get(&b_id).is_none());
+        assert!(!network.nodes.contains_key(&b_id));
         assert!(network.get_node(&a_id).out_links.is_empty());
         assert!(network.get_node(&c_id).in_links.is_empty());
     }

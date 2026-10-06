@@ -110,7 +110,7 @@ impl IntervalVolumes {
     /// cannot be represented exactly at [`PCE_UNITS_PER_PCE`] is treated the
     /// same way, because a total built from it would not be reproducible.
     pub fn record(&mut self, side: FlowSide, pce: Option<f64>) {
-        let units = pce.and_then(|pce| Self::to_units(pce));
+        let units = pce.and_then(Self::to_units);
         let (vehicles, pce_units, unresolved) = match side {
             FlowSide::Entry => (
                 &mut self.entries,

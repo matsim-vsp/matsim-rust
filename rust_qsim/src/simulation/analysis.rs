@@ -38,7 +38,7 @@ use crate::simulation::events::{
 use crate::simulation::id;
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_events::{ProtoEventsReader, event_from_proto};
-use crate::simulation::io::xml::events::XmlEventsReader;
+use crate::simulation::io::xml::events::{TimedEvent, XmlEventsReader};
 use crate::simulation::scenario::network::{Link, Network, Node};
 use crate::simulation::scenario::population::{InternalPlanElement, Population};
 use crate::simulation::scenario::transit::TransitSchedule;
@@ -697,6 +697,7 @@ enum RequiredOutcome {
 ///
 /// A required-module failure records a failed report next to the last completed one and returns
 /// the error, so a failed attempt never publishes a completed index over working output.
+#[allow(clippy::too_many_arguments)] // public entry point; each argument is a distinct run input
 pub fn analyze_final_iteration(
     output_dir: &Path,
     iteration: u32,
@@ -1152,7 +1153,7 @@ fn replay_partitions<'a>(
                 pending: None,
             },
             CompressionType::None | CompressionType::Gz | CompressionType::Zst => {
-                PartitionReader::Xml(XmlEventsReader::new(path))
+                PartitionReader::Xml(Box::new(XmlEventsReader::new(path)))
             }
         })
         .collect();
@@ -1289,6 +1290,7 @@ struct ReplayedAnalysis<'a> {
     transit: TransitCollector,
 }
 
+#[allow(clippy::too_many_arguments)] // internal step that forwards the run inputs it needs
 fn publish_complete(
     output_dir: &Path,
     manifest: &Manifest,
@@ -3164,7 +3166,7 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), AnalysisError> 
 }
 
 enum PartitionReader {
-    Xml(XmlEventsReader),
+    Xml(Box<XmlEventsReader>),
     Proto {
         reader: ProtoEventsReader<File>,
         pending: Option<(
@@ -3175,7 +3177,7 @@ enum PartitionReader {
 }
 
 impl PartitionReader {
-    fn next_event(&mut self) -> Result<Option<(SimTime, Box<dyn EventTrait>)>, AnalysisError> {
+    fn next_event(&mut self) -> Result<Option<TimedEvent>, AnalysisError> {
         match self {
             Self::Xml(reader) => reader
                 .try_read_next()
@@ -3236,14 +3238,14 @@ fn link_visit(event: &dyn EventTrait) -> Option<LinkVisit<'_>> {
             link: &event.link,
             exit_position: 1.0,
         })
-    } else if let Some(event) = event.downcast_ref::<VehicleLeavesTrafficEvent>() {
-        Some(LinkVisit::Leave {
-            vehicle: &event.vehicle,
-            link: &event.link,
-            exit_position: event.relative_position,
-        })
     } else {
-        None
+        event
+            .downcast_ref::<VehicleLeavesTrafficEvent>()
+            .map(|event| LinkVisit::Leave {
+                vehicle: &event.vehicle,
+                link: &event.link,
+                exit_position: event.relative_position,
+            })
     }
 }
 
@@ -3916,6 +3918,7 @@ impl AgentTravelAccumulator {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // writes several independent tables from separately owned inputs
 fn write_tables(
     path: &Path,
     links: &[&Link],

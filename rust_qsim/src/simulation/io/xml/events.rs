@@ -30,6 +30,9 @@ use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 
+/// An event together with the simulation time at which it was read.
+pub type TimedEvent = (SimTime, Box<dyn EventTrait>);
+
 pub struct XmlEventsWriter {
     writer: Mutex<Option<XmlEventsOutputWriter>>,
 }
@@ -300,9 +303,7 @@ impl XmlEventsReader {
         }
     }
 
-    pub fn try_read_next(
-        &mut self,
-    ) -> Result<Option<(SimTime, Box<dyn EventTrait>)>, XmlEventsReadError> {
+    pub fn try_read_next(&mut self) -> Result<Option<TimedEvent>, XmlEventsReadError> {
         loop {
             let result = self.parser.next();
             match result {
@@ -614,7 +615,7 @@ fn handle_person_stuck(attr: Vec<OwnedAttribute>) -> Box<dyn EventTrait> {
     )
 }
 
-fn value_from_name<'a>(attr: &'a Vec<OwnedAttribute>, name: &str) -> Option<&'a String> {
+fn value_from_name<'a>(attr: &'a [OwnedAttribute], name: &str) -> Option<&'a String> {
     attr.iter()
         .find(|&a| a.name.local_name.eq(name))
         .map(|a| &a.value)

@@ -11,12 +11,11 @@ use crate::simulation::replanning::routing::graph::{
 use crate::simulation::scenario::network::{Link, Network};
 
 #[allow(dead_code)]
-
 /// convert a network into multiple graphs, one for each given mode, such that only the links on
 /// which a mode can travel on are contained in the respective graphs
 pub fn convert_network_with_modes(
     network: Arc<Network>,
-    modes: &Vec<Id<String>>,
+    modes: &[Id<String>],
 ) -> IntMap<Id<String>, ForwardBackwardRoutingGraph> {
     modes
         .iter()
@@ -190,7 +189,7 @@ mod test {
         // create graphs based on the given network based on the given nodes
         let mut graph_by_mode = network_converter::convert_network_with_modes(
             Arc::new(network),
-            &vec![car_mode_id.clone(), bike_mode_id.clone()],
+            &[car_mode_id.clone(), bike_mode_id.clone()],
         );
 
         assert_eq!(graph_by_mode.keys().len(), 2);

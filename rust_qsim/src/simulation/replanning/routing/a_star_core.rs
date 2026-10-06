@@ -23,7 +23,7 @@ use tracing::warn;
 /// - `WithHeuristic(&'a H)`: Use the provided heuristic for One-to-One routing with A*
 /// - `WithoutHeuristic`: Use zero heuristic (collapses A* to pure Dijkstra),
 ///   for One-to-Many landmark distance calculations
-///     - this allows to run `a_star_core` without a `to`-node, since even when using
+///   - this allows to run `a_star_core` without a `to`-node, since even when using
 ///     `ZeroHeuristic`, a node would have to be passed. But with this setting, `a_star_core` knows
 ///     not to call any Heuristic
 #[derive(Debug)]
@@ -97,7 +97,7 @@ pub(crate) struct CandidateRoute {
 /// - at every current node in the algorithm, whether it should stop, since it reached its goal
 /// - upon reaching a node, whether its parent link should be tracked
 /// - when scanning neighbours of the current node, whether to track the arrival time at the
-///     neighbour nodes.
+///   neighbour nodes.
 /// - when the algorithm returns, what form the result should have (e.g. with or without parents)
 pub(crate) trait AStarActions: Clone + Debug {
     /// Called by `a_star_core` at every visited node, the alg will return if it receives `true`
@@ -369,15 +369,15 @@ impl AStarActions for RoutingAStarActions<'_> {
 
 /// Request for A* runs. Contains
 /// - data needed for calculation, that is the graph, the travel time and travel disutility
-///     functions, the from-node, the departure time, the person and vehicle (if applicable)
+///   functions, the from-node, the departure time, the person and vehicle (if applicable)
 /// - a `AStarActions` implementation that determines the use case (routing or landmark calculation,
-///     that is, parent tracking or not, one to many or not, arrival time tracking or not). The
-///     implementation also contains the travel disutility function, and the travel time function
-///     and the to-node when applicable.
+///   that is, parent tracking or not, one to many or not, arrival time tracking or not). The
+///   implementation also contains the travel disutility function, and the travel time function
+///   and the to-node when applicable.
 /// - the `HeuristicMode`: a heuristic to be used, or the information that none is to be used
 /// - a bool specifying whether the search is to be performed forwards or backwards. In the
-///     latter case, paths using incoming edges, i.e., paths leading going to the from-node,
-///     are searched.
+///   latter case, paths using incoming edges, i.e., paths leading going to the from-node,
+///   are searched.
 #[derive(Builder, Debug)]
 #[builder(pattern = "owned")]
 pub(crate) struct AStarRequest<'a, H: AStarHeuristic, O: AStarActions> {
@@ -400,6 +400,7 @@ pub(crate) struct AStarRequest<'a, H: AStarHeuristic, O: AStarActions> {
 
 impl<'a, H: AStarHeuristic, O: AStarActions> AStarRequestBuilder<'a, H, O> {
     /// partially builds a A* request using data from a given least cost path request and graph
+    #[allow(clippy::wrong_self_convention)] // builder step: consumes and returns the builder
     pub(crate) fn from_least_cost_path_request_with_graph(
         self,
         request: &LeastCostPathRequest<'a>,
@@ -422,11 +423,12 @@ impl<'a, H: AStarHeuristic, O: AStarActions> AStarRequestBuilder<'a, H, O> {
 /// Core A* logic.
 /// Can be used for different use cases, currently:
 /// - Routing: calculate the least cost path from one node to another, tracking
-///     parent links and arrival times at all nodes, using the true travel disutility per link at
-///     the actual arrival time at the link
+///   parent links and arrival times at all nodes, using the true travel disutility per link at
+///   the actual arrival time at the link
 /// - Landmark calculation: calculate disutilites from one to all other nodes, based on the
-///     minimum travel disutility for each link (independent of time, vehicle, ...). Used for
-///     precalculating landmark data to be used in the ALT heuristic function.
+///   minimum travel disutility for each link (independent of time, vehicle, ...). Used for
+///   precalculating landmark data to be used in the ALT heuristic function.
+///
 /// Takes an `AStarRequest` containing all necessary data for the A* run, for example an
 /// implementation of the `AStarActions` trait, which determines which of the above use cases is
 /// used.
