@@ -109,7 +109,7 @@ fn collect_partition_events(config_path: &str) -> Vec<PartitionRuntimeEvent> {
 fn create_partition_listener(
     sender: Sender<PartitionRuntimeEvent>,
 ) -> Box<WorkerListenerRegisterFunction> {
-    Box::new(move |_, _, partition_events| {
+    Box::new(move |_, _, partition_events, _| {
         partition_events.on_event(move |event| {
             sender
                 .send(event.clone())

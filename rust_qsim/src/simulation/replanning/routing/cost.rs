@@ -500,6 +500,7 @@ mod tests {
     fn scoring_config() -> Config {
         let mut config = Config::default();
         config.set_scoring(Scoring {
+            write_experienced_plans: false,
             activity_params: Vec::new(),
             mode_params: vec![
                 mode_params("car", -6.0, -0.01),

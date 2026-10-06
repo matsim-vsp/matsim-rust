@@ -9,6 +9,34 @@ The core implementation of the Rust QSim is oriented towards [MATSim Java](https
 In particular, we tried to minimize the differences between the physics of both simulations, including link dynamics
 and output of events.
 
+### Traffic signals
+
+`qsim.signals` optionally names the three MATSim signal files -- `systems`, `groups` and
+`control`. All three are required; a partial set is rejected as a configuration error
+rather than silently running without signals. The files are read once during scenario
+load, after the network, because they reference approach links by external id.
+
+The three files reduce to a per-approach-link list of green windows inside a repeating
+cycle, held in `ScenarioCore::signals` and shared by every partition. Each partition
+narrows that plan to the links it owns, because signal state depends on the link and the
+time alone. A vehicle on an approach link may enter its next link while the current
+second is inside one of the link's green windows, and always may when the link carries
+no signal. A link governed by several groups is green as soon as any of them is.
+
+A red signal holds the vehicle in `evaluate_front_vehicle` and, unlike a full out-link,
+suspends the link's stuck timer. Without that distinction a signal could only ever hold
+a vehicle for `stuck_threshold` seconds regardless of how long its red runs, because
+the engine would otherwise declare the waiting vehicle stuck and force it through.
+Genuine blockage is unaffected: a vehicle that is red *and* blocked still accrues stuck
+time and still escapes.
+
+Two deviations from MATSim Java are deliberate. MATSim resolves a turn against the
+signals of the node and compares the vehicle's candidate next links against them, which
+models conflicting turns at a junction; this port keys on the approach link, because
+that is what the input format names. Opposing turns off one approach therefore share a
+state, and turns from different approaches never contend, so a vehicle faces no
+turn-acceptance conflict. See `rust_qsim/src/simulation/network/signals.rs`.
+
 ### General Scenario Handling
 
 Starting the simulation mostly works as in MATSim Java. All XML input files need to be converted into protobuf for
@@ -33,6 +61,13 @@ The shared router reads the snapshot without taking the submission lock; unobser
 `prepare_for_sim` uses the previous iteration's snapshot, or an empty snapshot for the first iteration. The workers'
 iteration-reset hooks clear the collectors before the next Mobsim. No event-file output is required for travel-time
 collection.
+
+Experienced-plan collection uses a worker-local backpack that moves with vehicles and teleporting agents between
+partitions. Workers send their completed partial plans to the controller after Mobsim; the controller merges them in
+stable person order and scores each experienced plan. The score is copied to the person's selected plan for the next
+replanning step. Collection and scoring run every iteration, even when experienced-plan output is disabled. The
+controller accepts a custom `PlanScorer`; otherwise it uses `CharyparNagelScoringFunction`. Set
+`scoring.write_experienced_plans` to write experienced plans alongside regular iteration plans.
 
 ### Final-Iteration Analysis
 
@@ -83,6 +118,25 @@ activities containing `interaction` do not end a journey. The main mode follows 
 mode hierarchy, and journey distance sums the route distances captured from the prepared selected
 plan, including model-derived teleportation distances. Journeys with incomplete observed legs keep
 their completion and route-distance fields but have no duration.
+
+#### Demographic outcomes and equity
+
+`simulation::analysis::demographic` groups people by the person attributes
+`output.analysis.person_group_attributes` names. The group labels, the optional person weight and
+the optional monetary cost are read from the population next to the expected-travel capture,
+before the final mobsim is the only moment the attributes exist, and travel with
+`AnalysisRunMetadata` so a standalone rerun groups the same people.
+
+The module reads `person_daily.csv` -- the agent travel module's table -- for the person outcomes
+it aggregates, so the group burdens, the equity comparison and the person table cannot describe
+the same day differently. A burden is defined only for a person whose day is `complete` or
+`no_travel`; every other person keeps their group size and is counted in `incomplete_persons`
+instead of lowering a mean. The equity comparison reads each configured comparison run's
+published report and counts winners and losers per group under the stated criterion
+`lower_daily_completed_travel_time`, rejecting a comparison run that was not grouped by the same
+attributes, and reporting the persons each count excludes. Other modules join the group tables by
+writing `<module>_group_outcomes.csv` with the columns `dimension,group,metric,unit,value` into
+the report directory.
 
 #### PCE volumes and capacity utilization
 

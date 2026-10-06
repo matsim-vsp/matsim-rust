@@ -10,6 +10,7 @@ use crate::simulation::framework_events::{
 };
 use crate::simulation::io::proto::proto_events::ProtoEventsWriter;
 use crate::simulation::io::xml::events::XmlEventsWriter;
+use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
 use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::population::agent_source::DynAgentSource;
@@ -17,6 +18,9 @@ use crate::simulation::replanning::routing::TripRouter;
 use crate::simulation::replanning::{StrategyManager, replan_population};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::{MobsimInput, ScenarioCore};
+use crate::simulation::scoring::{
+    CharyparNagelScoringFunction, PersonExperiences, PlanScorer, score_population,
+};
 use crate::simulation::simulation::{Simulation, SimulationBuilder};
 use crate::simulation::{io, logging};
 use derive_builder::Builder;
@@ -98,6 +102,8 @@ pub struct ThreadLocalComputationalEnvironment {
     events_manager: Rc<RefCell<EventsManager>>,
     mobsim_events_manager: Rc<RefCell<MobsimEventsManager>>,
     partition_events_manager: Rc<RefCell<PartitionEventsManager>>,
+    #[builder(default)]
+    partition_migration_extensions_manager: Rc<RefCell<PartitionChangeExtensionsManager>>,
 }
 
 #[cfg(test)]
@@ -108,6 +114,9 @@ impl Default for ThreadLocalComputationalEnvironment {
             events_manager: Rc::new(RefCell::new(EventsManager::new())),
             mobsim_events_manager: Rc::new(RefCell::new(MobsimEventsManager::default())),
             partition_events_manager: Rc::new(RefCell::new(PartitionEventsManager::default())),
+            partition_migration_extensions_manager: Rc::new(RefCell::new(
+                PartitionChangeExtensionsManager::default(),
+            )),
         }
     }
 }
@@ -142,6 +151,12 @@ impl ThreadLocalComputationalEnvironment {
 
     pub fn partition_event_bus(&self) -> Rc<RefCell<PartitionEventsManager>> {
         self.partition_events_manager.clone()
+    }
+
+    pub fn partition_migration_extensions_manager_borrow_mut(
+        &mut self,
+    ) -> RefMut<'_, PartitionChangeExtensionsManager> {
+        self.partition_migration_extensions_manager.borrow_mut()
     }
 
     pub fn reset_iteration(&mut self, iteration: u32) {
@@ -373,6 +388,7 @@ impl MobsimWorker {
         let mut events = EventsManager::new();
         let mut mobsim_events = MobsimEventsManager::for_partition(rank, 0);
         let mut partition_events = PartitionEventsManager::for_partition(rank, 0);
+        let mut partition_changes = PartitionChangeExtensionsManager::new();
 
         if config.output().write_events != WriteEvents::None {
             assert!(
@@ -390,7 +406,12 @@ impl MobsimWorker {
         }
 
         for subscriber in additional_subscribers {
-            subscriber(&mut events, &mut mobsim_events, &mut partition_events);
+            subscriber(
+                &mut events,
+                &mut mobsim_events,
+                &mut partition_events,
+                &mut partition_changes,
+            );
         }
 
         let comp_env = ThreadLocalComputationalEnvironmentBuilder::default()
@@ -398,6 +419,7 @@ impl MobsimWorker {
             .events_manager(Rc::new(RefCell::new(events)))
             .mobsim_events_manager(Rc::new(RefCell::new(mobsim_events)))
             .partition_events_manager(Rc::new(RefCell::new(partition_events)))
+            .partition_migration_extensions_manager(Rc::new(RefCell::new(partition_changes)))
             .build()
             .unwrap();
 
@@ -509,6 +531,11 @@ pub(crate) struct ReplanningPool {
     batch_previous_route_proposals: bool,
 }
 
+pub(crate) struct ScoringPool {
+    pool: Option<rayon::ThreadPool>,
+    plan_scorer: Box<dyn PlanScorer>,
+}
+
 impl ReplanningPool {
     pub(crate) fn new(scenario_core: &ScenarioCore, trip_router: TripRouter) -> Self {
         let config = scenario_core.config.as_ref();
@@ -583,6 +610,48 @@ impl ReplanningPool {
             iteration.saturating_sub(self.first_iteration) as f64 / total_iterations as f64
         };
         progress >= self.innovation_disable_fraction
+    }
+}
+
+impl ScoringPool {
+    pub(crate) fn new(
+        scenario_core: &ScenarioCore,
+        plan_scorer: Option<Box<dyn PlanScorer>>,
+    ) -> Self {
+        let threads = scenario_core.config.computational_setup().scoring_threads;
+        let pool = if threads == 0 {
+            None
+        } else {
+            Some(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads as usize)
+                    .thread_name(|index| format!("scoring-{index}"))
+                    .build()
+                    .expect("Failed to build scoring thread pool."),
+            )
+        };
+        Self {
+            pool,
+            plan_scorer: plan_scorer.unwrap_or_else(|| {
+                Box::new(CharyparNagelScoringFunction::new(
+                    scenario_core.config.as_ref(),
+                    scenario_core.network.clone(),
+                ))
+            }),
+        }
+    }
+
+    pub(crate) fn score_population(
+        &self,
+        experienced_plans: &mut Vec<PersonExperiences>,
+        population: &mut Population,
+    ) {
+        let mut score =
+            || score_population(experienced_plans, population, self.plan_scorer.as_ref());
+        match &self.pool {
+            Some(pool) => pool.install(score),
+            None => score(),
+        }
     }
 }
 
@@ -755,6 +824,7 @@ mod tests {
     use crate::simulation::config::Config;
     use crate::simulation::framework_events::{MobsimEvent, WorkerListenerRegisterFunction};
     use crate::simulation::id::Id;
+    use crate::simulation::network::signals::Signals;
     use crate::simulation::network::sim_network::SimNetworkPartition;
     use crate::simulation::population::agent_source::PopulationAgentSource;
     use crate::simulation::replanning::routing::TripRouter;
@@ -781,12 +851,13 @@ mod tests {
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
             config: config.clone(),
+            signals: Arc::new(Signals::default()),
         };
 
         let completed_iterations = Arc::new(Mutex::new(Vec::new()));
         let completed_for_registration = completed_iterations.clone();
         let completion_listener: Box<WorkerListenerRegisterFunction> =
-            Box::new(move |_, mobsim, _| {
+            Box::new(move |_, mobsim, _, _| {
                 mobsim.on_event(move |event| {
                     if matches!(&event.payload, MobsimEvent::BeforeCleanup) {
                         completed_for_registration
@@ -827,6 +898,7 @@ mod tests {
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
             config: Arc::new(config),
+            signals: Arc::new(Signals::default()),
         };
         let pool = ReplanningPool::new(&scenario_core, TripRouter::default());
 

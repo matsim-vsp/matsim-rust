@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-use super::{csv, hour_start_seconds, io_error, link_visit, table_writer};
+use super::{TableSpec, csv, hour_start_seconds, io_error, link_visit, table_writer};
 
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 /// Width of one fixed link-speed histogram bin in m/s.
@@ -95,7 +95,7 @@ impl SpeedGroup {
 }
 
 /// The full-link traversals of one link within one analysis interval.
-#[derive(Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
 struct SpeedKey {
     hour_start_seconds: u64,
     link_index: usize,
@@ -110,12 +110,20 @@ impl SpeedKey {
     }
 }
 
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
+struct ClassSpeedKey {
+    class: String,
+    hour_start_seconds: u64,
+    link_index: usize,
+}
+
 /// One link traversal that has been entered but not yet left.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct OpenTraversal {
     link_index: usize,
     entry_position: f64,
     entry_nanos: u64,
+    class: Option<String>,
 }
 
 /// Records that cannot contribute a full-link speed, reported next to the speeds themselves.
@@ -163,17 +171,23 @@ pub(super) struct LinkSpeedCollector<'a> {
     /// The reported links in the order of the report; an index into this slice identifies a link.
     links: &'a [&'a Link],
     link_index: BTreeMap<&'a str, usize>,
+    class_by_vehicle: BTreeMap<String, String>,
     /// Traversals are kept per vehicle, oldest first, and matched by link. A leave therefore finds
     /// its enter even when the enter of the next link was already seen at the same timestamp, as it
     /// happens when the partitions of a hand-over are replayed in the opposite rank order, and even
     /// when a vehicle visits the same link several times.
     open_traversals: IntMap<u64, Vec<OpenTraversal>>,
     groups: BTreeMap<SpeedKey, SpeedGroup>,
+    class_groups: BTreeMap<ClassSpeedKey, SpeedGroup>,
     diagnostics: SpeedDiagnostics,
 }
 
 impl<'a> LinkSpeedCollector<'a> {
-    pub(super) fn new(interval_seconds: u32, links: &'a [&'a Link]) -> Self {
+    pub(super) fn new(
+        interval_seconds: u32,
+        links: &'a [&'a Link],
+        class_by_vehicle: &BTreeMap<&str, &str>,
+    ) -> Self {
         Self {
             interval_seconds,
             links,
@@ -182,8 +196,13 @@ impl<'a> LinkSpeedCollector<'a> {
                 .enumerate()
                 .map(|(index, link)| (link.id.external(), index))
                 .collect(),
+            class_by_vehicle: class_by_vehicle
+                .iter()
+                .map(|(vehicle, class)| ((*vehicle).to_owned(), (*class).to_owned()))
+                .collect(),
             open_traversals: IntMap::default(),
             groups: BTreeMap::new(),
+            class_groups: BTreeMap::new(),
             diagnostics: SpeedDiagnostics::default(),
         }
     }
@@ -196,7 +215,13 @@ impl<'a> LinkSpeedCollector<'a> {
                 vehicle,
                 link,
                 entry_position,
-            }) => self.enter(vehicle.internal(), link.external(), entry_position, time),
+            }) => self.enter(
+                vehicle.internal(),
+                vehicle.external(),
+                link.external(),
+                entry_position,
+                time,
+            ),
             Some(LinkVisit::Leave {
                 vehicle,
                 link,
@@ -228,7 +253,39 @@ impl<'a> LinkSpeedCollector<'a> {
         Ok(())
     }
 
-    fn enter(&mut self, vehicle: u64, link: &str, position: f64, time: SimTime) {
+    pub(super) fn write_class_hourly_speeds(&self, path: &Path) -> Result<(), AnalysisError> {
+        let mut writer = table_writer(path, "link_speed_by_class.csv")?;
+        writeln!(writer, "vehicle_class,link_id,hour_start_seconds,observations,total_distance_meters,total_duration_seconds,representative_speed_mps,vehicle_speed_mean_mps,vehicle_speed_population_std_mps")
+            .map_err(io_error)?;
+        for (key, group) in &self.class_groups {
+            let link = self.links[key.link_index];
+            let length = link.length;
+            writeln!(
+                writer,
+                "{},{},{},{},{:.6},{:.6},{},{},{}",
+                csv(&key.class),
+                csv(link.id.external()),
+                key.hour_start_seconds,
+                group.observations,
+                group.observations as f64 * length,
+                group.total_duration_nanos as f64 / NANOS_PER_SECOND,
+                optional_number(group.representative_speed(length)),
+                optional_number(group.mean_speed()),
+                optional_number(Some(group.vehicle_speeds.population_std()))
+            )
+            .map_err(io_error)?;
+        }
+        Ok(())
+    }
+
+    fn enter(
+        &mut self,
+        vehicle: u64,
+        vehicle_external: &str,
+        link: &str,
+        position: f64,
+        time: SimTime,
+    ) {
         let Some(link_index) = self.link_index(link) else {
             return;
         };
@@ -239,6 +296,7 @@ impl<'a> LinkSpeedCollector<'a> {
                 link_index,
                 entry_position: position,
                 entry_nanos: time.as_nanos(),
+                class: self.class_by_vehicle.get(vehicle_external).cloned(),
             });
     }
 
@@ -311,6 +369,16 @@ impl<'a> LinkSpeedCollector<'a> {
             .entry(key)
             .or_default()
             .observe(speed, duration_nanos);
+        if let Some(class) = traversal.class {
+            self.class_groups
+                .entry(ClassSpeedKey {
+                    class,
+                    hour_start_seconds: key.hour_start_seconds,
+                    link_index: key.link_index,
+                })
+                .or_default()
+                .observe(speed, duration_nanos);
+        }
     }
 
     fn write_hourly_speeds(&self, path: &Path, hours: &[u64]) -> Result<(), AnalysisError> {
@@ -480,3 +548,44 @@ fn optional_number(value: Option<f64>) -> String {
         None => String::new(),
     }
 }
+
+/// Metrics from this module that completed-run comparison can compare.
+pub(super) const COMPARISON_TABLES: &[TableSpec] = &[
+    TableSpec {
+        file: "link_speed_hourly.csv",
+        metrics: &[
+            ("link_speed_traversals", "observations"),
+            ("link_total_distance", "total_distance_meters"),
+            ("link_total_duration", "total_duration_seconds"),
+            ("link_representative_speed", "representative_speed_mps"),
+            ("link_vehicle_speed_mean", "vehicle_speed_mean_mps"),
+            (
+                "link_vehicle_speed_population_std",
+                "vehicle_speed_population_std_mps",
+            ),
+        ],
+    },
+    TableSpec {
+        file: "link_speed_summary.csv",
+        metrics: &[
+            ("links_with_speed", "links_with_speed"),
+            ("hourly_link_speed_traversals", "observations"),
+            ("hourly_mean_link_speed", "mean_link_speed_mps"),
+            (
+                "hourly_link_speed_population_std",
+                "population_std_link_speed_mps",
+            ),
+        ],
+    },
+    TableSpec {
+        file: "link_speed_histogram.csv",
+        metrics: &[
+            ("speed_histogram_link_count", "link_count"),
+            ("speed_histogram_observation_count", "observation_count"),
+        ],
+    },
+    TableSpec {
+        file: "link_speed_diagnostics.csv",
+        metrics: &[],
+    },
+];

@@ -2,7 +2,9 @@ use macros::deterministic_id_test;
 use rust_qsim::simulation::analysis::{
     AnalysisInputPaths, AnalysisRunMetadata, analyze_final_iteration,
 };
-use rust_qsim::simulation::config::{Analysis, CommandLineArgs, CompressionType, Config};
+use rust_qsim::simulation::config::{
+    Accessibility, Analysis, CommandLineArgs, CompressionType, Config,
+};
 use rust_qsim::simulation::controller::controller::ControllerBuilder;
 use rust_qsim::simulation::id::Id;
 use rust_qsim::simulation::scenario::Coordinate;
@@ -97,6 +99,10 @@ fn write_partitions(output: &Path, iteration: u32, partitions: &[Vec<String>]) {
 }
 
 /// Runs the shared analysis interface and returns the report tables by file name.
+/// The recorded window opens at the start of the day in these fixtures, which is what makes
+/// the first observed activity of a person left-censored.
+const WINDOW_START_SECONDS: u32 = 0;
+
 fn analyze(
     output: &Path,
     iteration: u32,
@@ -130,6 +136,7 @@ fn analyze_with_clip(
         4711,
         // An unsampled run; the speed tables do not depend on the fraction.
         1.0,
+        WINDOW_START_SECONDS,
         &garage,
         Vec::new(),
         AnalysisInputPaths {
@@ -152,7 +159,20 @@ fn analyze_with_clip(
             interval_seconds,
             link_labels: BTreeMap::new(),
             urban_boundary: None,
+            observed_data: None,
+            journey_survey: None,
+            comparison_runs: Vec::new(),
+            service: None,
+            transit_observed_data: None,
+            economic_inputs: None,
+            emissions: None,
+            noise: None,
             excess_delay_clip_seconds: clip_delay,
+            zone_system: Default::default(),
+            accessibility: Accessibility::default(),
+            person_group_attributes: Vec::new(),
+            person_weight_attribute: None,
+            person_cost_attribute: None,
         },
     )
     .unwrap();
