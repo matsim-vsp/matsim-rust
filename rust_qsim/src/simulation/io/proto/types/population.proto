@@ -25,7 +25,9 @@ message Plan {
 
 message Activity {
   string act_type = 1;
-  string link_id = 2;
+  // Optional because activities may be located by facility or coordinate only. Missing links are
+  // derived in prepare_for_sim.
+  optional string link_id = 2;
   optional general.Coordinate coordinate = 3;
   // Simulation clock instant in nanoseconds since simulation start.
   optional uint64 start_time_ns = 5;
@@ -34,6 +36,7 @@ message Activity {
   // Duration in nanoseconds.
   optional uint64 max_dur_ns = 7;
   map<string, general.AttributeValue> attributes = 8;
+  optional string facility_id = 9;
 }
 
 message Leg {

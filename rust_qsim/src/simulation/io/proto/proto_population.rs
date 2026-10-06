@@ -116,7 +116,7 @@ impl Activity {
     fn from(value: &InternalActivity) -> Self {
         Self {
             act_type: value.act_type.external().to_string(),
-            link_id: value.link_id.external().to_string(),
+            link_id: value.link_id.as_ref().map(|id| id.external().to_string()),
             coordinate: value.coord.as_ref().map(|c| Coordinate {
                 x: c.x,
                 y: c.y,
@@ -126,6 +126,10 @@ impl Activity {
             end_time_ns: value.end_time.map(SimTime::as_nanos),
             max_dur_ns: value.max_dur.map(duration_to_u64_nanos),
             attributes: value.attributes.as_cloned_map(),
+            facility_id: value
+                .facility_id
+                .as_ref()
+                .map(|id| id.external().to_string()),
         }
     }
 }
@@ -207,8 +211,9 @@ mod tests {
     use crate::generated::population::Activity;
     use crate::generated::population::{Leg, Person, Plan, PtRouteDescription};
     use crate::simulation::id::Id;
-    use crate::simulation::io::xml::population::{IOPlan, IOPopulation};
+    use crate::simulation::io::xml::population::{IOActivity, IOPlan, IOPopulation};
     use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::facilities::ActivityFacility;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::{
         InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
@@ -368,6 +373,31 @@ mod tests {
         assert_eq!(Some(SimTime::from_nanos(1_500_000)), round_trip.start_time);
         assert_eq!(Some(SimTime::from_nanos(2_250_000)), round_trip.end_time);
         assert_eq!(Some(Duration::from_nanos(3_500_000)), round_trip.max_dur);
+    }
+
+    #[deterministic_id_test]
+    fn activity_at_facility_without_link_survives_xml_and_proto_round_trip() {
+        Id::<ActivityFacility>::create("f1");
+        let mut activity = InternalActivity::new(
+            Some(Coordinate::new_2d(10.0, 20.0)),
+            "home",
+            Id::create("1"),
+            None,
+            Some(SimTime::from_secs(60)),
+            None,
+        );
+        activity.link_id = None;
+        activity.facility_id = Some(Id::get_from_ext("f1"));
+
+        let wire = Activity::from(&activity);
+        let decoded = Activity::decode(wire.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(activity, InternalActivity::from(decoded));
+
+        let xml = to_string(&IOActivity::from(&activity)).unwrap();
+        assert!(xml.contains(r#"facility="f1""#), "{xml}");
+        assert!(!xml.contains("link="), "{xml}");
+        let from_xml = InternalActivity::from(from_str::<IOActivity>(&xml).unwrap());
+        assert_eq!(activity, from_xml);
     }
 
     #[deterministic_id_test]

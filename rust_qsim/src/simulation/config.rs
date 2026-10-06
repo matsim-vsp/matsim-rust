@@ -163,6 +163,7 @@ impl Config {
         self.population_mut();
         self.vehicles_mut();
         self.transit_mut();
+        self.facilities_mut();
         self.ids_mut();
     }
 
@@ -255,6 +256,24 @@ impl Config {
     pub fn set_transit(&mut self, transit: Transit) {
         self.modules
             .insert("transit".to_string(), Box::new(transit));
+    }
+
+    pub fn facilities(&self) -> &Facilities {
+        self.module::<Facilities>("facilities")
+            .expect("Facilities was not set.")
+    }
+
+    pub fn facilities_mut(&mut self) -> &mut Facilities {
+        if !self.modules.contains_key("facilities") {
+            self.modules
+                .insert("facilities".to_string(), Box::new(Facilities::default()));
+        }
+        self.module_mut::<Facilities>("facilities").unwrap()
+    }
+
+    pub fn set_facilities(&mut self, facilities: Facilities) {
+        self.modules
+            .insert("facilities".to_string(), Box::new(facilities));
     }
 
     pub fn ids(&self) -> &Ids {
@@ -533,6 +552,11 @@ pub struct Transit {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Facilities {
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Ids {
     pub path: Option<PathBuf>,
 }
@@ -551,6 +575,10 @@ register_override!("vehicles.path", |config, value| {
 
 register_override!("transit.schedule_path", |config, value| {
     config.transit_mut().schedule_path = Some(PathBuf::from(value));
+});
+
+register_override!("facilities.path", |config, value| {
+    config.facilities_mut().path = Some(PathBuf::from(value));
 });
 
 register_override!("ids.path", |config, value| {
@@ -1087,6 +1115,16 @@ impl ConfigModule for Vehicles {
 
 #[typetag::serde]
 impl ConfigModule for Transit {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+#[typetag::serde]
+impl ConfigModule for Facilities {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -2136,6 +2174,38 @@ modules:
         assert_eq!(
             Some(PathBuf::from("schedule.binpb")),
             config.transit().schedule_path
+        );
+    }
+
+    #[test]
+    fn facilities_defaults_to_no_path() {
+        let config = Config::default();
+
+        assert_eq!(None, config.facilities().path);
+    }
+
+    #[test]
+    fn test_override_facilities_path() {
+        let yaml = r#"
+modules:
+  facilities:
+    type: Facilities
+    path: facilities.xml
+"#;
+        let file = write_temp_config(yaml);
+        let args = CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![(
+                "facilities.path".to_string(),
+                "facilities.binpb".to_string(),
+            )],
+        };
+
+        let config = Config::from_args(args);
+
+        assert_eq!(
+            Some(PathBuf::from("facilities.binpb")),
+            config.facilities().path
         );
     }
 

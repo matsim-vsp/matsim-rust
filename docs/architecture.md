@@ -17,7 +17,16 @@ based on that the controller -- pretty much like in MATSim Java.
 
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
-(`Arc<Network>`, `Arc<Garage>`, `Arc<Config>`) and owns the mutable `Population`.
+(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
+mutable `Population`.
+
+Input data is converted into internal types without deriving missing values. Fields that can be derived stay `Option`
+after the conversion and are resolved during preparation; code running afterward uses accessors such as
+`InternalActivity::link_id` instead of unwrapping. Preparation is split into two steps in `scenario::prepare`:
+
+- `prepare_for_sim` runs once on the loaded `Scenario`, before the controller shares it, e.g. with the routing modules.
+  It connects the facilities to the network and resolves the activity locations. Both run in parallel.
+- `prepare_for_mobsim` runs before every mobsim iteration. It validates and repairs plans, e.g. by routing trips.
 
 For mobsim, the controller splits the population into `MobsimInput`s. Each input contains a `MobsimPartition` with the
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive
@@ -30,7 +39,7 @@ worker result. A thread-local completion listener consolidates the collector's o
 shared travel-time calculator. The last submission atomically publishes the complete, immutable snapshot. The controller
 only waits for worker results, so publication has finished before `AfterMobsim`.
 The shared router reads the snapshot without taking the submission lock; unobserved links use freespeed.
-`prepare_for_sim` uses the previous iteration's snapshot, or an empty snapshot for the first iteration. The workers'
+`prepare_for_mobsim` uses the previous iteration's snapshot, or an empty snapshot for the first iteration. The workers'
 iteration-reset hooks clear the collectors before the next Mobsim. No event-file output is required for travel-time
 collection.
 

@@ -91,7 +91,7 @@ pub(crate) fn create_registrations(
                     person_id.external()
                 )
             });
-        let partition = scenario.core.network.get_link(&activity.link_id).partition;
+        let partition = scenario.core.network.get_link(activity.link_id()).partition;
         assert!(
             partition < num_parts,
             "Person {} starts in partition {}, but only {} partitions exist.",

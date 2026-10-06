@@ -82,9 +82,9 @@ impl ActivityEngine {
                 &ActivityEndEventBuilder::default()
                     .time(now)
                     .person(agent.id().clone())
-                    .link(agent.curr_act().link_id.clone())
+                    .link(agent.curr_act().link_id().clone())
                     .act_type(agent.curr_act().act_type.clone())
-                    .coordinate(agent.curr_act().coord.as_ref().unwrap().clone())
+                    .coordinate(agent.curr_act().coord().clone())
                     .build()
                     .unwrap(),
             );
@@ -123,9 +123,9 @@ impl ActivityEngine {
             &ActivityStartEventBuilder::default()
                 .time(now_time)
                 .person(agent.agent.id().clone())
-                .link(act.link_id.clone())
+                .link(act.link_id().clone())
                 .act_type(act.act_type.clone())
-                .coordinate(act.coord.as_ref().unwrap().clone())
+                .coordinate(act.coord().clone())
                 .build()
                 .unwrap(),
         );
@@ -405,9 +405,9 @@ mod tests {
         let agent = agents.first().unwrap();
 
         assert_eq!(agent.curr_act().act_type, Id::get_from_ext("home"));
-        assert_eq!(agent.curr_act().link_id, Id::get_from_ext("start"));
+        assert_eq!(agent.curr_act().link_id, Some(Id::get_from_ext("start")));
         assert_eq!(agent.next_act().act_type, Id::get_from_ext("work"));
-        assert_eq!(agent.next_act().link_id, Id::get_from_ext("end"));
+        assert_eq!(agent.next_act().link_id, Some(Id::get_from_ext("end")));
 
         let leg = agent.next_leg().unwrap();
 

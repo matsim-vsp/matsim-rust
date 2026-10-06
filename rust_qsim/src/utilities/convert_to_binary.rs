@@ -1,5 +1,6 @@
 use crate::simulation::config::PartitionMethod;
 use crate::simulation::id::Id;
+use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::transit::TransitSchedule;
@@ -24,6 +25,8 @@ pub struct InputArgs {
     pub run_id: String,
     #[arg(short, long)]
     pub transit_schedule: Option<PathBuf>,
+    #[arg(short, long)]
+    pub facilities: Option<PathBuf>,
 }
 
 pub fn run(args: &InputArgs) {
@@ -33,6 +36,12 @@ pub fn run(args: &InputArgs) {
         .transit_schedule
         .as_ref()
         .map(|path| TransitSchedule::from_file(path));
+    // Facilities are loaded before the population, so that their ids exist when activities
+    // reference them. Their modal links are derived in prepare_for_sim and not converted.
+    let facilities = args
+        .facilities
+        .as_ref()
+        .map(|path| ActivityFacilities::from_file(path));
     let pop = Population::from_file(&args.population, &mut veh);
 
     let cmp_weights = compute_computational_weights(&pop);
@@ -44,6 +53,9 @@ pub fn run(args: &InputArgs) {
     pop.to_file(&create_file_path(&args, "plans"));
     if let Some(transit_schedule) = transit_schedule.as_ref() {
         transit_schedule.to_file(&create_file_path(&args, "transit_schedule"));
+    }
+    if let Some(facilities) = facilities.as_ref() {
+        facilities.to_file(&create_file_path(&args, "facilities"));
     }
 }
 

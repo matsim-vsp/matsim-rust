@@ -13,16 +13,21 @@ use crate::simulation::network::metis_partitioning;
 use crate::simulation::scenario::Coordinate;
 use itertools::Itertools;
 use nohash_hasher::{IntMap, IntSet};
+use spatial_index::{LazySpatialIndex, NetworkSpatialIndex};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tracing::info;
+
+pub mod spatial_index;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Network {
     nodes: IntMap<Id<Node>, Node>,
     links: IntMap<Id<Link>, Link>,
     effective_cell_size: f64,
+    /// Built on first use and reset by every method that may change nodes or links.
+    spatial_index: LazySpatialIndex,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +68,7 @@ impl Network {
             nodes: IntMap::default(),
             links: IntMap::default(),
             effective_cell_size: 7.5,
+            spatial_index: LazySpatialIndex::default(),
         }
     }
 
@@ -101,6 +107,7 @@ impl Network {
     }
 
     pub fn add_node(&mut self, node: Node) {
+        self.spatial_index.reset();
         let id = node.id.clone();
         let option = self.nodes.insert(id.clone(), node);
         assert!(
@@ -111,6 +118,7 @@ impl Network {
     }
 
     pub fn add_link(&mut self, link: Link) {
+        self.spatial_index.reset();
         // wire up in and out links and push link to the links vec
         let id = link.id.clone();
         self.nodes
@@ -139,6 +147,7 @@ impl Network {
     /// Panics if the link does not exist or if network adjacency invariants are broken
     /// (for example, if the link is not present exactly once in the endpoint link lists).
     pub fn remove_link(&mut self, id: Id<Link>) {
+        self.spatial_index.reset();
         let link = self.links.remove(&id).unwrap_or_else(|| {
             panic!("Link with id {} does not exist in the network.", id);
         });
@@ -177,6 +186,7 @@ impl Network {
     ///
     /// Panics if the node does not exist.
     pub fn remove_node(&mut self, id: Id<Node>) {
+        self.spatial_index.reset();
         let links_to_remove: HashSet<_> = {
             let node = self.nodes.get(&id).unwrap_or_else(|| {
                 panic!("Node with id {} does not exist in the network.", id);
@@ -204,11 +214,24 @@ impl Network {
     }
 
     pub fn get_node_mut(&mut self, id: &Id<Node>) -> &mut Node {
+        self.spatial_index.reset();
         self.nodes.get_mut(id).unwrap()
     }
 
     pub fn get_link_mut(&mut self, id: &Id<Link>) -> &mut Link {
+        self.spatial_index.reset();
         self.links.get_mut(id).unwrap()
+    }
+
+    /// Returns the spatial index of the links. It is built on first use.
+    pub fn spatial_index(&self) -> &NetworkSpatialIndex {
+        self.spatial_index.get_or_init(self)
+    }
+
+    /// Returns the link nearest to `coord`, optionally restricted to links allowing `mode`.
+    /// See [`NetworkSpatialIndex::nearest_link`].
+    pub fn nearest_link(&self, coord: &Coordinate, mode: Option<&Id<String>>) -> Option<Id<Link>> {
+        self.spatial_index().nearest_link(coord, mode)
     }
 
     pub fn partition_network(

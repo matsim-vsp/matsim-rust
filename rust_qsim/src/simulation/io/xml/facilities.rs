@@ -5,8 +5,10 @@ use tracing::info;
 
 use crate::simulation::io::xml;
 use crate::simulation::io::xml::attributes::IOAttributes;
+use crate::simulation::scenario::facilities::{
+    ActivityFacilities, ActivityFacility, ActivityOption, OpenDay, OpeningTime,
+};
 
-#[allow(dead_code)]
 pub(crate) fn load_from_xml(path: &Path) -> IOFacilities {
     let io_facilities = IOFacilities::from_file(path.to_str().unwrap());
 
@@ -18,14 +20,27 @@ pub(crate) fn load_from_xml(path: &Path) -> IOFacilities {
     io_facilities
 }
 
+pub(crate) fn write_to_xml(facilities: &ActivityFacilities, path: &Path) {
+    info!("Writing facilities to XML at {path:?}");
+    xml::write_to_file(
+        &IOFacilities::from(facilities),
+        path,
+        "<!DOCTYPE facilities SYSTEM \"http://www.matsim.org/files/dtd/facilities_v2.dtd\">",
+    );
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 #[serde(rename = "facilities")]
 pub struct IOFacilities {
-    #[serde(rename = "@name")]
+    #[serde(rename = "@name", skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(rename = "@aggregation_layer")]
+    #[serde(rename = "@aggregation_layer", skip_serializing_if = "Option::is_none")]
     pub aggregation_layer: Option<String>,
-    #[serde(rename = "@xml:lang", alias = "@lang")]
+    #[serde(
+        rename = "@xml:lang",
+        alias = "@lang",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub lang: Option<String>,
     #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
     pub attributes: Option<IOAttributes>,
@@ -47,11 +62,11 @@ pub struct IOFacility {
     pub x: Option<f64>,
     #[serde(rename = "@y")]
     pub y: Option<f64>,
-    #[serde(rename = "@z")]
+    #[serde(rename = "@z", skip_serializing_if = "Option::is_none")]
     pub z: Option<f64>,
-    #[serde(rename = "@linkId")]
+    #[serde(rename = "@linkId", skip_serializing_if = "Option::is_none")]
     pub link_id: Option<String>,
-    #[serde(rename = "@desc")]
+    #[serde(rename = "@desc", skip_serializing_if = "Option::is_none")]
     pub desc: Option<String>,
     #[serde(rename = "activity", default)]
     pub activities: Vec<IOFacilityActivity>,
@@ -99,6 +114,81 @@ pub enum IOOpenDay {
     Wkend,
     #[default]
     Wk,
+}
+
+impl From<&ActivityFacilities> for IOFacilities {
+    fn from(facilities: &ActivityFacilities) -> Self {
+        IOFacilities {
+            name: facilities.name.clone(),
+            aggregation_layer: facilities.aggregation_layer.clone(),
+            lang: facilities.lang.clone(),
+            attributes: IOAttributes::from_internal_none_if_empty(&facilities.attributes),
+            facilities: facilities
+                .sorted_facilities()
+                .into_iter()
+                .map(IOFacility::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<&ActivityFacility> for IOFacility {
+    fn from(facility: &ActivityFacility) -> Self {
+        IOFacility {
+            id: facility.id.external().to_string(),
+            x: Some(facility.coord.x),
+            y: Some(facility.coord.y),
+            z: Some(facility.coord.z),
+            link_id: facility
+                .base_link
+                .as_ref()
+                .map(|id| id.external().to_string()),
+            desc: facility.desc.clone(),
+            activities: facility
+                .activities
+                .iter()
+                .map(IOFacilityActivity::from)
+                .collect(),
+            attributes: IOAttributes::from_internal_none_if_empty(&facility.attributes),
+        }
+    }
+}
+
+impl From<&ActivityOption> for IOFacilityActivity {
+    fn from(option: &ActivityOption) -> Self {
+        IOFacilityActivity {
+            activity_type: option.activity_type.external().to_string(),
+            capacity: option.capacity.map(|value| IOCapacity { value }),
+            open_times: option.open_times.iter().map(IOOpenTime::from).collect(),
+        }
+    }
+}
+
+impl From<&OpeningTime> for IOOpenTime {
+    fn from(open_time: &OpeningTime) -> Self {
+        IOOpenTime {
+            day: IOOpenDay::from(open_time.day),
+            start_time: open_time.start_time.format_hh_mm_ss_trimmed(),
+            end_time: open_time.end_time.format_hh_mm_ss_trimmed(),
+        }
+    }
+}
+
+impl From<OpenDay> for IOOpenDay {
+    fn from(day: OpenDay) -> Self {
+        match day {
+            OpenDay::Mon => IOOpenDay::Mon,
+            OpenDay::Tue => IOOpenDay::Tue,
+            OpenDay::Wed => IOOpenDay::Wed,
+            OpenDay::Thu => IOOpenDay::Thu,
+            OpenDay::Fri => IOOpenDay::Fri,
+            OpenDay::Sat => IOOpenDay::Sat,
+            OpenDay::Sun => IOOpenDay::Sun,
+            OpenDay::Wkday => IOOpenDay::Wkday,
+            OpenDay::Wkend => IOOpenDay::Wkend,
+            OpenDay::Wk => IOOpenDay::Wk,
+        }
+    }
 }
 
 #[cfg(test)]

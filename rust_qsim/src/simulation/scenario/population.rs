@@ -8,6 +8,7 @@ use crate::simulation::io::xml::population::{
     IOActivity, IOLeg, IOPTRouteDescription, IOPerson, IOPlan, IOPlanElement, IORoute,
 };
 use crate::simulation::scenario::Coordinate;
+use crate::simulation::scenario::facilities::ActivityFacility;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -81,8 +82,7 @@ impl Population {
         part: u32,
     ) -> Self {
         from_file(file_path, garage, |p| {
-            let act = p.plan_element_at(0).and_then(|p| p.as_activity()).unwrap();
-            let partition = net.get_link(&act.link_id).partition;
+            let partition = net.get_link(input_start_link(p)).partition;
             partition == part
         })
     }
@@ -115,12 +115,13 @@ impl Population {
                         id.external()
                     )
                 });
-            let partition = net.get_link(&act.link_id).partition;
+            let link_id = act.link_id();
+            let partition = net.get_link(link_id).partition;
             assert!(
                 partition < num_parts,
                 "Person {} starts on link {} with partition {}, but only {} partitions exist.",
                 id.external(),
-                act.link_id.external(),
+                link_id.external(),
                 partition,
                 num_parts
             );
@@ -154,8 +155,7 @@ impl Population {
 
     fn f(net: &Network, part: u32) -> impl Fn(&InternalPerson) -> bool + use<'_> {
         move |p: &InternalPerson| {
-            let act = p.plan_element_at(0).and_then(|p| p.as_activity()).unwrap();
-            let partition = net.get_link(&act.link_id).partition;
+            let partition = net.get_link(input_start_link(p)).partition;
             partition == part
         }
     }
@@ -176,11 +176,35 @@ impl Population {
     }
 }
 
+/// Returns the link of the first activity as given in the input. Partition filters may run before
+/// `prepare_for_sim`, so they cannot derive missing links and require them in the input.
+fn input_start_link(person: &InternalPerson) -> &Id<Link> {
+    person
+        .plan_element_at(0)
+        .and_then(|p| p.as_activity())
+        .and_then(|act| act.link_id.as_ref())
+        .unwrap_or_else(|| {
+            panic!(
+                "Person {} has no link on its first activity. Filtering by partition before prepare_for_sim requires link ids in the input.",
+                person.id().external()
+            )
+        })
+}
+
+/// An activity of a plan.
+///
+/// The location fields mirror the input: an activity may specify a facility, a link, a
+/// coordinate, or any combination of them. Missing values are derived in `prepare_for_sim`, so
+/// code running after it should use [`InternalActivity::link_id`] and
+/// [`InternalActivity::coord`].
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalActivity {
     pub act_type: Id<String>,
-    pub link_id: Id<Link>,
+    pub link_id: Option<Id<Link>>,
     pub coord: Option<Coordinate>,
+    /// The facility at which the activity takes place. `None` means that the activity is located
+    /// by its link and coordinate only, i.e. it is routed via a link wrapper facility.
+    pub facility_id: Option<Id<ActivityFacility>>,
     pub start_time: Option<SimTime>,
     pub end_time: Option<SimTime>,
     pub max_dur: Option<Duration>,
@@ -418,12 +442,33 @@ impl InternalActivity {
         InternalActivity {
             coord,
             act_type: Id::create(act_type),
-            link_id,
+            link_id: Some(link_id),
+            facility_id: None,
             start_time,
             end_time,
             max_dur,
             attributes: InternalAttributes::default(),
         }
+    }
+
+    /// Returns the link of the activity. It is always present after `prepare_for_sim`.
+    pub fn link_id(&self) -> &Id<Link> {
+        self.link_id.as_ref().unwrap_or_else(|| {
+            panic!(
+                "Activity of type {} has no link. Links are assigned in prepare_for_sim.",
+                self.act_type.external()
+            )
+        })
+    }
+
+    /// Returns the coordinate of the activity. It is always present after `prepare_for_sim`.
+    pub fn coord(&self) -> &Coordinate {
+        self.coord.as_ref().unwrap_or_else(|| {
+            panic!(
+                "Activity of type {} has no coordinate. Coordinates are assigned in prepare_for_sim.",
+                self.act_type.external()
+            )
+        })
     }
 
     // i think this should go into the utils module rather than being here. paul, mar'26
@@ -792,8 +837,9 @@ impl From<IOActivity> for InternalActivity {
     fn from(io: IOActivity) -> Self {
         InternalActivity {
             act_type: Id::create(&io.r#type),
-            link_id: Id::create(&io.link.expect("Activity must have a link id")),
+            link_id: io.link.as_deref().map(Id::create),
             coord: io.x.zip(io.y).map(|(x, y)| Coordinate::new_2d(x, y)),
+            facility_id: io.facility.as_deref().map(Id::create),
             start_time: parse_time_opt(&io.start_time),
             end_time: parse_time_opt(&io.end_time),
             max_dur: parse_duration_opt(&io.max_dur),
@@ -809,10 +855,11 @@ impl From<Activity> for InternalActivity {
     fn from(value: Activity) -> Self {
         InternalActivity {
             act_type: Id::get_from_ext(&value.act_type),
-            link_id: Id::get_from_ext(&value.link_id),
+            link_id: value.link_id.as_deref().map(Id::get_from_ext),
             coord: value
                 .coordinate
                 .map(|coord| Coordinate::new_3d(coord.x, coord.y, coord.z)),
+            facility_id: value.facility_id.as_deref().map(Id::get_from_ext),
             start_time: value.start_time_ns.map(SimTime::from_nanos),
             end_time: value.end_time_ns.map(SimTime::from_nanos),
             max_dur: value.max_dur_ns.map(Duration::from_nanos),
@@ -1010,6 +1057,7 @@ mod tests {
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
     use crate::simulation::io::xml::population::{IOActivity, IOLeg, IOPerson, IOPlan, IORoute};
     use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::facilities::ActivityFacility;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
         FromIOPerson, InternalActivity, InternalLeg, InternalPerson, InternalRoute, Population,
@@ -1037,18 +1085,47 @@ mod tests {
             let activity = InternalActivity::from(io_activity);
 
             assert_eq!(expected_coord, activity.coord, "input: {xml}");
-            assert_eq!(Id::<Link>::get_from_ext("1"), activity.link_id);
+            assert_eq!(Some(Id::<Link>::get_from_ext("1")), activity.link_id);
         }
     }
 
     #[deterministic_id_test]
-    #[should_panic(expected = "Activity must have a link id")]
-    fn activity_from_xml_still_requires_link_id() {
+    fn activity_from_xml_keeps_missing_link_for_prepare_for_sim() {
         let io_activity =
             quick_xml::de::from_str::<IOActivity>(r#"<activity type="home" x="10" y="20" />"#)
                 .unwrap();
 
-        let _ = InternalActivity::from(io_activity);
+        let activity = InternalActivity::from(io_activity);
+
+        assert_eq!(None, activity.link_id);
+        assert_eq!(None, activity.facility_id);
+        assert_eq!(Some(Coordinate::new_2d(10.0, 20.0)), activity.coord);
+    }
+
+    #[deterministic_id_test]
+    fn activity_from_xml_reads_facility_without_link_or_coordinate() {
+        let io_activity =
+            quick_xml::de::from_str::<IOActivity>(r#"<activity type="home" facility="f1" />"#)
+                .unwrap();
+
+        let activity = InternalActivity::from(io_activity);
+
+        assert_eq!(
+            Some(Id::<ActivityFacility>::get_from_ext("f1")),
+            activity.facility_id
+        );
+        assert_eq!(None, activity.link_id);
+        assert_eq!(None, activity.coord);
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Links are assigned in prepare_for_sim")]
+    fn prepared_link_id_panics_for_unresolved_activity() {
+        let io_activity =
+            quick_xml::de::from_str::<IOActivity>(r#"<activity type="home" facility="f1" />"#)
+                .unwrap();
+
+        InternalActivity::from(io_activity).link_id();
     }
 
     #[deterministic_id_test]
@@ -1154,7 +1231,7 @@ mod tests {
         let binding = plan.acts();
         let home_act = binding.first().unwrap();
         assert_eq!("h", home_act.act_type.external());
-        assert_eq!(Id::<Link>::get_from_ext("1"), home_act.link_id);
+        assert_eq!(Some(Id::<Link>::get_from_ext("1")), home_act.link_id);
         assert_eq!(-25000., home_act.coord.as_ref().unwrap().x);
         assert_eq!(0., home_act.coord.as_ref().unwrap().y);
         assert_eq!(Some(SimTime::from_secs(6 * 3600)), home_act.end_time);

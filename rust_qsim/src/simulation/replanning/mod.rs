@@ -5,8 +5,8 @@ use crate::simulation::replanning::routing::TripRouter;
 use crate::simulation::replanning::selectors::RandomSelector;
 use crate::simulation::scenario::ScenarioCore;
 use crate::simulation::scenario::population::{DEFAULT_SUBPOPULATION, InternalPerson, Population};
-use crate::simulation::scenario::prepare_for_sim::{
-    PrepareForSimContext, TripPreparationError, route_trip,
+use crate::simulation::scenario::prepare::prepare_for_mobsim::{
+    PrepareForMobsimContext, TripPreparationError, route_trip,
 };
 use crate::simulation::scenario::trip_structure_utils::{
     get_trip_spans_default, identify_main_mode,
@@ -384,9 +384,10 @@ impl ReRouteModule {
 
 impl PlanStrategyModule for ReRouteModule {
     fn handle(&self, person: &mut InternalPerson, plan_index: usize) {
-        let context = PrepareForSimContext {
+        let context = PrepareForMobsimContext {
             network: &self.scenario_core.network,
             garage: &self.scenario_core.garage,
+            facilities: &self.scenario_core.facilities,
             config: &self.scenario_core.config,
         };
         let trip_count = get_trip_spans_default(&person.plans()[plan_index].elements).len();
@@ -854,8 +855,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(request.departure_time());
-            let from = request.from().link().clone();
-            let to = request.to().link().clone();
+            let from = request.from().modal_link(&self.mode).clone();
+            let to = request.to().modal_link(&self.mode).clone();
             let one_second = Duration::from_secs(1);
             let two_seconds = Duration::from_secs(2);
             let access = InternalPlanElement::Leg(InternalLeg::new(

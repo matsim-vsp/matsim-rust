@@ -7,6 +7,7 @@ fn main() {
     let proto_files = [
         "src/simulation/io/proto/types/general.proto",
         "src/simulation/io/proto/types/events.proto",
+        "src/simulation/io/proto/types/facilities.proto",
         "src/simulation/io/proto/types/ids.proto",
         "src/simulation/io/proto/types/network.proto",
         "src/simulation/io/proto/types/population.proto",

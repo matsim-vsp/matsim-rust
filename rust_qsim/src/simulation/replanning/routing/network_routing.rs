@@ -3,9 +3,8 @@ use crate::simulation::replanning::routing::least_cost_path_calculator::{
     LeastCostPath, LeastCostPathCalculator, LeastCostPathRequestBuilder,
 };
 use crate::simulation::replanning::routing::{
-    RoutingError, RoutingModule, RoutingRequest, RoutingRequestBuilder,
+    Facility, RoutingError, RoutingModule, RoutingRequest, RoutingRequestBuilder,
 };
-use crate::simulation::scenario::facilities::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPlanElement,
@@ -33,14 +32,17 @@ impl RoutingModule for NetworkRoutingModule {
     ) -> Result<Vec<InternalPlanElement>, RoutingError> {
         let mut result = Vec::with_capacity(5);
 
+        let access_link = request.from.modal_link(&self.mode).clone();
+        let egress_link = request.to.modal_link(&self.mode).clone();
+
         // ====== route access leg
-        let mut now = self.access_routing(&request, &mut result)?;
+        let mut now = self.access_routing(&request, &access_link, &mut result)?;
 
         // ====== route "true" leg
-        now = self.network_leg(&request, now, &mut result)?;
+        now = self.network_leg(&request, &access_link, &egress_link, now, &mut result)?;
 
         // ======= route egress leg
-        self.egress_routing(&request, now, &mut result)?;
+        self.egress_routing(&request, &egress_link, now, &mut result)?;
 
         Ok(result)
     }
@@ -66,17 +68,19 @@ impl NetworkRoutingModule {
         }
     }
 
+    /// Calculates the legs needed from activity --> access link
     fn access_routing(
         &self,
         original_request: &RoutingRequest,
+        access_link: &Id<Link>,
         result: &mut Vec<InternalPlanElement>,
     ) -> Result<SimTime, RoutingError> {
         let coord = network::utils::find_nearest_point_on_link(
             original_request.from.coord(),
-            original_request.from.link(),
+            access_link,
             self.scenario.network.as_ref(),
         );
-        let to = Facility::new_link_wrapper_from(original_request.from, coord.clone());
+        let to = Facility::new_link_wrapper(coord.clone(), access_link.clone());
 
         let new_req = RoutingRequestBuilder::default()
             .from(original_request.from)
@@ -96,25 +100,26 @@ impl NetworkRoutingModule {
             mode: self.mode.external().to_string(),
         })?;
         result.extend(access);
-        let interaction_activity =
-            self.create_interaction_activity(coord, &original_request.from.link());
+        let interaction_activity = self.create_interaction_activity(coord, access_link);
         result.push(interaction_activity);
 
         Ok(now)
     }
 
+    /// Calculates the legs needed from egress link --> activity
     fn egress_routing(
         &self,
         original_request: &RoutingRequest,
+        egress_link: &Id<Link>,
         now: SimTime,
         result: &mut Vec<InternalPlanElement>,
     ) -> Result<(), RoutingError> {
         let coord = network::utils::find_nearest_point_on_link(
             original_request.to.coord(),
-            original_request.to.link(),
+            egress_link,
             self.scenario.network.as_ref(),
         );
-        let from = Facility::new_link_wrapper_from(original_request.to, coord.clone());
+        let from = Facility::new_link_wrapper(coord.clone(), egress_link.clone());
 
         let new_req = RoutingRequestBuilder::default()
             .from(&from)
@@ -125,30 +130,22 @@ impl NetworkRoutingModule {
             .build()
             .unwrap();
 
-        let interaction_activity =
-            self.create_interaction_activity(coord, original_request.to.link());
+        let interaction_activity = self.create_interaction_activity(coord, egress_link);
         result.push(interaction_activity);
         let egress = self.egress_router.calc_route(new_req)?;
         result.extend(egress);
         Ok(())
     }
 
+    /// Calculates the legs needed from access link --> egress link
     fn network_leg(
         &self,
         request: &RoutingRequest,
+        from: &Id<Link>,
+        to: &Id<Link>,
         now: SimTime,
         result: &mut Vec<InternalPlanElement>,
     ) -> Result<SimTime, RoutingError> {
-        let from = request
-            .from
-            .modal_link(&self.mode)
-            .unwrap_or_else(|| request.from.link())
-            .clone();
-        let to = request
-            .to
-            .modal_link(&self.mode)
-            .unwrap_or_else(|| request.to.link())
-            .clone();
         let person = request.person;
 
         let path = if from == to {
@@ -177,7 +174,7 @@ impl NetworkRoutingModule {
         };
 
         let elements =
-            vec![self.path_to_elements(path, &from, &to, &self.mode, request.vehicle, now)];
+            vec![self.path_to_elements(path, from, to, &self.mode, request.vehicle, now)];
         let time =
             TimeInterpretation::decide_on_elements_end_time(&elements, &now).ok_or_else(|| {
                 RoutingError::MissingEndTime {
@@ -288,8 +285,8 @@ mod tests {
     use crate::simulation::replanning::routing::a_star::Alt;
     use crate::simulation::replanning::routing::cost::FreeSpeedTravelTimeAndDisutility;
     use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
-    use crate::simulation::replanning::routing::{RoutingModule, RoutingRequestBuilder};
-    use crate::simulation::scenario::facilities::{ActivityFacility, Facility};
+    use crate::simulation::replanning::routing::{Facility, RoutingModule, RoutingRequestBuilder};
+    use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
         InternalActivity, InternalLeg, InternalPlanElement, InternalRoute,
@@ -361,8 +358,38 @@ mod tests {
         );
     }
 
-    fn assert_route_with_alt(from: Facility, to: Facility, expected: ExpectedTrip) {
-        let plan = calc_route_with_alt(&from, &to);
+    // The base link is only the facility's address. Access, egress and the network leg use the
+    // modal link of the mode.
+    #[deterministic_id_test]
+    fn calc_route_uses_modal_link_instead_of_base_link() {
+        let mut from = facility("from_base_20_modal_1", -17500.0, 100.0, "20");
+        from.mode_to_link
+            .insert(Id::create("car"), Id::<Link>::create("1"));
+
+        assert_route_with_alt(
+            from,
+            facility("to_20", 2500.0, 200.0, "20"),
+            ExpectedTrip {
+                access_link: "1",
+                access_projection: (-17500.0, 0.0),
+                access_distance: 100.0,
+                egress_link: "20",
+                egress_projection: (2500.0, 0.0),
+                egress_distance: 200.0,
+                network_start: "1",
+                network_end: "20",
+                network_distance: 25000.0,
+                network_travel_time: None,
+                network_routes: &[&["1", "2", "11", "20"]],
+            },
+        );
+    }
+
+    fn assert_route_with_alt(from: ActivityFacility, to: ActivityFacility, expected: ExpectedTrip) {
+        let plan = calc_route_with_alt(
+            &Facility::ActivityFacility(&from),
+            &Facility::ActivityFacility(&to),
+        );
 
         // Basic structure assertions
         assert_eq!(5, plan.len());
@@ -418,12 +445,21 @@ mod tests {
             .expect("Egress leg must have a route")
             .as_generic();
 
-        assert_eq!(expected.access_link, access_route.start_link().external());
+        // Access and egress walk legs connect the facility's walk link, i.e. its base link, with
+        // the car access and egress links.
+        let walk = Id::create("walk");
+        assert_eq!(
+            Facility::ActivityFacility(&from).modal_link(&walk),
+            access_route.start_link()
+        );
         assert_eq!(expected.access_link, access_route.end_link().external());
         assert_approx_eq!(expected.access_distance, access_route.distance().unwrap());
 
         assert_eq!(expected.egress_link, egress_route.start_link().external());
-        assert_eq!(expected.egress_link, egress_route.end_link().external());
+        assert_eq!(
+            Facility::ActivityFacility(&to).modal_link(&walk),
+            egress_route.end_link()
+        );
         assert_approx_eq!(expected.egress_distance, egress_route.distance().unwrap());
 
         let network_leg = network;
@@ -477,6 +513,7 @@ mod tests {
                 transit_schedule: Arc::new(
                     crate::simulation::scenario::transit::TransitSchedule::default(),
                 ),
+                facilities: Arc::new(ActivityFacilities::default()),
                 config: Arc::new(Config::default()),
             },
         );
@@ -491,16 +528,16 @@ mod tests {
         module.calc_route(request).unwrap()
     }
 
-    fn facility(id: &str, x: f64, y: f64, link_id: &str) -> Facility {
-        Facility::ActivityFacility(ActivityFacility {
+    fn facility(id: &str, x: f64, y: f64, link_id: &str) -> ActivityFacility {
+        ActivityFacility {
             id: Id::create(id),
             coord: Coordinate::new_2d(x, y),
-            link_id: Id::<Link>::create(link_id),
+            base_link: Some(Id::<Link>::create(link_id)),
             mode_to_link: IntMap::default(),
             desc: None,
             activities: Vec::new(),
             attributes: InternalAttributes::default(),
-        })
+        }
     }
 
     fn leg_at(plan: &[InternalPlanElement], index: usize) -> &InternalLeg {
@@ -539,7 +576,7 @@ mod tests {
     ) {
         assert!(activity.is_interaction());
         assert_eq!("car interaction", activity.act_type.external());
-        assert_eq!(link_id, activity.link_id.external());
+        assert_eq!(link_id, activity.link_id().external());
         assert_eq!(Some(Duration::from_secs(0)), activity.max_dur);
 
         let coord = activity

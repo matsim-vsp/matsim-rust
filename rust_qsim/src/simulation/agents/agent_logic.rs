@@ -406,18 +406,10 @@ impl AdaptivePlanBasedSimulationLogic {
 
         let payload = InternalRoutingRequestPayloadBuilder::default()
             .person_id(self.delegate.id().external().to_string())
-            .from_link(origin.link_id.external().to_string())
-            .from(
-                origin
-                    .coord
-                    .clone()
-                    .expect("Origin activity must have coordinate to call router."),
-            )
-            .to_link(destination.link_id.external().to_string())
-            .to(destination
-                .coord
-                .clone()
-                .expect("Destination activity must have coordinate to call router."))
+            .from_link(origin.link_id().external().to_string())
+            .from(origin.coord().clone())
+            .to_link(destination.link_id().external().to_string())
+            .to(destination.coord().clone())
             .mode(mode.clone())
             .departure_time(departure_time)
             .now(now)
@@ -502,8 +494,9 @@ mod tests {
     fn make_activity(act_type: &str, link: &str) -> InternalActivity {
         InternalActivity {
             act_type: Id::create(act_type),
-            link_id: Id::create(link),
+            link_id: Some(Id::create(link)),
             coord: Some(Coordinate::default()),
+            facility_id: None,
             start_time: None,
             end_time: None,
             max_dur: None,

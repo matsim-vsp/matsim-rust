@@ -1,14 +1,16 @@
+use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
 use crate::simulation::config::Config;
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::utils::calc_distance;
-use crate::simulation::replanning::routing::{RoutingError, RoutingRequestBuilder, TripRouter};
+use crate::simulation::replanning::routing::{
+    Facility, RoutingError, RoutingRequestBuilder, TripRouter,
+};
 use crate::simulation::scenario::ControllerScenario;
-use crate::simulation::scenario::Coordinate;
-use crate::simulation::scenario::facilities::Facility;
+use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{
-    InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement,
-    InternalRoute,
+    InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
+    InternalPlanElement, InternalRoute,
 };
 use crate::simulation::scenario::trip_structure_utils::{
     TripSpan, get_trip_spans_default, identify_main_mode,
@@ -20,44 +22,16 @@ use rayon::prelude::*;
 use std::borrow::Cow;
 use thiserror::Error;
 
-#[derive(Debug, Error, PartialEq, Eq)]
-#[error("prepare-for-sim failed")]
-pub struct PrepareForSimError {
-    issues: Vec<PrepareForSimIssue>,
-}
-
-impl PrepareForSimError {
-    fn new(mut issues: Vec<PrepareForSimIssue>) -> Self {
-        issues.sort_by(|a, b| {
-            (&a.person_id, a.plan_index, a.trip_index).cmp(&(
-                &b.person_id,
-                b.plan_index,
-                b.trip_index,
-            ))
-        });
-        Self { issues }
-    }
-
-    pub fn issues(&self) -> &[PrepareForSimIssue] {
-        &self.issues
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrepareForSimIssue {
-    pub person_id: String,
-    pub plan_index: usize,
-    pub trip_index: Option<usize>,
-    pub message: String,
-}
-
-pub(crate) fn prepare_for_sim(
+/// Prepares the population before every mobsim iteration: plans are validated and repaired, e.g.
+/// trips without valid routes are routed with the current travel times.
+pub(crate) fn prepare_for_mobsim(
     scenario: &mut ControllerScenario,
     trip_router: &TripRouter,
-) -> Result<(), PrepareForSimError> {
-    let context = PrepareForSimContext {
+) -> Result<(), PrepareError> {
+    let context = PrepareForMobsimContext {
         network: &scenario.core.network,
         garage: &scenario.core.garage,
+        facilities: &scenario.core.facilities,
         config: scenario.core.config.as_ref(),
     };
 
@@ -65,26 +39,21 @@ pub(crate) fn prepare_for_sim(
         .population
         .persons
         .par_iter_mut()
-        .flat_map(|(_, person)| prepare_person(&context, person, trip_router))
+        .flat_map(|(_, person)| {
+            prepare_person(person, |person, plan| {
+                prepare_plan(&context, person, plan, trip_router)
+            })
+        })
         .collect();
 
-    if issues.is_empty() {
-        Ok(())
-    } else {
-        Err(PrepareForSimError::new(issues))
-    }
+    PrepareError::from_issues(issues)
 }
 
-pub struct PrepareForSimContext<'a> {
+pub struct PrepareForMobsimContext<'a> {
     pub network: &'a Network,
     pub garage: &'a Garage,
+    pub facilities: &'a ActivityFacilities,
     pub config: &'a Config,
-}
-
-#[derive(Debug)]
-struct IndexedTripFailure {
-    trip_index: usize,
-    source: TripPreparationError,
 }
 
 #[derive(Debug, Error)]
@@ -102,6 +71,8 @@ pub(crate) enum TripPreparationError {
         mode: String,
         default_vehicle: String,
     },
+    #[error("Activity references unknown facility {facility}")]
+    UnknownFacility { facility: String },
     #[error(transparent)]
     Routing(#[from] RoutingError),
 }
@@ -111,77 +82,30 @@ enum TripAssessment {
     NeedsRouting(Id<String>),
 }
 
-/// Prepares a single person for simulation by validating and potentially repairing their plans.
-/// This function works in two stages:
-/// (1) check if preparation is needed and perform it on a clone of the plan,
-/// (2) replace the old plans by the new ones.
-///
-/// This two-stage approach is necessary to avoid data races when multiple plans of the same person are being prepared in parallel.
-fn prepare_person(
-    context: &PrepareForSimContext<'_>,
-    person: &mut InternalPerson,
-    trip_router: &TripRouter,
-) -> Vec<PrepareForSimIssue> {
-    // Stage 1: check if preparation is needed and perform it on a clone of the plan
-    // This stage is parallelized by rayon
-    let outcomes: Vec<_> = person
-        .plans()
-        .par_iter()
-        .enumerate()
-        .map(|(plan_index, plan)| (plan_index, prepare_plan(context, person, plan, trip_router)))
-        .collect();
-
-    // Stage 2: replace the old plans by the new ones
-    let mut issues = Vec::new();
-    let person_id = person.id().external().to_string();
-    for (plan_index, outcome) in outcomes {
-        match outcome {
-            Ok(Some(plan)) => person.plans_mut()[plan_index] = plan,
-            Ok(None) => {}
-            Err(failure) => {
-                issues.push(PrepareForSimIssue {
-                    person_id: person_id.clone(),
-                    plan_index,
-                    trip_index: Some(failure.trip_index),
-                    message: failure.source.to_string(),
-                });
-            }
-        }
-    }
-
-    issues
-}
-
 fn prepare_plan<'a>(
-    context: &PrepareForSimContext<'_>,
+    context: &PrepareForMobsimContext<'_>,
     person: &InternalPerson,
     plan: &'a InternalPlan,
     trip_router: &TripRouter,
-) -> Result<Option<InternalPlan>, IndexedTripFailure> {
+) -> Result<Option<InternalPlan>, PlanPreparationFailure> {
     // `Cow` works as follows: borrow the plan and if it needs to be mutated, clone it.
     let mut working_plan = Cow::Borrowed(plan);
-    if working_plan
-        .acts()
-        .iter()
-        .any(|activity| activity.coord.is_none())
-    {
-        assign_activity_coordinates(context, working_plan.to_mut());
-    }
 
     let trip_count = get_trip_spans_default(&working_plan.elements).len();
     for trip_index in 0..trip_count {
-        check_and_adapt_trip(context, person, &mut working_plan, trip_index, trip_router)
-            .map_err(|source| IndexedTripFailure { trip_index, source })?;
+        check_and_adapt_trip(context, person, &mut working_plan, trip_index, trip_router).map_err(
+            |source| PlanPreparationFailure {
+                trip_index: Some(trip_index),
+                message: source.to_string(),
+            },
+        )?;
     }
 
-    Ok(match working_plan {
-        Cow::Borrowed(_) => None,
-        Cow::Owned(plan) => Some(plan),
-    })
+    Ok(owned_plan(working_plan))
 }
 
 fn check_and_adapt_trip(
-    context: &PrepareForSimContext<'_>,
+    context: &PrepareForMobsimContext<'_>,
     person: &InternalPerson,
     working_plan: &mut Cow<'_, InternalPlan>,
     trip_index: usize,
@@ -202,7 +126,7 @@ fn check_and_adapt_trip(
 }
 
 pub(crate) fn route_trip(
-    context: &PrepareForSimContext<'_>,
+    context: &PrepareForMobsimContext<'_>,
     person: &InternalPerson,
     plan: &InternalPlan,
     span: TripSpan,
@@ -217,14 +141,8 @@ pub(crate) fn route_trip(
 
     let origin = span.origin(&plan.elements);
     let dest = span.destination(&plan.elements);
-    let from_facility = Facility::new_link_wrapper(
-        origin.coord.clone().expect("coordinates were assigned"),
-        origin.link_id.clone(),
-    );
-    let to_facility = Facility::new_link_wrapper(
-        dest.coord.clone().expect("coordinates were assigned"),
-        dest.link_id.clone(),
-    );
+    let from_facility = facility_for_activity(context, origin)?;
+    let to_facility = facility_for_activity(context, dest)?;
     let vehicle = vehicle_for_trip(context, person, span, &plan.elements, mode)?;
 
     let request = RoutingRequestBuilder::default()
@@ -238,23 +156,29 @@ pub(crate) fn route_trip(
     Ok(trip_router.calc_route(mode, request)?)
 }
 
-fn assign_activity_coordinates(context: &PrepareForSimContext<'_>, plan: &mut InternalPlan) {
-    for element in &mut plan.elements {
-        let InternalPlanElement::Activity(activity) = element else {
-            continue;
-        };
-
-        if activity.coord.is_none() {
-            let link = context.network.get_link(&activity.link_id);
-            let from = context.network.get_node(&link.from);
-            let to = context.network.get_node(&link.to);
-            activity.coord = Some(Coordinate::middle(&from.coord, &to.coord));
-        }
+/// Each activity takes place at a facility. Activities without a facility are routed via a link
+/// wrapper facility built from the activity's own link and coordinate.
+fn facility_for_activity<'a>(
+    context: &PrepareForMobsimContext<'a>,
+    activity: &InternalActivity,
+) -> Result<Facility<'a>, TripPreparationError> {
+    match &activity.facility_id {
+        Some(facility_id) => context
+            .facilities
+            .get(facility_id)
+            .map(Facility::ActivityFacility)
+            .ok_or_else(|| TripPreparationError::UnknownFacility {
+                facility: facility_id.external().to_string(),
+            }),
+        None => Ok(Facility::new_link_wrapper(
+            activity.coord().clone(),
+            activity.link_id().clone(),
+        )),
     }
 }
 
 fn assess_trip(
-    context: &PrepareForSimContext<'_>,
+    context: &PrepareForMobsimContext<'_>,
     span: TripSpan,
     working_plan: &mut Cow<'_, InternalPlan>,
 ) -> Result<TripAssessment, TripPreparationError> {
@@ -342,7 +266,7 @@ fn synchronize_missing_travel_times(span: TripSpan, working_plan: &mut Cow<'_, I
 }
 
 fn trip_is_valid(
-    context: &PrepareForSimContext<'_>,
+    context: &PrepareForMobsimContext<'_>,
     span: TripSpan,
     elements: &[InternalPlanElement],
     mode: &Id<String>,
@@ -438,7 +362,7 @@ fn network_route_is_valid(
 }
 
 fn vehicle_for_trip<'a>(
-    context: &'a PrepareForSimContext<'_>,
+    context: &'a PrepareForMobsimContext<'_>,
     person: &InternalPerson,
     span: TripSpan,
     elements: &[InternalPlanElement],
@@ -472,7 +396,7 @@ fn vehicle_for_trip<'a>(
         })
 }
 
-fn is_network_mode(context: &PrepareForSimContext<'_>, mode: &Id<String>) -> bool {
+fn is_network_mode(context: &PrepareForMobsimContext<'_>, mode: &Id<String>) -> bool {
     context
         .config
         .qsim()
@@ -483,7 +407,8 @@ fn is_network_mode(context: &PrepareForSimContext<'_>, mode: &Id<String>) -> boo
 
 #[cfg(test)]
 mod tests {
-    use super::{add_travel_distance, prepare_for_sim};
+    use super::add_travel_distance;
+    use super::prepare_for_mobsim;
     use crate::simulation::InternalAttributes;
     use crate::simulation::config::Config;
     use crate::simulation::id::Id;
@@ -491,10 +416,15 @@ mod tests {
     use crate::simulation::replanning::routing::{
         RoutingError, RoutingModule, RoutingRequest, TripRouter,
     };
+    use crate::simulation::scenario::facilities::ActivityFacilities;
     use crate::simulation::scenario::network::{Link, Network, Node};
     use crate::simulation::scenario::population::{
         InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPerson,
         InternalPlan, InternalPlanElement, InternalRoute, Population,
+    };
+    use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
+    use crate::simulation::scenario::prepare::test_utils::{
+        activity_facility, facilities, layered_network, located_activity,
     };
     use crate::simulation::scenario::transit::TransitSchedule;
     use crate::simulation::scenario::trip_structure_utils::get_trip_spans_default;
@@ -509,17 +439,17 @@ mod tests {
 
     // Before: no persons or plans; after: the population is still empty.
     #[deterministic_id_test]
-    fn prepare_for_sim_succeeds_for_empty_population() {
+    fn prepare_for_mobsim_succeeds_for_empty_population() {
         let mut scenario = scenario_with_population(Population::new());
 
-        prepare_for_sim(&mut scenario, &empty_router()).unwrap();
+        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
 
         assert!(scenario.population.persons.is_empty());
     }
 
     // Before: two persons with activity-only plans; after: both persons and plans are unchanged.
     #[deterministic_id_test]
-    fn prepare_for_sim_visits_population_without_moving_persons() {
+    fn prepare_for_mobsim_visits_population_without_moving_persons() {
         let mut persons = IntMap::default();
         persons.insert(Id::create("person-1"), person("person-1", "link-1"));
         persons.insert(Id::create("person-2"), person("person-2", "link-1"));
@@ -528,7 +458,7 @@ mod tests {
             Population { persons },
         );
 
-        prepare_for_sim(&mut scenario, &empty_router()).unwrap();
+        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
 
         assert_eq!(2, scenario.population.persons.len());
         assert!(
@@ -547,7 +477,7 @@ mod tests {
 
     // Before: one activity without a coordinate; after: the activity has the link midpoint.
     #[deterministic_id_test]
-    fn prepare_for_sim_assigns_missing_activity_coordinates() {
+    fn prepare_for_mobsim_assigns_missing_activity_coordinates() {
         let person_id = Id::create("person-1");
         let link_id = Id::create("link-1");
         let mut plan = InternalPlan::default();
@@ -570,7 +500,7 @@ mod tests {
             Population { persons },
         );
 
-        prepare_for_sim(&mut scenario, &empty_router()).unwrap();
+        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
 
         let person = scenario.population.persons.get(&person_id).unwrap();
         let act = person.selected_plan().unwrap().acts()[0];
@@ -600,7 +530,7 @@ mod tests {
             Config::default(),
         );
 
-        prepare_for_sim(&mut scenario, &router).unwrap();
+        prepare_for_mobsim(&mut scenario, &router).unwrap();
 
         let person = scenario.population.persons.get(&person_id).unwrap();
         assert_eq!(2, person.plans().len());
@@ -616,7 +546,7 @@ mod tests {
         }
 
         first_plan = person.plans()[0].clone();
-        prepare_for_sim(&mut scenario, &empty_router()).unwrap();
+        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
         assert_eq!(
             &first_plan,
             &scenario.population.persons.get(&person_id).unwrap().plans()[0]
@@ -640,7 +570,7 @@ mod tests {
             Config::default(),
         );
 
-        prepare_for_sim(&mut scenario, &empty_router()).unwrap();
+        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
 
         let plan = scenario.population.persons[&person_id]
             .selected_plan()
@@ -670,7 +600,7 @@ mod tests {
             Config::default(),
         );
 
-        prepare_for_sim(&mut scenario, &empty_router()).unwrap();
+        prepare_for_mobsim(&mut scenario, &empty_router()).unwrap();
 
         let plan = scenario.population.persons[&person_id]
             .selected_plan()
@@ -777,7 +707,7 @@ mod tests {
             Config::default(),
         );
 
-        let error = prepare_for_sim(&mut scenario, &empty_router()).unwrap_err();
+        let error = prepare_for_mobsim(&mut scenario, &empty_router()).unwrap_err();
 
         assert_eq!(1, error.issues().len());
         assert_eq!(0, error.issues()[0].plan_index);
@@ -820,7 +750,7 @@ mod tests {
             config,
         );
 
-        prepare_for_sim(&mut scenario, &router).unwrap();
+        prepare_for_mobsim(&mut scenario, &router).unwrap();
 
         let plan = scenario
             .population
@@ -865,7 +795,7 @@ mod tests {
                 .set_trav_time(None);
         }
 
-        prepare_for_sim(&mut scenario, &router).unwrap();
+        prepare_for_mobsim(&mut scenario, &router).unwrap();
 
         assert_eq!(
             vec![SimTime::from_secs(10)],
@@ -926,7 +856,7 @@ mod tests {
             config,
         );
 
-        prepare_for_sim(&mut scenario, &router).unwrap();
+        prepare_for_mobsim(&mut scenario, &router).unwrap();
 
         assert_eq!(
             vec![SimTime::from_secs(10), SimTime::from_secs(19)],
@@ -956,7 +886,7 @@ mod tests {
             config,
         );
 
-        let error = prepare_for_sim(&mut scenario, &router).unwrap_err();
+        let error = prepare_for_mobsim(&mut scenario, &router).unwrap_err();
 
         assert!(error.issues()[0].message.contains("person-1_car"));
         assert!(departures.lock().unwrap().is_empty());
@@ -996,7 +926,7 @@ mod tests {
             config,
         );
 
-        let error = prepare_for_sim(&mut scenario, &router).unwrap_err();
+        let error = prepare_for_mobsim(&mut scenario, &router).unwrap_err();
 
         assert_eq!(Some(0), error.issues()[0].trip_index);
         assert!(error.issues()[0].message.contains("departure time"));
@@ -1007,6 +937,60 @@ mod tests {
                 .selected_plan()
                 .unwrap()
         );
+    }
+
+    // Before: act@facility--unrouted car--act@facility; after: the car leg runs between the modal
+    // links, while the activities stay on the facilities' base links.
+    #[deterministic_id_test]
+    fn routes_trips_between_facilities_via_modal_links() {
+        let departures = Arc::new(Mutex::new(Vec::new()));
+        let router = network_test_router(departures.clone());
+        let mut config = Config::default();
+        config.qsim_mut().main_modes = vec!["car".to_string()];
+        let mut garage = Garage::default();
+        garage.add_veh(test_vehicle("person-1_car"));
+        let network = layered_network();
+        let facilities = facilities(vec![
+            activity_facility("home", 50.0, 19.0, Some("car-0")),
+            activity_facility("work", 50.0, 1.0, None),
+        ]);
+        let mut plan = InternalPlan::default();
+        let mut home = located_activity(None, None, Some("home"));
+        home.end_time = Some(SimTime::from_secs(10));
+        plan.add_act(home);
+        plan.add_leg(unrouted_leg("car"));
+        plan.add_act(located_activity(None, None, Some("work")));
+        let person_id = Id::create("person-1");
+        let mut persons = IntMap::default();
+        persons.insert(
+            person_id.clone(),
+            InternalPerson::new(person_id.clone(), plan),
+        );
+        let mut scenario = Scenario {
+            network,
+            garage,
+            population: Population { persons },
+            transit_schedule: TransitSchedule::default(),
+            facilities,
+            config: Arc::new(config),
+        };
+        prepare_for_sim(&mut scenario).unwrap();
+        let mut scenario: ControllerScenario = scenario.into();
+
+        prepare_for_mobsim(&mut scenario, &router).unwrap();
+
+        let plan = scenario.population.persons[&person_id]
+            .selected_plan()
+            .unwrap();
+        assert_eq!(vec!["walk", "car", "walk"], leg_modes(plan));
+        assert_eq!("car-0", plan.acts()[0].link_id().external());
+        assert_eq!("car-0", plan.acts()[3].link_id().external());
+        let access_interaction = plan.acts()[1];
+        assert_eq!("car-bike-20", access_interaction.link_id().external());
+        let car_route = plan.legs()[1].route.as_ref().unwrap().as_generic().clone();
+        assert_eq!("car-bike-20", car_route.start_link().external());
+        assert_eq!("car-0", car_route.end_link().external());
+        assert_eq!(vec![SimTime::from_secs(10)], *departures.lock().unwrap());
     }
 
     fn scenario_with_population(population: Population) -> ControllerScenario {
@@ -1026,6 +1010,7 @@ mod tests {
             garage: Garage::default(),
             population,
             transit_schedule: TransitSchedule::default(),
+            facilities: ActivityFacilities::default(),
             config: Arc::new(Config::default()),
         }
         .into()
@@ -1042,6 +1027,7 @@ mod tests {
             garage,
             population,
             transit_schedule: TransitSchedule::default(),
+            facilities: ActivityFacilities::default(),
             config: Arc::new(config),
         }
         .into()
@@ -1217,8 +1203,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(request.departure_time());
-            let from = request.from().link().clone();
-            let to = request.to().link().clone();
+            let from = request.from().modal_link(&self.mode).clone();
+            let to = request.to().modal_link(&self.mode).clone();
             let one_second = Duration::from_secs(1);
             let two_seconds = Duration::from_secs(2);
 
