@@ -629,7 +629,7 @@ mod tests {
         let link = link("mode-specific", 100.0, 10.0);
         observe_travel_time(&mut partition, "car", &link.id, "car-vehicle", 20);
         observe_travel_time(&mut partition, "walk", &link.id, "walk-vehicle", 30);
-        let travel_time = global_travel_time(vec![partition], &[link.clone()]);
+        let travel_time = global_travel_time(vec![partition], std::slice::from_ref(&link));
 
         let car = ScoringBasedTravelTimeAndDisutility::new(
             &config,

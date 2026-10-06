@@ -206,6 +206,40 @@ cd rust_qsim
 cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-config-1.yml
 ```
 
+## Serve routes to SILO after QSim
+
+With `--routing-service-ready-file`, `local_qsim` keeps its trip router and population alive after
+the last iteration and answers route queries over TCP, so SILO can reuse the simulated travel times
+for the rest of its year:
+
+```shell
+cargo run --release --bin local_qsim -- --config /path/to/config.yml --routing-service-ready-file /path/to/ready
+```
+
+The service binds to a free port on `127.0.0.1` and writes its address (for example
+`127.0.0.1:41235`) to the ready file once it accepts connections. The process then keeps serving
+until it is killed.
+
+The protocol is line-delimited JSON: one request object per line, one response object per line.
+
+```json
+{"mode": "car", "from_x": -20000.0, "from_y": 0.0, "from_link_id": "1", "to_x": 0.0, "to_y": 0.0, "to_link_id": "20", "departure_time_seconds": 21600.0, "person_id": null}
+```
+
+```json
+{"travel_time_seconds": 1234.0, "distance_meters": 25000.0, "error": null}
+```
+
+`person_id` is optional. Unknown links or persons, non-finite coordinates, and negative departure
+times produce a response with `error` set instead of closing the connection. A request whose
+origin and destination are the same link returns zero time and distance, as MATSim does for
+intrazonal trips.
+
+For `pt` requests that no transit line connects, the transit router falls back to the car router
+when one is configured, including for requests without a person. Without a fallback the response
+reports the no-path error. See `rust_qsim/tests/resources/equil/equil-config-silo-routing.yml` for a
+minimal config used by the integration test.
+
 ## Reanalyze a completed run
 
 A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. It

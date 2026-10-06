@@ -167,7 +167,7 @@ pub(crate) struct MobsimWorkerPool {
 }
 
 pub(crate) enum MobsimWorkerCommand {
-    RunMobsim(MobsimWorkerRun),
+    RunMobsim(Box<MobsimWorkerRun>),
     Shutdown,
 }
 
@@ -282,11 +282,11 @@ impl MobsimWorkerPool {
             self.command_senders
                 .get(&rank)
                 .unwrap_or_else(|| panic!("No mobsim worker command sender for rank {rank}."))
-                .send(MobsimWorkerCommand::RunMobsim(MobsimWorkerRun {
+                .send(MobsimWorkerCommand::RunMobsim(Box::new(MobsimWorkerRun {
                     iteration,
                     is_last_iteration,
                     input,
-                }))
+                })))
                 .unwrap_or_else(|err| {
                     panic!("Failed to send mobsim command to rank {rank}: {err}")
                 });
@@ -419,11 +419,12 @@ impl MobsimWorker {
     ) {
         while let Ok(command) = command_receiver.recv() {
             match command {
-                MobsimWorkerCommand::RunMobsim(MobsimWorkerRun {
-                    iteration,
-                    is_last_iteration,
-                    input,
-                }) => {
+                MobsimWorkerCommand::RunMobsim(run) => {
+                    let MobsimWorkerRun {
+                        iteration,
+                        is_last_iteration,
+                        input,
+                    } = *run;
                     info!(
                         "Mobsim worker #{} starting iteration {}. Last iteration: {}",
                         self.rank, iteration, is_last_iteration

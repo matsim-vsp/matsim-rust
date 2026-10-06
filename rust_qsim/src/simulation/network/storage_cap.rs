@@ -230,8 +230,10 @@ mod test {
         network.add_node(to);
         network.add_link(link);
 
-        let mut qsim = config::QSim::default();
-        qsim.sample_size = 0.2;
+        let qsim = config::QSim {
+            sample_size: 0.2,
+            ..Default::default()
+        };
         let capacities = LinkStorageCapacities::from_network(&network, &qsim);
 
         assert_eq!(Some(200.), capacities.get(&link_id).qsim_override());

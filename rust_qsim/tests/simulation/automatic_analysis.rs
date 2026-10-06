@@ -839,10 +839,7 @@ fn metric_catalog_names_match_the_exported_columns() {
         "unused_links",
         "unavailable_links",
     ] {
-        assert!(
-            names.iter().any(|name| *name == expected),
-            "{expected} is not catalogued"
-        );
+        assert!(names.contains(&expected), "{expected} is not catalogued");
     }
     for name in [
         "capacity_pce_per_hour",
@@ -908,15 +905,15 @@ fn capacity_utilization_uses_effective_capacity_and_survives_event_order() {
             assert_eq!(row["entry_pce"], "0.500000");
             assert_eq!(row["entry_vc"], "0.100000");
             // The `links` column is the sixth, and only the occupied bin is nonzero.
-            let binned = histogram
+
+            histogram
                 .lines()
                 .find(|line| {
                     line.starts_with("0,entry_vc,")
                         && line.split(',').nth(5).is_some_and(|links| links != "0")
                 })
                 .expect("the link is binned somewhere")
-                .to_owned();
-            binned
+                .to_owned()
         })
         .collect();
     assert_eq!(bins[0], bins[1]);

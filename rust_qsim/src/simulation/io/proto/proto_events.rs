@@ -675,7 +675,7 @@ mod tests {
         let (time, events) = reader.next().expect("Couldn't read timestep.");
         assert_eq!(SimTime::from_nanos(1_500_000), time);
         assert_eq!(1, events.len());
-        match_events(&event, events.first().unwrap());
+        match_events(event.as_ref(), events.first().unwrap());
     }
 
     #[deterministic_id_test]
@@ -728,7 +728,7 @@ mod tests {
         assert_eq!(issued_events.len(), events.len());
 
         for (i, expected_event) in issued_events.iter().enumerate() {
-            match_events(expected_event, events.get(i).unwrap());
+            match_events(expected_event.as_ref(), events.get(i).unwrap());
         }
     }
 
@@ -798,7 +798,7 @@ mod tests {
             assert_eq!(3, events.len());
             for (i, event) in events.iter().enumerate() {
                 let index = ((time.as_secs() - start_time.as_secs()) * 3) as usize + i;
-                match_events(issued_events.get(index).unwrap(), event);
+                match_events(issued_events.get(index).unwrap().as_ref(), event);
             }
         }
     }
@@ -811,7 +811,7 @@ mod tests {
         path_buf
     }
 
-    fn match_events(event: &Box<dyn EventTrait>, other: &GenericEvent) {
+    fn match_events(event: &dyn EventTrait, other: &GenericEvent) {
         let type_ = event.type_();
         assert_eq!(type_, other.r#type);
 
