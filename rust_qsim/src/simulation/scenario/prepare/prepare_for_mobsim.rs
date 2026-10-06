@@ -177,6 +177,7 @@ fn facility_for_activity<'a>(
             activity.link_id().clone(),
             mode,
             context.network,
+            context.config.facilities().modal_link_selection,
         )),
     }
 }
@@ -414,7 +415,7 @@ mod tests {
     use super::add_travel_distance;
     use super::prepare_for_mobsim;
     use crate::simulation::InternalAttributes;
-    use crate::simulation::config::Config;
+    use crate::simulation::config::{Config, ModalLinkSelection};
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
     use crate::simulation::replanning::routing::{
@@ -871,14 +872,37 @@ mod tests {
         );
     }
 
-    // Before: act on a bike-only link--unrouted car--act on a car link; after: the car leg runs
-    // between the nearest car links, while the activities stay on their own links.
+    // Before: act on a bike-only link--unrouted car--act on a car link; after: the car leg starts on
+    // the nearest car link and ends on the destination's own link, which allows car.
     #[deterministic_id_test]
-    fn routes_activities_without_facility_via_nearest_link_of_the_mode() {
+    fn routes_activities_without_facility_with_base_link_first() {
+        let plan = route_activities_without_facility(ModalLinkSelection::BaseLinkFirst);
+
+        let car_route = plan.legs()[1].route.as_ref().unwrap().as_generic().clone();
+        assert_eq!("car-bike-20", car_route.start_link().external());
+        // The destination link allows car, so it is kept although car-bike-20 is nearer.
+        assert_eq!("car-0", car_route.end_link().external());
+    }
+
+    // Before: as above; after: both ends of the car leg are the nearest car links.
+    #[deterministic_id_test]
+    fn routes_activities_without_facility_with_nearest_link() {
+        let plan = route_activities_without_facility(ModalLinkSelection::NearestLink);
+
+        let car_route = plan.legs()[1].route.as_ref().unwrap().as_generic().clone();
+        assert_eq!("car-bike-20", car_route.start_link().external());
+        // The destination link allows car, but car-bike-20 is nearer.
+        assert_eq!("car-bike-20", car_route.end_link().external());
+    }
+
+    /// Routes act on bike-10--unrouted car--act on car-0, with both activities at (50, 19), i.e.
+    /// next to car-bike-20, and returns the prepared plan.
+    fn route_activities_without_facility(selection: ModalLinkSelection) -> InternalPlan {
         let departures = Arc::new(Mutex::new(Vec::new()));
         let router = network_test_router(departures.clone());
         let mut config = Config::default();
         config.qsim_mut().main_modes = vec!["car".to_string()];
+        config.facilities_mut().modal_link_selection = selection;
         let mut garage = Garage::default();
         garage.add_veh(test_vehicle("person-1_car"));
         let network = layered_network();
@@ -889,8 +913,8 @@ mod tests {
         plan.add_act(home);
         plan.add_leg(unrouted_leg("car"));
         plan.add_act(located_activity(
-            Some("car-bike-20"),
-            Some(Coordinate::new_2d(50.0, 1.0)),
+            Some("car-0"),
+            Some(Coordinate::new_2d(50.0, 19.0)),
             None,
         ));
         let person_id = Id::create("person-1");
@@ -905,14 +929,13 @@ mod tests {
 
         let plan = scenario.population.persons[&person_id]
             .selected_plan()
-            .unwrap();
-        assert_eq!(vec!["walk", "car", "walk"], leg_modes(plan));
+            .unwrap()
+            .clone();
+        assert_eq!(vec!["walk", "car", "walk"], leg_modes(&plan));
+        // The activities stay on their own links in both cases.
         assert_eq!("bike-10", plan.acts()[0].link_id().external());
-        assert_eq!("car-bike-20", plan.acts()[3].link_id().external());
-        let car_route = plan.legs()[1].route.as_ref().unwrap().as_generic().clone();
-        assert_eq!("car-bike-20", car_route.start_link().external());
-        // The destination link allows car, but car-0 is nearer to the destination coordinate.
-        assert_eq!("car-0", car_route.end_link().external());
+        assert_eq!("car-0", plan.acts()[3].link_id().external());
+        plan
     }
 
     // Before: act@facility--unrouted car--act@facility; after: the car leg runs between the modal
@@ -927,7 +950,7 @@ mod tests {
         garage.add_veh(test_vehicle("person-1_car"));
         let network = layered_network();
         let facilities = facilities(vec![
-            activity_facility("home", 50.0, 19.0, Some("car-0")),
+            activity_facility("home", 50.0, 19.0, Some("bike-10")),
             activity_facility("work", 50.0, 1.0, None),
         ]);
         let mut plan = InternalPlan::default();
@@ -959,7 +982,7 @@ mod tests {
             .selected_plan()
             .unwrap();
         assert_eq!(vec!["walk", "car", "walk"], leg_modes(plan));
-        assert_eq!("car-0", plan.acts()[0].link_id().external());
+        assert_eq!("bike-10", plan.acts()[0].link_id().external());
         assert_eq!("car-0", plan.acts()[3].link_id().external());
         let access_interaction = plan.acts()[1];
         assert_eq!("car-bike-20", access_interaction.link_id().external());

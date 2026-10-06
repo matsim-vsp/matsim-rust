@@ -125,10 +125,6 @@ pub struct ActivityFacility {
     /// The link given in the input. If it is missing, `prepare_for_sim` assigns the nearest link of
     /// any mode. Use [`ActivityFacility::base_link`] after `prepare_for_sim`.
     pub base_link: Option<Id<Link>>,
-    /// The nearest link per network mode, filled in `prepare_for_sim`. Modes whose nearest link
-    /// equals the base link are omitted to save memory;
-    /// [`Facility::modal_link`](crate::simulation::replanning::routing::Facility::modal_link)
-    /// falls back to the base link for them.
     pub mode_to_link: IntMap<Id<String>, Id<Link>>,
     pub desc: Option<String>,
     pub activities: Vec<ActivityOption>,

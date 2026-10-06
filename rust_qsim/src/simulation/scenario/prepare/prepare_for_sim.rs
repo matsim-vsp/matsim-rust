@@ -1,4 +1,5 @@
 use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
+use crate::simulation::config::ModalLinkSelection;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
 use crate::simulation::scenario::network::{Link, Network};
@@ -16,7 +17,8 @@ use thiserror::Error;
 ///
 /// Both steps process facilities and persons in parallel.
 pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareError> {
-    prepare_facilities(&mut scenario.facilities, &scenario.network);
+    let selection = scenario.config.facilities().modal_link_selection;
+    prepare_facilities(&mut scenario.facilities, &scenario.network, selection);
 
     let network = &scenario.network;
     let facilities = &scenario.facilities;
@@ -41,7 +43,11 @@ pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareErro
     PrepareError::from_issues(issues)
 }
 
-pub(crate) fn prepare_facilities(facilities: &mut ActivityFacilities, network: &Network) {
+pub(crate) fn prepare_facilities(
+    facilities: &mut ActivityFacilities,
+    network: &Network,
+    selection: ModalLinkSelection,
+) {
     if facilities.facilities.is_empty() {
         return;
     }
@@ -52,10 +58,14 @@ pub(crate) fn prepare_facilities(facilities: &mut ActivityFacilities, network: &
     facilities
         .facilities
         .par_iter_mut()
-        .for_each(|(_, facility)| prepare_facility(facility, network));
+        .for_each(|(_, facility)| prepare_facility(facility, network, selection));
 }
 
-fn prepare_facility(facility: &mut ActivityFacility, network: &Network) {
+fn prepare_facility(
+    facility: &mut ActivityFacility,
+    network: &Network,
+    selection: ModalLinkSelection,
+) {
     let base_link = match &facility.base_link {
         Some(link_id) => {
             assert!(
@@ -76,14 +86,15 @@ fn prepare_facility(facility: &mut ActivityFacility, network: &Network) {
             }),
     };
 
+    // The configured selection decides the modal link of each mode, see `Network::modal_link`.
     // Only modal links differing from the base link are stored; `Facility::modal_link` falls back
-    // to the base link for all other modes.
+    // to the base link otherwise.
     facility.mode_to_link = network
         .spatial_index()
         .modes()
         .iter()
         .filter_map(|mode| {
-            let modal_link = network.nearest_link(&facility.coord, Some(mode))?;
+            let modal_link = network.modal_link(&base_link, &facility.coord, mode, selection);
             (modal_link != base_link).then(|| (mode.clone(), modal_link))
         })
         .collect();
@@ -176,7 +187,7 @@ fn resolve_activity_location(
 #[cfg(test)]
 mod tests {
     use super::{prepare_facilities, prepare_for_sim};
-    use crate::simulation::config::Config;
+    use crate::simulation::config::{Config, ModalLinkSelection};
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::Facility;
     use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
@@ -197,16 +208,17 @@ mod tests {
     fn prepare_facilities_assigns_base_and_modal_links() {
         let network = layered_network();
         let mut facilities = facilities(vec![
-            // The input link is kept as base link, although other links are closer.
+            // The input link is kept as base link, although other links are closer. It is the
+            // car link, but bike uses the nearest bike link.
             activity_facility("input-link", 50.0, 19.0, Some("car-0")),
             // Without an input link, the nearest link of any mode becomes the base link.
             activity_facility("no-link", 50.0, 11.0, None),
-            // The modal link is the nearest link of the mode, even if the base link allows it.
-            activity_facility("bike-on-base", 50.0, 11.0, Some("car-bike-20")),
+            // The base link is the modal link of every mode it allows, even if others are closer.
+            activity_facility("base-allows-all", 50.0, 11.0, Some("car-bike-20")),
         ]);
         let walk = Id::<String>::create("walk");
 
-        prepare_facilities(&mut facilities, &network);
+        prepare_facilities(&mut facilities, &network, ModalLinkSelection::BaseLinkFirst);
 
         let links = |id: &str| {
             let facility =
@@ -225,7 +237,7 @@ mod tests {
             ]
         };
         assert_eq!(
-            ["car-0", "car-bike-20", "car-bike-20", "car-0"],
+            ["car-0", "car-0", "car-bike-20", "car-0"],
             links("input-link")
         );
         assert_eq!(
@@ -233,15 +245,19 @@ mod tests {
             links("no-link")
         );
         assert_eq!(
-            ["car-bike-20", "car-bike-20", "bike-10", "car-bike-20"],
-            links("bike-on-base")
+            ["car-bike-20", "car-bike-20", "car-bike-20", "car-bike-20"],
+            links("base-allows-all")
         );
-        // Modal links equal to the base link are not stored.
+        // Only modes that the base link does not allow are stored.
         let no_link = facilities.get(&Id::get_from_ext("no-link")).unwrap();
         assert_eq!(1, no_link.mode_to_link.len());
+        let base_allows_all = facilities
+            .get(&Id::get_from_ext("base-allows-all"))
+            .unwrap();
+        assert!(base_allows_all.mode_to_link.is_empty());
 
         let prepared = facilities.clone();
-        prepare_facilities(&mut facilities, &network);
+        prepare_facilities(&mut facilities, &network, ModalLinkSelection::BaseLinkFirst);
         assert_eq!(prepared, facilities);
     }
 
@@ -252,7 +268,7 @@ mod tests {
         Id::<Link>::create("unknown");
         let mut facilities = facilities(vec![activity_facility("f", 0.0, 0.0, Some("unknown"))]);
 
-        prepare_facilities(&mut facilities, &network);
+        prepare_facilities(&mut facilities, &network, ModalLinkSelection::BaseLinkFirst);
     }
 
     // Before: a facility without link in the loaded scenario; after: the facility is prepared.

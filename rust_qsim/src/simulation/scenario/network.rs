@@ -1,5 +1,5 @@
 use crate::simulation::InternalAttributes;
-use crate::simulation::config::PartitionMethod;
+use crate::simulation::config::{ModalLinkSelection, PartitionMethod};
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_network::{
     load_from_proto, write_to_proto_with_link_attribute_overrides,
@@ -17,7 +17,7 @@ use spatial_index::{LazySpatialIndex, NetworkSpatialIndex};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod spatial_index;
 
@@ -232,6 +232,31 @@ impl Network {
     /// See [`NetworkSpatialIndex::nearest_link`].
     pub fn nearest_link(&self, coord: &Coordinate, mode: Option<&Id<String>>) -> Option<Id<Link>> {
         self.spatial_index().nearest_link(coord, mode)
+    }
+
+    /// Returns the link through which a location with `base_link` and `coord` is connected to the
+    /// network for `mode`, i.e. its access and egress link, according to `selection`. This is the
+    /// single place deciding modal links, both for activity facilities and for the link wrappers
+    /// of activities without a facility.
+    ///
+    /// Falls back to the base link if no link allows `mode`. A base link outside the network, e.g.
+    /// in teleportation-only setups, is kept for every mode.
+    pub fn modal_link(
+        &self,
+        base_link: &Id<Link>,
+        coord: &Coordinate,
+        mode: &Id<String>,
+        selection: ModalLinkSelection,
+    ) -> Id<Link> {
+        let Some(base) = self.links.get(base_link) else {
+            return base_link.clone();
+        };
+        match selection {
+            ModalLinkSelection::BaseLinkFirst if base.contains_mode(mode) => base_link.clone(),
+            ModalLinkSelection::BaseLinkFirst | ModalLinkSelection::NearestLink => self
+                .nearest_link(coord, Some(mode))
+                .unwrap_or_else(|| base_link.clone()),
+        }
     }
 
     pub fn partition_network(
@@ -459,12 +484,12 @@ impl Link {
     }
 
     pub fn contains_mode(&self, mode: &Id<String>) -> bool {
-        self.modes.is_empty() || self.modes.iter().contains(mode)
+        self.modes.contains(mode)
     }
 }
 
 pub fn from_file(path: &Path) -> Network {
-    if path.extension().unwrap().eq("binpb") {
+    let network = if path.extension().unwrap().eq("binpb") {
         load_from_proto(path)
     } else if path.extension().unwrap().eq("xml")
         || path.extension().unwrap().eq("gz")
@@ -475,7 +500,20 @@ pub fn from_file(path: &Path) -> Network {
         panic!(
             "Tried to load {path:?}. File format not supported. Either use `.xml`, `.xml.gz`, `.xml.zst`, or `.binpb` as extension"
         );
+    };
+
+    // MATSim assumes car for links without modes, whereas these links allow no mode here.
+    let links_without_modes = network
+        .links
+        .values()
+        .filter(|link| link.modes.is_empty())
+        .count();
+    if links_without_modes > 0 {
+        warn!(
+            "{links_without_modes} links in {path:?} have no modes and therefore allow no mode. Modes must be listed explicitly."
+        );
     }
+    network
 }
 
 pub fn to_file(network: &Network, path: &Path) {
@@ -537,12 +575,15 @@ pub mod utils {
 
 #[cfg(test)]
 mod tests {
-    use crate::simulation::config::{EdgeWeight, MetisOptions, PartitionMethod};
+    use crate::simulation::config::{
+        EdgeWeight, MetisOptions, ModalLinkSelection, PartitionMethod,
+    };
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::network::{IOLink, IONode};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node, add_io_link, add_io_node};
     use macros::deterministic_id_test;
+    use nohash_hasher::IntSet;
 
     fn coord(x: f64, y: f64) -> Coordinate {
         Coordinate::new_2d(x, y)
@@ -739,6 +780,89 @@ mod tests {
         assert_eq!(5., link.length);
         assert_eq!(from.id, link.from);
         assert_eq!(to.id, link.to);
+    }
+
+    // Car links at y=0 and y=20 and a bike link at y=10, all spanning x=0..100. The location is
+    // on car-0, but closer to car-20.
+    #[deterministic_id_test]
+    fn modal_link_depends_on_selection() {
+        let mut network = Network::new();
+        for (link_id, y, mode) in [
+            ("car-0", 0.0, "car"),
+            ("bike-10", 10.0, "bike"),
+            ("car-20", 20.0, "car"),
+        ] {
+            let from = Node::new(
+                Id::create(&format!("{link_id}-from")),
+                Coordinate::new_2d(0.0, y),
+                0,
+                1,
+            );
+            let to = Node::new(
+                Id::create(&format!("{link_id}-to")),
+                Coordinate::new_2d(100.0, y),
+                0,
+                1,
+            );
+            let link = Link::new(
+                Id::create(link_id),
+                from.id.clone(),
+                to.id.clone(),
+                100.0,
+                1.0,
+                1.0,
+                1.0,
+                IntSet::from_iter([Id::create(mode)]),
+                0,
+            );
+            network.add_node(from);
+            network.add_node(to);
+            network.add_link(link);
+        }
+        let car = Id::get_from_ext("car");
+        let bike = Id::get_from_ext("bike");
+        let walk = Id::create("walk");
+        let base = Id::<Link>::get_from_ext("car-0");
+        let coord = Coordinate::new_2d(50.0, 19.0);
+        let modal = |mode: &Id<String>, selection| {
+            network
+                .modal_link(&base, &coord, mode, selection)
+                .external()
+                .to_string()
+        };
+
+        // The base link allows car, but car-20 is nearer.
+        assert_eq!("car-0", modal(&car, ModalLinkSelection::BaseLinkFirst));
+        assert_eq!("car-20", modal(&car, ModalLinkSelection::NearestLink));
+        for selection in [
+            ModalLinkSelection::BaseLinkFirst,
+            ModalLinkSelection::NearestLink,
+        ] {
+            // The base link does not allow bike.
+            assert_eq!("bike-10", modal(&bike, selection));
+            // No link allows walk: the base link is the fallback.
+            assert_eq!("car-0", modal(&walk, selection));
+            // A base link outside the network is kept.
+            let outside = Id::create("outside");
+            assert_eq!(
+                outside,
+                network.modal_link(&outside, &coord, &car, selection)
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn link_allows_only_explicitly_listed_modes() {
+        let from = Node::new(Id::create("from"), coord(0., 0.), 0, 1);
+        let to = Node::new(Id::create("to"), coord(3., 4.), 0, 1);
+        let car = Id::create("car");
+        let mut link = Link::new_with_default(Id::create("link-id"), &from, &to);
+
+        assert!(!link.contains_mode(&car));
+
+        link.modes.insert(car.clone());
+        assert!(link.contains_mode(&car));
+        assert!(!link.contains_mode(&Id::create("bike")));
     }
 
     #[deterministic_id_test]

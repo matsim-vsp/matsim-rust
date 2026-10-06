@@ -554,6 +554,25 @@ pub struct Transit {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Facilities {
     pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub modal_link_selection: ModalLinkSelection,
+}
+
+/// How the modal link of a facility, i.e. its access and egress link for a mode, is chosen. This
+/// applies to activity facilities and to the link wrappers of activities without a facility.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum ModalLinkSelection {
+    #[default]
+    BaseLinkFirst,
+    NearestLink,
+}
+
+fn parse_modal_link_selection(value: &str) -> ModalLinkSelection {
+    match value.to_lowercase().replace(['-', '_'], "").as_str() {
+        "baselinkfirst" => ModalLinkSelection::BaseLinkFirst,
+        "nearestlink" => ModalLinkSelection::NearestLink,
+        _ => panic!("Invalid modal_link_selection: {}", value),
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -579,6 +598,10 @@ register_override!("transit.schedule_path", |config, value| {
 
 register_override!("facilities.path", |config, value| {
     config.facilities_mut().path = Some(PathBuf::from(value));
+});
+
+register_override!("facilities.modal_link_selection", |config, value| {
+    config.facilities_mut().modal_link_selection = parse_modal_link_selection(value);
 });
 
 register_override!("ids.path", |config, value| {
@@ -1541,7 +1564,7 @@ mod tests {
         TravelTimeCalculator, VertexWeight, parse_key_val,
     };
     use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
-    use crate::simulation::config::{Logging, RoutingMode};
+    use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
     use crate::simulation::replanning::{
         KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME,
     };
@@ -2182,6 +2205,51 @@ modules:
         let config = Config::default();
 
         assert_eq!(None, config.facilities().path);
+        assert_eq!(
+            ModalLinkSelection::BaseLinkFirst,
+            config.facilities().modal_link_selection
+        );
+    }
+
+    #[test]
+    fn read_modal_link_selection_from_yaml() {
+        let yaml = r#"
+modules:
+  facilities:
+    type: Facilities
+    modal_link_selection: NearestLink
+"#;
+
+        let parsed_config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
+
+        assert_eq!(
+            ModalLinkSelection::NearestLink,
+            parsed_config.facilities().modal_link_selection
+        );
+    }
+
+    #[test]
+    fn test_override_modal_link_selection() {
+        let yaml = r#"
+modules:
+  facilities:
+    type: Facilities
+"#;
+        let file = write_temp_config(yaml);
+        let args = CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![(
+                "facilities.modal_link_selection".to_string(),
+                "nearest_link".to_string(),
+            )],
+        };
+
+        let config = Config::from_args(args);
+
+        assert_eq!(
+            ModalLinkSelection::NearestLink,
+            config.facilities().modal_link_selection
+        );
     }
 
     #[test]

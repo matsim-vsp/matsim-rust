@@ -15,6 +15,10 @@ Starting the simulation mostly works as in MATSim Java. All XML input files need
 faster reading. These files need to be referenced in a configuration file. Based on the config, a scenario is built,
 based on that the controller -- pretty much like in MATSim Java.
 
+Network links must list their allowed modes explicitly: a link without modes allows no mode. Unlike MATSim, which
+assumes `car` for links without a `modes` attribute, nothing is implied. Loading a network with such links logs a
+warning.
+
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
 (`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the

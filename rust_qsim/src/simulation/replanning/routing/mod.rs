@@ -1,4 +1,5 @@
 use crate::simulation::InternalAttributes;
+use crate::simulation::config::ModalLinkSelection;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::facilities::ActivityFacility;
@@ -115,10 +116,11 @@ impl Facility<'_> {
     /// The link through which the facility is connected to the network for `mode`, i.e. the
     /// access and egress link of trips with that mode.
     ///
-    /// The [`Facility::base_link`] is always the fallback: it is returned whenever the facility
-    /// has no dedicated link for `mode`. This is the case for modes without network links, e.g.
-    /// teleported modes, for modes whose nearest link equals the base link (such entries are not
-    /// stored), and for transit facilities, which have no modal links at all.
+    /// How modal links are chosen is configured by [`ModalLinkSelection`]. The
+    /// [`Facility::base_link`] is always the fallback: it is returned whenever the facility has no
+    /// dedicated link for `mode`. This is the case for modes whose selected modal link is the base
+    /// link, for modes without network links, e.g. teleported modes, and for transit facilities,
+    /// which have no modal links at all.
     pub fn modal_link(&self, mode: &Id<String>) -> &Id<Link> {
         let modal_link = match self {
             Facility::LinkWrapperFacility(facility) => facility.mode_to_link.get(mode),
@@ -137,9 +139,8 @@ impl Facility<'_> {
     }
 
     /// Creates a link wrapper facility for an activity without a facility that is routed with
-    /// `mode`. The activity's link becomes the base link. As for activity facilities, the modal
-    /// link is the nearest link allowing `mode`, independent of the base link. Without such a link,
-    /// the base link is the fallback.
+    /// `mode`. The activity's link becomes the base link. The modal link for `mode` is chosen by
+    /// `selection`, exactly as for activity facilities (see [`Network::modal_link`]).
     ///
     /// The modal link is computed on the fly instead of being stored for every link, because a
     /// nearest-link query is cheap compared to routing.
@@ -148,12 +149,11 @@ impl Facility<'_> {
         link_id: Id<Link>,
         mode: &Id<String>,
         network: &Network,
+        selection: ModalLinkSelection,
     ) -> Facility<'static> {
-        // As for activity facilities, only a modal link differing from the base link is stored.
         let mut mode_to_link = IntMap::default();
-        if let Some(modal_link) = network.nearest_link(&coord, Some(mode))
-            && modal_link != link_id
-        {
+        let modal_link = network.modal_link(&link_id, &coord, mode, selection);
+        if modal_link != link_id {
             mode_to_link.insert(mode.clone(), modal_link);
         }
         Facility::LinkWrapperFacility(LinkWrapperFacility {
@@ -275,6 +275,7 @@ impl Debug for dyn RoutingModule {
 #[cfg(test)]
 mod tests {
     use crate::simulation::InternalAttributes;
+    use crate::simulation::config::ModalLinkSelection;
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::{Facility, LinkWrapperFacility};
     use crate::simulation::scenario::Coordinate;
@@ -333,7 +334,7 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn link_wrapper_for_mode_uses_nearest_link_of_the_mode() {
+    fn link_wrapper_for_mode_follows_modal_link_selection() {
         // Car links at y=0 and y=20 and a bike link at y=10, all spanning x=0..100.
         let mut network = Network::new();
         for (link_id, y, mode) in [
@@ -373,33 +374,31 @@ mod tests {
         let walk = Id::create("walk");
         let car_link = Id::<Link>::get_from_ext("car-0");
 
-        // The base link allows car and is the nearest car link.
-        let near_base = Coordinate::new_2d(50.0, 1.0);
-        let wrapper = Facility::new_link_wrapper_for_mode(
-            near_base.clone(),
-            car_link.clone(),
-            &car,
-            &network,
-        );
-        assert_eq!(&car_link, wrapper.modal_link(&car));
+        let wrapper = |coord: Coordinate, mode: &Id<String>, selection| {
+            Facility::new_link_wrapper_for_mode(coord, car_link.clone(), mode, &network, selection)
+        };
+
         // The base link allows car, but another car link is nearer.
         let near_other = Coordinate::new_2d(50.0, 19.0);
-        let wrapper =
-            Facility::new_link_wrapper_for_mode(near_other, car_link.clone(), &car, &network);
-        assert_eq!("car-20", wrapper.modal_link(&car).external());
-        assert_eq!(&car_link, wrapper.base_link());
-        // The base link does not allow bike.
-        let wrapper = Facility::new_link_wrapper_for_mode(
-            near_base.clone(),
-            car_link.clone(),
-            &bike,
-            &network,
-        );
-        assert_eq!("bike-10", wrapper.modal_link(&bike).external());
-        // No link allows walk: the base link is the fallback.
-        let wrapper =
-            Facility::new_link_wrapper_for_mode(near_base, car_link.clone(), &walk, &network);
-        assert_eq!(&car_link, wrapper.modal_link(&walk));
+        let base_first = wrapper(near_other.clone(), &car, ModalLinkSelection::BaseLinkFirst);
+        assert_eq!(&car_link, base_first.modal_link(&car));
+        assert_eq!(&car_link, base_first.base_link());
+        let nearest = wrapper(near_other, &car, ModalLinkSelection::NearestLink);
+        assert_eq!("car-20", nearest.modal_link(&car).external());
+        assert_eq!(&car_link, nearest.base_link());
+
+        let near_base = Coordinate::new_2d(50.0, 1.0);
+        for selection in [
+            ModalLinkSelection::BaseLinkFirst,
+            ModalLinkSelection::NearestLink,
+        ] {
+            // The base link does not allow bike: the nearest bike link is the modal link.
+            let bike_wrapper = wrapper(near_base.clone(), &bike, selection);
+            assert_eq!("bike-10", bike_wrapper.modal_link(&bike).external());
+            // No link allows walk: the base link is the fallback.
+            let walk_wrapper = wrapper(near_base.clone(), &walk, selection);
+            assert_eq!(&car_link, walk_wrapper.modal_link(&walk));
+        }
     }
 
     #[deterministic_id_test]
