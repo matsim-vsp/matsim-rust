@@ -24,7 +24,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, warn};
 
 static ROUTE_CACHE_ENABLED: LazyLock<bool> =
-    LazyLock::new(|| std::env::var_os("MATSIM_DISABLE_ROUTE_CACHE").is_none());
+    LazyLock::new(|| std::env::var_os("MATSIM_ENABLE_ROUTE_CACHE").is_some());
 
 /// A heuristic to be used in A*. Given a from and to-node, estimates the disutility between them.
 /// Is not allowed to overestimate disutilities. It is expected of implementations to respect this.
@@ -1179,7 +1179,7 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn exact_static_route_cache_reuses_a_completed_path() {
+    fn repeated_static_route_searches_bypass_the_route_cache() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("routing.csv");
         let (layer, guard) = RoutingSpanDurationToFileLayer::new_csv(&path);
@@ -1206,14 +1206,9 @@ mod tests {
         let rows = reader.records().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(rows.len(), 2);
         let cache_hit = headers.iter().position(|name| name == "cache_hit").unwrap();
-        let fallback = headers
-            .iter()
-            .position(|name| name == "fallback_search")
-            .unwrap();
-        assert_eq!(&rows[0][cache_hit], "false");
-        assert_eq!(&rows[0][fallback], "true");
-        assert_eq!(&rows[1][cache_hit], "true");
-        assert_eq!(&rows[1][fallback], "false");
+        for row in &rows {
+            assert_eq!(&row[cache_hit], "false");
+        }
     }
 
     #[deterministic_id_test]
