@@ -467,6 +467,26 @@ pub(super) fn write_report(
     let html = format!(
         "{body}const em={emissions};csvTable('#emissions',em);const emap=document.querySelector('#network-map').cloneNode(true);emap.setAttribute('id','emissions-network-map');document.querySelector('#emissions-map').append(emap);const eh=parseCsv(em[0]);const er=em.slice(1).map(parseCsv);const ei=n=>eh.indexOf(n);const lk=er.filter(r=>r[ei('location_type')]==='link');const choices=[...new Map(lk.map(r=>{{const k=[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]];return [JSON.stringify(k),k]}}))];const select=document.querySelector('#emissions-filter');choices.forEach(([key,k])=>select.add(new Option(k.join(' · '),key)));function colorEmissions(){{const chosen=select.value?JSON.parse(select.value):null;const values=new Map(lk.filter(r=>chosen&&[r[ei('pollutant')],r[ei('unit')],r[ei('hour_start_seconds')],r[ei('vehicle_category')],r[ei('emission_type')]].every((v,i)=>v===chosen[i])).map(r=>[r[ei('location_id')],Number(r[ei('total_expanded')])]));const max=Math.max(0,...values.values());document.querySelectorAll('#emissions-network-map line').forEach(line=>{{const value=values.get(line.getAttribute('data-link-id'));if(value===undefined){{line.setAttribute('stroke','#c8ccd0')}}else{{const scale=max?value/max:0;line.setAttribute('stroke',`rgb(${{Math.round(255*scale)}},${{Math.round(210*(1-scale))}},0)`)}}}})}}select.addEventListener('change',colorEmissions);colorEmissions();</script>{script_end}"
     );
+    let economic = csv_for_script(&path.join("economic_summary.csv"))?;
+    let economic_status = statuses
+        .iter()
+        .find(|status| status.module == "economic_appraisal");
+    let economic_note = match economic_status {
+        Some(status) if status.status == STATUS_COMPLETE => "Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate; group and run net values require utility and all three costs at the same scope and currency. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.".to_owned(),
+        Some(status) if status.status == STATUS_FAILED => format!(
+            "Economic appraisal failed: {}. See module_status.json for details.",
+            escape_html(status.reason.as_deref().unwrap_or("unspecified error"))
+        ),
+        Some(status) => format!(
+            "Economic appraisal is unavailable: {}.",
+            escape_html(status.reason.as_deref().unwrap_or("no input data was configured"))
+        ),
+        None => "Economic appraisal status is unavailable.".to_owned(),
+    };
+    let economic_section = format!(
+        "<h2>Economic appraisal</h2><p>{economic_note}</p><div id=\"economic-summary\"></div><p><a href=\"economic_appraisal.csv\">Appraisal ledger</a> · <a href=\"economic_summary.csv\">Appraisal summary</a></p><script>csvTable('#economic-summary',{economic});</script>"
+    );
+    let html = html.replace("</body>", &format!("{economic_section}</body>"));
     fs::write(path.join("index.html"), html).map_err(io_error)
 }
 
@@ -657,6 +677,7 @@ mod tests {
             "transit_validation_summary.csv",
             "transit_validation_matches.csv",
             "transit_validation_unmatched.csv",
+            "economic_summary.csv",
         ] {
             fs::write(directory.path().join(file), "fixture\n").unwrap();
         }
