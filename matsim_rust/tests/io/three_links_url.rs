@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 // Pinned to the v0.3.0 tag (before the crate directory was renamed from `rust_qsim` to
 // `matsim_rust`) so the remote files stay stable independent of the current branch layout.
-const BASE_URL: &str = "https://raw.githubusercontent.com/matsim-vsp/parallel_qsim_rust/refs/tags/v0.3.0/rust_qsim/tests/resources/3-links-url";
+const BASE_URL: &str = "https://raw.githubusercontent.com/matsim-vsp/matsim-rust/refs/tags/v0.3.0/rust_qsim/tests/resources/3-links-url";
 
 #[test]
 fn load_files_from_url_have_content() {
