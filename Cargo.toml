@@ -1,5 +1,5 @@
 [workspace]
-members = ["rust_qsim", "macros"]
+members = ["matsim_rust", "macros"]
 resolver = "2"
 
 [profile.bench]

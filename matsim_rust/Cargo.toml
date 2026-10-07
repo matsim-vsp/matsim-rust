@@ -1,0 +1,77 @@
+[package]
+name = "matsim-rust"
+version = "1.0.0"
+edition = "2024"
+description = "A parallel Rust implementation of MATSim"
+license-file = "../LICENSE"
+repository = "https://github.com/matsim-vsp/matsim-rust"
+
+[features]
+test_util = []
+# Feature for activating remote file download. Might cause problems on hardware with no OpenSSL installed.
+http = ["dep:reqwest"]
+
+[dependencies]
+serde = { version = "1.0.137", features = ["derive"] }
+serde_json = "1.0.93"
+quick-xml = { version = "0.41.0", features = ["serialize"] }
+flate2 = { version = "1.0.24" }
+fnv = "1.0.7"
+rand = "0.10.2"
+rand_xoshiro = "0.8.1"
+zstd = "0.13.3"
+metis = "0.2.2"
+clap = { version = "4.0.29", features = ["derive"] }
+# dependencies for serialization with protobuf
+prost = "0.13.3"
+# bytes replaces the signature of std::io::Cursor to implemnt Buf somehow...
+bytes = "1.3.0"
+serial_test = "3.2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.0", features = ["json", "fmt", "std", "registry", "env-filter"] }
+tracing-appender = "0.2"
+itertools = "0.15.0"
+assert_approx_eq = "1.1.0"
+nohash-hasher = "0.2.0"
+serde_path_to_error = "0.1.14"
+ahash = "0.8.11"
+keyed_priority_queue = "0.4.2"
+xml = "1.3.0"
+lz4_flex = "0.14.0"
+typetag = "0.2.18"
+serde_yaml = "0.9.34"
+tonic = "0.13.1"
+tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros"] }
+lz4 = "1.28.1"
+derive_builder = "0.20.2"
+tempfile = "3.20.0"
+dyn-clone = "1.0.19"
+thiserror = "2.0.16"
+dashmap = "6.1.0"
+once_cell = "1.20.2"
+macros = { path = "../macros" }
+reqwest = { version = "0.12.23", features = ["blocking"], optional = true }
+derive_more = { version = "2.0.1", features = ["debug"] }
+futures = "0.3.31"
+uuid = { version = "1.18.1", features = ["v7"] }
+csv = "1.4.0"
+inventory = "0.3.21"
+arrow2 = { version = "0.18.0", features = ["io_parquet", "io_parquet_compression"] }
+ordered-float = "5.3.0"
+rayon = "1.12.0"
+fs_extra = "1.3.0"
+arc-swap = "1.9.2"
+rstar = "0.13"
+
+# arrow2 removed; we write parquet-proxy as JSON-lines implementation for now
+
+[dev-dependencies]
+# For development, test_util feature is always activated so that functions like id store reset work
+matsim-rust = { path = ".", features = ["test_util"] }
+
+[build-dependencies]
+# generates types based on .proto files
+prost-build = "0.13.5"
+# provides the protoc compiler - this makes the build slow but one doesn't need to install the protoc compiler as prerequisite.
+protobuf-src = "2.1.1"
+tonic-build = "0.13.1"

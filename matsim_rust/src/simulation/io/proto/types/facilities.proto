@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+import "simulation/io/proto/types/general.proto";
+
+package facilities;
+
+message ActivityFacilities {
+  optional string name = 1;
+  optional string aggregation_layer = 2;
+  optional string lang = 3;
+  map<string, general.AttributeValue> attributes = 4;
+  repeated ActivityFacility facilities = 5;
+}
+
+message ActivityFacility {
+  uint64 id = 1;
+  general.Coordinate coordinate = 2;
+  // The link given in the input. Modal links are derived in prepare_for_sim and not stored.
+  optional uint64 base_link = 3;
+  optional string desc = 4;
+  repeated ActivityOption activities = 5;
+  map<string, general.AttributeValue> attributes = 6;
+}
+
+message ActivityOption {
+  uint64 activity_type = 1;
+  optional double capacity = 2;
+  repeated OpeningTime open_times = 3;
+}
+
+message OpeningTime {
+  OpenDay day = 1;
+  // Simulation clock instant in nanoseconds since simulation start.
+  uint64 start_time_ns = 2;
+  // Simulation clock instant in nanoseconds since simulation start.
+  uint64 end_time_ns = 3;
+}
+
+// The whole week is the default, as in MATSim's facilities format.
+enum OpenDay {
+  WK = 0;
+  MON = 1;
+  TUE = 2;
+  WED = 3;
+  THU = 4;
+  FRI = 5;
+  SAT = 6;
+  SUN = 7;
+  WKDAY = 8;
+  WKEND = 9;
+}
