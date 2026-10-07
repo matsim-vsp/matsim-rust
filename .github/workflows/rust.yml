@@ -12,6 +12,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Omit debug symbols in CI to reduce linking time and cache size.
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+  RUSTFLAGS: -D warnings
 
 # A new push to a PR makes the previous run obsolete.
 concurrency:
@@ -32,30 +35,19 @@ jobs:
       - name: Install other libraries
         run: sudo apt -y install libclang-dev llvm-dev libmetis-dev
       - name: Cache cargo and build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Build
-        env:
-          RUSTFLAGS: -D warnings
         run: cargo build --release --locked
       # Berlin integration runs take far too long for pull request feedback, so they
       # only run on main (and on manual dispatch).
       - name: Test
         env:
           RUST_BACKTRACE: 1
-          RUSTFLAGS: -D warnings
         run: cargo test --release --locked --features http -- --test-threads=1 --skip 'berlin::'
       - name: Test Berlin
         if: github.event_name != 'pull_request'
         env:
           RUST_BACKTRACE: 1
-          RUSTFLAGS: -D warnings
         run: 'cargo test --release --locked --test simulation berlin:: -- --test-threads=1'
