@@ -20,8 +20,11 @@ use ordered_float::OrderedFloat;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::mem::size_of;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, warn};
+
+static ROUTE_CACHE_ENABLED: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("MATSIM_DISABLE_ROUTE_CACHE").is_none());
 
 /// A heuristic to be used in A*. Given a from and to-node, estimates the disutility between them.
 /// Is not allowed to overestimate disutilities. It is expected of implementations to respect this.
@@ -510,34 +513,37 @@ impl<H: AStarHeuristic> AStar<H> {
 
 impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
     fn calc_least_cost_path(&self, request: LeastCostPathRequest) -> Option<LeastCostPath> {
-        let route_cache_key = self
-            .travel_time
-            .cache_epoch()
-            .zip(self.travel_disutility.cache_epoch())
-            .zip(
-                self.travel_time
-                    .cache_profile(request.person, request.vehicle),
-            )
-            .zip(
-                self.travel_disutility
-                    .cache_profile(request.person, request.vehicle),
-            )
-            .map(
-                |(
-                    ((travel_time_epoch, disutility_epoch), travel_time_profile),
-                    disutility_profile,
-                )| {
-                    RouteCacheKey {
-                        from: request.from.clone(),
-                        to: request.to.clone(),
-                        departure_nanos: request.departure_time.as_nanos(),
-                        travel_time_epoch,
-                        disutility_epoch,
-                        travel_time_profile,
+        let route_cache_key = if *ROUTE_CACHE_ENABLED {
+            self.travel_time
+                .cache_epoch()
+                .zip(self.travel_disutility.cache_epoch())
+                .zip(
+                    self.travel_time
+                        .cache_profile(request.person, request.vehicle),
+                )
+                .zip(
+                    self.travel_disutility
+                        .cache_profile(request.person, request.vehicle),
+                )
+                .map(
+                    |(
+                        ((travel_time_epoch, disutility_epoch), travel_time_profile),
                         disutility_profile,
-                    }
-                },
-            );
+                    )| {
+                        RouteCacheKey {
+                            from: request.from.clone(),
+                            to: request.to.clone(),
+                            departure_nanos: request.departure_time.as_nanos(),
+                            travel_time_epoch,
+                            disutility_epoch,
+                            travel_time_profile,
+                            disutility_profile,
+                        }
+                    },
+                )
+        } else {
+            None
+        };
         if let Some(key) = route_cache_key.as_ref()
             && let Some(path) = self.route_cache.lock().unwrap().get(key)
             && self.travel_time.cache_epoch() == Some(key.travel_time_epoch)
