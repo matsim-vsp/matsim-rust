@@ -722,9 +722,7 @@ impl Controller {
     }
 
     fn should_write_iteration_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
-        is_last_iteration
-            || (iteration != 0
-                && iteration.is_multiple_of(self.config.controller().write_plans_interval))
+        is_last_iteration || iteration.is_multiple_of(self.config.controller().write_plans_interval)
     }
 }
 

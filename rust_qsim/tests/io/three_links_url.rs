@@ -4,7 +4,7 @@ use rust_qsim::simulation::scenario::population::Population;
 use rust_qsim::simulation::scenario::vehicles::Garage;
 use std::path::PathBuf;
 
-const BASE_URL: &str = "https://raw.githubusercontent.com/matsim-vsp/parallel_qsim_rust/refs/heads/main/rust_qsim/tests/resources/3-links-url";
+const BASE_URL: &str = "https://raw.githubusercontent.com/titipakorn-th/matsim-rust/main/rust_qsim/tests/resources/3-links-url";
 
 #[test]
 fn load_files_from_url_have_content() {

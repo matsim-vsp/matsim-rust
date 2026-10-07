@@ -56,7 +56,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 use transit::TransitCollector;
@@ -111,19 +111,6 @@ const OPTIONAL_MODULES: &[(&str, Option<&str>)] = &[
     ("noise_exposure", None),
     ("economic_appraisal", None),
 ];
-
-const REPORT_STYLE: &str = "body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#17212b}table{border-collapse:collapse;margin-bottom:2rem}td,th{border:1px solid #ccd;padding:.5rem}a{color:#075ea8}pre{background:#f4f6f9;border:1px solid #ccd;padding:1rem;overflow:auto}";
-
-const MODULE_TABLE_SCRIPT: &str = "function table(root,headers,rows){const t=document.createElement('table'),head=t.createTHead().insertRow();headers.forEach(x=>{const cell=document.createElement('th');cell.textContent=x;head.appendChild(cell)});const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(x=>{const cell=tr.insertCell();cell.textContent=x})});root.replaceChildren(t)}table(document.querySelector('#modules'),['Module','Status','Reason'],m.map(x=>[x.module,x.status,x.reason||'']))";
-
-/// Complete report shell. Substituted in one pass by [`substitute_template`], so a link
-/// label that happens to read like a token cannot corrupt the payloads.
-
-const REPORT_TEMPLATE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MATSim analysis</title><style>__REPORT_STYLE__label{margin-right:1rem}</style></head><body><h1>Simulation analysis</h1><p>Completed final iteration __ITERATION__; __LINKS__ eligible directed links in __INTERVAL__-second intervals.</p><h2>Final-run network coverage map</h2><p>Green links were used at least once in the final iteration; gray links were unused. Dashed links are expressways. Hover over a link for its classifications.</p><div id="map-container">__NETWORK_MAP__</div><h2>Observed validation</h2><p>Count observations are expanded by the reciprocal of the simulated sample fraction. Only exact link, period, class and metric matches are compared; __VALIDATION_NOTE__ A blank relative error means the observed reference is zero.</p><h3>Validation summary</h3><div id="validation-summary"></div><h3>Matched observations</h3><div id="validation-matches"></div>__VALIDATION_PLOTS__<p><a href="validation_summary.csv">Summary CSV</a> · <a href="validation_matches.csv">Matched observations CSV</a> · <a href="validation_unmatched.csv">Unmatched observations CSV</a></p><h2>Coverage by group</h2><p>Urban area, road type, and road size are grouped independently. Missing labels are retained as unknown; geographic boundary crossings are explicit.</p><div id="groups"></div><h2>Hourly link metrics</h2><p>Filter on any combination of classifications to compare link volumes by group.</p><div id="filters"></div><div id="hourly"></div><h2>Hourly network coverage</h2><div id="coverage"></div><h2>PCE volumes and capacity utilization</h2><p>Volumes are passenger-car-equivalent weighted, matching how the link flow cap is charged, and are scaled up by the simulated sample fraction to describe the full population. Raw vehicle counts, observed PCE volumes and scaled PCE volumes are exported separately. The V/C denominator is the link's own network capacity multiplied by the length of the interval the simulation covered; lanes are never applied again, and a value on a bin edge belongs to the higher bin. A link that carried no vehicles is counted as unused whatever its capacity says, while missing PCE or an invalid capacity leaves the ratio blank and is reported per link.</p><h3>Per-link PCE volumes, capacity and V/C</h3><div id="capacity"></div><h3>V/C distribution</h3><p id="histogram-metric-label">Entry V/C (default view)</p><div id="histogram"></div><button id="histogram-toggle" type="button">Show exit V/C</button><h2>Interval link speeds</h2><p>__SPEED_NOTE__</p>__SPEED_SECTIONS__<h2>Network distance, time and congestion</h2><p>Vehicle distance uses the observed fraction of each link. Partial and unfinished traversals are reported in diagnostics. A traversal crossing an interval boundary is assigned whole to its entry interval, so no within-link path is inferred. Relative delay is signed; clipped excess delay, when configured, sums positive link delay capped per link and interval. Passenger distance and time are unavailable because link-level passenger occupancy is not recorded. <a href="network_distance_time_diagnostics.csv">Traversal diagnostics (CSV)</a>.</p><h3>Network totals and peak-hour profile</h3><p id="peak-delay"></p><div id="network-summary"></div><h3>Per-link distance, time and relative speed</h3><div id="network-link-metrics"></div><h3>Traversal exclusions</h3><div id="network-distance-diagnostics"></div><h2>Available metrics</h2><div id="metrics"></div><h2>Agent travel</h2><p>Leg completion uses observed departure and arrival events. Incomplete persons retain completed-leg duration totals; missing arrivals are excluded from duration means. Verified non-travelers have an expected plan with no legs. Journeys run between substantive activities; stage activities such as transit transfers stay within the journey. Main mode follows the MATSim analysis hierarchy. Distances sum planned route distances, including prepared teleported routes, and report when any component is unavailable.</p><h3>En-route agent profile</h3><p>Counts use observed person departures, arrivals, and stuck events across all travel modes. Person-seconds are allocated by event timestamps; no within-link position or occupancy is inferred.</p><div id="en-route-agents"></div><h3>Departures and duration by interval and mode</h3><div id="leg-hourly"></div><h3>Journey mode share by hour, purpose, and distance</h3><div id="journey-shares"></div><h3>Journey duration and distance distributions</h3><div id="journey-summary"></div><h3>Journey components and completion</h3><div id="journeys"></div><h3>Daily cohort means</h3><div id="daily"></div><h3>Person daily totals and status</h3><div id="persons"></div><h2>Daily activity patterns</h2><p>__ACTIVITY_PATTERN_NOTE__</p><h3>Activity type totals</h3><div id="activity-types"></div><h3>Pattern totals by status and person zone</h3><div id="activity-summary"></div><h3>Per-person activity chains and mode chains</h3><p>__PATTERN_NOTE__</p><div id="activity-patterns"></div><h3>Observed activity intervals and censoring</h3><p>__ACTIVITY_DURATIONS_NOTE__</p><div id="activity-durations"></div><h2>Zonal origin-destination flows</h2><p>__ZONE_NOTE__ Zone system: __ZONE_SYSTEM_NAME__.</p><h3>Zone OD by interval and mode</h3><p>__ZONE_OD_NOTE__</p><div id="zone-od"></div><h3>Zone boundary crossings</h3><div id="zone-flows"></div><h3>Zone totals</h3><div id="zone-summary"></div><h3>Urban-area summary</h3><div id="urban-areas"></div><h3>Observed and planned legs</h3><p>__LEGS_NOTE__</p><div id="legs"></div>__CROSS_RUN_SECTION__<h2>Module status</h2><div id="modules"></div><p>Machine-readable data: <a href="network_map.svg">coverage map (SVG)</a>, <a href="link_classification.csv">link classifications (CSV)</a>, <a href="group_coverage.csv">group coverage (CSV)</a>, <a href="link_hourly.csv">link volumes (CSV)</a>, <a href="link_capacity.csv">PCE volumes, capacity and V/C (CSV)</a>, <a href="vc_histogram.csv">V/C distribution (CSV)</a>, <a href="coverage.csv">coverage (CSV)</a>, <a href="link_speed_hourly.csv">link speeds (CSV)</a>, <a href="link_speed_summary.csv">interval speed summary (CSV)</a>, <a href="link_speed_histogram.csv">speed histogram (CSV)</a>, <a href="link_speed_diagnostics.csv">speed traversal records (CSV)</a>, <a href="leg_hourly.csv">legs by interval and mode (CSV)</a>, <a href="journeys.csv">journey components and completion (CSV)</a>, <a href="journey_mode_share.csv">journey mode shares (CSV)</a>, <a href="journey_summary.csv">journey distributions (CSV)</a>, <a href="person_daily.csv">person daily totals (CSV)</a>, <a href="daily_summary.csv">daily cohort means (CSV)</a>, <a href="activity_patterns.csv">activity patterns (CSV)</a>, <a href="activity_durations.csv">activity intervals and censoring (CSV)</a>, <a href="activity_type_summary.csv">activity type totals (CSV)</a>, <a href="activity_pattern_summary.csv">activity pattern totals (CSV)</a>, <a href="urban_area_summary.csv">urban-area summary (CSV)</a>, <a href="zone_od.csv">zone OD matrices (CSV)</a>, <a href="zone_flows.csv">zone boundary crossings (CSV)</a>, <a href="zone_summary.csv">zone totals (CSV)</a>, <a href="legs.csv">legs (CSV)</a>, <a href="run_metadata.json">expected travel and vehicle/PCE metadata (JSON)</a>, <a href="manifest.json">run manifest</a>, <a href="metric_catalog.json">metric catalog</a>.</p><script>const d=__LINK_HOURLY__;const c=__COVERAGE__;const a=__METRICS__;const cap=__LINK_CAPACITY__;const bins=__VC_HISTOGRAM__;const m=__MODULES__;const D=__DIMENSIONS__;const lh=__LEG_HOURLY__;const dy=__DAILY__;const pd=__PERSONS__;const lg=__LEGS__;const js=__JOURNEY_SHARES__;const jy=__JOURNEY_SUMMARY__;const jn=__JOURNEYS__;__SPEED_DECLARATIONS____MODULE_TABLE_SCRIPT__;__CSV_TABLE_SCRIPT__;csvTable('#validation-summary',__VALIDATION_SUMMARY__);csvTable('#validation-matches',__VALIDATION_MATCHES__);__CROSS_RUN_RENDER__table(document.querySelector('#coverage'),['hour_start_seconds','eligible_links','used_links','unused_links','used_percent'],c.slice(1).map(x=>x.split(',')));__SPEED_RENDERS__table(document.querySelector('#capacity'),cap[0].split(','),cap.slice(1).map(x=>x.split(',')));const metricColumn=bins[0].indexOf('metric');let metric='entry_vc';function histogram(){const root=document.querySelector('#histogram');root.replaceChildren();table(root,bins[0],bins.slice(1).filter(x=>x[metricColumn]===metric));document.querySelector('#histogram-metric-label').textContent=metric==='entry_vc'?'Entry V/C (default view)':'Exit V/C';document.querySelector('#histogram-toggle').textContent=metric==='entry_vc'?'Show exit V/C':'Show entry V/C';}histogram();document.querySelector('#histogram-toggle').addEventListener('click',()=>{metric=metric==='entry_vc'?'exit_vc':'entry_vc';histogram()});table(document.querySelector('#metrics'),['Metric','Unit','Aggregation key'],a.map(x=>[x.name,x.unit,x.aggregation_key]));csvTable('#leg-hourly',lh);csvTable('#journey-shares',js);csvTable('#journey-summary',jy);csvTable('#journeys',jn);csvTable('#daily',dy);csvTable('#persons',pd);csvTable('#legs',lg);__PATTERN_RENDERS____ZONE_RENDERS__const selectors=[];D.forEach(([key,title])=>{const label=document.createElement('label');label.textContent=title+' ';const select=document.createElement('select');select.append(new Option('All',''));[...new Set(d.map(x=>x[key]))].sort().forEach(value=>select.append(new Option(value,value)));label.append(select);document.querySelector('#filters').append(label);select.addEventListener('change',renderHourly);selectors.push([key,select])});function selectedRows(){return d.filter(row=>selectors.every(([key,select])=>select.value===''||row[key]===select.value))}function renderHourly(){const rows=selectedRows();table(document.querySelector('#hourly'),['link_id','hour_start_seconds','entry_vehicles','exit_vehicles','urban_area','road_type','road_size'],rows.map(row=>[row.link_id,row.hour_start_seconds,row.entry_vehicles,row.exit_vehicles,row.urban_area,row.road_type,row.road_size]));renderGroups(rows);updateMap()}function renderGroups(rows){const groups=new Map();rows.forEach(row=>D.map(([dimension])=>[dimension,row[dimension]]).forEach(([dimension,category])=>{const key=JSON.stringify([dimension,category,row.hour_start_seconds]);let group=groups.get(key);if(!group){group={dimension,category,hour:row.hour_start_seconds,eligible:0,used:0};groups.set(key,group)}group.eligible++;if(row.entry_vehicles+row.exit_vehicles>0)group.used++}));const values=[...groups.values()].map(group=>[group.dimension,group.category,group.hour,group.eligible,group.used,group.eligible-group.used,(group.used*100/group.eligible).toFixed(6)]);table(document.querySelector('#groups'),['Dimension','Group','Hour start (s)','Eligible','Used','Unused','Used (%)'],values)}function updateMap(){document.querySelectorAll('#network-map line').forEach(line=>{line.style.display=selectors.every(([key,select])=>select.value===''||line.getAttribute('data-'+key.replace('_','-'))===select.value)?'':'none'})}renderHourly()__NETWORK_ANALYSIS_SCRIPT__</script></body></html>"#;
-
-/// Renders the agent travel tables. They quote person identifiers, so the header and every row
-/// are split with a quote-aware parser instead of `String.split(',')`.
-const CSV_TABLE_SCRIPT: &str = "function parseCsv(line){const fields=[];let field='',quoted=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch.charCodeAt(0)===34){if(quoted&&line.charCodeAt(i+1)===34){field+=String.fromCharCode(34);i++}else{quoted=!quoted}}else if(ch===','&&!quoted){fields.push(field);field=''}else{field+=ch}}fields.push(field);return fields}function csvTable(id,rows){table(document.querySelector(id),parseCsv(rows[0]),rows.slice(1).map(parseCsv))}";
 
 #[derive(Debug)]
 pub struct AnalysisError(String);
@@ -1577,14 +1564,13 @@ fn publish_complete(
 
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
-    write_report(
+    report::write_report(
         &staging,
         manifest,
         &statuses,
         &link_hourly,
         &settings.zone_system,
     )?;
-    report::write_report(&staging, manifest, &statuses, &link_hourly)?;
     // The report is rendered before its own runtime is timed, so that measurement is
     // patched in afterwards; a failed patch falls back to the tables written first.
     let initial_runtime = runtime.clone();
@@ -1592,7 +1578,13 @@ fn publish_complete(
     if let Err(error) = report::refresh_runtime_report(&staging.join("index.html"), &runtime) {
         warn!("Could not refresh runtime measurements in the staged report: {error}");
         write_runtime_tables(&staging, &initial_runtime)?;
-        report::write_report(&staging, manifest, &statuses, &link_hourly)?;
+        report::write_report(
+            &staging,
+            manifest,
+            &statuses,
+            &link_hourly,
+            &settings.zone_system,
+        )?;
     }
     let published = publication::publish(
         &staging,
@@ -4545,378 +4537,6 @@ struct IntervalHistograms {
 /// A quantity that could not be computed is exported as an empty cell.
 fn number_opt(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.6}"))
-}
-
-/// One exported CSV file rendered as a table of the report.
-struct ReportTable {
-    /// JavaScript variable and DOM id of the rendered table.
-    name: &'static str,
-    title: &'static str,
-    file: &'static str,
-}
-
-/// The speed tables hold no quoted field, so their lines split on commas. The agent travel tables
-/// quote person identifiers and are rendered with the quote-aware parser instead.
-const SPEED_TABLES: &[ReportTable] = &[
-    ReportTable {
-        name: "linkSpeeds",
-        title: "Per-link interval speed",
-        file: "link_speed_hourly.csv",
-    },
-    ReportTable {
-        name: "speedSummary",
-        title: "Across-link interval speed summary",
-        file: "link_speed_summary.csv",
-    },
-    ReportTable {
-        name: "speedHistogram",
-        title: "Interval link speed histogram",
-        file: "link_speed_histogram.csv",
-    },
-    ReportTable {
-        name: "speedRecords",
-        title: "Link speed traversal records",
-        file: "link_speed_diagnostics.csv",
-    },
-];
-
-/// A table of the report together with its embedded CSV lines.
-struct EmbeddedTable<'a> {
-    table: &'a ReportTable,
-    data: String,
-}
-
-impl<'a> EmbeddedTable<'a> {
-    fn read(path: &Path, table: &'a ReportTable) -> Result<Self, AnalysisError> {
-        let content = fs::read_to_string(path.join(table.file)).map_err(io_error)?;
-        let lines: Vec<_> = content.lines().collect();
-        Ok(Self {
-            table,
-            data: json_for_script(&lines)?,
-        })
-    }
-
-    /// The first embedded line holds the column names, the remaining lines the rows.
-    fn declaration(&self) -> String {
-        format!(
-            "const {name}={data};",
-            name = self.table.name,
-            data = self.data
-        )
-    }
-
-    fn section(&self) -> String {
-        format!(
-            "<h3>{title}</h3><div id=\"{name}\"></div>",
-            title = self.table.title,
-            name = self.table.name
-        )
-    }
-
-    fn render(&self) -> String {
-        let name = self.table.name;
-        format!(
-            "table(document.querySelector('#{name}'),{name}[0].split(','),{name}.slice(1).map(x=>x.split(',')));"
-        )
-    }
-}
-
-fn embed_tables<'a>(
-    path: &Path,
-    tables: &'a [ReportTable],
-) -> Result<Vec<EmbeddedTable<'a>>, AnalysisError> {
-    tables
-        .iter()
-        .map(|table| EmbeddedTable::read(path, table))
-        .collect()
-}
-
-/// The headings and mount points of all tables of one report section.
-fn sections(tables: &[EmbeddedTable<'_>]) -> String {
-    tables
-        .iter()
-        .map(EmbeddedTable::section)
-        .collect::<String>()
-}
-
-/// Explains how the link speeds are reconstructed, next to the tables they are rendered in.
-const SPEED_NOTE: &str = "Speeds are reconstructed from full-link traversals and assigned to the interval in which the vehicle entered the link. The representative speed divides the total travelled distance by the total travel time; the arithmetic vehicle-speed mean and population standard deviation describe the single traversals. A link without a full-link traversal has no speed: QSim inserts a vehicle at the end of the first link of a leg, so the first link of a network leg never covers its whole length and is reported as a partial traversal instead. The traversal records table lists every record that cannot produce a full-link speed, such as those partial traversals, traversals that never finished, and records without a positive duration.";
-
-/// Explains the censoring convention, next to the tables that report it.
-const ACTIVITY_PATTERN_NOTE: &str = "Activity times come from the recorded activity start and end events, and travel time from \
-     the observed leg completions. The recording window opens at the simulation start, so the \
-     first activity of a day was already in progress when it did and its total duration is only \
-     a lower bound; it is flagged as left-censored. An activity with no end before the run shuts \
-     down is right-censored for the same reason. Censored activities still report the seconds \
-     they were observed inside the window, so in-window activity time plus travel time can be \
-     reconciled against the observed span of the day; a nonzero timeline gap is time the \
-     recorded events do not account for.";
-
-/// Explains what the zone and urban-area tables resolve, next to the tables themselves.
-const ZONE_NOTE: &str = "Zones come from the supplied zone system, never from the network: a journey is located by \
-     the links its origin and destination name, and a person by the supplied person geography. A \
-     location the zone system does not cover is reported as unmapped and still forms OD rows and \
-     boundary crossings, so the matrices account for every observed journey. Only journeys with \
-     an observed departure enter a matrix, because the matrix is keyed by departure interval; a \
-     journey that never departed keeps its zone counts instead.";
-
-fn write_report(
-    path: &Path,
-    manifest: &Manifest,
-    statuses: &[ModuleStatus],
-    link_hourly: &[LinkHourlyMetric],
-    zone_system: &ZoneSystem,
-) -> Result<(), AnalysisError> {
-    let coverage = fs::read_to_string(path.join("coverage.csv")).map_err(io_error)?;
-    let coverage = json_for_script(&coverage.lines().collect::<Vec<_>>())?;
-    let modules = json_for_script(statuses)?;
-    let capacity = fs::read_to_string(path.join("link_capacity.csv")).map_err(io_error)?;
-    let capacity = json_for_script(&capacity.lines().collect::<Vec<_>>())?;
-    let histogram = fs::read_to_string(path.join("vc_histogram.csv")).map_err(io_error)?;
-    // Split into columns so the report can filter by metric and label the bins itself.
-    let histogram_rows = json_for_script(
-        &histogram
-            .lines()
-            .map(|row| row.split(',').collect::<Vec<_>>())
-            .collect::<Vec<_>>(),
-    )?;
-    let metrics = json_for_script(&metrics(
-        manifest.excess_delay_clip_seconds.is_some(),
-        manifest.accessibility.is_configured(),
-    ))?;
-    let hourly = json_for_script(link_hourly)?;
-    // The filter list comes from the same constant the CSV exporters group by, so a
-    // dimension cannot be exported without also being offered as a filter.
-    let dimensions = json_for_script(&FILTER_DIMENSIONS)?;
-    let network_map = fs::read_to_string(path.join("network_map.svg")).map_err(io_error)?;
-    let speeds = embed_tables(path, SPEED_TABLES)?;
-    let leg_hourly = csv_for_script(&path.join("leg_hourly.csv"))?;
-    let daily = csv_for_script(&path.join("daily_summary.csv"))?;
-    let persons = csv_for_script(&path.join("person_daily.csv"))?;
-    let network_link_metrics = csv_for_script(&path.join("network_distance_time.csv"))?;
-    let network_summary = csv_for_script(&path.join("network_distance_time_summary.csv"))?;
-    let en_route_agents = csv_for_script(&path.join("en_route_agents.csv"))?;
-    let diagnostics = csv_for_script(&path.join("network_distance_time_diagnostics.csv"))?;
-    let network_script = format!(
-        "const nd={network_link_metrics};const ns={network_summary};const ea={en_route_agents};const dg={diagnostics};csvTable('#network-summary',ns);csvTable('#network-link-metrics',nd);csvTable('#en-route-agents',ea);csvTable('#network-distance-diagnostics',dg);const delayColumn=parseCsv(ns[0]).indexOf('free_flow_relative_delay_seconds');const ratioColumn=parseCsv(ns[0]).indexOf('relative_speed_ratio');const peak=ns.slice(1).map(parseCsv).filter(row=>row[delayColumn]!=='').sort((a,b)=>Number(b[delayColumn])-Number(a[delayColumn]))[0];const slowest=ns.slice(1).map(parseCsv).filter(row=>row[ratioColumn]!=='').sort((a,b)=>Number(a[ratioColumn])-Number(b[ratioColumn]))[0];document.querySelector('#peak-delay').textContent=(peak?`Peak interval by total signed free-flow delay: ${{peak[0]}} s (${{peak[delayColumn]}} vehicle-seconds). `:'Peak delay unavailable: no valid free-flow references. ')+(slowest?`Lowest relative-speed interval: ${{slowest[0]}} s (ratio ${{slowest[ratioColumn]}}).`:'Relative-speed profile unavailable.');"
-    );
-    let journeys = csv_for_script(&path.join("journeys.csv"))?;
-    let journey_shares = csv_for_script(&path.join("journey_mode_share.csv"))?;
-    let journey_summary = csv_for_script(&path.join("journey_summary.csv"))?;
-    // One row per leg, so only a bounded preview is embedded and the rest stays in the CSV.
-    let (legs, legs_truncated) = csv_preview_for_script(&path.join("legs.csv"), LEGS_PREVIEW_ROWS)?;
-    let validation_summary = csv_for_script(&path.join("validation_summary.csv"))?;
-    let validation_matches = csv_preview_for_script(&path.join("validation_matches.csv"), 500)?.0;
-    let cross_run = csv_for_script(&path.join("cross_run_comparison.csv"))?;
-    // One row per person, per activity, and per matrix cell, so these are previews with a note
-    // rather than whole files inlined: a large population would otherwise put tens of
-    // megabytes of CSV into the page, the same cliff `legs.csv` already avoids.
-    let (activity_patterns, activity_patterns_truncated) =
-        csv_preview_for_script(&path.join("activity_patterns.csv"), PATTERN_PREVIEW_ROWS)?;
-    let (activity_durations, activity_durations_truncated) =
-        csv_preview_for_script(&path.join("activity_durations.csv"), PATTERN_PREVIEW_ROWS)?;
-    let (zone_od, zone_od_truncated) =
-        csv_preview_for_script(&path.join("zone_od.csv"), PATTERN_PREVIEW_ROWS)?;
-    // Aggregates are bounded by the number of activity types, statuses and zones, so they are
-    // embedded whole.
-    let activity_types = csv_for_script(&path.join("activity_type_summary.csv"))?;
-    let activity_summary = csv_for_script(&path.join("activity_pattern_summary.csv"))?;
-    let urban_areas = csv_for_script(&path.join("urban_area_summary.csv"))?;
-    let zone_flows = csv_for_script(&path.join("zone_flows.csv"))?;
-    let zone_summary = csv_for_script(&path.join("zone_summary.csv"))?;
-    let zone_system_name = zone_system
-        .name
-        .clone()
-        .unwrap_or_else(|| "none configured".to_owned());
-    let validation_note = "vehicle_class accepts all or a vehicle type ID. Calibration and holdout plots are kept separate.";
-    let validation_plots = "<h3>Calibration count</h3><img src=\"validation_scatter_count_calibration.svg\" alt=\"Calibration count scatterplot\"><h3>Holdout count</h3><img src=\"validation_scatter_count_holdout.svg\" alt=\"Holdout count scatterplot\"><h3>Calibration speed</h3><img src=\"validation_scatter_speed_calibration.svg\" alt=\"Calibration speed scatterplot\"><h3>Holdout speed</h3><img src=\"validation_scatter_speed_holdout.svg\" alt=\"Holdout speed scatterplot\"><h3>Calibration time profile</h3><img src=\"validation_time_profiles_calibration.svg\" alt=\"Calibration observed and simulated counts by period\"><h3>Holdout time profile</h3><img src=\"validation_time_profiles_holdout.svg\" alt=\"Holdout observed and simulated counts by period\"><h3>Calibration residual map</h3><img src=\"validation_residual_map_calibration.svg\" alt=\"Calibration link count residual map\"><h3>Holdout residual map</h3><img src=\"validation_residual_map_holdout.svg\" alt=\"Holdout link count residual map\">";
-    let cross_run_section = "<h2>Cross-run comparison</h2><p>Rows contain metrics from the latest completed report in each configured comparison run.</p><div id=\"cross-run\"></div><p><a href=\"cross_run_comparison.csv\">Cross-run comparison CSV</a></p>";
-    let preview_note = |file: &str, truncated: bool| {
-        truncated.then(|| {
-            format!(
-                "Showing the first {PATTERN_PREVIEW_ROWS} rows of <a href=\"{file}\">{file}</a>, which holds every row."
-            )
-        })
-    };
-    let pattern_note = preview_note("activity_patterns.csv", activity_patterns_truncated)
-        .or_else(|| preview_note("activity_durations.csv", activity_durations_truncated));
-    let durations_note = preview_note("activity_durations.csv", activity_durations_truncated)
-        .or_else(|| preview_note("activity_patterns.csv", activity_patterns_truncated));
-    let zone_od_note = preview_note("zone_od.csv", zone_od_truncated);
-    let legs_note = if legs_truncated {
-        format!(
-            "Showing the first {LEGS_PREVIEW_ROWS} rows of <a href=\"legs.csv\">legs.csv</a>, which holds every leg."
-        )
-    } else {
-        "Every observed and planned leg is listed in <a href=\"legs.csv\">legs.csv</a>.".to_owned()
-    };
-    let speed_declarations = speeds
-        .iter()
-        .map(EmbeddedTable::declaration)
-        .collect::<Vec<_>>()
-        .join("");
-    let speed_sections = sections(&speeds);
-    let speed_renders = speeds
-        .iter()
-        .map(EmbeddedTable::render)
-        .collect::<Vec<_>>()
-        .join("");
-    let html = substitute_template(
-        REPORT_TEMPLATE,
-        &[
-            ("__ITERATION__", &manifest.iteration.to_string()),
-            ("__LINKS__", &manifest.eligible_links.to_string()),
-            ("__INTERVAL__", &manifest.interval_seconds.to_string()),
-            ("__REPORT_STYLE__", REPORT_STYLE),
-            ("__MODULE_TABLE_SCRIPT__", MODULE_TABLE_SCRIPT),
-            ("__CSV_TABLE_SCRIPT__", CSV_TABLE_SCRIPT),
-            ("__NETWORK_MAP__", &network_map),
-            ("__DIMENSIONS__", &dimensions),
-            ("__LINK_HOURLY__", &hourly),
-            ("__COVERAGE__", &coverage),
-            ("__LINK_CAPACITY__", &capacity),
-            ("__VC_HISTOGRAM__", &histogram_rows),
-            ("__METRICS__", &metrics),
-            ("__MODULES__", &modules),
-            ("__SPEED_DECLARATIONS__", &speed_declarations),
-            ("__SPEED_SECTIONS__", &speed_sections),
-            ("__SPEED_RENDERS__", &speed_renders),
-            ("__SPEED_NOTE__", SPEED_NOTE),
-            ("__LEG_HOURLY__", &leg_hourly),
-            ("__DAILY__", &daily),
-            ("__PERSONS__", &persons),
-            ("__JOURNEYS__", &journeys),
-            ("__JOURNEY_SHARES__", &journey_shares),
-            ("__JOURNEY_SUMMARY__", &journey_summary),
-            ("__ACTIVITY_PATTERN_NOTE__", ACTIVITY_PATTERN_NOTE),
-            ("__ZONE_NOTE__", ZONE_NOTE),
-            ("__ZONE_SYSTEM_NAME__", &zone_system_name),
-            ("__LEGS__", &legs),
-            ("__VALIDATION_SUMMARY__", &validation_summary),
-            ("__VALIDATION_MATCHES__", &validation_matches),
-            ("__VALIDATION_NOTE__", validation_note),
-            ("__VALIDATION_PLOTS__", validation_plots),
-            ("__CROSS_RUN_SECTION__", cross_run_section),
-            (
-                "__CROSS_RUN_RENDER__",
-                &format!("csvTable('#cross-run',{cross_run});"),
-            ),
-            ("__LEGS_NOTE__", &legs_note),
-            (
-                "__PATTERN_NOTE__",
-                pattern_note.as_deref().unwrap_or_default(),
-            ),
-            (
-                "__ACTIVITY_DURATIONS_NOTE__",
-                durations_note.as_deref().unwrap_or_default(),
-            ),
-            (
-                "__ZONE_OD_NOTE__",
-                zone_od_note.as_deref().unwrap_or_default(),
-            ),
-            ("__NETWORK_ANALYSIS_SCRIPT__", &network_script),
-            (
-                "__PATTERN_RENDERS__",
-                &format!(
-                    "csvTable('#activity-patterns',{activity_patterns});\
-                     csvTable('#activity-durations',{activity_durations});\
-                     csvTable('#activity-types',{activity_types});\
-                     csvTable('#activity-summary',{activity_summary});"
-                ),
-            ),
-            (
-                "__ZONE_RENDERS__",
-                &format!(
-                    "csvTable('#zone-od',{zone_od});\
-                     csvTable('#zone-flows',{zone_flows});\
-                     csvTable('#zone-summary',{zone_summary});\
-                     csvTable('#urban-areas',{urban_areas});"
-                ),
-            ),
-        ],
-    );
-    let economic = csv_for_script(&path.join("economic_summary.csv"))?;
-    let economic_status = statuses
-        .iter()
-        .find(|status| status.module == "economic_appraisal");
-    let economic_note = match economic_status {
-        Some(status) if status.status == STATUS_COMPLETE => "Traveler utility is converted with the supplied marginal utility of money. Fare and toll entries are shown on both ledgers as transfers and excluded from net social accounting. Operating, investment, and external costs stay separate; group and run net values require utility and all three costs at the same scope and currency. Placeholder plan scores are not used. Missing costs and utility conversion inputs are listed as unavailable.".to_owned(),
-        Some(status) if status.status == STATUS_FAILED => format!(
-            "Economic appraisal failed: {}. See module_status.json for details.",
-            report::escape_html(status.reason.as_deref().unwrap_or("unspecified error"))
-        ),
-        Some(status) => format!(
-            "Economic appraisal is unavailable: {}.",
-            report::escape_html(status.reason.as_deref().unwrap_or("no input data was configured"))
-        ),
-        None => "Economic appraisal status is unavailable.".to_owned(),
-    };
-    let economic_section = format!(
-        "<h2>Economic appraisal</h2><p>{economic_note}</p><div id=\"economic-summary\"></div><p><a href=\"economic_appraisal.csv\">Appraisal ledger</a> · <a href=\"economic_summary.csv\">Appraisal summary</a></p><script>csvTable('#economic-summary',{economic});</script>"
-    );
-    let html = html.replace("</body>", &format!("{economic_section}</body>"));
-    fs::write(path.join("index.html"), html).map_err(io_error)
-}
-
-/// Fill `template` by scanning it once, left to right.
-///
-/// A chained `str::replace` would rescan text it had already substituted, so a
-/// replacement value that happens to contain another token (a link label reading
-/// `__METRICS__`, say) would be rewritten by a later step and corrupt the
-/// payload. Advancing past the token after one substitution leaves inserted text
-/// untouched. Byte indexing is safe here because the cursor only ever lands on a
-/// `char` boundary.
-fn substitute_template(template: &str, replacements: &[(&str, &str)]) -> String {
-    let mut output = String::with_capacity(template.len());
-    let mut cursor = 0;
-    while cursor < template.len() {
-        if let Some((token, value)) = replacements
-            .iter()
-            .find(|(token, _)| template[cursor..].starts_with(token))
-        {
-            output.push_str(value);
-            cursor += token.len();
-        } else {
-            let character = template[cursor..]
-                .chars()
-                .next()
-                .expect("cursor is within the template");
-            output.push(character);
-            cursor += character.len_utf8();
-        }
-    }
-    output
-}
-
-fn csv_for_script(path: &Path) -> Result<String, AnalysisError> {
-    let csv = fs::read_to_string(path).map_err(io_error)?;
-    json_for_script(&csv.lines().collect::<Vec<_>>())
-}
-
-/// Embeds at most `rows` lines, header included, without reading the whole file.
-/// Reports whether the file had more lines than were embedded.
-fn csv_preview_for_script(path: &Path, rows: usize) -> Result<(String, bool), AnalysisError> {
-    let file = File::open(path).map_err(io_error)?;
-    let mut lines = Vec::new();
-    let mut truncated = false;
-    for line in BufReader::new(file).lines() {
-        if lines.len() == rows {
-            truncated = true;
-            break;
-        }
-        lines.push(line.map_err(io_error)?);
-    }
-    Ok((json_for_script(&lines)?, truncated))
-}
-
-fn json_for_script(value: &(impl Serialize + ?Sized)) -> Result<String, AnalysisError> {
-    serde_json::to_string(value)
-        .map(|json| {
-            json.replace('&', "\\u0026")
-                .replace('<', "\\u003c")
-                .replace('>', "\\u003e")
-        })
-        .map_err(|e| AnalysisError(e.to_string()))
 }
 
 /// Opens one of the exported CSV tables for writing.
