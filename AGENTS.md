@@ -13,7 +13,7 @@ model.
 
 The Cargo workspace has two members:
 
-- `rust_qsim`: the simulation library, command-line tools, and almost all tests.
+- `matsim-rust` (directory `matsim_rust`): the simulation library, command-line tools, and almost all tests.
 - `macros`: procedural macros used by the simulation and its tests.
 
 Read these files before making broad changes:
@@ -24,26 +24,26 @@ Read these files before making broad changes:
 
 ## Repository map
 
-- `rust_qsim/src/simulation/`: core simulation code.
-- `rust_qsim/src/simulation/controller/`: iteration orchestration and scenario
+- `matsim_rust/src/simulation/`: core simulation code.
+- `matsim_rust/src/simulation/controller/`: iteration orchestration and scenario
   transitions.
-- `rust_qsim/src/simulation/engines/`: activity, leg, network, and teleportation
+- `matsim_rust/src/simulation/engines/`: activity, leg, network, and teleportation
   engines.
-- `rust_qsim/src/simulation/network/`: the runtime network, capacities,
+- `matsim_rust/src/simulation/network/`: the runtime network, capacities,
   partitioning, and link dynamics.
-- `rust_qsim/src/simulation/replanning/`: selectors, strategies, routing, and
+- `matsim_rust/src/simulation/replanning/`: selectors, strategies, routing, and
   travel-time handling.
-- `rust_qsim/src/simulation/scenario/`: input models and preparation of plans,
+- `matsim_rust/src/simulation/scenario/`: input models and preparation of plans,
   routes, vehicles, and transit data.
-- `rust_qsim/src/simulation/io/`: XML and protobuf adapters.
-- `rust_qsim/src/simulation/id/`: external-to-internal ID mapping and its global
+- `matsim_rust/src/simulation/io/`: XML and protobuf adapters.
+- `matsim_rust/src/simulation/id/`: external-to-internal ID mapping and its global
   store.
-- `rust_qsim/src/simulation/random.rs`: the reproducible RNG contract.
-- `rust_qsim/src/bin/`: conversion, merge, partitioning, and simulation entry
+- `matsim_rust/src/simulation/random.rs`: the reproducible RNG contract.
+- `matsim_rust/src/bin/`: conversion, merge, partitioning, and simulation entry
   points.
-- `rust_qsim/src/experiments/`: exploratory code; do not treat it as the
+- `matsim_rust/src/experiments/`: exploratory code; do not treat it as the
   production architecture without checking its callers.
-- `rust_qsim/tests/resources/` and `rust_qsim/assets/`: test and example inputs.
+- `matsim_rust/tests/resources/` and `matsim_rust/assets/`: test and example inputs.
 
 `Scenario` owns data while inputs are read. The controller converts it to a
 `ControllerScenario`, whose immutable core is shared through `Arc` while the
@@ -59,7 +59,7 @@ avoid solving borrowing problems by cloning an entire scenario or population.
   not a source-code regression.
 - `.cargo/config.toml` contains Apple Silicon Homebrew search paths. Do not
   generalize or replace them incidentally while working on unrelated code.
-- `rust_qsim/build.rs` compiles the `.proto` sources with the bundled
+- `matsim_rust/build.rs` compiles the `.proto` sources with the bundled
   `protobuf-src` compiler. Edit the `.proto` definitions or handwritten adapter
   code, never generated files in Cargo's `OUT_DIR`.
 - The optional `http` feature pulls in remote-download support and may require
@@ -147,7 +147,7 @@ While editing:
   staged mutation followed by validation, or copy-on-write where the code
   already uses it.
 - Do not hand-edit generated build output, files below `target/`, or runtime
-  output below `out/` and `rust_qsim/test_output/`.
+  output below `out/` and `matsim_rust/test_output/`.
 - Update `docs/architecture.md`, `docs/tests.md`, or `README.md` when their stated
   contract changes.
 
@@ -176,9 +176,9 @@ very long in debug mode. If Berlin validation is needed, run it only with
 repository root are:
 
 ```shell
-cargo test -p rust_qsim --lib path::to::test -- --test-threads=1
+cargo test -p matsim-rust --lib path::to::test -- --test-threads=1
 cargo test --workspace -- --test-threads=1 --skip berlin::
-cargo test -p rust_qsim --release --test simulation berlin:: -- --test-threads=1
+cargo test -p matsim-rust --release --test simulation berlin:: -- --test-threads=1
 cargo fmt --all -- --check
 ```
 

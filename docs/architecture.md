@@ -3,7 +3,7 @@
 This document provides an overview of the architecture of the project, detailing its main components, their
 interactions, and the overall design principles.
 
-## `rust_qsim`
+## `matsim-rust`
 
 The core implementation of the Rust QSim is oriented towards [MATSim Java](https://github.com/matsim-org/matsim-libs).
 In particular, we tried to minimize the differences between the physics of both simulations, including link dynamics
