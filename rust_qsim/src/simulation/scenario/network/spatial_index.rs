@@ -205,19 +205,19 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn nearest_link_breaks_ties_by_smallest_internal_id() {
-        // Both links are 5 units away. The link created first has the smaller internal id.
+fn nearest_link_breaks_ties_by_smallest_external_id() {
+        // Both links are 5 units away. The link created second has the smaller external id.
         let mut network = Network::new();
         add_node(&mut network, "a0", 0.0, 0.0);
         add_node(&mut network, "a1", 100.0, 0.0);
         add_node(&mut network, "c0", 0.0, 10.0);
         add_node(&mut network, "c1", 100.0, 10.0);
-        add_link(&mut network, "first", "c0", "c1", &["car"]);
-        add_link(&mut network, "second", "a0", "a1", &["car"]);
+        add_link(&mut network, "z-first", "c0", "c1", &["car"]);
+        add_link(&mut network, "a-second", "a0", "a1", &["car"]);
         let index = NetworkSpatialIndex::new(&network);
 
         assert_eq!(
-            Some(Id::get_from_ext("first")),
+            Some(Id::get_from_ext("a-second")),
             index.nearest_link(&Coordinate::new_2d(50.0, 5.0), None)
         );
     }
