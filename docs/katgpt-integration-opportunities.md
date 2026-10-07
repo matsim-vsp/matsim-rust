@@ -1,6 +1,6 @@
 # Applying katgpt-rs techniques to MATSim Rust
 
-The strongest initial opportunities are shared route caching and speculative route proposals with exact-search fallback. Both can keep all 10 million people represented and leave the traffic engine responsible for queues, capacity, spillback, and vehicle events. Their benefit depends on routing's share of total runtime.
+The strongest initial opportunities are shared route caching and speculative route proposals with exact-search fallback. They operate in route planning and leave the traffic engine responsible for queues, capacity, spillback, and vehicle events. Their benefit depends on routing's share of total runtime.
 
 This document records the katgpt patterns implemented in this repository and their limits. Exact routing optimizations are enabled when their assumptions hold. Adaptive rerouting and proposal preparation are opt-in because they can change strategy behavior or add work.
 
@@ -20,6 +20,50 @@ The controller builds ALT routers, which use landmark-based lower bounds to acce
 Workers collect observed travel times and publish a complete immutable snapshot after all partitions submit. Routers read it through `ArcSwap`; they do not take the submission lock. [Travel-time calculator](../rust_qsim/src/simulation/replanning/routing/travel_time_calculator.rs).
 
 The network already tracks active links and nodes. Each simulation tick visits active network objects, while the outer loop still advances through every tick. Skipping inactive links would duplicate existing behavior. [Network processing](../rust_qsim/src/simulation/network/sim_network.rs), [simulation loop](../rust_qsim/src/simulation/simulation.rs).
+
+`ControllerBuilder` accepts custom `ReplanningStrategy` implementations. Configured strategy settings select them by name. Custom strategies are innovative by default and can opt into innovation-disabled iterations. [Controller builder](../rust_qsim/src/simulation/controller/controller.rs), [replanning strategy API](../rust_qsim/src/simulation/replanning/mod.rs).
+
+For example, register a strategy and enable it in the scenario config:
+
+```rust
+use rust_qsim::simulation::config::{Config, StrategySetting};
+use rust_qsim::simulation::controller::controller::ControllerBuilder;
+use rust_qsim::simulation::replanning::{ReplanningContext, ReplanningStrategy};
+use rust_qsim::simulation::scenario::population::InternalPerson;
+use rust_qsim::simulation::scenario::Scenario;
+
+struct IterationMarker;
+
+impl ReplanningStrategy for IterationMarker {
+    fn name(&self) -> &str {
+        "IterationMarker"
+    }
+
+    fn replan(&self, person: &mut InternalPerson, context: &ReplanningContext) {
+        person
+            .selected_plan_mut()
+            .attributes
+            .insert("custom_strategy_iteration", context.iteration);
+    }
+}
+
+fn main() -> Result<(), String> {
+    let mut config = Config::from_path("config.xml");
+    config.replanning_mut().strategy_settings.clear();
+    config.replanning_mut().strategy_settings.push(StrategySetting::new(
+        "IterationMarker".to_string(),
+        1.0,
+        "person".to_string(),
+    ));
+    let scenario = Scenario::load(config);
+    let _controller = ControllerBuilder::default_with_scenario(scenario)
+        .replanning_strategy(Box::new(IterationMarker))
+        .build()?;
+    Ok(())
+}
+```
+
+This strategy only adds an iteration attribute; production strategies can edit the selected plan or append a new selected plan. Implementations run concurrently across people.
 
 Current main supports multithreading. Its README marks MPI support as deprecated and directs MPI users to version 0.2.0 or earlier. [README](../README.md).
 
@@ -62,7 +106,7 @@ Travel-time snapshots expose a monotonically increasing epoch. Cache keys includ
 
 Rounding departure times to bins is not automatically exact. A route can enter later links in different bins, and interpolation can vary within a bin. Start with exact request equivalence. Treat time grouping as a separate approximation.
 
-The cache currently uses FIFO eviction with limits of 4,096 entries and 4 MiB of estimated route payload per `AStar` instance. Mode-specific routers each own a cache, so total retained memory grows with the number of routers. Measure duplicate-request frequency, memory, and hit rate before assuming it helps at ten-million-person scale.
+The cache currently uses FIFO eviction with limits of 4,096 entries and 4 MiB of estimated route payload per `AStar` instance. Mode-specific routers each own a cache, so total retained memory grows with the number of routers. Measure duplicate-request frequency, memory, and hit rate on each target workload before assuming the cache helps.
 
 ## 3. Draft a candidate and verify its value
 
@@ -118,7 +162,9 @@ The implementation uses these domain patterns without adding katgpt-rs as a depe
 
 ## Prerequisites for a meaningful experiment
 
-The current controller's `run_scoring_phase` sets all stored plan scores to `Some(1.0)`. Scoring-based link disutility exists, but full behavioral plan scoring is not implemented in that phase. Do not interpret score-based convergence or adaptive plan-quality learning as production MATSim behavior until that scoring path is implemented or supplied. Routing and fixed-plan mobility experiments remain useful. [Controller scoring](../rust_qsim/src/simulation/controller/controller.rs), [routing disutility](../rust_qsim/src/simulation/replanning/routing/cost.rs).
+The controller uses `CharyparNagelScoringFunction` by default and writes its calculated score to each experienced plan and the selected stored plan. A custom `PlanScorer` can replace it. The earlier 130,295-person BKK adaptive pilot set mode utility parameters to zero; the bounded 5,332-person pilot used -6 utils/hour. Both used configured activity-duration parameters, and neither establishes parity with a calibrated MATSim scoring setup or convergence. [Scoring pool](../rust_qsim/src/simulation/controller/mod.rs), [score assignment](../rust_qsim/src/simulation/scoring/mod.rs), [scoring function](../rust_qsim/src/simulation/scoring/charypar_nagel_scoring_function.rs).
+
+This work excludes 500K- and 1M-person feasibility runs. Results from the available cohorts must not be extrapolated to those sizes.
 
 katgpt-rs pins Rust 1.98.1, while MATSim Rust pins 1.94.0. Importing its current crates would require a toolchain review, and `katgpt-pruners` brings several other workspace crates. The current routing changes use local types and do not need that dependency. [katgpt manifest](https://github.com/katopz/katgpt-rs/blob/2865de70807046578c86d60e68668166c04bdf8b/Cargo.toml), [pruner dependencies](https://github.com/katopz/katgpt-rs/blob/2865de70807046578c86d60e68668166c04bdf8b/crates/katgpt-pruners/Cargo.toml), [MATSim toolchain](../rust-toolchain.toml).
 
@@ -128,7 +174,7 @@ Routing profiles record route-search counts, graph node counts, expanded nodes, 
 
 For larger comparisons, keep the same inputs, seed, worker count, output settings, and convergence criteria. Record total wall time, CPU time, peak memory, route-search count, nodes expanded, cache-hit fraction, candidate validation time, and full-search fallback fraction.
 
-For exact changes, compare costs, routes, determinism, and vehicle events. For experimental adaptive replanning, also compare link volumes, travel-time distributions, stuck agents, and convergence across seeds. Profile smaller cases before allocating a ten-million-person run, then validate scale effects with a controlled population ladder.
+For exact changes, compare costs, routes, determinism, and vehicle events. For experimental adaptive replanning, also compare link volumes, travel-time distributions, stuck agents, and score trajectories across seeds. Keep conclusions within the measured cohorts; 500K- and 1M-person feasibility runs are explicitly out of scope.
 
 ### Repeatable local runs
 
@@ -158,7 +204,7 @@ The `--input` paths must cover the full input bundle; files and directory conten
 
 Built the unchanged release binary with `cargo build --release --bin local_qsim` after confirming the apt-installed CMake is available. The build completed successfully (about 73 seconds).
 
-Ran the bundled Berlin v6.4 input, which contains 5,332 people and 119,174 nodes / 283,885 links. With its configured 0.001 QSim sample size and one ReRoute phase across two iterations, the complete command took 34.73 seconds wall time, 45.78 CPU seconds, and peaked at 2,526,804 KiB RSS. This is a small-scenario baseline, not a ten-million-person estimate. QSim spans accounted for 9.27 seconds in the measured run; the rest includes startup, preparation, replanning/scoring, and output. The route profile remained header-only, so route-search time and counts are not yet measurable.
+Ran the bundled Berlin v6.4 input, which contains 5,332 people and 119,174 nodes / 283,885 links. With its configured 0.001 QSim sample size and one ReRoute phase across two iterations, the complete command took 34.73 seconds wall time, 45.78 CPU seconds, and peaked at 2,526,804 KiB RSS. This is a small-scenario baseline, not an estimate for unmeasured population sizes. QSim spans accounted for 9.27 seconds in the measured run; the rest includes startup, preparation, replanning/scoring, and output. The route profile remained header-only, so route-search time and counts are not yet measurable.
 
 A separate run with `qsim.sample_size=1.0` took 15.04 seconds wall time and peaked at 2,195,840 KiB RSS, but that override changes capacity scaling and should be treated only as a stress datapoint, not a behavior-comparable result. Neither run establishes a speedup or scaling curve.
 
@@ -179,11 +225,11 @@ For each population size, runs used the same input, the 119,174-node / 283,885-l
 |  | User CPU time | 47.57 s (46.36–60.01) | 25.71 s (19.09–29.51) |
 |  | Peak RSS | 2,203,528 KiB (2,203,428–2,205,416) | 1,756,836 KiB (1,754,124–1,756,988) |
 
-The optimized runs consistently recorded 380 searches and 838,406 node expansions for 100 people, and 740 searches and 1,796,027 expansions for 200. The baseline predates those routing profile counters, so its per-search counts are unavailable. The first baseline and optimized runs produced identical serialized route records (2,286 for 100 people and 4,482 for 200) and byte-identical compressed vehicle-event files at each population size. Median user CPU time fell by 44% and 46%, and median peak RSS by 21% and 20%, respectively. Wall-time ranges overlap at both sizes and the optimized medians are higher. These runs support lower CPU and memory use on these cases, but do not establish a wall-time improvement or predict ten-million-person behavior. Route-cache and reverse-tree limits apply per router, and search scratch is retained per worker thread. Kernel profiling remains unavailable in this environment (`perf_event_paranoid=4`).
+The optimized runs consistently recorded 380 searches and 838,406 node expansions for 100 people, and 740 searches and 1,796,027 expansions for 200. The baseline predates those routing profile counters, so its per-search counts are unavailable. The first baseline and optimized runs produced identical serialized route records (2,286 for 100 people and 4,482 for 200) and byte-identical compressed vehicle-event files at each population size. Median user CPU time fell by 44% and 46%, and median peak RSS by 21% and 20%, respectively. Wall-time ranges overlap at both sizes and the optimized medians are higher. These runs support lower CPU and memory use on these cases, but do not establish a wall-time improvement or predict behavior at unmeasured population sizes. Route-cache and reverse-tree limits apply per router, and search scratch is retained per worker thread. Kernel profiling remains unavailable in this environment (`perf_event_paranoid=4`).
 
 Checks recorded for the historical comparison: `cargo check -p rust_qsim --lib` passed, all 91 replanning tests passed, and both CSV and Parquet routing profile tests passed. The runtime comparison used release builds from the archived baseline and optimized commits. Subsequent correctness changes in the current source were not included in those measurements.
 
-The historical measurements above predate the experiment driver and are not a completed population ladder. A larger population ladder is not part of the remaining completion scope. The adaptive option remains disabled by default and makes per-person seeded decisions with mandatory first and periodic checks. The full million-person feasibility claim remains unproven; do not extrapolate it from the 100/200-person routing subset.
+The historical measurements above predate the experiment driver and are not a completed population ladder. A larger population ladder is not part of the remaining completion scope. The adaptive option remains disabled by default and makes per-person seeded decisions with mandatory first and periodic checks. No result here establishes feasibility at 500K or 1M people, and none is planned.
 
 #### Refreshed matched exact-optimization baseline
 
@@ -196,6 +242,21 @@ The archived baseline (`789ff1c`) lacks A* CSV profiling and public-transport ro
 | Sampled peak RSS | 1,976,608 KiB | 1,742,172 KiB |
 
 The optimized build recorded 740 A* searches and 1,796,027 expanded nodes per run; the baseline did not expose those counters. Median wall time, sampled CPU, and sampled peak RSS were 20.5%, 33.7%, and 11.9% lower, respectively. Final iteration output contained 4,482 routed leg records in each build, with every route record equal. Both event partitions were byte-identical after decompression. The comparison JSON files, raw runs, and derived 200-person input are under `/mnt/Data/bangkoksilo/scenOutput/issue32-rustqsim-berlin-200-exact-{baseline-789ff1c-final,optimized-7307024}/` and `/mnt/Data/bangkoksilo/scenOutput/issue32-rustqsim-berlin-200-exact-match-input/`.
+
+#### Route-cache and batch-proposal measurement
+
+A 5-by-5 factorial comparison used the same release executable with a temporary runtime switch to disable the route cache, the 5,332-person BKK 2045 cohort, seed 4711, two QSim workers, four replanning threads, and one route-active iteration. Runs were interleaved across cache and proposal settings. The runtime switch existed only in the temporary benchmark worktree.
+
+| Cache | Batch proposals | Median wall | Median sampled CPU | Median sampled peak RSS |
+| --- | --- | ---: | ---: | ---: |
+| on | off | 28.960 s | 109.27 s | 1,079,796 KiB |
+| on | on | 30.063 s | 109.48 s | 1,076,924 KiB |
+| off | off | 30.069 s | 145.87 s | 1,059,984 KiB |
+| off | on | 30.081 s | 145.93 s | 1,058,960 KiB |
+
+Every run performed 10,075 A* searches and expanded about 17.2 million nodes. No route-cache lookup hit, candidate passed validation, or candidate bound was used. Batch proposals therefore demonstrated no routing-work reduction, and their wall and CPU timings overlap their paired controls. Cache on/off outputs had identical semantic plans after normalizing unordered XML attributes and byte-identical decompressed event partitions. The wall-time ranges overlap. The sampled CPU gap between cache settings was reproducible, including with the same executable, but contradicts the identical search work and zero hits; its cause is unknown, so it is not evidence of cache savings.
+
+A smaller 533-person replay checked whether the CPU gap was a scale artifact. Three matched runs per setting again recorded identical work (1,011 searches and 1,781,484 expanded nodes); summed A* span durations had a 2.470 s cache-on median and 2.473 s cache-off median. Yet sampled process CPU medians were 15.26 s on and 17.85 s off, with the same 6.316 s median wall time. Two additional matched pairs measured with `/usr/bin/time -v` confirmed the direction: user CPU was 14.48 s in both cache-on runs and 16.95 / 17.08 s cache-off, while wall time stayed 6.16–6.30 s. A final-iteration event comparison for one pair matched event counts, travel-time summaries, and every link volume. The toggle only gates route-cache key construction, lookup, and insertion in the temporary executable. Available profiles do not explain the extra process CPU outside the nearly equal A* spans. Raw reports and logs are under `/tmp/matsim-katgpt-followups/factorial-toggle/` and `/tmp/matsim-katgpt-followups/cache-repro-533/`. Keep proposal generation opt-in and treat cache benefit as workload-specific; this workload had no reuse opportunities.
 
 ### BKK supplied population, 130,295 people
 
@@ -225,4 +286,48 @@ A second matched pair used seed 27182, identical inputs, 8 QSim partitions, 8 re
 
 The seed-27182 event comparison found the same 341,945 departures, 341,754 arrivals, and 191 stuck events. Median leg times were equal for walk (293 s) and PT (8,427 s), and differed by one second for car (797 s ReRoute, 796 s adaptive). Per-link entered-event count L1 delta was 7.446% of ReRoute volume, with 16,350 links changed. Raw outputs and the comparison JSON are under `/mnt/Data/bangkoksilo/scenOutput/issue32-rustqsim-bkk-130295-current-{reroute,adaptive-p025}-seed27182-3iter/`.
 
-Across these two seeds, adaptive used fewer searches and sampled CPU, while final aggregate event counts and travel-time medians were close; per-link counts differed by about 7.4%. This is two seeds, one run per condition per seed, and not an equal-CPU-budget outcome comparison. Plan scores remain placeholders, so these results say nothing about convergence. No 500k or 1M demand input is available here, and million-person feasibility remains unproven. The matched exact-optimization comparison and adaptive assessment are documented above; no larger population ladder is claimed.
+Across these two seeds, adaptive used fewer searches and sampled CPU, while final aggregate event counts and travel-time medians were close; per-link counts differed by about 7.4%. This is two seeds, one run per condition per seed, and not an equal-CPU-budget outcome comparison. Scores were calculated under the configured zero-mode-utility BKK setup, but the comparison does not establish convergence. The matched exact-optimization comparison and adaptive assessment are documented above. The separate 24,729-person ladder below adds fixed-plan scale data.
+
+### Separate BKK 2045 population ladder, 24,729 people
+
+This ladder uses `/mnt/Data/temp_silo_vv test/2045.output_plans.xml`, a different demand file from the 130,295-person `BKK_Output` cohort above. Its matching network is `BKK_Network_Road-PT_01.xml` with 31,758 nodes and 105,406 links. It uses the M01 transit schedule and fleet.
+
+The plans contain 14,816 people with car legs. The supplied M01 fleet has no `car` type, so a derived vehicle file adds one default car vehicle for each of those people. The added type has 7.5 m length, 1.0 m width, 44.4 m/s maximum speed, PCE 1.0, `car` network mode, and flow efficiency 1.0. The source fleet file remains unchanged.
+
+The 533-, 2,666-, and 5,332-person subsets rank person IDs by SHA-256 and take nested prefixes. All runs use the full network, M01 schedule, sample size 1.0, seed 4711, one QSim worker, one replanning worker, and one fixed-plan iteration through 129,600 seconds. The scoring config sets mode utilities to zero and supplies activity durations for `home`, `work`, and `pt interaction`. Each size had one warm-up and three measured runs. All measured runs exited successfully, and the full run's final iteration plan file contains all 24,729 people.
+
+| People | Median wall time (range) | Median sampled CPU | Median sampled peak RSS |
+|---:|---:|---:|---:|
+| 533 | 2.607 s (2.510–2.707) | 5.72 s | 469,064 KiB |
+| 2,666 | 5.516 s (5.514–5.617) | 21.20 s | 632,424 KiB |
+| 5,332 | 8.923 s (8.825–9.023) | 41.39 s | 856,100 KiB |
+| 24,729 | 36.732 s (36.510–36.803) | 210.39 s | 2,685,200 KiB |
+
+The `Simulation::run` span took 9.535 s in the first measured full-population run. Wall time also includes scenario loading, scoring, and output, so the table is not a QSim-only timing. The runs use one iteration and zero mode utilities; they measure a fixed-plan workload, not replanning convergence. Experiment JSON files and logs are under `/tmp/matsim-bkk-scale/scale-final-{533,2666,5332,24729}/`.
+
+#### Bounded adaptive multi-iteration pilot
+
+I compared ReRoute plus `SelectExpBeta` against the same strategy weights with `adaptive_reroute_probability=0.25` and interval 5 on the nested 5,332-person cohort, using seeds 4711, 27182, and 8675309. Each run simulated iterations 0–6, retained all 5,332 people in every written iteration plan, used two QSim workers and four replanning workers, and selected between ReRoute and `SelectExpBeta`. All modes used a configured travel-time utility of -6 utils/hour with the same activity-duration settings. This makes scores responsive for the comparison, but is an uncalibrated scoring setup and is not a MATSim parity claim. There was one run per condition and seed; timing medians below are descriptive, not a performance guarantee.
+
+| Median across three seeds | ReRoute + SelectExpBeta | Adaptive 25% |
+| --- | ---: | ---: |
+| Wall time | 86.819 s | 65.162 s |
+| Sampled CPU time | 263.44 s | 179.58 s |
+| Sampled peak RSS | 1,149,440 KiB | 1,115,728 KiB |
+| A* searches | 30,129 | 16,080 |
+| Expanded nodes | 51,425,834 | 27,270,020 |
+
+The medians of selected-plan mean score by written iteration rose in both groups and ended close:
+
+| Iteration | ReRoute + SelectExpBeta | Adaptive 25% |
+| ---: | ---: | ---: |
+| 1 | 118.366 | 118.366 |
+| 2 | 121.216 | 121.216 |
+| 3 | 122.908 | 122.934 |
+| 4 | 123.732 | 123.768 |
+| 5 | 124.201 | 124.287 |
+| 6 | 124.437 | 124.465 |
+
+Final-iteration event comparisons across the three matched seeds had median travel-time medians of 838 s versus 841 s for car, 2,062 s versus 1,761 s for PT, and 412 s versus 414 s for walk (ReRoute versus adaptive). The absolute per-link entered-event count difference was 3.481–4.031% of ReRoute volume across seeds. These are different simulated outcomes; the small score gap does not prove convergence or that either outcome is better. Raw reports, logs, plans, events, and per-seed event comparisons are under `/tmp/matsim-katgpt-followups/adaptive-pilot/`.
+
+This completes a bounded assessment of the adaptive option on an available cohort. No 500K- or 1M-person feasibility run was performed or is planned; these measurements must not be extrapolated to those populations.

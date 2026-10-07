@@ -14,6 +14,7 @@ use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::population::agent_source::{
     DynAgentSource, IntoDynAgentSource, PopulationAgentSource,
 };
+use crate::simulation::replanning::ReplanningStrategy;
 use crate::simulation::replanning::routing::a_star::{AStar, AltHeuristic};
 use crate::simulation::replanning::routing::cost::ScoringBasedTravelTimeAndDisutility;
 use crate::simulation::replanning::routing::network_routing::NetworkRoutingModule;
@@ -59,6 +60,8 @@ pub struct Controller {
     experienced_plan_collection: scoring::ExperiencedPlansCollection,
     #[debug(skip)]
     scoring_function: Option<Box<dyn PlanScorer>>,
+    #[debug(skip)]
+    replanning_strategies: Vec<Box<dyn ReplanningStrategy>>,
     person_demographics: Vec<crate::simulation::analysis::PersonDemographic>,
 }
 
@@ -71,6 +74,7 @@ pub struct ControllerBuilder {
     global_barrier: Option<Arc<Barrier>>,
     adapter_handles: Vec<AdapterHandle>,
     scoring_function: Option<Box<dyn PlanScorer>>,
+    replanning_strategies: Vec<Box<dyn ReplanningStrategy>>,
 }
 
 impl ControllerBuilder {
@@ -84,6 +88,7 @@ impl ControllerBuilder {
             global_barrier: None,
             adapter_handles: Vec::new(),
             scoring_function: None,
+            replanning_strategies: Vec::new(),
         }
     }
 
@@ -165,6 +170,7 @@ impl ControllerBuilder {
             expected_travel: Vec::new(),
             experienced_plan_collection: experienced_plans,
             scoring_function: self.scoring_function,
+            replanning_strategies: self.replanning_strategies,
             person_demographics: Vec::new(),
         })
     }
@@ -199,6 +205,12 @@ impl ControllerBuilder {
 
     pub fn scoring_function(mut self, scoring_function: Box<dyn PlanScorer>) -> Self {
         self.scoring_function = Some(scoring_function);
+        self
+    }
+
+    /// Registers a named replanning strategy that can be selected from the scenario config.
+    pub fn replanning_strategy(mut self, strategy: Box<dyn ReplanningStrategy>) -> Self {
+        self.replanning_strategies.push(strategy);
         self
     }
 
@@ -352,7 +364,11 @@ impl Controller {
         let simulation_started = Instant::now();
         let mut mobsim_workers = self.start_mobsim_workers();
         let scoring_pool = ScoringPool::new(&self.scenario.core, self.scoring_function.take());
-        let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
+        let replanning_pool = ReplanningPool::new(
+            &self.scenario.core,
+            self.trip_router.clone(),
+            mem::take(&mut self.replanning_strategies),
+        );
         let mut phase_seconds = BTreeMap::new();
 
         for iteration in first_iteration..=last_iteration {

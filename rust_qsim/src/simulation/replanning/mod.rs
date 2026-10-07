@@ -33,10 +33,29 @@ pub const RE_ROUTE_STRATEGY_NAME: &str = "ReRoute";
 pub const SELECT_EXP_BETA_STRATEGY_NAME: &str = "SelectExpBeta";
 const ADAPTIVE_REROUTE_RNG_PURPOSE: &str = "replanning.reroute.exploration";
 
+/// A user-defined replanning strategy registered with [`crate::simulation::controller::ControllerBuilder`].
+///
+/// The implementation runs on the replanning pool and may be called concurrently for different
+/// people. Keep mutable state local to the person or synchronize shared state. Use a stable,
+/// unique name in `replanning.strategy_settings` to enable this strategy.
+pub trait ReplanningStrategy: Send + Sync {
+    fn name(&self) -> &str;
+
+    /// Returns true when this strategy should remain eligible while innovation is disabled.
+    fn is_non_innovative(&self) -> bool {
+        false
+    }
+
+    fn replan(&self, person: &mut InternalPerson, context: &ReplanningContext);
+}
+
 #[allow(dead_code)]
 /// This is responsible for picking a plan, copying it, and replanning it.
 trait PlanStrategy: Send + Sync {
     fn name(&self) -> &Id<String>;
+    fn is_non_innovative(&self) -> bool {
+        false
+    }
     fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext);
 }
 
@@ -142,9 +161,27 @@ impl StrategyManager {
         replanning: &config::Replanning,
         trip_router: TripRouter,
         scenario_core: &ScenarioCore,
+        custom_strategies: Vec<Box<dyn ReplanningStrategy>>,
     ) -> Self {
+        let mut strategies = default_strategies(trip_router.clone(), scenario_core.clone());
+        for strategy in custom_strategies {
+            let name = strategy.name();
+            assert!(
+                !name.is_empty(),
+                "Custom replanning strategy name cannot be empty."
+            );
+            let id = Id::create(name);
+            assert!(
+                !strategies.contains_key(&id),
+                "Duplicate replanning strategy name: {name}"
+            );
+            strategies.insert(
+                id.clone(),
+                Box::new(RegisteredReplanningStrategy { id, strategy }),
+            );
+        }
         let weights_per_subpopulation =
-            weights_per_subpopulation_from_settings(&replanning.strategy_settings);
+            weights_per_subpopulation_from_settings(&replanning.strategy_settings, &strategies);
 
         StrategyManagerBuilder::default()
             .weights_per_subpopulation(weights_per_subpopulation)
@@ -153,7 +190,7 @@ impl StrategyManager {
                 &replanning.plan_selector_for_removal,
             ))
             .adaptive_reroute_policy(AdaptiveReroutePolicy::from_config(replanning))
-            .strategies(default_strategies(trip_router, scenario_core.clone()))
+            .strategies(strategies)
             .build()
             .unwrap()
     }
@@ -222,7 +259,10 @@ impl StrategyManager {
             .iter()
             .filter(|entry| entry.weight > 0.0)
             .filter(|entry| {
-                !context.innovation_disabled || is_non_innovative_strategy(&entry.strategy_name)
+                !context.innovation_disabled
+                    || self
+                        .strategy_by_name(&entry.strategy_name)
+                        .is_non_innovative()
             })
             .collect::<Vec<_>>();
 
@@ -352,10 +392,15 @@ fn default_strategies(
 
 fn weights_per_subpopulation_from_settings(
     settings: &[config::StrategySetting],
+    strategies: &IntMap<Id<String>, Box<dyn PlanStrategy>>,
 ) -> IntMap<Id<String>, StrategyWeights> {
     let mut weights_per_subpopulation = IntMap::default();
     for setting in settings {
-        assert_known_strategy_name(&setting.name);
+        assert!(
+            strategies.contains_key(&Id::create(&setting.name)),
+            "Unknown replanning strategy or selector configured: {}",
+            setting.name
+        );
         weights_per_subpopulation
             .entry(Id::create(&setting.subpopulation))
             .or_insert_with(|| StrategyWeights::new(Vec::new()))
@@ -368,21 +413,10 @@ fn weights_per_subpopulation_from_settings(
     weights_per_subpopulation
 }
 
-fn assert_known_strategy_name(name: &str) {
-    if DefaultSelector::from_str(name).is_ok() || DefaultStrategy::from_str(name).is_ok() {
-        return;
-    }
-    panic!("Unknown replanning strategy or selector configured: {name}");
-}
-
 fn plan_selector_from_config_name(name: &str) -> Box<dyn PlanSelector> {
     DefaultSelector::from_str(name)
         .map(DefaultSelector::as_plan_selector)
         .unwrap_or_else(|_| panic!("Unknown plan_selector_for_removal configured: {name}"))
-}
-
-fn is_non_innovative_strategy(strategy_name: &Id<String>) -> bool {
-    DefaultSelector::from_str(strategy_name.external()).is_ok()
 }
 
 struct StrategyWeights {
@@ -416,9 +450,32 @@ struct GenericPlanStrategy {
     modules: Vec<Box<dyn PlanStrategyModule + Send + Sync>>,
 }
 
+struct RegisteredReplanningStrategy {
+    id: Id<String>,
+    strategy: Box<dyn ReplanningStrategy>,
+}
+
+impl PlanStrategy for RegisteredReplanningStrategy {
+    fn name(&self) -> &Id<String> {
+        &self.id
+    }
+
+    fn is_non_innovative(&self) -> bool {
+        self.strategy.is_non_innovative()
+    }
+
+    fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext) {
+        self.strategy.replan(person, context);
+    }
+}
+
 impl PlanStrategy for GenericPlanStrategy {
     fn name(&self) -> &Id<String> {
         &self.name
+    }
+
+    fn is_non_innovative(&self) -> bool {
+        DefaultSelector::from_str(self.name.external()).is_ok()
     }
 
     fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext) {
@@ -499,17 +556,18 @@ impl PlanStrategyModule for ReRouteModule {
     }
 }
 
-struct ReplanningContext {
-    iteration: u32,
-    base_seed: u64,
-    innovation_disabled: bool,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplanningContext {
+    pub iteration: u32,
+    pub base_seed: u64,
+    pub innovation_disabled: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         DefaultStrategy, GenericPlanStrategy, PlanStrategy, PlanStrategyModule, ReplanningContext,
-        StrategyManager,
+        ReplanningStrategy, StrategyManager,
     };
     use crate::simulation::config::{Config, Replanning, StrategySetting};
     use crate::simulation::id::Id;
@@ -555,6 +613,7 @@ mod tests {
             &replanning,
             TripRouter::default(),
             &ScenarioCore::default(),
+            Vec::new(),
         );
         let mut person = person_with_scores([Some(1.0), Some(2.0)]);
 
@@ -575,6 +634,7 @@ mod tests {
             &replanning,
             TripRouter::default(),
             &ScenarioCore::default(),
+            Vec::new(),
         );
         let person = person_with_scores([Some(1.0)]);
         let mut context = context();
@@ -612,6 +672,7 @@ mod tests {
             &replanning,
             TripRouter::default(),
             &ScenarioCore::default(),
+            Vec::new(),
         );
 
         let person_weights = manager
@@ -627,6 +688,55 @@ mod tests {
         assert_eq!(0.3, person_weights.entries[0].weight);
         assert_eq!(1, freight_weights.entries.len());
         assert_eq!(0.7, freight_weights.entries[0].weight);
+    }
+
+    struct MarkIterationStrategy;
+
+    impl ReplanningStrategy for MarkIterationStrategy {
+        fn name(&self) -> &str {
+            "MarkIteration"
+        }
+
+        fn is_non_innovative(&self) -> bool {
+            true
+        }
+
+        fn replan(&self, person: &mut InternalPerson, context: &ReplanningContext) {
+            person
+                .selected_plan_mut()
+                .attributes
+                .insert("custom_strategy_iteration", context.iteration);
+        }
+    }
+
+    #[deterministic_id_test]
+    fn registered_custom_strategy_runs_when_selected_by_config() {
+        let replanning = Replanning {
+            strategy_settings: vec![StrategySetting {
+                name: "MarkIteration".to_string(),
+                weight: 1.0,
+                subpopulation: "person".to_string(),
+            }],
+            ..Replanning::default()
+        };
+        let manager = StrategyManager::from_replanning_config(
+            &replanning,
+            TripRouter::default(),
+            &ScenarioCore::default(),
+            vec![Box::new(MarkIterationStrategy)],
+        );
+        let mut person = person_with_scores([Some(1.0)]);
+
+        manager.run(7, 42, true, &mut person);
+
+        assert_eq!(
+            Some(7),
+            person
+                .selected_plan()
+                .unwrap()
+                .attributes
+                .get::<u32>("custom_strategy_iteration")
+        );
     }
 
     #[deterministic_id_test]
@@ -650,6 +760,7 @@ mod tests {
             &replanning,
             TripRouter::default(),
             &ScenarioCore::default(),
+            Vec::new(),
         );
         let person = person_with_scores([Some(1.0), Some(2.0)]);
         let context = ReplanningContext {
