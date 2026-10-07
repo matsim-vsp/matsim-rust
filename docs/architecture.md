@@ -3,7 +3,7 @@
 This document provides an overview of the architecture of the project, detailing its main components, their
 interactions, and the overall design principles.
 
-## `rust_qsim`
+## `matsim-rust`
 
 The core implementation of the Rust QSim is oriented towards [MATSim Java](https://github.com/matsim-org/matsim-libs).
 In particular, we tried to minimize the differences between the physics of both simulations, including link dynamics
@@ -43,9 +43,22 @@ Starting the simulation mostly works as in MATSim Java. All XML input files need
 faster reading. These files need to be referenced in a configuration file. Based on the config, a scenario is built,
 based on that the controller -- pretty much like in MATSim Java.
 
+Network links must list their allowed modes explicitly: a link without modes allows no mode. Unlike MATSim, which
+assumes `car` for links without a `modes` attribute, nothing is implied. Loading a network with such links logs a
+warning.
+
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
-(`Arc<Network>`, `Arc<Garage>`, `Arc<Config>`) and owns the mutable `Population`.
+(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
+mutable `Population`.
+
+Input data is converted into internal types without deriving missing values. Fields that can be derived stay `Option`
+after the conversion and are resolved during preparation; code running afterward uses accessors such as
+`InternalActivity::link_id` instead of unwrapping. Preparation is split into two steps in `scenario::prepare`:
+
+- `prepare_for_sim` runs once on the loaded `Scenario`, before the controller shares it, e.g. with the routing modules.
+  It connects the facilities to the network and resolves the activity locations. Both run in parallel.
+- `prepare_for_mobsim` runs before every mobsim iteration. It validates and repairs plans, e.g. by routing trips.
 
 For mobsim, the controller splits the population into `MobsimInput`s. Each input contains a `MobsimPartition` with the
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive
@@ -67,16 +80,31 @@ worker result. A thread-local completion listener consolidates the collector's o
 shared travel-time calculator. The last submission atomically publishes the complete, immutable snapshot. The controller
 only waits for worker results, so publication has finished before `AfterMobsim`.
 The shared router reads the snapshot without taking the submission lock; unobserved links use freespeed.
-`prepare_for_sim` uses the previous iteration's snapshot, or an empty snapshot for the first iteration. The workers'
+`prepare_for_mobsim` uses the previous iteration's snapshot, or an empty snapshot for the first iteration. The workers'
 iteration-reset hooks clear the collectors before the next Mobsim. No event-file output is required for travel-time
 collection.
 
-Experienced-plan collection uses a worker-local backpack that moves with vehicles and teleporting agents between
-partitions. Workers send their completed partial plans to the controller after Mobsim; the controller merges them in
-stable person order and scores each experienced plan. The score is copied to the person's selected plan for the next
-replanning step. Collection and scoring run every iteration, even when experienced-plan output is disabled. The
-controller accepts a custom `PlanScorer`; otherwise it uses `CharyparNagelScoringFunction`. Set
-`scoring.write_experienced_plans` to write experienced plans alongside regular iteration plans.
+Worker extensions can observe state moving between partitions through a fourth, thread-local
+`PartitionChangeExtensionsManager` bus alongside the simulation-event, Mobsim-lifecycle, and partition-event buses.
+When a vehicle or teleporting agent leaves a partition, the bus moves one typed attachment slot per registered
+extension into the normal network message. The receiving worker installs all attachments before it emits partition
+enter events and hands the entity to its local engine. The network message broker only transports these opaque slots;
+it does not inspect or clone their contents.
+
+Experienced-plan collection uses this migration bus. Each worker creates one `BackpackingEngine` in an
+`Rc<RefCell<_>>`; its backpacks move with vehicles and teleporting agents and keep both their partial plans and any
+future scoring events. At `BeforeCleanup`, every worker converts the backpacks currently on that partition into one
+partial population and sends it to the controller over a dedicated backchannel before publishing its normal worker
+result. Consequently, all partial populations are available when the controller emits `AfterMobsim`. The scoring
+module verifies iteration and rank and merges the populations deterministically by person ID. The controller then
+scores each reconstructed experienced plan and copies the result to exactly the selected original plan. Experienced
+plans receive the same score and are written only when `scoring.write_experienced_plans` and the configured plan
+writing interval allow it. Collection and scoring always run, even when experienced-plan output is disabled, so
+replanning can consume the updated selected-plan scores. Backpacks do not return to an initial or "home" partition.
+Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
+`Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
+`OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
+An empty experienced plan receives zero points from either built-in scorer.
 
 ### Final-Iteration Analysis
 
@@ -176,6 +204,7 @@ replayed in.
 
 Every name in `metric_catalog.json` is the column it describes, so a consumer can look a metric up in
 the table that exports it.
+
 
 ### External Services
 
