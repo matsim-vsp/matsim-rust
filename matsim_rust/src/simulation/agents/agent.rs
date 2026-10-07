@@ -14,6 +14,7 @@ use crate::simulation::time::SimTime;
 #[derive(Debug)]
 pub struct SimulationAgent {
     logic: Box<dyn SimulationAgentLogic>,
+    stuck: bool,
 }
 
 impl PartialEq for SimulationAgent {
@@ -26,17 +27,26 @@ impl SimulationAgent {
     pub fn new_plan_based(person: InternalPerson) -> Self {
         Self {
             logic: Box::new(PlanBasedSimulationLogic::new(person)),
+            stuck: false,
         }
     }
 
     pub fn new_adaptive_plan_based(person: InternalPerson) -> Self {
         Self {
             logic: Box::new(AdaptivePlanBasedSimulationLogic::new(person)),
+            stuck: false,
         }
     }
 
     pub fn new(logic: Box<dyn SimulationAgentLogic>) -> Self {
-        Self { logic }
+        Self {
+            logic,
+            stuck: false,
+        }
+    }
+
+    pub(crate) fn mark_stuck(&mut self) {
+        self.stuck = true;
     }
 
     pub fn into_person(self) -> Option<InternalPerson> {
@@ -79,7 +89,11 @@ impl SimulationAgentLogic for SimulationAgent {
         self.logic.advance_plan(now);
     }
     fn state(&self) -> SimulationAgentState {
-        self.logic.state()
+        if self.stuck {
+            SimulationAgentState::STUCK
+        } else {
+            self.logic.state()
+        }
     }
     fn is_wanting_to_arrive_on_current_link(&self) -> bool {
         self.logic.is_wanting_to_arrive_on_current_link()
