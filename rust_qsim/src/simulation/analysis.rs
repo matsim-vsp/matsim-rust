@@ -1577,7 +1577,6 @@ fn publish_complete(
 
     write_json(&staging.join(MODULE_STATUS_FILE), &statuses)?;
     write_json(&staging.join(MANIFEST_FILE), manifest)?;
-    report::write_report(&staging, manifest, &statuses, &link_hourly)?;
     write_report(
         &staging,
         manifest,
@@ -1585,6 +1584,7 @@ fn publish_complete(
         &link_hourly,
         &settings.zone_system,
     )?;
+    report::write_report(&staging, manifest, &statuses, &link_hourly)?;
     // The report is rendered before its own runtime is timed, so that measurement is
     // patched in afterwards; a failed patch falls back to the tables written first.
     let initial_runtime = runtime.clone();
@@ -1593,13 +1593,6 @@ fn publish_complete(
         warn!("Could not refresh runtime measurements in the staged report: {error}");
         write_runtime_tables(&staging, &initial_runtime)?;
         report::write_report(&staging, manifest, &statuses, &link_hourly)?;
-        write_report(
-            &staging,
-            manifest,
-            &statuses,
-            &link_hourly,
-            &settings.zone_system,
-        )?;
     }
     let published = publication::publish(
         &staging,
