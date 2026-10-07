@@ -1,6 +1,8 @@
 # MATSim Rust
 
-This is a port of MATSim to Rust. This project served
+This project implements MATSim's QSim in Rust, with multithreaded network simulation,
+iterative scoring and replanning, and final-iteration analysis. It aims to preserve
+MATSim Java behavior and event semantics. This project served
 as [reference implementation](https://github.com/matsim-org/matsim-libs/pull/4255) for a distributed version of the QSim
 in the MATSim-Java core.
 
@@ -17,6 +19,31 @@ And two conference papers, which were presented at ISPDC 24 in Chur, Switzerland
 - [High-Performance Simulations for Urban Planning: Implementing Parallel Distributed Multi-Agent Systems in MATSim](https://doi.org/10.1109/ISPDC62236.2024.10705395)
 - [Real-Time Routing in Traffic Simulations: A Distributed Event Processing Approach](https://doi.org/10.1109/ISPDC62236.2024.10705399)
 
+## Current capabilities
+
+Recent upgrades extend the simulation, routing, and analysis workflow:
+
+- Persistent partition workers share immutable scenario data, collect experienced plans,
+  and publish mode-specific travel-time snapshots for the next iteration's routing.
+- Public transport vehicles can run through the network, board and alight passengers,
+  and compete for link capacity. Enable this with `transit.simulate_vehicles: true`;
+  transit legs are teleported by default.
+- Activity facilities support mode-specific link selection. The controller also accepts
+  custom scoring functions and replanning strategies.
+- Traffic signals use approach-link green windows. `qsim.remove_stuck_vehicles: true`
+  removes blocked vehicles after the stuck threshold; the default forces them onward.
+  See [architecture](docs/architecture.md) for ownership and MATSim compatibility limits.
+- A* routing reuses search buffers and initializes only discovered nodes. Adaptive
+  rerouting and batched route proposals are opt-in. The route cache is disabled by
+  default; setting `MATSIM_ENABLE_ROUTE_CACHE` enables it, regardless of the variable's
+  value. See [routing experiments](docs/katgpt-integration-opportunities.md) for the
+  implemented techniques, their limits, and the reproducible experiment runner.
+- The post-simulation SILO service exposes route queries using simulated travel times,
+  with explicit failure categories.
+- Automatic reports cover network use, congestion, journeys, activity patterns, transit,
+  and policy comparisons. Optional inputs add validation, accessibility, equity,
+  economic appraisal, and externally modeled environmental outcomes.
+
 ## How this project is organized
 
 The project is organized as a cargo workspace with multiple crates. The main crates are:
@@ -29,9 +56,10 @@ code, the crate is imported as `matsim_rust`.
 
 Up to version 0.3.0, the core crate was called `rust_qsim` and the repository `parallel_qsim_rust`.
 
-Check out further documentation in the `docs` folder.
+See [architecture](docs/architecture.md), [testing](docs/tests.md), and
+[analysis](docs/analysis.md) for the detailed contracts.
 
-## Set Up Prerequisites
+## Prerequisites
 
 The project relies on METIS as external dependency. This means this dependency is not
 compiled with the project, but need to be present on the operating system.
@@ -53,7 +81,8 @@ Currently, only Rust's multithreading capabilities are used for parallelism.
 
 ### Install dependencies
 
-The dependencies named above need to be installed before the project can be buit
+Install the dependencies below before building. Rustup uses the version pinned in
+`rust-toolchain.toml`, currently Rust 1.94.0. The crates use Rust 2024.
 
 #### Linux - apt
 
@@ -166,25 +195,42 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/sw/comm/openmpi/5.0.3/genoa.el9/aocc/li
 
 ## Build
 
-The project is built using cargo.
+From the repository root, build the release binaries using the Rust toolchain pinned in
+`rust-toolchain.toml` and the dependencies in `Cargo.lock`:
 
 ```shell
-cargo build --release
+cargo build --release --locked
 ```
+
+The binaries are written to `target/release/`. The main simulation executable is
+`target/release/local_qsim`. The release profile enables optimizations and retains debug information.
 
 ## Test
 
-To execute all tests run:
+Run the workspace tests without the long Berlin scenarios:
 
+```shell
+cargo test --workspace -- --test-threads=1 --skip berlin::
 ```
-cargo test -- --test-threads=1
+
+Add `--nocapture` for immediate output. Tests that use the global ID store or logging
+use `#[deterministic_id_test]` for repeatable, serialized setup. See
+[testing](docs/tests.md) for isolation rules and known native METIS failures.
+
+The pull request checks use release mode, the optional `http` feature, and warnings as errors:
+
+```shell
+cargo fmt --all -- --check
+RUSTFLAGS="-D warnings" cargo build --release --locked
+RUSTFLAGS="-D warnings" cargo test --release --locked --features http -- --test-threads=1 --skip berlin::
 ```
 
-To have immediate output add `--nocapture` to the command.
+Run Berlin integration tests separately, always in release mode. CI runs these on
+`main` and manual dispatch, rather than on pull requests:
 
-Note (Sep 205): The `--test-threads=1` option is used currently to ensure that the global ID store does not get
-overwritten by multiple parallel test threads. This will eventually be refined to allow all read-only tests to run in
-parallel and forcing sequencial order only for read-write tests.
+```shell
+RUSTFLAGS="-D warnings" cargo test --release --locked --test simulation berlin:: -- --test-threads=1
+```
 
 ## Run locally (multithreaded)
 
@@ -202,7 +248,7 @@ cargo run --release --bin local_qsim -- --config /path/to/config.yml
 
 to run the simulation.
 
-For example, after successfully running the tests first, try
+For a small XML-based scenario, run from the crate directory so the config's relative input paths resolve:
 
 ```
 cd matsim_rust
@@ -250,94 +296,113 @@ version. Clients degrade those to `service_error`, which hides which failures ar
 
 For `pt` requests that no transit line connects, the transit router falls back to the car router
 when one is configured, including for requests without a person. Without a fallback the response
-reports the no-path error. See `rust_qsim/tests/resources/equil/equil-config-silo-routing.yml` for a
+reports the no-path error. See `matsim_rust/tests/resources/equil/equil-config-silo-routing.yml` for a
 minimal config used by the integration test. Its network adds an unreachable `island` link to the
 equil network, so the tests can produce a `no_path` answer.
 
-## Reanalyze a completed run
+## Analyze simulation results
 
-A run with `output.analysis.enabled` writes a final-iteration report to `<output_dir>/analysis`. It
-covers link volumes and coverage, link classification, per-interval link speeds, vehicle distance
-and travel time, free-flow-relative delay, relative-speed profiles, traversal diagnostics, and
-en-route agent travel; passenger distance and time are explicitly unavailable without link-level
-occupancy. It also covers daily activity patterns — per-person activity and mode chains, observed
-activity times with first/last-day censoring reported explicitly, and the reconciliation of a
-person's day into activity and travel time — plus the urban-area summary and, when a zone system
-is supplied, mode and time zonal OD matrices and zone boundary crossings. An optional
-`output.analysis.zone_system` setting maps external link and person IDs to zones; locations it does
-not cover are reported as `unmapped` rather than dropped. An optional
-`output.analysis.excess_delay_clip_seconds` setting adds clipped positive
-delay columns to the CSV exports and metric catalog. See `docs/analysis.md` for allocation and
-metric conventions. The `analyze` binary regenerates that report from the
-occupancy. An optional `output.analysis.excess_delay_clip_seconds` setting adds clipped positive
-delay columns to the CSV exports and metric catalog.
+Enable `output.analysis.enabled` in the config's Output module to write a
+final-iteration report to `<output_dir>/analysis`. For example:
 
-Configuring `output.analysis.accessibility` adds accessibility to supplied opportunities: the
-cumulative count of jobs, schools or services reachable from each zone and person within a
-configurable travel-time threshold, by mode and departure period, with per-zone, per-person, summary
-and map exports. It needs three supplied files — opportunity locations and weights, zone centroids,
-and potential-destination travel costs — and stays `unavailable` until all three are configured.
-Realized trip durations are never substituted for the supplied costs, so a missing cost leaves the
-measure unavailable rather than guessed. See `docs/analysis.md` for the measure, the input formats and
-the status conventions. The `analyze` binary regenerates that report from the
-run's saved outputs without rerunning QSim:
+```yaml
+modules:
+  output:
+    type: Output
+    output_dir: ./output
+    write_events: File
+    analysis:
+      enabled: true
+      interval_seconds: 3600
+```
+
+Or enable analysis for an existing config from the command line:
+
+```shell
+cargo run --release --bin local_qsim -- --config /path/to/config.yml --set output.analysis.enabled=true
+```
+
+Open `analysis/index.html` for the offline report. CSV, JSON, and SVG exports include:
+
+- Link volumes, coverage, PCE-weighted capacity utilization, speeds, vehicle distance
+  and travel time, free-flow-relative delay, and en-route agent counts.
+- Legs and journeys, mode shares, travel distributions, completion and stuck status,
+  daily activity chains and durations, and activity/travel time reconciliation.
+- Link classification and urban-area summaries. A supplied zone system adds zonal
+  origin-destination flows and zone boundary crossings.
+- Transit waiting and in-vehicle time, boardings, alightings, and occupancy where the
+  recorded events and vehicle capacities support them. DRT and taxi service metrics
+  likewise depend on recorded service events.
+- Runtime context, including phase timings, worker count, build information, and
+  available hardware and memory measurements.
+
+Optional supplied inputs add observed traffic and transit validation, travel survey
+comparison, accessibility to opportunities, demographic burdens and equity,
+economic appraisal, modeled emissions, and modeled noise and exposure. The report
+states missing inputs and unavailable metrics explicitly. It does not infer passenger
+kilometers from vehicle counts, calculate emissions, or treat plan scores as welfare.
+See [analysis](docs/analysis.md) for configuration, input formats, and metric definitions.
+
+### Reanalyze a completed run
+
+Regenerate a report from saved outputs without rerunning QSim:
 
 ```shell
 cargo run --release --bin analyze -- --run-dir /path/to/output
 ```
 
-Analysis settings can be changed for the rerun, for example to export narrower intervals:
+Override the recorded interval width for the new report:
 
 ```shell
 cargo run --release --bin analyze -- --run-dir /path/to/output --interval-seconds 1800
 ```
 
-The same setting applies to an automatic run's interval width via
-`--set output.analysis.interval_seconds=1800`.
+The command requires a run that already recorded an analysis report. It reads replay
+settings from `analysis/manifest.json` and `analysis/run_metadata.json`, along with the
+saved event files, output network, and ID store. It rewrites only analysis outputs.
+Recorded classification, geography, and optional input paths are reused; externally
+supplied files must still exist at those paths.
 
-Setting `output.analysis.person_group_attributes` groups the report by person attributes such as
-`income`, `age`, `carAvailability` or `homeZone`, so travel burdens and, against
-`output.analysis.comparison_runs`, winner and loser counts are reported per group under a stated
-equity criterion. `output.analysis.person_weight_attribute` and
-`output.analysis.person_cost_attribute` name the person's weight and monetary cost when the
-population supplies them. See `docs/analysis.md` for the group and comparison definitions.
+A completed report has `"status": "complete"` in its manifest. If a required module
+fails, diagnostics go to `analysis-failure/` and the last complete report remains
+intact. `module_status.json` distinguishes required and optional modules and records
+unavailable inputs. Reanalysis exits non-zero on failure. A successful retry removes
+the failure directory, and interrupted publication recovers the last good report.
 
-The rerun reads the recorded final iteration, ID store, output network and run metadata. It only
-rewrites the analysis outputs; event files, plans, the output network and the ID store are left
-untouched. Without `--interval-seconds` the recorded interval width is reused. Link labels, the
-urban boundary and the zone system are restored from `manifest.json`, so a rerun reproduces the
-recorded classification and geography rather than reporting every link as `unknown` or every
-location as `unmapped`.
-urban boundary and the accessibility inputs are restored from `manifest.json`, so a rerun reproduces
-the recorded classification and accessibility measure rather than reporting every link as `unknown`
-and leaving accessibility unavailable. The accessibility inputs themselves are read again from the
-recorded paths, so they have to still be present.
+### Compare completed runs
 
-The standalone command needs a run that already recorded a report, so run the simulation once with
-`output.analysis.enabled: true`. It reads its replay parameters from the run's `analysis/manifest.json`
-and `analysis/run_metadata.json` rather than a config file, which keeps a rerun independent of the
-run's original inputs and config.
+Compare saved journey mode shares across the latest completed iterations:
 
-Reports distinguish three states. A completed report in `<output_dir>/analysis` carries
-`"status": "complete"` in its `manifest.json`, and its `index.html` presents a completed report. If
-a required module fails, the diagnostics -- including their own `index.html` -- are written to
-`<output_dir>/analysis-failure` and the completed report is left untouched, so a failed attempt is
-never mistaken for a completed one. Rerunning after fixing the inputs republishes the complete
-report and removes the failure directory. Optional modules that are not implemented or whose inputs
-are not configured are reported as `unavailable` in `module_status.json` rather than failing;
-`module_status.json` marks each entry `required` or not. The computed optional modules `link_speed`
-and `agent_travel` follow the run's outcome, so a failed run never lists them as complete.
+```shell
+cargo run --release --bin analyze -- --run-dir /path/to/baseline --compare-run-dir /path/to/alternative
+```
 
-A rerun exits non-zero and logs a diagnostic on failure. If a previous run was interrupted while
-publishing, its backup is reclaimed on the next rerun so the last good report is never stranded.
+Repeat `--compare-run-dir` to add runs. The report is written to
+`baseline/analysis/cross_run_comparison`. For broader metric and completion-status
+comparisons, configure `output.analysis.comparison_runs` or use the
+`compare_completed_runs` library interface documented in [analysis](docs/analysis.md).
+
+Summarize seed uncertainty and parameter sensitivity with an ensemble manifest:
+
+```shell
+cargo run --release --bin analyze -- --run-dir /path/to/baseline --ensemble-manifest /path/to/ensemble.json
+```
+
+This reads completed runs and writes `baseline/ensemble/`. The manifest format,
+compatibility checks, and statistical assumptions are documented in
+[analysis](docs/analysis.md).
 
 ## Create input files
 
-You need to create protobuf files from the xml files. This can be done with the following command:
+The simulator accepts XML and protobuf inputs. To convert XML inputs to protobuf
+for faster loading, run:
 
 ```shell
 cargo run --bin convert_to_binary --release -- --network network.xml --population population.xml --vehicles vehicles.xml --output-dir output --run-id run
 ```
+
+Keep the generated ID store with its matching protobuf inputs and configure it via
+`ids.path`. Internal IDs depend on that mapping.
 
 Optionally, `--transit-schedule` and `--facilities` convert a transit schedule and an activity facilities file as
 well. Facilities are referenced in the config via `facilities.path`.
