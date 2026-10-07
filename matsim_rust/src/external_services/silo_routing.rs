@@ -1,7 +1,7 @@
 use crate::simulation::id::Id;
+use crate::simulation::replanning::routing::Facility;
 use crate::simulation::replanning::routing::{RoutingError, RoutingRequestBuilder, TripRouter};
 use crate::simulation::scenario::Coordinate;
-use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{InternalPerson, InternalPlanElement, Population};
 use crate::simulation::time::SimTime;

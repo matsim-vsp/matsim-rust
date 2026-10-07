@@ -1,9 +1,9 @@
 use clap::Parser;
-use rayon::prelude::*;
 use matsim_rust::simulation::replanning::routing::TransitRoutingModule;
 use matsim_rust::simulation::scenario::Coordinate;
 use matsim_rust::simulation::scenario::transit::TransitSchedule;
 use matsim_rust::simulation::time::SimTime;
+use rayon::prelude::*;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -8,12 +8,12 @@ use matsim_rust::simulation::config::{
 };
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::id::Id;
+use matsim_rust::simulation::replanning::routing::Facility;
 use matsim_rust::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
 use matsim_rust::simulation::replanning::routing::{RoutingModule, RoutingRequestBuilder};
 use matsim_rust::simulation::scenario::Coordinate;
 use matsim_rust::simulation::scenario::Scenario;
 use matsim_rust::simulation::scenario::facilities::ActivityFacility;
-use matsim_rust::simulation::replanning::routing::Facility;
 use matsim_rust::simulation::scenario::network::{Link, Network, Node};
 use matsim_rust::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,

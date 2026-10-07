@@ -230,8 +230,10 @@ mod tests {
             Some(driver),
             vec![passenger],
         );
-        let mut departing =
-            BackpackingDataCollector::new(vec![driver_id.clone(), passenger_id.clone()], Arc::new(TransitVehicleRuns::default()));
+        let mut departing = BackpackingDataCollector::new(
+            vec![driver_id.clone(), passenger_id.clone()],
+            Arc::new(TransitVehicleRuns::default()),
+        );
         departing.reset_iteration();
         departing.vehicle_id2person_ids.insert(
             vehicle.id().clone(),
@@ -244,7 +246,8 @@ mod tests {
         assert!(departing.person_id2backpack.is_empty());
         assert!(departing.vehicle_id2person_ids.is_empty());
 
-        let mut arriving = BackpackingDataCollector::new(Vec::new(), Arc::new(TransitVehicleRuns::default()));
+        let mut arriving =
+            BackpackingDataCollector::new(Vec::new(), Arc::new(TransitVehicleRuns::default()));
         arriving.receive(PartitionChangeEntity::Vehicle(&vehicle), attachment);
         assert_eq!(arriving.person_id2backpack.len(), 2);
         let expected: IntSet<_> = [driver_id, passenger_id].into_iter().collect();

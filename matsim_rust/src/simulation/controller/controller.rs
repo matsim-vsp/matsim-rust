@@ -739,7 +739,6 @@ impl Controller {
             ),
         );
     }
-
 }
 
 fn add_phase_time(phases: &mut BTreeMap<String, f64>, phase: &str, elapsed: Duration) {

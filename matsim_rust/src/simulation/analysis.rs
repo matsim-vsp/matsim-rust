@@ -616,8 +616,16 @@ pub fn capture_expected_travel(population: &Population) -> Vec<PersonExpectedTra
                         journey_index,
                         origin: origin.act_type.external().to_owned(),
                         destination: destination.act_type.external().to_owned(),
-                        origin_link: origin.link_id.as_ref().map(|id| id.external().to_owned()).unwrap_or_default(),
-                        destination_link: destination.link_id.as_ref().map(|id| id.external().to_owned()).unwrap_or_default(),
+                        origin_link: origin
+                            .link_id
+                            .as_ref()
+                            .map(|id| id.external().to_owned())
+                            .unwrap_or_default(),
+                        destination_link: destination
+                            .link_id
+                            .as_ref()
+                            .map(|id| id.external().to_owned())
+                            .unwrap_or_default(),
                         purpose: destination.act_type.external().to_owned(),
                         leg_indices: expected_legs.iter().map(|leg| leg.leg_index).collect(),
                         component_modes: expected_legs.iter().map(|leg| leg.mode.clone()).collect(),

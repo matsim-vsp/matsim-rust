@@ -236,7 +236,6 @@ impl RouteProposalTable {
     }
 }
 
-
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RoutingError {
     #[error("No routing module found for mode {mode}")]
@@ -252,7 +251,6 @@ pub enum RoutingError {
     #[error("Routing for mode {mode} is not implemented")]
     Unsupported { mode: String },
 }
-
 
 /// Facility is a location that has modal access to the network.
 ///
@@ -290,7 +288,6 @@ impl Facility<'_> {
     pub fn link(&self) -> &Id<Link> {
         self.base_link()
     }
-
 
     /// The link through which the facility is connected to the network for `mode`, i.e. the
     /// access and egress link of trips with that mode.
@@ -373,7 +370,6 @@ impl From<&TransitStopFacility> for LinkWrapperFacility {
     }
 }
 
-
 #[derive(Builder, Clone)]
 #[builder(pattern = "owned")]
 pub struct RoutingRequest<'r> {
@@ -420,7 +416,6 @@ impl<'r> RoutingRequest<'r> {
         &self.attributes
     }
 }
-
 
 pub trait RoutingModule: Send + Sync {
     fn calc_route(&self, request: RoutingRequest)
@@ -1125,7 +1120,6 @@ impl Debug for dyn RoutingModule {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::simulation::InternalAttributes;
@@ -1273,7 +1267,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod route_proposal_tests {
     use super::{
@@ -1420,8 +1413,8 @@ mod route_proposal_tests {
     /// from BangkokPtFallbackModule, which was installed as a controler-wide override.
     #[deterministic_id_test]
     fn pt_without_a_person_falls_back_to_the_car_router() {
-        use crate::simulation::scenario::Coordinate;
         use super::Facility;
+        use crate::simulation::scenario::Coordinate;
         use crate::simulation::scenario::network::Link;
         use crate::simulation::scenario::vehicles::Garage;
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1459,8 +1452,8 @@ mod route_proposal_tests {
     /// no-path error rather than a silently wrong travel time.
     #[deterministic_id_test]
     fn pt_without_transit_or_fallback_reports_no_path() {
-        use crate::simulation::scenario::Coordinate;
         use super::Facility;
+        use crate::simulation::scenario::Coordinate;
         use crate::simulation::scenario::network::Link;
         use crate::simulation::scenario::vehicles::Garage;
 
