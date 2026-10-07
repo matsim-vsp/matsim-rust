@@ -13,24 +13,24 @@ Links below name the inspected implementations. Local files can change after thi
 
 ## What the current implementation already does
 
-The controller runs preparation, partitioned mobility simulation, scoring, and replanning. It shares immutable scenario data and keeps partition-local runtime state. Replanning uses Rayon. [Architecture](architecture.md), [controller](../rust_qsim/src/simulation/controller/controller.rs), [replanning](../rust_qsim/src/simulation/replanning/mod.rs).
+The controller runs preparation, partitioned mobility simulation, scoring, and replanning. It shares immutable scenario data and keeps partition-local runtime state. Replanning uses Rayon. [Architecture](architecture.md), [controller](../matsim_rust/src/simulation/controller/controller.rs), [replanning](../matsim_rust/src/simulation/replanning/mod.rs).
 
-The controller builds ALT routers, which use landmark-based lower bounds to accelerate A*. A route request includes departure time and optional person and vehicle references. Routing cost can vary by time and traveler characteristics. [Router construction](../rust_qsim/src/simulation/controller/controller.rs), [A*](../rust_qsim/src/simulation/replanning/routing/a_star.rs), [request and calculator interface](../rust_qsim/src/simulation/replanning/routing/least_cost_path_calculator.rs), [cost functions](../rust_qsim/src/simulation/replanning/routing/cost.rs).
+The controller builds ALT routers, which use landmark-based lower bounds to accelerate A*. A route request includes departure time and optional person and vehicle references. Routing cost can vary by time and traveler characteristics. [Router construction](../matsim_rust/src/simulation/controller/controller.rs), [A*](../matsim_rust/src/simulation/replanning/routing/a_star.rs), [request and calculator interface](../matsim_rust/src/simulation/replanning/routing/least_cost_path_calculator.rs), [cost functions](../matsim_rust/src/simulation/replanning/routing/cost.rs).
 
-Workers collect observed travel times and publish a complete immutable snapshot after all partitions submit. Routers read it through `ArcSwap`; they do not take the submission lock. [Travel-time calculator](../rust_qsim/src/simulation/replanning/routing/travel_time_calculator.rs).
+Workers collect observed travel times and publish a complete immutable snapshot after all partitions submit. Routers read it through `ArcSwap`; they do not take the submission lock. [Travel-time calculator](../matsim_rust/src/simulation/replanning/routing/travel_time_calculator.rs).
 
-The network already tracks active links and nodes. Each simulation tick visits active network objects, while the outer loop still advances through every tick. Skipping inactive links would duplicate existing behavior. [Network processing](../rust_qsim/src/simulation/network/sim_network.rs), [simulation loop](../rust_qsim/src/simulation/simulation.rs).
+The network already tracks active links and nodes. Each simulation tick visits active network objects, while the outer loop still advances through every tick. Skipping inactive links would duplicate existing behavior. [Network processing](../matsim_rust/src/simulation/network/sim_network.rs), [simulation loop](../matsim_rust/src/simulation/simulation.rs).
 
-`ControllerBuilder` accepts custom `ReplanningStrategy` implementations. Configured strategy settings select them by name. Custom strategies are innovative by default and can opt into innovation-disabled iterations. [Controller builder](../rust_qsim/src/simulation/controller/controller.rs), [replanning strategy API](../rust_qsim/src/simulation/replanning/mod.rs).
+`ControllerBuilder` accepts custom `ReplanningStrategy` implementations. Configured strategy settings select them by name. Custom strategies are innovative by default and can opt into innovation-disabled iterations. [Controller builder](../matsim_rust/src/simulation/controller/controller.rs), [replanning strategy API](../matsim_rust/src/simulation/replanning/mod.rs).
 
 For example, register a strategy and enable it in the scenario config:
 
 ```rust
-use rust_qsim::simulation::config::{Config, StrategySetting};
-use rust_qsim::simulation::controller::controller::ControllerBuilder;
-use rust_qsim::simulation::replanning::{ReplanningContext, ReplanningStrategy};
-use rust_qsim::simulation::scenario::population::InternalPerson;
-use rust_qsim::simulation::scenario::Scenario;
+use matsim_rust::simulation::config::{Config, StrategySetting};
+use matsim_rust::simulation::controller::controller::ControllerBuilder;
+use matsim_rust::simulation::replanning::{ReplanningContext, ReplanningStrategy};
+use matsim_rust::simulation::scenario::population::InternalPerson;
+use matsim_rust::simulation::scenario::Scenario;
 
 struct IterationMarker;
 
@@ -84,7 +84,7 @@ All six techniques now have an implementation in the routing or replanning path.
 
 ## 1. Remove route-search setup work first
 
-`get_initial_queue` pushes every graph node into a keyed priority queue, including unreachable nodes with infinite priority. Each routing request also allocates full-node arrays for parents and arrival times. [Search core](../rust_qsim/src/simulation/replanning/routing/a_star_core.rs).
+`get_initial_queue` pushes every graph node into a keyed priority queue, including unreachable nodes with infinite priority. Each routing request also allocates full-node arrays for parents and arrival times. [Search core](../matsim_rust/src/simulation/replanning/routing/a_star_core.rs).
 
 This gives every route full-network setup work even when the useful search is local. A proposal model would still pay that overhead unless the search implementation changes.
 
@@ -96,17 +96,17 @@ The priority ordering remains deterministic. The search retains equal-bound stat
 
 ## 2. Cache equivalent route requests against one snapshot
 
-Wrap `LeastCostPathCalculator` with a bounded cache. The controller already supplies this interface to `NetworkRoutingModule`; callers need not know how caching works. [Calculator interface](../rust_qsim/src/simulation/replanning/routing/least_cost_path_calculator.rs), [network routing](../rust_qsim/src/simulation/replanning/routing/network_routing.rs).
+Wrap `LeastCostPathCalculator` with a bounded cache. The controller already supplies this interface to `NetworkRoutingModule`; callers need not know how caching works. [Calculator interface](../matsim_rust/src/simulation/replanning/routing/least_cost_path_calculator.rs), [network routing](../matsim_rust/src/simulation/replanning/routing/network_routing.rs).
 
 Borrow the shared-goal cache and invalidation idea from `FlowFieldCache`. Its cache tracks topology versions and dirty state. [katgpt flow-field cache](https://github.com/katopz/katgpt-rs/blob/2865de70807046578c86d60e68668166c04bdf8b/crates/katgpt-core/src/flow/cache.rs).
 
 A traffic key needs origin, destination, mode, departure time, topology version, cost-snapshot version, and every relevant person and vehicle cost parameter. Disable exact caching for cost implementations whose dependencies cannot be identified. Never use borrowed addresses as key identities.
 
-Travel-time snapshots expose a monotonically increasing epoch. Cache keys include request endpoints, exact departure nanoseconds, travel-time and disutility epochs, and complete built-in cost profiles. The cache is bounded by entry count and estimated route payload. Custom cost providers bypass the cache unless they expose a stable epoch and profile. [Snapshot publication](../rust_qsim/src/simulation/replanning/routing/travel_time_calculator.rs).
+Travel-time snapshots expose a monotonically increasing epoch. Cache keys include request endpoints, exact departure nanoseconds, travel-time and disutility epochs, and complete built-in cost profiles. The cache is bounded by entry count and estimated route payload. Custom cost providers bypass the cache unless they expose a stable epoch and profile. [Snapshot publication](../matsim_rust/src/simulation/replanning/routing/travel_time_calculator.rs).
 
 Rounding departure times to bins is not automatically exact. A route can enter later links in different bins, and interpolation can vary within a bin. Start with exact request equivalence. Treat time grouping as a separate approximation.
 
-The cache currently uses FIFO eviction with limits of 4,096 entries and 4 MiB of estimated route payload per `AStar` instance. Mode-specific routers each own a cache, so total retained memory grows with the number of routers. Measure duplicate-request frequency, memory, and hit rate on each target workload before assuming the cache helps.
+The cache currently uses FIFO eviction with limits of 4,096 entries and 4 MiB of estimated route payload per `AStar` instance. Mode-specific routers each own a cache, so total retained memory grows with the number of routers. Measure duplicate-request frequency, memory, and hit rate before assuming it helps at ten-million-person scale.
 
 ## 3. Draft a candidate and verify its value
 
@@ -114,7 +114,7 @@ katgpt-rs exposes `SpeculativeGenerator`, typed `GenerativeConstraintPruner`, an
 
 For traffic, the router drafts from a previous route or reverse destination guidance. The router checks endpoints, each consecutive link connection, mode-graph membership, and finite nonnegative costs while accumulating candidate cost and travel time. Invalid candidates fall through to ordinary A*. Regression coverage includes a disconnected candidate whose endpoints match and whose cost would otherwise be low enough to prune the valid route, a legal but suboptimal candidate that must not be returned instead of the cheaper route, and a sweep comparing assisted and unassisted routers over every link pair on the triangle network.
 
-Plan preparation validates full network routes, including departure and arrival links, modes, and connectivity. The least-cost calculator receives only intermediate links, so its candidate verifier checks continuity between the request endpoints and each intermediate link in the mode-specific graph. Keep this representation difference explicit. [Plan preparation](../rust_qsim/src/simulation/scenario/prepare_for_sim.rs), [A* path validation and extraction](../rust_qsim/src/simulation/replanning/routing/a_star.rs).
+Plan preparation validates full network routes, including departure and arrival links, modes, and connectivity. The least-cost calculator receives only intermediate links, so its candidate verifier checks continuity between the request endpoints and each intermediate link in the mode-specific graph. Keep this representation difference explicit. [Plan preparation](../matsim_rust/src/simulation/scenario/prepare_for_sim.rs), [A* path validation and extraction](../matsim_rust/src/simulation/replanning/routing/a_star.rs).
 
 A valid candidate supplies an upper bound, not proof that it is the least-cost route. The search accepts that bound only when the popped priority is strictly greater than the candidate cost, so equal bounds stay searchable and the baseline tie rule is preserved. Dynamic costs and providers without static-bound guarantees use the candidate only as a route hint or fall back to ordinary A*. ALT remains the lower bound.
 
@@ -122,13 +122,13 @@ That test rarely decides a result, and the profile now says so. A validated cand
 
 The current search settles nodes without reopening them. Check heuristic consistency and time-dependent routing assumptions before adding stronger pruning or claiming optimality. The existing nonnegative-cost contract is necessary but does not by itself establish all conditions for general time-dependent disutility.
 
-Heuristics opt into bounds through `supports_consistent_static_bounds`. `ZeroHeuristic` states the property, since a zero estimate is consistent for nonnegative costs. `AltHeuristic` declines it: the landmark bound is admissible by the triangle inequality, but this implementation does not establish that it is consistent, and a search that settles without reopening relies on consistency to stay exact. Candidate bounds and shared destination guidance are therefore limited to the zero heuristic, and the production ALT routers do not use them. Establishing the property for landmarks would mean reweighting the search and revisiting this decision. [A* loop](../rust_qsim/src/simulation/replanning/routing/a_star_core.rs), [heuristic contract](../rust_qsim/src/simulation/replanning/routing/a_star.rs), [cost contract](../rust_qsim/src/simulation/replanning/routing/cost.rs).
+Heuristics opt into bounds through `supports_consistent_static_bounds`. `ZeroHeuristic` states the property, since a zero estimate is consistent for nonnegative costs. `AltHeuristic` declines it: the landmark bound is admissible by the triangle inequality, but this implementation does not establish that it is consistent, and a search that settles without reopening relies on consistency to stay exact. Candidate bounds and shared destination guidance are therefore limited to the zero heuristic, and the production ALT routers do not use them. Establishing the property for landmarks would mean reweighting the search and revisiting this decision. [A* loop](../matsim_rust/src/simulation/replanning/routing/a_star_core.rs), [heuristic contract](../matsim_rust/src/simulation/replanning/routing/a_star.rs), [cost contract](../matsim_rust/src/simulation/replanning/routing/cost.rs).
 
 LLM speculative decoding's distribution guarantees do not automatically transfer to route search. Route legality and route optimality need their own checks. Keep ordinary ALT as fallback when proposals fail or verification is not cheaper.
 
 ## 4. Spend replanning effort selectively
 
-`StrategyManager` supports an optional reroute probability and periodic full-route interval. The default probability is unset, so the gate is disabled. When enabled, a stable RNG stream keyed by iteration and person makes the decision. The first reroute and each configured periodic check always run. [Strategies and rerouting](../rust_qsim/src/simulation/replanning/mod.rs), [replanning configuration](../rust_qsim/src/simulation/config.rs).
+`StrategyManager` supports an optional reroute probability and periodic full-route interval. The default probability is unset, so the gate is disabled. When enabled, a stable RNG stream keyed by iteration and person makes the decision. The first reroute and each configured periodic check always run. [Strategies and rerouting](../matsim_rust/src/simulation/replanning/mod.rs), [replanning configuration](../matsim_rust/src/simulation/config.rs).
 
 Borrow the budget-and-fallback pattern from katgpt-rs's `ExplorationBudget`, rather than its syntax-specific verification tiers. That implementation tracks remaining verification counts; it does not perform domain verification itself. [Exploration budget](https://github.com/katopz/katgpt-rs/blob/2865de70807046578c86d60e68668166c04bdf8b/crates/katgpt-pruners/src/exploration_budget.rs).
 
@@ -138,7 +138,7 @@ Do not copy density-based game caching unchanged. A dense traffic queue can be w
 
 ## 5. Batch proposals without making execution timing a decision
 
-When `replanning.batch_previous_route_proposals` is enabled, replanning counts stored network routes by mode, origin, destination, and path before parallel strategy execution. It caps the model at 4,096 unique candidates and 4 MiB of route payload, processes candidates in batches of 256, and publishes an immutable lookup table. For each request, the model proposes the most common stored path. Ties use path order. Request-time exact routing validates every candidate. The external routing-service adapters remain separate and are not called by this path. [Proposal preparation](../rust_qsim/src/simulation/replanning/routing/mod.rs), [replanning pool](../rust_qsim/src/simulation/controller/mod.rs), [configuration](../rust_qsim/src/simulation/config.rs).
+When `replanning.batch_previous_route_proposals` is enabled, replanning counts stored network routes by mode, origin, destination, and path before parallel strategy execution. It caps the model at 4,096 unique candidates and 4 MiB of route payload, processes candidates in batches of 256, and publishes an immutable lookup table. For each request, the model proposes the most common stored path. Ties use path order. Request-time exact routing validates every candidate. The external routing-service adapters remain separate and are not called by this path. [Proposal preparation](../matsim_rust/src/simulation/replanning/routing/mod.rs), [replanning pool](../matsim_rust/src/simulation/controller/mod.rs), [configuration](../matsim_rust/src/simulation/config.rs).
 
 Start with deterministic batches between iterations. Live asynchronous inference introduces ordering concerns: apply responses by semantic simulation time and stable request identity, rather than whichever request finishes first. Use MATSim's seeded RNG contract if proposals are stochastic. The generic katgpt generator takes `fastrand::Rng`, which is not a direct substitute for MATSim's reproducibility contract. [Randomness contract](../AGENTS.md).
 
@@ -162,7 +162,7 @@ The implementation uses these domain patterns without adding katgpt-rs as a depe
 
 ## Prerequisites for a meaningful experiment
 
-The controller uses `CharyparNagelScoringFunction` by default and writes its calculated score to each experienced plan and the selected stored plan. A custom `PlanScorer` can replace it. The earlier 130,295-person BKK adaptive pilot set mode utility parameters to zero; the bounded 5,332-person pilot used -6 utils/hour. Both used configured activity-duration parameters, and neither establishes parity with a calibrated MATSim scoring setup or convergence. [Scoring pool](../rust_qsim/src/simulation/controller/mod.rs), [score assignment](../rust_qsim/src/simulation/scoring/mod.rs), [scoring function](../rust_qsim/src/simulation/scoring/charypar_nagel_scoring_function.rs).
+The controller uses `CharyparNagelScoringFunction` by default and writes its calculated score to each experienced plan and the selected stored plan. A custom `PlanScorer` can replace it. The BKK adaptive pilots set mode utility parameters to zero and used configured activity-duration parameters, so their score trajectories reflect that experiment's utility settings; they do not establish parity with a calibrated MATSim scoring setup. The existing two-seed, three-iteration comparison is a pilot, not evidence of convergence. [Scoring pool](../matsim_rust/src/simulation/controller/mod.rs), [score assignment](../matsim_rust/src/simulation/scoring/mod.rs), [scoring function](../matsim_rust/src/simulation/scoring/charypar_nagel_scoring_function.rs).
 
 This work excludes 500K- and 1M-person feasibility runs. Results from the available cohorts must not be extrapolated to those sizes.
 
@@ -170,11 +170,11 @@ katgpt-rs pins Rust 1.98.1, while MATSim Rust pins 1.94.0. Importing its current
 
 ## Recommended first experiment
 
-Routing profiles record route-search counts, graph node counts, expanded nodes, cache hits, candidate validity, candidate-bound use, candidate validation time, and searches without a valid bound in CSV and Parquet output. `candidate_valid` and `candidate_bound_used` are separate measurements: the first says a stored path passed validation, the second says the search returned that path instead of its own result. Expect the second to stay `false` for the reason given in section 3. The matched route-active comparison below confirms the counters capture search work. The earlier fixed-plan comparison did not call A*. [Routing profiling](../rust_qsim/src/simulation/profiling/routing.rs).
+Routing profiles record route-search counts, graph node counts, expanded nodes, cache hits, candidate validity, candidate-bound use, candidate validation time, and searches without a valid bound in CSV and Parquet output. `candidate_valid` and `candidate_bound_used` are separate measurements: the first says a stored path passed validation, the second says the search returned that path instead of its own result. Expect the second to stay `false` for the reason given in section 3. The matched route-active comparison below confirms the counters capture search work. The earlier fixed-plan comparison did not call A*. [Routing profiling](../matsim_rust/src/simulation/profiling/routing.rs).
 
 For larger comparisons, keep the same inputs, seed, worker count, output settings, and convergence criteria. Record total wall time, CPU time, peak memory, route-search count, nodes expanded, cache-hit fraction, candidate validation time, and full-search fallback fraction.
 
-For exact changes, compare costs, routes, determinism, and vehicle events. For experimental adaptive replanning, also compare link volumes, travel-time distributions, stuck agents, and score trajectories across seeds. Keep conclusions within the measured cohorts; 500K- and 1M-person feasibility runs are explicitly out of scope.
+For exact changes, compare costs, routes, determinism, and vehicle events. For experimental adaptive replanning, also compare link volumes, travel-time distributions, stuck agents, and convergence across seeds. Profile smaller cases before allocating a ten-million-person run, then validate scale effects with a controlled population ladder.
 
 ### Repeatable local runs
 
@@ -184,8 +184,8 @@ Example on Linux after building the binary:
 
 ```sh
 python3 scripts/routing_experiment.py \\
-  --config rust_qsim/assets/berlin-v6.4/config.yml \\
-  --input rust_qsim/assets/berlin-v6.4 \\
+  --config matsim_rust/assets/berlin-v6.4/config.yml \\
+  --input matsim_rust/assets/berlin-v6.4 \\
   --output-dir /tmp/matsim-fixed-plan-current \\
   --workload fixed-plan --population-size 5332 \\
   --network-nodes 119174 --network-links 283885 \\
@@ -204,7 +204,7 @@ The `--input` paths must cover the full input bundle; files and directory conten
 
 Built the unchanged release binary with `cargo build --release --bin local_qsim` after confirming the apt-installed CMake is available. The build completed successfully (about 73 seconds).
 
-Ran the bundled Berlin v6.4 input, which contains 5,332 people and 119,174 nodes / 283,885 links. With its configured 0.001 QSim sample size and one ReRoute phase across two iterations, the complete command took 34.73 seconds wall time, 45.78 CPU seconds, and peaked at 2,526,804 KiB RSS. This is a small-scenario baseline, not an estimate for unmeasured population sizes. QSim spans accounted for 9.27 seconds in the measured run; the rest includes startup, preparation, replanning/scoring, and output. The route profile remained header-only, so route-search time and counts are not yet measurable.
+Ran the bundled Berlin v6.4 input, which contains 5,332 people and 119,174 nodes / 283,885 links. With its configured 0.001 QSim sample size and one ReRoute phase across two iterations, the complete command took 34.73 seconds wall time, 45.78 CPU seconds, and peaked at 2,526,804 KiB RSS. This is a small-scenario baseline, not a ten-million-person estimate. QSim spans accounted for 9.27 seconds in the measured run; the rest includes startup, preparation, replanning/scoring, and output. The route profile remained header-only, so route-search time and counts are not yet measurable.
 
 A separate run with `qsim.sample_size=1.0` took 15.04 seconds wall time and peaked at 2,195,840 KiB RSS, but that override changes capacity scaling and should be treated only as a stress datapoint, not a behavior-comparable result. Neither run establishes a speedup or scaling curve.
 
@@ -225,11 +225,11 @@ For each population size, runs used the same input, the 119,174-node / 283,885-l
 |  | User CPU time | 47.57 s (46.36–60.01) | 25.71 s (19.09–29.51) |
 |  | Peak RSS | 2,203,528 KiB (2,203,428–2,205,416) | 1,756,836 KiB (1,754,124–1,756,988) |
 
-The optimized runs consistently recorded 380 searches and 838,406 node expansions for 100 people, and 740 searches and 1,796,027 expansions for 200. The baseline predates those routing profile counters, so its per-search counts are unavailable. The first baseline and optimized runs produced identical serialized route records (2,286 for 100 people and 4,482 for 200) and byte-identical compressed vehicle-event files at each population size. Median user CPU time fell by 44% and 46%, and median peak RSS by 21% and 20%, respectively. Wall-time ranges overlap at both sizes and the optimized medians are higher. These runs support lower CPU and memory use on these cases, but do not establish a wall-time improvement or predict behavior at unmeasured population sizes. Route-cache and reverse-tree limits apply per router, and search scratch is retained per worker thread. Kernel profiling remains unavailable in this environment (`perf_event_paranoid=4`).
+The optimized runs consistently recorded 380 searches and 838,406 node expansions for 100 people, and 740 searches and 1,796,027 expansions for 200. The baseline predates those routing profile counters, so its per-search counts are unavailable. The first baseline and optimized runs produced identical serialized route records (2,286 for 100 people and 4,482 for 200) and byte-identical compressed vehicle-event files at each population size. Median user CPU time fell by 44% and 46%, and median peak RSS by 21% and 20%, respectively. Wall-time ranges overlap at both sizes and the optimized medians are higher. These runs support lower CPU and memory use on these cases, but do not establish a wall-time improvement or predict ten-million-person behavior. Route-cache and reverse-tree limits apply per router, and search scratch is retained per worker thread. Kernel profiling remains unavailable in this environment (`perf_event_paranoid=4`).
 
-Checks recorded for the historical comparison: `cargo check -p rust_qsim --lib` passed, all 91 replanning tests passed, and both CSV and Parquet routing profile tests passed. The runtime comparison used release builds from the archived baseline and optimized commits. Subsequent correctness changes in the current source were not included in those measurements.
+Checks recorded for the historical comparison: `cargo check -p matsim-rust --lib` passed, all 91 replanning tests passed, and both CSV and Parquet routing profile tests passed. The runtime comparison used release builds from the archived baseline and optimized commits. Subsequent correctness changes in the current source were not included in those measurements.
 
-The historical measurements above predate the experiment driver and are not a completed population ladder. A larger population ladder is not part of the remaining completion scope. The adaptive option remains disabled by default and makes per-person seeded decisions with mandatory first and periodic checks. No result here establishes feasibility at 500K or 1M people, and none is planned.
+The historical measurements above predate the experiment driver and are not a completed population ladder. A larger population ladder is not part of the remaining completion scope. The adaptive option remains disabled by default and makes per-person seeded decisions with mandatory first and periodic checks. The full million-person feasibility claim remains unproven; do not extrapolate it from the 100/200-person routing subset.
 
 #### Refreshed matched exact-optimization baseline
 
@@ -242,21 +242,6 @@ The archived baseline (`789ff1c`) lacks A* CSV profiling and public-transport ro
 | Sampled peak RSS | 1,976,608 KiB | 1,742,172 KiB |
 
 The optimized build recorded 740 A* searches and 1,796,027 expanded nodes per run; the baseline did not expose those counters. Median wall time, sampled CPU, and sampled peak RSS were 20.5%, 33.7%, and 11.9% lower, respectively. Final iteration output contained 4,482 routed leg records in each build, with every route record equal. Both event partitions were byte-identical after decompression. The comparison JSON files, raw runs, and derived 200-person input are under `/mnt/Data/bangkoksilo/scenOutput/issue32-rustqsim-berlin-200-exact-{baseline-789ff1c-final,optimized-7307024}/` and `/mnt/Data/bangkoksilo/scenOutput/issue32-rustqsim-berlin-200-exact-match-input/`.
-
-#### Route-cache and batch-proposal measurement
-
-A 5-by-5 factorial comparison used the same release executable with a temporary runtime switch to disable the route cache, the 5,332-person BKK 2045 cohort, seed 4711, two QSim workers, four replanning threads, and one route-active iteration. Runs were interleaved across cache and proposal settings. The runtime switch existed only in the temporary benchmark worktree.
-
-| Cache | Batch proposals | Median wall | Median sampled CPU | Median sampled peak RSS |
-| --- | --- | ---: | ---: | ---: |
-| on | off | 28.960 s | 109.27 s | 1,079,796 KiB |
-| on | on | 30.063 s | 109.48 s | 1,076,924 KiB |
-| off | off | 30.069 s | 145.87 s | 1,059,984 KiB |
-| off | on | 30.081 s | 145.93 s | 1,058,960 KiB |
-
-Every run performed 10,075 A* searches and expanded about 17.2 million nodes. No route-cache lookup hit, candidate passed validation, or candidate bound was used. Batch proposals therefore demonstrated no routing-work reduction, and their wall and CPU timings overlap their paired controls. Cache on/off outputs had identical semantic plans after normalizing unordered XML attributes and byte-identical decompressed event partitions. The wall-time ranges overlap. The sampled CPU gap between cache settings was reproducible, including with the same executable, but contradicts the identical search work and zero hits; its cause is unknown, so it is not evidence of cache savings.
-
-A smaller 533-person replay checked whether the CPU gap was a scale artifact. Three matched runs per setting again recorded identical work (1,011 searches and 1,781,484 expanded nodes); summed A* span durations had a 2.470 s cache-on median and 2.473 s cache-off median. Yet sampled process CPU medians were 15.26 s on and 17.85 s off, with the same 6.316 s median wall time. Two additional matched pairs measured with `/usr/bin/time -v` confirmed the direction: user CPU was 14.48 s in both cache-on runs and 16.95 / 17.08 s cache-off, while wall time stayed 6.16–6.30 s. A final-iteration event comparison for one pair matched event counts, travel-time summaries, and every link volume. The toggle only gates route-cache key construction, lookup, and insertion in the temporary executable. Available profiles do not explain the extra process CPU outside the nearly equal A* spans. Raw reports and logs are under `/tmp/matsim-katgpt-followups/factorial-toggle/` and `/tmp/matsim-katgpt-followups/cache-repro-533/`. Keep proposal generation opt-in and treat cache benefit as workload-specific; this workload had no reuse opportunities.
 
 ### BKK supplied population, 130,295 people
 
@@ -304,30 +289,3 @@ The 533-, 2,666-, and 5,332-person subsets rank person IDs by SHA-256 and take n
 | 24,729 | 36.732 s (36.510–36.803) | 210.39 s | 2,685,200 KiB |
 
 The `Simulation::run` span took 9.535 s in the first measured full-population run. Wall time also includes scenario loading, scoring, and output, so the table is not a QSim-only timing. The runs use one iteration and zero mode utilities; they measure a fixed-plan workload, not replanning convergence. Experiment JSON files and logs are under `/tmp/matsim-bkk-scale/scale-final-{533,2666,5332,24729}/`.
-
-#### Bounded adaptive multi-iteration pilot
-
-I compared ReRoute plus `SelectExpBeta` against the same strategy weights with `adaptive_reroute_probability=0.25` and interval 5 on the nested 5,332-person cohort, using seeds 4711, 27182, and 8675309. Each run simulated iterations 0–6, retained all 5,332 people in every written iteration plan, used two QSim workers and four replanning workers, and selected between ReRoute and `SelectExpBeta`. All modes used a configured travel-time utility of -6 utils/hour with the same activity-duration settings. This makes scores responsive for the comparison, but is an uncalibrated scoring setup and is not a MATSim parity claim. There was one run per condition and seed; timing medians below are descriptive, not a performance guarantee.
-
-| Median across three seeds | ReRoute + SelectExpBeta | Adaptive 25% |
-| --- | ---: | ---: |
-| Wall time | 86.819 s | 65.162 s |
-| Sampled CPU time | 263.44 s | 179.58 s |
-| Sampled peak RSS | 1,149,440 KiB | 1,115,728 KiB |
-| A* searches | 30,129 | 16,080 |
-| Expanded nodes | 51,425,834 | 27,270,020 |
-
-The medians of selected-plan mean score by written iteration rose in both groups and ended close:
-
-| Iteration | ReRoute + SelectExpBeta | Adaptive 25% |
-| ---: | ---: | ---: |
-| 1 | 118.366 | 118.366 |
-| 2 | 121.216 | 121.216 |
-| 3 | 122.908 | 122.934 |
-| 4 | 123.732 | 123.768 |
-| 5 | 124.201 | 124.287 |
-| 6 | 124.437 | 124.465 |
-
-Final-iteration event comparisons across the three matched seeds had median travel-time medians of 838 s versus 841 s for car, 2,062 s versus 1,761 s for PT, and 412 s versus 414 s for walk (ReRoute versus adaptive). The absolute per-link entered-event count difference was 3.481–4.031% of ReRoute volume across seeds. These are different simulated outcomes; the small score gap does not prove convergence or that either outcome is better. Raw reports, logs, plans, events, and per-seed event comparisons are under `/tmp/matsim-katgpt-followups/adaptive-pilot/`.
-
-This completes a bounded assessment of the adaptive option on an available cohort. No 500K- or 1M-person feasibility run was performed or is planned; these measurements must not be extrapolated to those populations.
