@@ -22,7 +22,8 @@ use crate::simulation::replanning::routing::travel_time_calculator::{
 };
 use crate::simulation::replanning::routing::{RoutingModule, TripRouter};
 use crate::simulation::scenario::population::Population;
-use crate::simulation::scenario::prepare_for_sim::prepare_for_sim;
+use crate::simulation::scenario::prepare::prepare_for_mobsim::prepare_for_mobsim;
+use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
 use crate::simulation::scoring::{PersonExperiences, PlanScorer};
@@ -102,6 +103,11 @@ impl ControllerBuilder {
         for register_fn in self.controller_event_register_fn {
             register_fn(&mut controller_event_manager);
         }
+
+        // Prepare the scenario once, before it is shared, e.g. with the routing modules. The
+        // scoring registrations below also need the resolved activity links.
+        prepare_for_sim(&mut self.scenario)
+            .unwrap_or_else(|err| panic!("{err}: {:?}", err.issues()));
 
         let link_storage_capacities = LinkStorageCapacities::from_network(
             &self.scenario.network,
@@ -399,7 +405,7 @@ impl Controller {
         self.controller_events_manager
             .process_event(ControllerEvent::before_mobsim(is_last_iteration));
 
-        prepare_for_sim(&mut self.scenario, &self.trip_router)
+        prepare_for_mobsim(&mut self.scenario, &self.trip_router)
             .unwrap_or_else(|err| panic!("{err}: {:?}", err.issues()));
         let inputs = self
             .scenario

@@ -164,8 +164,10 @@ pub struct IOActivity {
     pub attributes: Option<IOAttributes>,
     #[serde(rename = "@type")]
     pub r#type: String,
-    #[serde(rename = "@link")]
+    #[serde(rename = "@link", skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    #[serde(rename = "@facility", skip_serializing_if = "Option::is_none")]
+    pub facility: Option<String>,
     #[serde(rename = "@x")]
     pub x: Option<f64>,
     #[serde(rename = "@y")]
@@ -188,7 +190,14 @@ impl From<&InternalActivity> for IOActivity {
     fn from(activity: &InternalActivity) -> Self {
         IOActivity {
             r#type: activity.act_type.external().to_string(),
-            link: Some(activity.link_id.external().to_string()),
+            link: activity
+                .link_id
+                .as_ref()
+                .map(|id| id.external().to_string()),
+            facility: activity
+                .facility_id
+                .as_ref()
+                .map(|id| id.external().to_string()),
             x: activity.coord.as_ref().map(|c| c.x),
             y: activity.coord.as_ref().map(|c| c.y),
             start_time: activity.start_time.map(|t| t.format_hh_mm_ss_trimmed()),
@@ -236,8 +245,9 @@ impl From<&InternalLeg> for IOLeg {
 #[serde(rename_all = "lowercase")]
 pub enum IOPlanElement {
     // the current matsim implementation has more logic with facility-id, link-id and coord.
-    // This prototype assumes a fully specified activity with coord and link-id. We don't care about
-    // Facilities at this stage.
+    // Like in MATSim, an activity may specify any combination of facility-id, link-id and coord.
+    // Missing link-ids and coords are derived in prepare_for_sim, where the facility takes
+    // precedence over the activity's own link and coord.
     Activity(IOActivity),
     Leg(IOLeg),
 }

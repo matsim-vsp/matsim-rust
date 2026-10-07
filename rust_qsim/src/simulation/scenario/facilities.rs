@@ -1,69 +1,16 @@
 use crate::simulation::id::Id;
+use crate::simulation::io::proto::proto_facilities::{load_from_proto, write_to_proto};
 use crate::simulation::io::xml::facilities::{
-    IOFacilities, IOFacility, IOFacilityActivity, IOOpenDay, IOOpenTime,
+    IOFacilities, IOFacility, IOFacilityActivity, IOOpenDay, IOOpenTime, load_from_xml,
+    write_to_xml,
 };
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
-use crate::simulation::scenario::transit::TransitStopFacility;
 use crate::simulation::time::SimTime;
 use crate::simulation::{Attributable, Identifiable, InternalAttributes};
 use nohash_hasher::IntMap;
-
-/// Facility is a location that has modal access to the network.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Facility {
-    LinkWrapperFacility(LinkWrapperFacility),
-    ActivityFacility(ActivityFacility),
-    TransitFacility(TransitStopFacility),
-}
-
-impl Facility {
-    pub fn coord(&self) -> &Coordinate {
-        match self {
-            Facility::LinkWrapperFacility(facility) => &facility.coord,
-            Facility::ActivityFacility(facility) => &facility.coord,
-            Facility::TransitFacility(facility) => &facility.coord,
-        }
-    }
-
-    pub fn link(&self) -> &Id<Link> {
-        match self {
-            Facility::LinkWrapperFacility(facility) => &facility.link_id,
-            Facility::ActivityFacility(facility) => &facility.link_id,
-            Facility::TransitFacility(facility) => {
-                facility.link_ref_id.as_ref().unwrap_or_else(|| {
-                    panic!("Transit facility with id {} has no link id.", facility.id)
-                })
-            }
-        }
-    }
-
-    pub fn modal_link(&self, mode: &Id<String>) -> Option<&Id<Link>> {
-        match self {
-            Facility::LinkWrapperFacility(facility) => facility.mode_to_link.get(mode),
-            Facility::ActivityFacility(facility) => facility.mode_to_link.get(mode),
-            Facility::TransitFacility(_) => None,
-        }
-    }
-
-    pub fn new_link_wrapper_from(facility: &Facility, coordinate: Coordinate) -> Facility {
-        let mut f = match facility {
-            Facility::LinkWrapperFacility(f) => f.clone(),
-            Facility::ActivityFacility(f) => f.into(),
-            Facility::TransitFacility(f) => f.into(),
-        };
-        f.coord = coordinate;
-        Facility::LinkWrapperFacility(f)
-    }
-
-    pub fn new_link_wrapper(coord: Coordinate, link_id: Id<Link>) -> Facility {
-        Facility::LinkWrapperFacility(LinkWrapperFacility {
-            coord,
-            link_id,
-            mode_to_link: IntMap::default(),
-        })
-    }
-}
+use std::path::Path;
+use tracing::info;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActivityFacilities {
@@ -103,6 +50,49 @@ impl ActivityFacilities {
     pub fn get(&self, id: &Id<ActivityFacility>) -> Option<&ActivityFacility> {
         self.facilities.get(id)
     }
+
+    /// Returns all facilities sorted by internal id, e.g. for stable output order.
+    pub fn sorted_facilities(&self) -> Vec<&ActivityFacility> {
+        let mut facilities: Vec<_> = self.facilities.values().collect();
+        facilities.sort_by_key(|facility| facility.id.internal());
+        facilities
+    }
+
+    pub fn from_file(file_path: &Path) -> Self {
+        info!("Reading facilities from {file_path:?}");
+        let facilities = if file_path.extension().unwrap().eq("binpb") {
+            load_from_proto(file_path)
+        } else if file_path.extension().unwrap().eq("xml")
+            || file_path.extension().unwrap().eq("gz")
+            || file_path.extension().unwrap().eq("zst")
+        {
+            ActivityFacilities::from(load_from_xml(file_path))
+        } else {
+            panic!(
+                "Tried to load {file_path:?}. File format not supported. Either use `.xml`, `.xml.gz`, `.xml.zst`, or `.binpb` as extension"
+            );
+        };
+        info!(
+            "Finished reading facilities. Found {} facilities.",
+            facilities.facilities.len()
+        );
+        facilities
+    }
+
+    pub fn to_file(&self, file_path: &Path) {
+        if file_path.extension().unwrap().eq("binpb") {
+            write_to_proto(self, file_path);
+        } else if file_path.extension().unwrap().eq("xml")
+            || file_path.extension().unwrap().eq("gz")
+            || file_path.extension().unwrap().eq("zst")
+        {
+            write_to_xml(self, file_path);
+        } else {
+            panic!(
+                "file format not supported. Either use `.xml`, `.xml.gz`, `.xml.zst`, or `.binpb` as extension"
+            );
+        }
+    }
 }
 
 impl Default for ActivityFacilities {
@@ -132,7 +122,9 @@ impl From<IOFacilities> for ActivityFacilities {
 pub struct ActivityFacility {
     pub id: Id<ActivityFacility>,
     pub coord: Coordinate,
-    pub link_id: Id<Link>,
+    /// The link given in the input. If it is missing, `prepare_for_sim` assigns the nearest link of
+    /// any mode. Use [`ActivityFacility::base_link`] after `prepare_for_sim`.
+    pub base_link: Option<Id<Link>>,
     pub mode_to_link: IntMap<Id<String>, Id<Link>>,
     pub desc: Option<String>,
     pub activities: Vec<ActivityOption>,
@@ -168,6 +160,16 @@ pub enum OpenDay {
 }
 
 impl ActivityFacility {
+    /// Returns the base link of the facility. It is always present after `prepare_for_sim`.
+    pub fn base_link(&self) -> &Id<Link> {
+        self.base_link.as_ref().unwrap_or_else(|| {
+            panic!(
+                "Facility with id {} has no base link. Base links are assigned in prepare_for_sim.",
+                self.id
+            )
+        })
+    }
+
     pub fn desc(&self) -> Option<&str> {
         self.desc.as_deref()
     }
@@ -199,15 +201,11 @@ impl From<IOFacility> for ActivityFacility {
             (Some(x), Some(y)) => Coordinate::new_3d(x, y, io.z.unwrap_or(0.0)),
             _ => panic!("Facility with id {} must have x and y coordinates.", io.id),
         };
-        let link_id = io
-            .link_id
-            .unwrap_or_else(|| panic!("Facility with id {} must have a link id.", io.id));
-
         Id::<String>::create(&io.id);
         ActivityFacility {
             id: Id::create(&io.id),
             coord,
-            link_id: Id::create(&link_id),
+            base_link: io.link_id.as_deref().map(Id::create),
             mode_to_link: IntMap::default(),
             desc: io.desc,
             activities: io.activities.into_iter().map(Into::into).collect(),
@@ -258,53 +256,17 @@ fn parse_open_time(value: &str) -> SimTime {
         .unwrap_or_else(|err| panic!("Invalid facility opentime value {value}: {err}"))
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct LinkWrapperFacility {
-    pub coord: Coordinate,
-    pub link_id: Id<Link>,
-    pub mode_to_link: IntMap<Id<String>, Id<Link>>,
-}
-
-impl From<&ActivityFacility> for LinkWrapperFacility {
-    fn from(value: &ActivityFacility) -> Self {
-        LinkWrapperFacility {
-            coord: value.coord.clone(),
-            link_id: value.link_id.clone(),
-            mode_to_link: value.mode_to_link.clone(),
-        }
-    }
-}
-
-impl From<&TransitStopFacility> for LinkWrapperFacility {
-    fn from(value: &TransitStopFacility) -> Self {
-        LinkWrapperFacility {
-            coord: value.coord.clone(),
-            link_id: value
-                .link_ref_id
-                .clone()
-                .unwrap_or_else(|| panic!("Transit facility with id {} has no link id.", value.id)),
-            mode_to_link: IntMap::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::facilities::{
         IOCapacity, IOFacilities, IOFacility, IOFacilityActivity, IOOpenDay, IOOpenTime,
     };
     use crate::simulation::scenario::Coordinate;
-    use crate::simulation::scenario::facilities::{
-        ActivityFacilities, ActivityFacility, ActivityOption, Facility, LinkWrapperFacility,
-        OpenDay,
-    };
+    use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility, OpenDay};
     use crate::simulation::scenario::network::Link;
-    use crate::simulation::scenario::transit::TransitStopFacility;
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
-    use nohash_hasher::IntMap;
 
     #[deterministic_id_test]
     fn conversion_creates_facilities_by_id() {
@@ -337,7 +299,7 @@ mod tests {
         let facility = facilities.get(&facility_id).unwrap();
 
         assert_eq!(Coordinate::new_3d(1.0, 2.0, 0.0), facility.coord);
-        assert_eq!(Id::<Link>::get_from_ext("l1"), facility.link_id);
+        assert_eq!(Some(Id::<Link>::get_from_ext("l1")), facility.base_link);
         assert!(facility.mode_to_link.is_empty());
         assert_eq!("facility", facility.desc.as_deref().unwrap());
         assert_eq!(1, facility.activities.len());
@@ -398,7 +360,7 @@ mod tests {
         let facility = facilities.get(&Id::get_from_ext("f1")).unwrap();
 
         assert_eq!(Coordinate::new_3d(1.0, 2.0, 5.0), facility.coord);
-        assert_eq!(Id::<Link>::get_from_ext("l1"), facility.link_id);
+        assert_eq!(Some(Id::<Link>::get_from_ext("l1")), facility.base_link);
         assert_eq!(
             Id::<String>::get_from_ext("shop"),
             facility.activities[0].activity_type
@@ -419,79 +381,32 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    #[should_panic(expected = "Facility with id f1 must have a link id.")]
-    fn conversion_panics_without_link_id() {
-        let _ = ActivityFacilities::from(IOFacilities {
+    fn conversion_keeps_missing_link_id_for_prepare_for_sim() {
+        let facilities = ActivityFacilities::from(IOFacilities {
             name: None,
             aggregation_layer: None,
             lang: None,
             attributes: None,
             facilities: vec![io_facility_with_id_and_coord("f1")],
         });
+
+        let facility = facilities.get(&Id::get_from_ext("f1")).unwrap();
+        assert_eq!(None, facility.base_link);
     }
 
     #[deterministic_id_test]
-    fn activity_facility_modal_link_uses_mode_mapping() {
-        let car = Id::create("car");
-        let base_link = Id::create("base-link");
-        let car_link = Id::create("car-link");
-        let mut mode_to_link = IntMap::default();
-        mode_to_link.insert(car.clone(), car_link.clone());
-
-        let facility = ActivityFacility {
-            id: Id::create("f1"),
-            coord: Coordinate::new_2d(1.0, 2.0),
-            link_id: base_link.clone(),
-            mode_to_link,
-            desc: None,
-            activities: vec![ActivityOption {
-                activity_type: Id::create("work"),
-                capacity: None,
-                open_times: Vec::new(),
-            }],
-            attributes: InternalAttributes::default(),
-        };
-        let facility = Facility::ActivityFacility(facility);
-
-        assert_eq!(Some(&car_link), facility.modal_link(&car));
-        assert_eq!(None, facility.modal_link(&Id::create("bike")));
-        assert_eq!(&base_link, facility.link());
-    }
-
-    #[deterministic_id_test]
-    fn link_wrapper_facility_provides_coord_link_and_modal_link() {
-        let walk = Id::create("walk");
-        let base_link = Id::create("base-link");
-        let walk_link = Id::create("walk-link");
-        let mut mode_to_link = IntMap::default();
-        mode_to_link.insert(walk, walk_link.clone());
-
-        let facility = Facility::LinkWrapperFacility(LinkWrapperFacility {
-            coord: Coordinate::new_2d(3.0, 4.0),
-            link_id: base_link.clone(),
-            mode_to_link,
-        });
-
-        assert_eq!(&Coordinate::new_2d(3.0, 4.0), facility.coord());
-        assert_eq!(&base_link, facility.link());
-        assert_eq!(Some(&walk_link), facility.modal_link(&Id::create("walk")));
-        assert_eq!(None, facility.modal_link(&Id::create("car")));
-    }
-
-    #[deterministic_id_test]
-    #[should_panic(expected = "Transit facility with id stop-1 has no link id.")]
-    fn transit_facility_link_panics_without_link_ref_id() {
-        let facility = Facility::TransitFacility(TransitStopFacility {
-            id: Id::create("stop-1"),
-            coord: Coordinate::new_2d(1.0, 2.0),
-            link_ref_id: None,
+    #[should_panic(expected = "Base links are assigned in prepare_for_sim")]
+    fn base_link_panics_for_unprepared_activity_facility() {
+        let facilities = ActivityFacilities::from(IOFacilities {
             name: None,
-            stop_area_id: None,
-            is_blocking: None,
-            attributes: InternalAttributes::default(),
+            aggregation_layer: None,
+            lang: None,
+            attributes: None,
+            facilities: vec![io_facility_with_id_and_coord("f1")],
         });
+        let facility = facilities.get(&Id::get_from_ext("f1")).unwrap();
 
-        facility.link();
+        facility.base_link();
     }
 
     fn io_facility_with_id_and_link(id: &str) -> IOFacility {

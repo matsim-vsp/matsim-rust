@@ -82,9 +82,9 @@ impl ActivityEngine {
                 &ActivityEndEventBuilder::default()
                     .time(now)
                     .person(agent.id().clone())
-                    .link(agent.curr_act().link_id.clone())
+                    .link(agent.curr_act().link_id().clone())
                     .act_type(agent.curr_act().act_type.clone())
-                    .coordinate(agent.curr_act().coord.as_ref().unwrap().clone())
+                    .coordinate(agent.curr_act().coord().clone())
                     .build()
                     .unwrap(),
             );
@@ -123,9 +123,9 @@ impl ActivityEngine {
             &ActivityStartEventBuilder::default()
                 .time(now_time)
                 .person(agent.agent.id().clone())
-                .link(act.link_id.clone())
+                .link(act.link_id().clone())
                 .act_type(act.act_type.clone())
-                .coordinate(act.coord.as_ref().unwrap().clone())
+                .coordinate(act.coord().clone())
                 .build()
                 .unwrap(),
         );
@@ -293,11 +293,11 @@ mod tests {
         ActivityEngine, ActivityEngineBuilder, AsleepSimulationAgent,
     };
     use crate::simulation::id::Id;
-    use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::population::{
         InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
         InternalPlanElement, InternalRoute,
     };
+    use crate::simulation::scenario::{Coordinate, ScenarioCore};
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
     use std::collections::HashMap;
@@ -383,31 +383,23 @@ mod tests {
         // The new mode id needs to be created before the test, so that it gets the correct internal id.
         Id::<String>::create("new_mode");
 
-        let mut map: HashMap<ExternalServiceType, RequestSender> = HashMap::new();
-        let (send, recv) = tokio::sync::mpsc::channel::<InternalRoutingRequest>(11);
-        map.insert(
-            ExternalServiceType::Routing("mode".to_string()),
-            Arc::new(send).into(),
-        );
-
-        let env = ThreadLocalComputationalEnvironmentBuilder::default()
-            .services(map.into())
-            .mobsim_events_manager(Default::default())
-            .partition_events_manager(Default::default())
-            .build()
-            .unwrap();
+        let (env, recv) = routing_env(ScenarioCore::default());
 
         let plan = create_plan();
 
-        let handle = run_test_thread(recv);
+        let handle = run_test_thread(
+            recv,
+            ("start", Coordinate::default()),
+            ("end", Coordinate::default()),
+        );
 
         let agents = test_adaptive(plan, env);
         let agent = agents.first().unwrap();
 
         assert_eq!(agent.curr_act().act_type, Id::get_from_ext("home"));
-        assert_eq!(agent.curr_act().link_id, Id::get_from_ext("start"));
+        assert_eq!(agent.curr_act().link_id, Some(Id::get_from_ext("start")));
         assert_eq!(agent.next_act().act_type, Id::get_from_ext("work"));
-        assert_eq!(agent.next_act().link_id, Id::get_from_ext("end"));
+        assert_eq!(agent.next_act().link_id, Some(Id::get_from_ext("end")));
 
         let leg = agent.next_leg().unwrap();
 
@@ -418,17 +410,46 @@ mod tests {
         handle.join().unwrap();
     }
 
-    fn run_test_thread(mut recv: Receiver<InternalRoutingRequest>) -> JoinHandle<()> {
+    fn routing_env(
+        scenario_core: ScenarioCore,
+    ) -> (
+        ThreadLocalComputationalEnvironment,
+        Receiver<InternalRoutingRequest>,
+    ) {
+        let mut map: HashMap<ExternalServiceType, RequestSender> = HashMap::new();
+        let (send, recv) = tokio::sync::mpsc::channel::<InternalRoutingRequest>(11);
+        map.insert(
+            ExternalServiceType::Routing("mode".to_string()),
+            Arc::new(send).into(),
+        );
+
+        let env = ThreadLocalComputationalEnvironmentBuilder::default()
+            .scenario_core(scenario_core)
+            .services(map.into())
+            .mobsim_events_manager(Default::default())
+            .partition_events_manager(Default::default())
+            .build()
+            .unwrap();
+        (env, recv)
+    }
+
+    /// Answers one routing request after checking that it starts and ends at the given links and
+    /// coordinates.
+    fn run_test_thread(
+        mut recv: Receiver<InternalRoutingRequest>,
+        from: (&'static str, Coordinate),
+        to: (&'static str, Coordinate),
+    ) -> JoinHandle<()> {
         std::thread::spawn(move || {
             let request = recv.blocking_recv();
             assert!(request.is_some());
 
             let payload = InternalRoutingRequestPayloadBuilder::default()
                 .person_id("1".to_string())
-                .from_link("start".to_string())
-                .from(Coordinate::default())
-                .to(Coordinate::default())
-                .to_link("end".to_string())
+                .from_link(from.0.to_string())
+                .from(from.1)
+                .to(to.1)
+                .to_link(to.0.to_string())
                 .mode("mode".to_string())
                 .departure_time(SimTime::from_secs(10))
                 .now(SimTime::from_secs(5))

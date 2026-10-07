@@ -95,6 +95,7 @@ impl ExternalServices {
 #[derive(Clone, Debug, Builder)]
 #[builder(pattern = "owned")]
 pub struct ThreadLocalComputationalEnvironment {
+    scenario_core: ScenarioCore,
     #[builder(default)]
     services: ExternalServices,
     #[builder(default)]
@@ -109,6 +110,7 @@ pub struct ThreadLocalComputationalEnvironment {
 impl Default for ThreadLocalComputationalEnvironment {
     fn default() -> Self {
         ThreadLocalComputationalEnvironment {
+            scenario_core: ScenarioCore::default(),
             services: ExternalServices::default(),
             events_manager: Rc::new(RefCell::new(EventsManager::new())),
             mobsim_events_manager: Rc::new(RefCell::new(MobsimEventsManager::default())),
@@ -121,6 +123,10 @@ impl Default for ThreadLocalComputationalEnvironment {
 }
 
 impl ThreadLocalComputationalEnvironment {
+    pub fn scenario_core(&self) -> &ScenarioCore {
+        &self.scenario_core
+    }
+
     pub fn get_service<T: Any + Send + Sync>(
         &self,
         service_type: ExternalServiceType,
@@ -414,6 +420,7 @@ impl MobsimWorker {
         }
 
         let comp_env = ThreadLocalComputationalEnvironmentBuilder::default()
+            .scenario_core(scenario_core.clone())
             .services(external_services)
             .events_manager(Rc::new(RefCell::new(events)))
             .mobsim_events_manager(Rc::new(RefCell::new(mobsim_events)))
@@ -837,6 +844,9 @@ mod tests {
             transit_schedule: Arc::new(
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
+            facilities: Arc::new(
+                crate::simulation::scenario::facilities::ActivityFacilities::default(),
+            ),
             config: config.clone(),
         };
 
@@ -882,6 +892,9 @@ mod tests {
             garage: Arc::new(Garage::default()),
             transit_schedule: Arc::new(
                 crate::simulation::scenario::transit::TransitSchedule::default(),
+            ),
+            facilities: Arc::new(
+                crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
             config: Arc::new(config),
         };

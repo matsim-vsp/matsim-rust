@@ -214,6 +214,9 @@ You need to create protobuf files from the xml files. This can be done with the 
 cargo run --bin convert_to_binary --release -- --network network.xml --population population.xml --vehicles vehicles.xml --output-dir output --run-id run
 ```
 
+Optionally, `--transit-schedule` and `--facilities` convert a transit schedule and an activity facilities file as
+well. Facilities are referenced in the config via `facilities.path`.
+
 ## RustRover settings
 
 If you use RustRover, you need to disable "Optimize Import". Otherwise, the imports are sorted differently compared to

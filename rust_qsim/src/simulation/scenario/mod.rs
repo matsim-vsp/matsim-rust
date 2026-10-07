@@ -1,7 +1,7 @@
 pub mod facilities;
 pub mod network;
 pub mod population;
-pub mod prepare_for_sim;
+pub mod prepare;
 pub mod transit;
 pub mod trip_structure_utils;
 pub mod vehicles;
@@ -10,6 +10,7 @@ use crate::simulation::config::Config;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::sim_network::SimNetworkPartition;
 use crate::simulation::{id, io};
+use facilities::ActivityFacilities;
 use network::Network;
 use population::Population;
 use std::sync::Arc;
@@ -159,6 +160,7 @@ pub struct Scenario {
     pub garage: Garage,
     pub population: Population,
     pub transit_schedule: TransitSchedule,
+    pub facilities: ActivityFacilities,
     pub config: Arc<Config>,
 }
 
@@ -177,6 +179,9 @@ impl Scenario {
         let network = Self::load_network(&config);
         let mut garage = Self::load_garage(&config);
         let transit_schedule = Self::load_transit_schedule(&config);
+        // Facilities are loaded before the population, so that their ids exist when activities
+        // reference them.
+        let facilities = Self::load_facilities(&config);
         let population = Self::load_population(&config, &mut garage);
 
         Scenario {
@@ -184,6 +189,7 @@ impl Scenario {
             garage,
             population,
             transit_schedule,
+            facilities,
             config,
         }
     }
@@ -216,6 +222,15 @@ impl Scenario {
         }
     }
 
+    fn load_facilities(config: &Config) -> ActivityFacilities {
+        if let Some(path) = &config.facilities().path {
+            let facilities_in_path = io::resolve_path(config.context(), path);
+            ActivityFacilities::from_file(&facilities_in_path)
+        } else {
+            ActivityFacilities::default()
+        }
+    }
+
     fn load_transit_schedule(config: &Config) -> TransitSchedule {
         if let Some(path) = &config.transit().schedule_path {
             let schedule_in_path = io::resolve_path(config.context(), path);
@@ -232,6 +247,8 @@ pub struct ScenarioCore {
     pub network: Arc<Network>,
     pub garage: Arc<Garage>,
     pub transit_schedule: Arc<TransitSchedule>,
+    /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
+    pub facilities: Arc<ActivityFacilities>,
     pub config: Arc<Config>,
 }
 
@@ -270,6 +287,7 @@ impl From<Scenario> for ControllerScenario {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
                 transit_schedule: Arc::new(scenario.transit_schedule),
+                facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
             },
             population: scenario.population,
@@ -357,8 +375,10 @@ mod tests {
     use crate::simulation::config::{Config, PartitionMethod, Transit};
     use crate::simulation::id::Id;
     use crate::simulation::network::LinkStorageCapacities;
-    use crate::simulation::scenario::network::Network;
+    use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
+    use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::Population;
+    use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
     use crate::simulation::scenario::transit::{
         TransitLine, TransitRoute, TransitSchedule, TransitStopFacility,
     };
@@ -407,6 +427,31 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn scenario_loads_facilities_and_prepare_for_sim_prepares_them() {
+        let mut config = Config::default();
+        config.network_mut().path = Some("./assets/equil/equil-network.xml".into());
+        config.facilities_mut().path =
+            Some("./tests/resources/facilities/equil-facilities.xml".into());
+
+        let mut scenario = Scenario::load(config);
+
+        assert_eq!(2, scenario.facilities.facilities.len());
+        let home_id = Id::<ActivityFacility>::get_from_ext("home");
+        assert_eq!(None, scenario.facilities.get(&home_id).unwrap().base_link);
+
+        prepare_for_sim(&mut scenario).unwrap();
+
+        let facilities = &scenario.facilities;
+        let home = facilities.get(&home_id).unwrap();
+        let work = facilities
+            .get(&Id::<ActivityFacility>::get_from_ext("work"))
+            .unwrap();
+        assert_eq!(Some(Id::<Link>::get_from_ext("1")), home.base_link);
+        assert_eq!(Some(Id::<Link>::get_from_ext("20")), work.base_link);
+        assert_eq!(1, work.activities[0].open_times.len());
+    }
+
+    #[deterministic_id_test]
     fn split_and_merge_mobsim_population_keeps_every_person_once() {
         let mut garage = Garage::from_file(&PathBuf::from("./assets/3-links/vehicles.xml"));
         let population = Population::from_file("./assets/3-links/3-agent.xml", &mut garage);
@@ -424,6 +469,7 @@ mod tests {
             garage,
             population,
             transit_schedule: TransitSchedule::default(),
+            facilities: ActivityFacilities::default(),
             config,
         }
         .into();

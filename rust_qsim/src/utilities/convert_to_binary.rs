@@ -1,5 +1,6 @@
 use crate::simulation::config::PartitionMethod;
 use crate::simulation::id::Id;
+use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::transit::TransitSchedule;
@@ -24,19 +25,44 @@ pub struct InputArgs {
     pub run_id: String,
     #[arg(short, long)]
     pub transit_schedule: Option<PathBuf>,
+    #[arg(short, long)]
+    pub facilities: Option<PathBuf>,
 }
 
-pub fn run(args: &InputArgs) {
+pub fn run(
+    args: &InputArgs,
+    f: impl FnOnce(
+        &mut Network,
+        &mut Population,
+        &mut Garage,
+        Option<&mut TransitSchedule>,
+        Option<&mut ActivityFacilities>,
+    ),
+) {
     let mut veh = Garage::from_file(&args.vehicles);
     let mut net = Network::from_file_path(&args.network, 1, &PartitionMethod::None);
-    let transit_schedule = args
+    let mut transit_schedule = args
         .transit_schedule
         .as_ref()
         .map(|path| TransitSchedule::from_file(path));
-    let pop = Population::from_file(&args.population, &mut veh);
+    // Facilities are loaded before the population, so that their ids exist when activities
+    // reference them. Their modal links are derived in prepare_for_sim and not converted.
+    let mut facilities = args
+        .facilities
+        .as_ref()
+        .map(|path| ActivityFacilities::from_file(path));
+    let mut pop = Population::from_file(&args.population, &mut veh);
 
     let cmp_weights = compute_computational_weights(&pop);
     assign_computational_weights(&mut net, cmp_weights);
+
+    f(
+        &mut net,
+        &mut pop,
+        &mut veh,
+        transit_schedule.as_mut(),
+        facilities.as_mut(),
+    );
 
     crate::simulation::id::store_to_file(&create_file_path(&args, "ids"));
     net.to_file(&create_file_path(&args, "network"));
@@ -44,6 +70,9 @@ pub fn run(args: &InputArgs) {
     pop.to_file(&create_file_path(&args, "plans"));
     if let Some(transit_schedule) = transit_schedule.as_ref() {
         transit_schedule.to_file(&create_file_path(&args, "transit_schedule"));
+    }
+    if let Some(facilities) = facilities.as_ref() {
+        facilities.to_file(&create_file_path(&args, "facilities"));
     }
 }
 

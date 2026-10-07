@@ -15,6 +15,9 @@ modules:
   population:
     type: Population
     path: berlin-v6.4-0.1pct.plans-filtered.xml.gz
+  facilities:
+    type: Facilities
+    path: 013.output_facilities.xml.gz
   output:
     type: Output
     overwrite_files: OverwriteExistingFiles

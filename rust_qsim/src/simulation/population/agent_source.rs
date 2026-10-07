@@ -195,6 +195,9 @@ mod tests {
                 transit_schedule: Arc::new(
                     crate::simulation::scenario::transit::TransitSchedule::default(),
                 ),
+                facilities: Arc::new(
+                    crate::simulation::scenario::facilities::ActivityFacilities::default(),
+                ),
                 config,
             },
             network_partition,

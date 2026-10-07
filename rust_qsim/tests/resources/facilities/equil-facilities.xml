@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE facilities SYSTEM "http://www.matsim.org/files/dtd/facilities_v2.dtd">
+<!-- Facilities for ./assets/equil/equil-network.xml. "home" has no link, so the nearest link is assigned. -->
+<facilities name="equil facilities">
+    <facility id="home" x="-17500.0" y="100.0">
+        <activity type="h"/>
+    </facility>
+    <facility id="work" x="2500.0" y="-100.0" linkId="20">
+        <activity type="w">
+            <capacity value="100.0"/>
+            <opentime day="wkday" start_time="07:00:00" end_time="18:00:00"/>
+        </activity>
+    </facility>
+</facilities>

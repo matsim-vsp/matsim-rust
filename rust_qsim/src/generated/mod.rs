@@ -15,6 +15,9 @@ use tracing::info;
 pub mod events {
     include!(concat!(env!("OUT_DIR"), "/events.rs"));
 }
+pub mod facilities {
+    include!(concat!(env!("OUT_DIR"), "/facilities.rs"));
+}
 pub mod ids {
     include!(concat!(env!("OUT_DIR"), "/ids.rs"));
 }
