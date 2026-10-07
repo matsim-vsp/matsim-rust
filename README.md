@@ -21,10 +21,13 @@ And two conference papers, which were presented at ISPDC 24 in Chur, Switzerland
 
 The project is organized as a cargo workspace with multiple crates. The main crates are:
 
-- `rust-qsim`: The core library containing the simulation logic
+- `matsim-rust` (directory `matsim_rust`): The core library containing the simulation logic
 - `macros`: The crate containing (test) macros used in the project
 
-Work with the `rust-qsim` crate for the simulation. The other crates are only for development purposes.
+Work with the `matsim-rust` crate for the simulation. The other crates are only for development purposes. In Rust
+code, the crate is imported as `matsim_rust`.
+
+Up to version 0.3.0, the core crate was called `rust_qsim` and the repository `parallel_qsim_rust`.
 
 Check out further documentation in the `docs` folder.
 
@@ -202,7 +205,7 @@ to run the simulation.
 For example, after successfully running the tests first, try
 
 ```
-cd rust_qsim
+cd matsim_rust
 cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-config-1.yml
 ```
 

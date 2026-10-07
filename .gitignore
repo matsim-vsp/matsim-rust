@@ -3,7 +3,7 @@
 */output
 *.iml
 .idea/
-rust_qsim/test_output/
+matsim_rust/test_output/
 /assets/routing_tests/*
 
 .DS_Store
