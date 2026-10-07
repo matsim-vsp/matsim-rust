@@ -166,11 +166,15 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/sw/comm/openmpi/5.0.3/genoa.el9/aocc/li
 
 ## Build
 
-The project is built using cargo.
+From the repository root, build the release binaries using the Rust toolchain pinned in
+`rust-toolchain.toml` and the dependencies in `Cargo.lock`:
 
 ```shell
-cargo build --release
+cargo build --release --locked
 ```
+
+The binaries are written to `target/release/`. The main simulation executable is
+`target/release/local_qsim`. The release profile enables optimizations and retains debug information.
 
 ## Test
 
