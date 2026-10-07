@@ -510,34 +510,7 @@ impl<H: AStarHeuristic> AStar<H> {
 
 impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
     fn calc_least_cost_path(&self, request: LeastCostPathRequest) -> Option<LeastCostPath> {
-        let route_cache_key = self
-            .travel_time
-            .cache_epoch()
-            .zip(self.travel_disutility.cache_epoch())
-            .zip(
-                self.travel_time
-                    .cache_profile(request.person, request.vehicle),
-            )
-            .zip(
-                self.travel_disutility
-                    .cache_profile(request.person, request.vehicle),
-            )
-            .map(
-                |(
-                    ((travel_time_epoch, disutility_epoch), travel_time_profile),
-                    disutility_profile,
-                )| {
-                    RouteCacheKey {
-                        from: request.from.clone(),
-                        to: request.to.clone(),
-                        departure_nanos: request.departure_time.as_nanos(),
-                        travel_time_epoch,
-                        disutility_epoch,
-                        travel_time_profile,
-                        disutility_profile,
-                    }
-                },
-            );
+        let route_cache_key: Option<RouteCacheKey> = None;
         if let Some(key) = route_cache_key.as_ref()
             && let Some(path) = self.route_cache.lock().unwrap().get(key)
             && self.travel_time.cache_epoch() == Some(key.travel_time_epoch)
