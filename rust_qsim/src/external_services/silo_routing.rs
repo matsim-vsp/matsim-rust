@@ -1,5 +1,5 @@
 use crate::simulation::id::Id;
-use crate::simulation::replanning::routing::{RoutingRequestBuilder, TripRouter};
+use crate::simulation::replanning::routing::{RoutingError, RoutingRequestBuilder, TripRouter};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::facilities::Facility;
 use crate::simulation::scenario::network::Link;
@@ -33,15 +33,25 @@ struct RouteResponse {
     travel_time_seconds: Option<f64>,
     distance_meters: Option<f64>,
     error: Option<String>,
+    failure_category: Option<String>,
 }
 
 impl RouteResponse {
-    fn error(message: impl Into<String>) -> Self {
+    fn error(message: impl Into<String>, category: impl Into<String>) -> Self {
         Self {
             travel_time_seconds: None,
             distance_meters: None,
             error: Some(message.into()),
+            failure_category: Some(category.into()),
         }
+    }
+}
+
+fn routing_failure_category(error: &RoutingError) -> &'static str {
+    match error {
+        RoutingError::NoPath { .. } => "no_path",
+        RoutingError::MissingModule { .. } | RoutingError::Unsupported { .. } => "unsupported_mode",
+        RoutingError::MissingEndTime { .. } => "internal_error",
     }
 }
 
@@ -97,7 +107,9 @@ fn handle_connection(stream: TcpStream, router: Arc<TripRouter>, population: Arc
 
         let response = match serde_json::from_str::<RouteRequest>(&line) {
             Ok(request) => route(&router, &population, request),
-            Err(error) => RouteResponse::error(format!("Invalid route request: {error}")),
+            Err(error) => {
+                RouteResponse::error(format!("Invalid route request: {error}"), "invalid_request")
+            }
         };
         if serde_json::to_writer(&mut writer, &response).is_err()
             || writer.write_all(b"\n").is_err()
@@ -116,7 +128,10 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
         || !request.to_x.is_finite()
         || !request.to_y.is_finite()
     {
-        return RouteResponse::error("Route request contains an invalid coordinate or time");
+        return RouteResponse::error(
+            "Route request contains an invalid coordinate or time",
+            "invalid_request",
+        );
     }
 
     let departure = Duration::from_secs_f64(request.departure_time_seconds);
@@ -127,19 +142,22 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
     let from_link = match Id::<Link>::try_get_from_ext(&request.from_link_id) {
         Some(link) => link,
         None => {
-            return RouteResponse::error(format!(
-                "Link `{}` is not in the routed network",
-                request.from_link_id
-            ));
+            return RouteResponse::error(
+                format!(
+                    "Link `{}` is not in the routed network",
+                    request.from_link_id
+                ),
+                "invalid_request",
+            );
         }
     };
     let to_link = match Id::<Link>::try_get_from_ext(&request.to_link_id) {
         Some(link) => link,
         None => {
-            return RouteResponse::error(format!(
-                "Link `{}` is not in the routed network",
-                request.to_link_id
-            ));
+            return RouteResponse::error(
+                format!("Link `{}` is not in the routed network", request.to_link_id),
+                "invalid_request",
+            );
         }
     };
     let from = Facility::new_link_wrapper(
@@ -151,30 +169,22 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
         to_link.clone(),
     );
     let mode = Id::<String>::create(&request.mode);
-    if from_link == to_link {
-        // MATSim answers a request whose origin and destination sit on the same link with
-        // a zero-length route instead of driving a loop back onto the link. SILO asks for
-        // travel times per origin/destination pair, so this is its intrazonal case.
-        return RouteResponse {
-            travel_time_seconds: Some(0.0),
-            distance_meters: Some(0.0),
-            error: None,
-        };
-    }
     let person = match request.person_id.as_deref() {
         Some(person_id) => match Id::<InternalPerson>::try_get_from_ext(person_id) {
             Some(person_id) => match population.persons.get(&person_id) {
                 Some(person) => Some(person),
                 None => {
-                    return RouteResponse::error(format!(
-                        "Person `{person_id}` is not in the routed population"
-                    ));
+                    return RouteResponse::error(
+                        format!("Person `{person_id}` is not in the routed population"),
+                        "invalid_request",
+                    );
                 }
             },
             None => {
-                return RouteResponse::error(format!(
-                    "Person `{person_id}` is not in the routed population"
-                ));
+                return RouteResponse::error(
+                    format!("Person `{person_id}` is not in the routed population"),
+                    "invalid_request",
+                );
             }
         },
         None => None,
@@ -187,15 +197,25 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
         .build()
     {
         Ok(request) => request,
-        Err(error) => return RouteResponse::error(format!("Invalid route request: {error}")),
+        Err(error) => {
+            return RouteResponse::error(
+                format!("Invalid route request: {error}"),
+                "invalid_request",
+            );
+        }
     };
     let elements = match router.calc_route(&mode, routing_request) {
         Ok(elements) => elements,
-        Err(error) => return RouteResponse::error(error.to_string()),
+        Err(error) => {
+            return RouteResponse::error(error.to_string(), routing_failure_category(&error));
+        }
     };
     let Some(arrival) = TimeInterpretation::decide_on_elements_end_time(&elements, &departure_time)
     else {
-        return RouteResponse::error("Rust router returned route elements without an arrival time");
+        return RouteResponse::error(
+            "Rust router returned route elements without an arrival time",
+            "internal_error",
+        );
     };
     let distance = elements
         .iter()
@@ -212,6 +232,7 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
         travel_time_seconds: Some(arrival.duration_since(departure_time).as_secs_f64()),
         distance_meters: Some(distance),
         error: None,
+        failure_category: None,
     }
 }
 

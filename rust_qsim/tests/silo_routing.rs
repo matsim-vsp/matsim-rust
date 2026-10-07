@@ -122,12 +122,24 @@ fn same_link_request_is_a_zero_length_route() {
 }
 
 #[deterministic_id_test(rust_qsim)]
+fn same_link_pt_request_is_handled_by_the_pt_router() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = start_route_service(&directory.path().join("routing-service.address"));
+
+    let mut request: Value =
+        serde_json::from_str(&car_request(HOME_LINK, HOME_LINK, START, START)).unwrap();
+    request["mode"] = json!("pt");
+    assert!(error_of(&client.request(&request.to_string())).contains("pt"));
+}
+
+#[deterministic_id_test(rust_qsim)]
 fn unknown_link_is_reported_and_the_connection_stays_open() {
     let directory = tempfile::tempdir().unwrap();
     let mut client = start_route_service(&directory.path().join("routing-service.address"));
 
     let response = client.request(&car_request("not-a-link", WORK_LINK, START, WORK_COORD));
     assert!(error_of(&response).contains("not-a-link"));
+    assert_eq!(response["failure_category"], "invalid_request");
 
     // A rejected request must not cost SILO its pooled connection.
     assert_eq!(
@@ -162,10 +174,12 @@ fn missing_mode_and_invalid_values_are_reported() {
     let mut unknown_mode: Value =
         serde_json::from_str(&car_request(HOME_LINK, WORK_LINK, START, WORK_COORD)).unwrap();
     unknown_mode["mode"] = json!("motorcycle");
+    let unsupported = client.request(&unknown_mode.to_string());
     assert!(
-        error_of(&client.request(&unknown_mode.to_string())).contains("motorcycle"),
+        error_of(&unsupported).contains("motorcycle"),
         "an unsupported mode should name the mode"
     );
+    assert_eq!(unsupported["failure_category"], "unsupported_mode");
 
     let mut negative_time: Value =
         serde_json::from_str(&car_request(HOME_LINK, WORK_LINK, START, WORK_COORD)).unwrap();

@@ -99,7 +99,8 @@ where
                         .build()
                         .unwrap(),
                 ),
-                SimulationAgentState::ACTIVITY | SimulationAgentState::STUCK => Some(
+                SimulationAgentState::STUCK => None,
+                SimulationAgentState::ACTIVITY => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
                         .person(agent.id().clone())
