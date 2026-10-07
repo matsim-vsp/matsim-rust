@@ -162,17 +162,6 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
         to_link.clone(),
     );
     let mode = Id::<String>::create(&request.mode);
-    if from_link == to_link {
-        // MATSim answers a request whose origin and destination sit on the same link with
-        // a zero-length route instead of driving a loop back onto the link. SILO asks for
-        // travel times per origin/destination pair, so this is its intrazonal case.
-        return RouteResponse {
-            travel_time_seconds: Some(0.0),
-            distance_meters: Some(0.0),
-            error: None,
-            failure_category: None,
-        };
-    }
     let person = match request.person_id.as_deref() {
         Some(person_id) => match Id::<InternalPerson>::try_get_from_ext(person_id) {
             Some(person_id) => match population.persons.get(&person_id) {
