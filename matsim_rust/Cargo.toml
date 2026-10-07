@@ -2,7 +2,7 @@
 name = "matsim-rust"
 version = "1.0.0"
 edition = "2024"
-description = "A parallel Rust implementation of the MATSim QSim"
+description = "A parallel Rust implementation of MATSim"
 license-file = "../LICENSE"
 repository = "https://github.com/matsim-vsp/matsim-rust"
 
