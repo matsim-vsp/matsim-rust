@@ -1,8 +1,12 @@
 use super::link::{LocalLink, SimLink, SplitInLink, SplitOutLink};
+use crate::simulation::Identifiable;
+use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
-use crate::simulation::events::{EventsManager, LinkEnterEventBuilder, LinkLeaveEventBuilder};
+use crate::simulation::events::{
+    EventsManager, LinkEnterEventBuilder, LinkLeaveEventBuilder, PersonStuckEventBuilder,
+};
 use crate::simulation::id::Id;
 use crate::simulation::id::serializable_type::StableTypeId;
 use crate::simulation::network::LinkStorageCapacities;
@@ -86,6 +90,8 @@ pub struct SimNetworkPartition {
     veh_counter: usize,
     partition: u32,
     clock: SimClock,
+    remove_stuck_vehicles: bool,
+    stuck_agents: Vec<SimulationAgent>,
     /// Green windows of the signalised approach links this partition owns. Empty when
     /// the run has no signals, in which case every approach discharges freely.
     signals: Signals,
@@ -111,6 +117,7 @@ enum FrontDecision {
     NoVehicle,
     MoveNormally,
     MoveAlthoughStuck,
+    RemoveStuck,
     Wait,
     /// The out-link has room but the approach's signal is red. Kept distinct from
     /// `Wait` because the two have different consequences for the stuck timer: a red
@@ -175,6 +182,7 @@ impl SimNetworkPartition {
             partition,
             config.computational_setup().random_seed,
             clock,
+            qsim_config.remove_stuck_vehicles,
             partition_signals,
         )
     }
@@ -213,12 +221,14 @@ impl SimNetworkPartition {
     }
 
     pub(crate) fn drain(&mut self) -> Vec<SimulationAgent> {
-        self.links
-            .values_mut()
-            .flat_map(|link| link.drain())
-            .flat_map(SimulationVehicle::into_agents)
-            .chain(self.transit_stops.drain())
-            .collect()
+        self.stuck_agents.extend(
+            self.links
+                .values_mut()
+                .flat_map(|link| link.drain())
+                .flat_map(SimulationVehicle::into_agents)
+                .chain(self.transit_stops.drain()),
+        );
+        std::mem::take(&mut self.stuck_agents)
     }
 
     fn create_sim_node(node: &Node) -> SimNode {
@@ -259,6 +269,7 @@ impl SimNetworkPartition {
         partition: u32,
         base_seed: u64,
         clock: SimClock,
+        remove_stuck_vehicles: bool,
         signals: Signals,
     ) -> Self {
         // Initialize RNG with a seed based on the base seed and node id
@@ -281,6 +292,8 @@ impl SimNetworkPartition {
             veh_counter: 0,
             partition,
             clock,
+            remove_stuck_vehicles,
+            stuck_agents: Vec::new(),
             signals,
             transit_stops: TransitStops::default(),
         }
@@ -568,15 +581,18 @@ impl SimNetworkPartition {
             let selected = candidates.swap_remove(selected_index);
             total_capacity -= selected.weight;
 
-            Self::drain_selected_inlink(
+            let (aborted, stuck_agents) = Self::drain_selected_inlink(
                 selected.id,
                 &mut self.links,
                 &mut self.active_links,
                 comp_env,
                 &self.signals,
                 self.clock,
+                self.remove_stuck_vehicles,
                 now,
             );
+            self.veh_counter -= aborted;
+            self.stuck_agents.extend(stuck_agents);
         }
 
         // check whether any link is offering next timestep. Otherwise, the node can be de-activated
@@ -626,6 +642,7 @@ impl SimNetworkPartition {
         links: &IntMap<Id<Link>, SimLink>,
         signals: &Signals,
         clock: SimClock,
+        remove_stuck_vehicles: bool,
         now: Tick,
     ) -> FrontDecision {
         let in_link = links.get(in_id).unwrap();
@@ -670,7 +687,11 @@ impl SimNetworkPartition {
         if out_link.is_available() {
             FrontDecision::MoveNormally
         } else if in_link.is_veh_stuck(now) {
-            FrontDecision::MoveAlthoughStuck
+            if remove_stuck_vehicles {
+                FrontDecision::RemoveStuck
+            } else {
+                FrontDecision::MoveAlthoughStuck
+            }
         } else {
             FrontDecision::Wait
         }
@@ -683,10 +704,20 @@ impl SimNetworkPartition {
         comp_env: &mut ThreadLocalComputationalEnvironment,
         signals: &Signals,
         clock: SimClock,
+        remove_stuck_vehicles: bool,
         now: Tick,
-    ) {
+    ) -> (usize, Vec<SimulationAgent>) {
+        let mut aborted = 0;
+        let mut stuck_agents = Vec::new();
         loop {
-            match Self::evaluate_front_vehicle(in_link_id, links, signals, clock, now) {
+            match Self::evaluate_front_vehicle(
+                in_link_id,
+                links,
+                signals,
+                clock,
+                remove_stuck_vehicles,
+                now,
+            ) {
                 FrontDecision::MoveNormally | FrontDecision::MoveAlthoughStuck => {
                     let in_link = links.get_mut(in_link_id).unwrap();
                     let vehicle = in_link
@@ -696,6 +727,38 @@ impl SimNetworkPartition {
                 }
                 FrontDecision::Abort => {
                     panic!("Invalid turn from in-link {}", in_link_id.external());
+                }
+                FrontDecision::RemoveStuck => {
+                    let vehicle = links
+                        .get_mut(in_link_id)
+                        .unwrap()
+                        .pop_veh_and_restart_stuck_timer(now)
+                        .expect("Stuck vehicle disappeared before removal");
+                    let now_time = clock.tick_to_time(now);
+                    let link = in_link_id.clone();
+                    comp_env.events_manager_borrow_mut().process_event(
+                        &LinkLeaveEventBuilder::default()
+                            .time(now_time)
+                            .link(link.clone())
+                            .vehicle(vehicle.id().clone())
+                            .build()
+                            .unwrap(),
+                    );
+                    let mut events = comp_env.events_manager_borrow_mut();
+                    for mut agent in vehicle.into_agents() {
+                        events.process_event(
+                            &PersonStuckEventBuilder::default()
+                                .time(now_time)
+                                .person(agent.id().clone())
+                                .link(Some(link.clone()))
+                                .leg_mode(Some(agent.curr_leg().mode.clone()))
+                                .build()
+                                .unwrap(),
+                        );
+                        agent.mark_stuck();
+                        stuck_agents.push(agent);
+                    }
+                    aborted += 1;
                 }
                 FrontDecision::WaitAtRedSignal => {
                     // Restart the stuck timer so a vehicle held at a red is not
@@ -726,6 +789,7 @@ impl SimNetworkPartition {
         if !links.get(in_link_id).unwrap().is_active() {
             active_links.deactivate(in_link_id);
         }
+        (aborted, stuck_agents)
     }
 
     /// Moves the vehicle from the current link to the next link.
@@ -793,9 +857,10 @@ struct MoveSingleLinkResult {
 #[cfg(test)]
 mod tests {
     use super::{Candidate, SimNetworkPartition};
+    use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
-    use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent};
+    use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent, PersonStuckEvent};
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::events::XmlEventsWriter;
     use crate::simulation::network::link::LinkPosition::QStart;
@@ -819,6 +884,7 @@ mod tests {
     struct TransitionEvents {
         link_enters: Rc<RefCell<Vec<(String, String)>>>,
         link_leaves: Rc<RefCell<Vec<(String, String)>>>,
+        stuck_people: Rc<RefCell<Vec<String>>>,
     }
 
     impl TransitionEvents {
@@ -840,6 +906,12 @@ mod tests {
                         event.vehicle.external().to_owned(),
                     ));
                 });
+
+            let stuck = self.stuck_people.clone();
+            env.events_manager_borrow_mut()
+                .on::<PersonStuckEvent, _>(move |event| {
+                    stuck.borrow_mut().push(event.person.external().to_owned());
+                });
         }
 
         fn leaving_vehicles(&self) -> Vec<String> {
@@ -857,6 +929,10 @@ mod tests {
                 .filter(|(event_link, _)| event_link == link)
                 .map(|(_, vehicle)| vehicle.clone())
                 .collect()
+        }
+
+        fn stuck_people(&self) -> Vec<String> {
+            self.stuck_people.borrow().clone()
         }
     }
 
@@ -1086,6 +1162,49 @@ mod tests {
 
         network.move_nodes(&mut env, 11);
         assert_eq!(vec!["11", "12"], events.leaves_on("A"));
+    }
+
+    /// Setting: vehicle 11 fills C; vehicle 12 remains blocked on A until the 10-tick threshold.
+    /// Execution: With MATSim's removeStuckVehicles behavior enabled, vehicle 12 is removed at tick 11.
+    /// Expectation: the vehicle leaves A, emits one stuck event for person 12, and never enters C.
+    #[deterministic_id_test]
+    fn stuck_vehicle_is_aborted_at_inclusive_threshold_when_configured() {
+        let mut global_network = Network::new();
+        add_test_nodes(&mut global_network, &["S", "K", "T", "END"]);
+        add_test_link(&mut global_network, "A", "S", "K", 1.0, 7200.0, 100.0);
+        add_test_link(&mut global_network, "C", "K", "T", 15.0, 7200.0, 100.0);
+        add_test_link(&mut global_network, "C2", "T", "END", 7.5, 3600.0, 100.0);
+
+        let mut config = test_utils::config();
+        config.qsim_mut().stuck_threshold = 10;
+        config.qsim_mut().remove_stuck_vehicles = true;
+        let mut network = SimNetworkPartition::from_network_for_test(&global_network, 0, &config);
+        push_vehicle_to_queue(&mut network, "C", 90, vec!["C", "C2"], 0);
+        network.send_veh_en_route(test_vehicle(11, vec!["A", "C"]), None, 0);
+        network.send_veh_en_route(test_vehicle(12, vec!["A", "C"]), None, 0);
+
+        let (mut env, events) = environment_with_transition_events();
+        network.move_links(&mut env, 0);
+        network.move_nodes(&mut env, 1);
+        network.move_nodes(&mut env, 10);
+        assert!(events.stuck_people().is_empty());
+        assert_eq!(2, network.veh_on_net());
+
+        network.move_nodes(&mut env, 11);
+
+        assert_eq!(vec!["11", "12"], events.leaves_on("A"));
+        assert_eq!(vec!["12"], events.stuck_people());
+        assert_eq!(0, local_vehicle_count(&network, "A"));
+        assert_eq!(2, local_vehicle_count(&network, "C"));
+        assert_eq!(1, network.veh_on_net());
+        assert_eq!(
+            1,
+            network
+                .drain()
+                .iter()
+                .filter(|agent| agent.state() == SimulationAgentState::STUCK)
+                .count()
+        );
     }
 
     /// Setting: The slow link C is 100 m long, has a free speed of 1 m/s, a capacity of 3600 vehicles/h, and already contains 14 vehicles; U offers one additional vehicle for C.

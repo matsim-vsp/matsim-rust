@@ -1329,6 +1329,7 @@ pub struct QSim {
     pub ticks_per_second: u32,
     pub sample_size: f64,
     pub stuck_threshold: u32,
+    pub remove_stuck_vehicles: bool,
     pub main_modes: Vec<String>,
     /// Paths to the MATSim signal files. Absent, or present but incomplete, means the
     /// run has no signals.
@@ -1433,6 +1434,7 @@ impl From<&Simulation> for QSim {
             ticks_per_second: value.ticks_per_second,
             sample_size: value.sample_size,
             stuck_threshold: value.stuck_threshold,
+            remove_stuck_vehicles: false,
             main_modes: value.main_modes.clone(),
             signals: SignalFilesConfig::default(),
         }
@@ -1469,6 +1471,10 @@ register_override!("qsim.sample_size", |config, value| {
 
 register_override!("qsim.stuck_threshold", |config, value| {
     config.qsim_mut().stuck_threshold = value.parse().unwrap();
+});
+
+register_override!("qsim.remove_stuck_vehicles", |config, value| {
+    config.qsim_mut().remove_stuck_vehicles = value.parse().unwrap();
 });
 
 register_override!("qsim.main_modes", |config, value| {
@@ -1727,6 +1733,7 @@ impl Default for QSim {
             ticks_per_second: 1,
             sample_size: 1.0,
             stuck_threshold: 10,
+            remove_stuck_vehicles: false,
             main_modes: vec![],
             signals: SignalFilesConfig::default(),
         }
@@ -2062,6 +2069,7 @@ mod tests {
             ticks_per_second: 1,
             sample_size: 0.1,
             stuck_threshold: 1,
+            remove_stuck_vehicles: true,
             main_modes: vec!["bike".to_string()],
             signals: SignalFilesConfig::default(),
         };
@@ -2118,6 +2126,7 @@ mod tests {
         assert_eq!(parsed_config.qsim().ticks_per_second, 1);
         assert_eq!(parsed_config.qsim().sample_size, 0.1);
         assert_eq!(parsed_config.qsim().stuck_threshold, 1);
+        assert!(parsed_config.qsim().remove_stuck_vehicles);
         assert_eq!(parsed_config.qsim().main_modes, vec!["bike"]);
     }
 
@@ -2182,6 +2191,7 @@ mod tests {
         assert_eq!(parsed_config.qsim().ticks_per_second, 10);
         assert_eq!(parsed_config.qsim().sample_size, 0.5);
         assert_eq!(parsed_config.qsim().stuck_threshold, 99);
+        assert!(!parsed_config.qsim().remove_stuck_vehicles);
         assert_eq!(parsed_config.qsim().main_modes, vec!["car", "bike"]);
     }
 
