@@ -1,18 +1,25 @@
 //! Public transport ridership, waiting, load, transfer and observed-demand tables.
 //!
-//! This build moves transit passengers by teleportation: a `travelled with pt` event names the
-//! line, route, access and egress stop and the scheduled boarding time of one passenger trip, and
-//! no transit vehicle ever drives through the network. Everything below is derived from those
-//! records and the recorded schedule. Quantities that would need vehicle service events (actual
-//! stop arrivals and departures) are reported as unavailable instead of being inferred.
+//! Transit vehicles drive through the network, so one passenger trip is rebuilt from the events
+//! that record it: the run a vehicle starts (`TransitDriverStarts` names its line, route and
+//! departure), the stop a passenger waits at (`waitingForPt`), the boarding (`PersonEntersVehicle`)
+//! and the alighting (`PersonLeavesVehicle`). A run always starts before anyone boards it, so the
+//! vehicle's current run identifies the line, route and departure a passenger rode.
+//!
+//! A `travelled with pt` event, which an earlier build wrote when passengers teleported, is still
+//! read so that an event file recorded before vehicle simulation keeps producing its tables.
+//! Quantities that need the vehicles' own stop events (`VehicleArrivesAtFacility` and
+//! `VehicleDepartsAtFacility`), which this module does not read, are reported as unavailable
+//! instead of being inferred.
 
 use super::{
     AnalysisError, ExpectedJourney, ObservedLeg, TableSpec, csv, hour_start_seconds, io_error,
     number_opt, table_writer,
 };
 use crate::simulation::events::{
-    EventTrait, PersonArrivalEvent, PersonDepartureEvent, PersonStuckEvent,
-    PtTeleportationArrivalEvent,
+    AgentWaitingForPtEvent, EventTrait, PersonArrivalEvent, PersonDepartureEvent,
+    PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
+    PtTeleportationArrivalEvent, TransitDriverStartsEvent,
 };
 use crate::simulation::scenario::transit::TransitSchedule;
 use crate::simulation::scenario::vehicles::Garage;
@@ -306,7 +313,7 @@ impl TransitMetadata {
 
 /// What the event stream recorded about one passenger transit leg.
 enum TripRecord {
-    /// A `travelled with pt` event: the leg was served by a teleported scheduled trip.
+    /// The leg was served: by a simulated ride, or by a `travelled with pt` record.
     Service(ServiceRecord),
     /// The leg ended without any service record, so nothing about its service is known.
     NoServiceRecord,
@@ -321,6 +328,10 @@ struct ServiceRecord {
     access_stop: String,
     egress_stop: String,
     boarding_seconds: f64,
+    /// Departure and vehicle of the ride. Empty for a `travelled with pt` record, which names
+    /// neither and whose departure has to be recovered from the schedule.
+    departure_id: String,
+    vehicle_id: String,
 }
 
 pub(super) struct TransitTrip {
@@ -339,7 +350,24 @@ pub(super) struct TransitCollector {
     transit_modes: BTreeSet<String>,
     /// Latest departure of each person that has not arrived yet.
     open: BTreeMap<String, (String, f64)>,
+    /// The run each transit vehicle currently serves: its line, route and departure. A run starts
+    /// before anyone boards it, so the entry in place when a passenger boards is the run it rode.
+    runs: BTreeMap<String, VehicleRun>,
+    /// Passengers that announced a transit leg and are not on board yet: access and destination
+    /// stop of that leg.
+    waiting: BTreeMap<String, (String, String)>,
+    /// Passengers that are on board: the vehicle they boarded and when.
+    boarded: BTreeMap<String, (String, f64)>,
+    /// Rides that ended and wait for the leg's arrival to close them.
+    rides: BTreeMap<String, ServiceRecord>,
     trips: Vec<TransitTrip>,
+}
+
+/// The line, route and departure a transit vehicle is currently serving.
+struct VehicleRun {
+    line: String,
+    route: String,
+    departure_id: String,
 }
 
 impl TransitCollector {
@@ -347,12 +375,70 @@ impl TransitCollector {
         Self {
             transit_modes: planned_transit_modes,
             open: BTreeMap::new(),
+            runs: BTreeMap::new(),
+            waiting: BTreeMap::new(),
+            boarded: BTreeMap::new(),
+            rides: BTreeMap::new(),
             trips: Vec::new(),
         }
     }
 
     pub(super) fn process_timestamp(&mut self, events: &[Box<dyn EventTrait>], time: SimTime) {
         let seconds = time.as_nanos() as f64 / 1e9;
+        // A ride is assembled before any trip is closed: the vehicle's run, the stop the passenger
+        // waits at, the boarding and the alighting all precede the leg's arrival. A driver also
+        // enters and leaves its own vehicle, so only a passenger that announced a transit leg can
+        // board, and a new wait clears whatever an earlier leg left behind.
+        for event in events {
+            if let Some(event) = event.as_any().downcast_ref::<TransitDriverStartsEvent>() {
+                self.runs.insert(
+                    event.vehicle.external().to_owned(),
+                    VehicleRun {
+                        line: event.line.external().to_owned(),
+                        route: event.route.external().to_owned(),
+                        departure_id: event.departure.external().to_owned(),
+                    },
+                );
+            } else if let Some(event) = event.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
+                let person = event.person.external().to_owned();
+                self.waiting.insert(
+                    person.clone(),
+                    (
+                        event.at_stop.external().to_owned(),
+                        event.destination_stop.external().to_owned(),
+                    ),
+                );
+                self.boarded.remove(&person);
+                self.rides.remove(&person);
+            } else if let Some(event) = event.as_any().downcast_ref::<PersonEntersVehicleEvent>() {
+                let person = event.person.external();
+                if self.waiting.contains_key(person) {
+                    self.boarded.insert(
+                        person.to_owned(),
+                        (event.vehicle.external().to_owned(), seconds),
+                    );
+                }
+            } else if let Some(event) = event.as_any().downcast_ref::<PersonLeavesVehicleEvent>() {
+                let person = event.person.external();
+                if let Some((vehicle, boarding_seconds)) = self.boarded.remove(person)
+                    && let Some((access_stop, egress_stop)) = self.waiting.remove(person)
+                    && let Some(run) = self.runs.get(&vehicle)
+                {
+                    self.rides.insert(
+                        person.to_owned(),
+                        ServiceRecord {
+                            line: run.line.clone(),
+                            route: run.route.clone(),
+                            access_stop,
+                            egress_stop,
+                            boarding_seconds,
+                            departure_id: run.departure_id.clone(),
+                            vehicle_id: vehicle,
+                        },
+                    );
+                }
+            }
+        }
         // Service records first: the leg they describe was opened by an earlier batch, and a
         // departure of the same batch must not be mistaken for it. Only a leg with no open
         // departure falls back to a departure of this batch: a zero-duration leg.
@@ -391,6 +477,8 @@ impl TransitCollector {
                         access_stop: event.access_facility.external().to_owned(),
                         egress_stop: event.egress_facility.external().to_owned(),
                         boarding_seconds: event.boarding_time.as_nanos() as f64 / 1e9,
+                        departure_id: String::new(),
+                        vehicle_id: String::new(),
                     }),
                 });
             }
@@ -403,16 +491,48 @@ impl TransitCollector {
                     && open_mode == mode
                 {
                     let departure = *departure;
+                    // The leg is over, whether or not it was served, so its waiting state goes.
+                    self.waiting.remove(person);
+                    let record = self
+                        .rides
+                        .remove(person)
+                        .map_or(TripRecord::NoServiceRecord, TripRecord::Service);
                     if self.transit_modes.contains(mode) {
                         self.trips.push(TransitTrip {
                             person: person.to_owned(),
                             mode: mode.to_owned(),
                             departure_seconds: Some(departure),
                             arrival_seconds: Some(seconds),
-                            record: TripRecord::NoServiceRecord,
+                            record,
                         });
                     }
                     self.open.remove(person);
+                } else if self.transit_modes.contains(mode)
+                    && self.rides.contains_key(person)
+                    && events.iter().any(|candidate| {
+                        candidate
+                            .as_any()
+                            .downcast_ref::<PersonDepartureEvent>()
+                            .is_some_and(|departure| {
+                                departure.person.external() == person
+                                    && departure.leg_mode.external() == mode
+                            })
+                    })
+                {
+                    // A ride that began and ended within this second: the leg it closed was
+                    // opened by a departure of this batch and never reached the open map.
+                    let record = self
+                        .rides
+                        .remove(person)
+                        .map_or(TripRecord::NoServiceRecord, TripRecord::Service);
+                    zero_duration.insert(((*person).to_owned(), mode.to_owned()));
+                    self.trips.push(TransitTrip {
+                        person: (*person).to_owned(),
+                        mode: mode.to_owned(),
+                        departure_seconds: Some(seconds),
+                        arrival_seconds: Some(seconds),
+                        record,
+                    });
                 }
             }
         }
@@ -464,6 +584,12 @@ impl TransitCollector {
         for (person, open) in std::mem::take(&mut self.open) {
             self.close_incomplete(&person, open);
         }
+        // A stuck or stranded passenger never reaches its arrival, so its boarded state and ride
+        // are dropped rather than carried into the next run.
+        self.runs.clear();
+        self.waiting.clear();
+        self.boarded.clear();
+        self.rides.clear();
         // Stable order independent of the event interleaving of the partitions.
         self.trips.sort_by(|a, b| {
             (
@@ -514,19 +640,25 @@ fn match_schedule(route: &RouteMeta, trip: &ServiceRecord) -> Option<ScheduleMat
         let Some(alighting_offset) = egress.alighting_offset() else {
             continue;
         };
-        if let Some((departure, scheduled)) =
-            route.departures.iter().enumerate().find(|(_, departure)| {
+        // A simulated ride names its departure, so the run is identified exactly. A
+        // `travelled with pt` record names neither and boards on the scheduled second.
+        let Some(departure) = route.departures.iter().position(|departure| {
+            if trip.departure_id.is_empty() {
                 (departure.departure_seconds + boarding_offset - trip.boarding_seconds).abs()
                     < TIME_EPSILON_SECONDS
-            })
-        {
-            return Some(ScheduleMatch {
-                departure,
-                from_stop,
-                to_stop,
-                scheduled_arrival_seconds: scheduled.departure_seconds + alighting_offset,
-            });
-        }
+            } else {
+                departure.departure_id == trip.departure_id
+            }
+        }) else {
+            continue;
+        };
+        return Some(ScheduleMatch {
+            departure,
+            from_stop,
+            to_stop,
+            scheduled_arrival_seconds: route.departures[departure].departure_seconds
+                + alighting_offset,
+        });
     }
     None
 }
@@ -593,7 +725,13 @@ fn view<'a>(
     TripView {
         trip,
         outcome: if missed { "missed_service" } else { "boarded" },
-        service_modeling: "teleported",
+        // A ride that names the departure it was served by came from a simulated vehicle; a
+        // `travelled with pt` record comes from a teleported leg.
+        service_modeling: if record.departure_id.is_empty() {
+            "teleported"
+        } else {
+            "simulated"
+        },
         wait_seconds: raw_wait.filter(|wait| *wait >= 0.0),
         in_vehicle_seconds: in_vehicle,
         arrival_delay_seconds: delay,
@@ -788,7 +926,7 @@ pub(super) fn write_tables(
 
     let service_trips = views.iter().filter(|view| view.record().is_some()).count();
     let matched_trips = views.iter().filter(|view| view.schedule.is_some()).count();
-    let no_records = "no transit service records (travelled with pt events) in the final iteration";
+    let no_records = "no transit service records (boardings and alightings of transit vehicles) in the final iteration";
     let schedule_reason = if service_trips == 0 {
         Some(no_records.to_owned())
     } else if metadata.is_none() {
@@ -814,7 +952,7 @@ pub(super) fn write_tables(
         (
             "service_delay",
             schedule_reason.clone(),
-            "arrival compared with the scheduled arrival at the egress stop; teleported service follows the schedule by construction",
+            "arrival compared with the scheduled arrival at the egress stop of the departure ridden",
         ),
         ("occupancy", schedule_reason.clone(), ""),
         (
@@ -833,11 +971,16 @@ pub(super) fn write_tables(
         (
             "missed_service",
             (service_trips == 0).then(|| no_records.to_owned()),
-            "passenger reached the stop after the scheduled departure; vehicle-level missed stops need physical service events",
+            "a passenger who waits for a later departure after missing one looks the same as a \
+             passenger whose vehicle was late; separating them needs the vehicles' departure events",
         ),
         (
             "physical_service",
-            Some("transit vehicle service events are not recorded; public transport is modeled by teleportation".to_owned()),
+            Some(
+                "this module does not read transit vehicle service events (VehicleArrivesAtFacility \
+                 and VehicleDepartsAtFacility)"
+                    .to_owned(),
+            ),
             "",
         ),
     ];
@@ -889,10 +1032,22 @@ fn write_trips(
             number_opt(view.in_vehicle_seconds),
             number_opt(schedule.map(|(_, matched)| matched.scheduled_arrival_seconds)),
             number_opt(view.arrival_delay_seconds),
-            departure.map_or_else(String::new, |d| csv(&d.departure_id)),
-            departure
-                .and_then(|d| d.vehicle_id.as_deref())
-                .map_or_else(String::new, csv),
+            // A simulated ride names its own departure and vehicle; a `travelled with pt` record
+            // names neither, so both come from the matched scheduled departure.
+            record
+                .filter(|record| !record.departure_id.is_empty())
+                .map_or_else(
+                    || departure.map_or_else(String::new, |d| csv(&d.departure_id)),
+                    |record| csv(&record.departure_id),
+                ),
+            record
+                .filter(|record| !record.vehicle_id.is_empty())
+                .map_or_else(
+                    || departure
+                        .and_then(|d| d.vehicle_id.as_deref())
+                        .map_or_else(String::new, csv),
+                    |record| csv(&record.vehicle_id),
+                ),
         )
         .map_err(io_error)?;
     }
@@ -1447,6 +1602,38 @@ mod tests {
         )
     }
 
+    fn driver_starts(time: u32, vehicle: &str, departure: &str) -> (u32, String) {
+        event(
+            time,
+            format!(
+                "type=\"TransitDriverStarts\" driverId=\"d_{vehicle}\" vehicleId=\"{vehicle}\" transitLineId=\"Blue\" transitRouteId=\"1to3\" departureId=\"{departure}\""
+            ),
+        )
+    }
+
+    fn waiting(time: u32, person: &str, from: &str, to: &str) -> (u32, String) {
+        event(
+            time,
+            format!(
+                "type=\"waitingForPt\" person=\"{person}\" agent=\"{person}\" atStop=\"{from}\" destinationStop=\"{to}\""
+            ),
+        )
+    }
+
+    fn boards(time: u32, person: &str, vehicle: &str) -> (u32, String) {
+        event(
+            time,
+            format!("type=\"PersonEntersVehicle\" person=\"{person}\" vehicle=\"{vehicle}\""),
+        )
+    }
+
+    fn leaves(time: u32, person: &str, vehicle: &str) -> (u32, String) {
+        event(
+            time,
+            format!("type=\"PersonLeavesVehicle\" person=\"{person}\" vehicle=\"{vehicle}\""),
+        )
+    }
+
     fn leg(leg_index: usize, mode: &str) -> ExpectedLeg {
         ExpectedLeg {
             leg_index,
@@ -1480,6 +1667,7 @@ mod tests {
                 distance_provenance: "unavailable".to_owned(),
             }],
             legs,
+            planned_activities: 0,
         }
     }
 
@@ -1533,6 +1721,7 @@ mod tests {
             0,
             // Half of the population is simulated, so counts are expanded by two.
             0.5,
+            0,
             &garage,
             expected,
             AnalysisInputPaths::default(),
@@ -1636,6 +1825,64 @@ mod tests {
             "{lines}"
         );
         assert_eq!(run.status("transit_performance")["status"], "complete");
+    }
+
+    #[deterministic_id_test]
+    fn a_simulated_ride_is_rebuilt_from_the_vehicle_and_passenger_events() {
+        // A vehicle that starts late still boards the passenger: the trip is matched to the
+        // departure the run names, not to a scheduled second, so the delay is the vehicle's.
+        let run = analyze(
+            vec![
+                driver_starts(1020, "tr_1", "01"),
+                departure(1000, "p1", "pt"),
+                waiting(1000, "p1", "1", "3"),
+                boards(1030, "p1", "tr_1"),
+                leaves(1545, "p1", "tr_1"),
+                arrival(1545, "p1", "pt"),
+            ],
+            vec![traveller("p1", &["pt"])],
+            true,
+            None,
+        );
+        let trips = run.report("transit_trips.csv");
+        assert!(trips.contains("\"p1\",\"pt\",simulated,boarded,\"Blue\",\"1to3\",\"1\",\"3\",1000.000000,1030.000000,1545.000000,30.000000,515.000000,1540.000000,5.000000,\"01\",\"tr_1\""), "{trips}");
+        assert_eq!(trips.lines().count(), 2, "{trips}");
+        let stops = run.report("transit_stop_hourly.csv");
+        assert!(
+            stops.contains("0,\"Blue\",\"1\",1,0,2.000000,0.000000"),
+            "{stops}"
+        );
+        assert!(
+            stops.contains("0,\"Blue\",\"3\",0,1,0.000000,2.000000"),
+            "{stops}"
+        );
+        let availability = run.report("transit_availability.csv");
+        assert!(
+            availability.contains("\"service_delay\",available,"),
+            "{availability}"
+        );
+        assert!(
+            availability.contains("\"physical_service\",unavailable,"),
+            "{availability}"
+        );
+    }
+
+    #[deterministic_id_test]
+    fn a_leg_that_never_boards_a_transit_vehicle_has_no_service_record() {
+        let run = analyze(
+            vec![
+                driver_starts(1020, "tr_1", "01"),
+                departure(1000, "p1", "pt"),
+                waiting(1000, "p1", "1", "3"),
+                arrival(1200, "p1", "pt"),
+            ],
+            vec![traveller("p1", &["pt"])],
+            true,
+            None,
+        );
+        assert!(run.report("transit_trips.csv").contains(
+            "\"p1\",\"pt\",unrecorded,no_service_record,,,,,1000.000000,,1200.000000,,,,,,"
+        ));
     }
 
     #[deterministic_id_test]
@@ -1817,9 +2064,10 @@ mod tests {
             run.report("transit_occupancy.csv")
                 .contains("\"02\",\"tr_2\",0,\"1\",\"2a\",2000.000000,1,2.000000,,\n")
         );
-        // Physically modeled transit would need vehicle service events, which are never recorded.
+        // Vehicle-level stop arrivals and departures would need the vehicles' service events,
+        // which this module does not read.
         assert!(availability.contains(
-            "\"physical_service\",unavailable,\"transit vehicle service events are not recorded"
+            "\"physical_service\",unavailable,\"this module does not read transit vehicle service events"
         ));
     }
 
@@ -1850,6 +2098,8 @@ mod tests {
             access_stop: from.to_owned(),
             egress_stop: to.to_owned(),
             boarding_seconds: boarding,
+            departure_id: String::new(),
+            vehicle_id: String::new(),
         };
         // A loop route visits `a` twice: boarding at its second visit rides to no later `a`.
         assert_eq!(

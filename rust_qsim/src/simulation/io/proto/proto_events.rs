@@ -1,10 +1,11 @@
 use crate::generated::events::{GenericEvent, TimeStep};
 use crate::generated::general::AttributeValue;
 use crate::simulation::events::{
-    ActivityEndEvent, ActivityStartEvent, EventHandlerRegisterFn, EventTrait, EventsManager,
-    LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
-    PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
-    PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
+    ActivityEndEvent, ActivityStartEvent, AgentWaitingForPtEvent, EventHandlerRegisterFn,
+    EventTrait, EventsManager, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent,
+    PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
+    PtTeleportationArrivalEvent, TeleportationArrivalEvent, TransitDriverStartsEvent,
+    VehicleArrivesAtFacilityEvent, VehicleDepartsAtFacilityEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
 };
 use crate::simulation::time::SimTime;
@@ -429,6 +430,80 @@ impl ProtoEventsWriter {
     }
 }
 
+impl From<&TransitDriverStartsEvent> for GenericEvent {
+    fn from(value: &TransitDriverStartsEvent) -> Self {
+        let mut attributes = HashMap::new();
+        for (key, id) in [
+            ("driverId", value.driver.external()),
+            ("vehicleId", value.vehicle.external()),
+            ("transitLineId", value.line.external()),
+            ("transitRouteId", value.route.external()),
+            ("departureId", value.departure.external()),
+        ] {
+            attributes.insert(key.to_string(), AttributeValue::from(id));
+        }
+        GenericEvent {
+            r#type: value.type_().to_string(),
+            attributes,
+        }
+    }
+}
+
+impl From<&VehicleArrivesAtFacilityEvent> for GenericEvent {
+    fn from(value: &VehicleArrivesAtFacilityEvent) -> Self {
+        facility_event(
+            value.type_(),
+            value.vehicle.external(),
+            value.facility.external(),
+            value.delay,
+        )
+    }
+}
+
+impl From<&VehicleDepartsAtFacilityEvent> for GenericEvent {
+    fn from(value: &VehicleDepartsAtFacilityEvent) -> Self {
+        facility_event(
+            value.type_(),
+            value.vehicle.external(),
+            value.facility.external(),
+            value.delay,
+        )
+    }
+}
+
+fn facility_event(type_: &str, vehicle: &str, facility: &str, delay: f64) -> GenericEvent {
+    let mut attributes = HashMap::new();
+    attributes.insert("vehicle".to_string(), AttributeValue::from(vehicle));
+    attributes.insert("facility".to_string(), AttributeValue::from(facility));
+    attributes.insert("delay".to_string(), AttributeValue::from(delay));
+    GenericEvent {
+        r#type: type_.to_string(),
+        attributes,
+    }
+}
+
+impl From<&AgentWaitingForPtEvent> for GenericEvent {
+    fn from(value: &AgentWaitingForPtEvent) -> Self {
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "person".to_string(),
+            AttributeValue::from(value.person.external()),
+        );
+        attributes.insert(
+            "atStop".to_string(),
+            AttributeValue::from(value.at_stop.external()),
+        );
+        attributes.insert(
+            "destinationStop".to_string(),
+            AttributeValue::from(value.destination_stop.external()),
+        );
+        GenericEvent {
+            r#type: value.type_().to_string(),
+            attributes,
+        }
+    }
+}
+
 pub(crate) fn event_to_proto(event: &dyn EventTrait) -> GenericEvent {
     if let Some(event) = event
         .as_any()
@@ -460,6 +535,20 @@ pub(crate) fn event_to_proto(event: &dyn EventTrait) -> GenericEvent {
     } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
         GenericEvent::from(event)
     } else if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
+        GenericEvent::from(event)
+    } else if let Some(event) = event.as_any().downcast_ref::<TransitDriverStartsEvent>() {
+        GenericEvent::from(event)
+    } else if let Some(event) = event
+        .as_any()
+        .downcast_ref::<VehicleArrivesAtFacilityEvent>()
+    {
+        GenericEvent::from(event)
+    } else if let Some(event) = event
+        .as_any()
+        .downcast_ref::<VehicleDepartsAtFacilityEvent>()
+    {
+        GenericEvent::from(event)
+    } else if let Some(event) = event.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
         GenericEvent::from(event)
     } else {
         // TODO use general event here and log warning
@@ -577,6 +666,10 @@ pub(crate) fn event_from_proto(time: SimTime, proto_event: &GenericEvent) -> Box
         VehicleEntersTrafficEvent::TYPE => Box::new(VehicleEntersTrafficEvent::from_proto_event(proto_event, time)),
         VehicleLeavesTrafficEvent::TYPE => Box::new(VehicleLeavesTrafficEvent::from_proto_event(proto_event, time)),
         PersonStuckEvent::TYPE => Box::new(PersonStuckEvent::from_proto_event(proto_event, time)),
+        TransitDriverStartsEvent::TYPE => Box::new(TransitDriverStartsEvent::from_proto_event(proto_event, time)),
+        VehicleArrivesAtFacilityEvent::TYPE => Box::new(VehicleArrivesAtFacilityEvent::from_proto_event(proto_event, time)),
+        VehicleDepartsAtFacilityEvent::TYPE => Box::new(VehicleDepartsAtFacilityEvent::from_proto_event(proto_event, time)),
+        AgentWaitingForPtEvent::TYPE => Box::new(AgentWaitingForPtEvent::from_proto_event(proto_event, time)),
         _ => panic!("Unknown event type: {:?}", type_),
     }
 }
@@ -649,6 +742,64 @@ mod tests {
             assert_eq!(expected.link, parsed_event.link);
             assert_eq!(expected.leg_mode, parsed_event.leg_mode);
             assert_eq!(expected.reason, parsed_event.reason);
+        }
+    }
+
+    #[deterministic_id_test]
+    fn transit_events_proto_round_trip() {
+        use crate::simulation::events::{
+            AgentWaitingForPtEventBuilder, TransitDriverStartsEventBuilder,
+            VehicleArrivesAtFacilityEventBuilder, VehicleDepartsAtFacilityEventBuilder,
+        };
+        let time = SimTime::from_secs(7);
+        let events: Vec<Box<dyn EventTrait>> = vec![
+            Box::new(
+                TransitDriverStartsEventBuilder::default()
+                    .time(time)
+                    .driver(Id::create("pt_tr_1_1"))
+                    .vehicle(Id::create("tr_1"))
+                    .line(Id::create("Blue Line"))
+                    .route(Id::create("1to3"))
+                    .departure(Id::create("01"))
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                VehicleArrivesAtFacilityEventBuilder::default()
+                    .time(time)
+                    .vehicle(Id::create("tr_1"))
+                    .facility(Id::create("2a"))
+                    .delay(1.5)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                VehicleDepartsAtFacilityEventBuilder::default()
+                    .time(time)
+                    .vehicle(Id::create("tr_1"))
+                    .facility(Id::create("2a"))
+                    .delay(-39.0)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                AgentWaitingForPtEventBuilder::default()
+                    .time(time)
+                    .person(Id::create("280"))
+                    .at_stop(Id::create("1"))
+                    .destination_stop(Id::create("3"))
+                    .build()
+                    .unwrap(),
+            ),
+        ];
+
+        for event in &events {
+            let proto = event_to_proto(event.as_ref());
+            assert_eq!(event.type_(), proto.r#type);
+            let parsed = event_from_proto(time, &proto);
+            // Attributes read from protobuf echo the wire attributes, so compare the
+            // canonical re-encoding instead of the structs.
+            assert_eq!(proto, event_to_proto(parsed.as_ref()));
         }
     }
 

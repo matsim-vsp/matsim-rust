@@ -55,10 +55,13 @@ impl Identifiable<InternalPerson> for PlanBasedSimulationLogic {
 impl EnvironmentalEventObserver for PlanBasedSimulationLogic {
     fn notify_event(&mut self, event: &mut AgentEvent, _now: SimTime) {
         match event {
-            AgentEvent::TeleportationStarted { .. } => {
+            AgentEvent::TeleportationStarted { .. } | AgentEvent::LeftTransitVehicle() => {
                 self.set_curr_route_element_to_last();
             }
-            AgentEvent::LeftLink { .. } => {
+            // A transit passenger rides along without following the vehicle's links.
+            AgentEvent::LeftLink { .. }
+                if !matches!(self.curr_leg().route, Some(InternalRoute::Pt(_))) =>
+            {
                 self.curr_route_element += 1;
             }
             _ => {}

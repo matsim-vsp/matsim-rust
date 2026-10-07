@@ -10,6 +10,7 @@ use crate::simulation::config::Config;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::signals::{SignalFiles, Signals};
 use crate::simulation::network::sim_network::SimNetworkPartition;
+use crate::simulation::pt::runs::TransitVehicleRuns;
 use crate::simulation::{id, io};
 use network::Network;
 use population::Population;
@@ -260,6 +261,8 @@ pub struct ScenarioCore {
     pub network: Arc<Network>,
     pub garage: Arc<Garage>,
     pub transit_schedule: Arc<TransitSchedule>,
+    /// Vehicle runs driven through the network. Empty unless `transit.simulate_vehicles` is set.
+    pub transit_runs: Arc<TransitVehicleRuns>,
     pub config: Arc<Config>,
     /// Signal plan resolved once at load and shared by every partition. Each partition
     /// filters this down to the links it owns.
@@ -296,11 +299,26 @@ pub struct MobsimInput {
 
 impl From<Scenario> for ControllerScenario {
     fn from(scenario: Scenario) -> Self {
+        let transit_runs = if scenario.config.transit().simulate_vehicles {
+            // The mobsim threads look these up, so they must exist before the threads start.
+            for mode in &scenario.config.transit().transit_modes {
+                id::Id::<String>::create(mode);
+            }
+            TransitVehicleRuns::build(
+                &scenario.transit_schedule,
+                &scenario.garage,
+                &scenario.network,
+            )
+            .unwrap_or_else(|error| panic!("Cannot simulate transit vehicles: {error}"))
+        } else {
+            TransitVehicleRuns::default()
+        };
         Self {
             core: ScenarioCore {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
                 transit_schedule: Arc::new(scenario.transit_schedule),
+                transit_runs: Arc::new(transit_runs),
                 config: scenario.config,
                 signals: Arc::new(Signals::default()),
             },
@@ -429,6 +447,7 @@ mod tests {
         let mut config = Config::default();
         config.set_transit(Transit {
             schedule_path: Some("./assets/pt_tutorial/transitschedule.xml".into()),
+            ..Transit::default()
         });
 
         let scenario = Scenario::load(config);

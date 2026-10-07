@@ -1,9 +1,11 @@
 use crate::simulation::events::{
-    ActivityEndEvent, ActivityStartEvent, EventTrait, LinkEnterEvent, PersonArrivalEvent,
-    PersonDepartureEvent, PersonEntersVehicleEvent, PersonStuckEvent, PtTeleportationArrivalEvent,
-    TeleportationArrivalEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
+    ActivityEndEvent, ActivityStartEvent, AgentWaitingForPtEvent, EventTrait, LinkEnterEvent,
+    PersonArrivalEvent, PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
+    PersonStuckEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
+    VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
+use crate::simulation::pt::driver::{RIDE_DISTANCE, RIDE_LINE, RIDE_ROUTE};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPlanElement::{Activity, Leg};
@@ -11,6 +13,7 @@ use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPlan,
     InternalPlanElement, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
 };
+use crate::simulation::scenario::transit::TransitStopFacility;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use std::time::Duration;
@@ -288,6 +291,9 @@ struct PartialRoute {
     distance: Option<f64>,
     vehicle: Option<Id<InternalVehicle>>,
     pt_description: Option<InternalPtRouteDescription>,
+    /// Stops of a ride in a simulated transit vehicle, from the passenger's waiting event.
+    pt_stops: Option<(Id<TransitStopFacility>, Id<TransitStopFacility>)>,
+    boarding_time: Option<SimTime>,
 
     //TODO These values are currently unused
     relative_position_on_departure_link: Option<f64>,
@@ -308,6 +314,8 @@ impl Default for PartialRoute {
             distance: None,
             vehicle: None,
             pt_description: None,
+            pt_stops: None,
+            boarding_time: None,
             relative_position_on_departure_link: None,
             relative_position_on_arrival_link: None,
             route: Vec::default(),
@@ -326,7 +334,44 @@ impl PartialRoute {
         self.end_link = Some(event.link.clone());
     }
 
+    fn handle_waiting_for_pt(&mut self, event: &AgentWaitingForPtEvent) {
+        self.route_type = Some(PartialRouteTypes::Pt);
+        self.pt_stops = Some((event.at_stop.clone(), event.destination_stop.clone()));
+    }
+
+    /// Completes a ride in a simulated transit vehicle. MATSim's `EventsToLegs` builds the same
+    /// route from the vehicle's events; the stop logic hands the line, route and distance over
+    /// on the leave event because the passenger's partition may never see the vehicle start.
+    fn handle_person_leaves_vehicle(&mut self, event: &PersonLeavesVehicleEvent) {
+        if self.route_type != Some(PartialRouteTypes::Pt) {
+            return;
+        }
+        let (Some(line), Some(route), Some(distance)) = (
+            event.attributes.get::<String>(RIDE_LINE),
+            event.attributes.get::<String>(RIDE_ROUTE),
+            event.attributes.get::<f64>(RIDE_DISTANCE),
+        ) else {
+            return;
+        };
+        let (access, egress) = self
+            .pt_stops
+            .as_ref()
+            .expect("A transit passenger waits at a stop before riding.");
+        self.distance = Some(distance);
+        self.pt_description = Some(InternalPtRouteDescription {
+            transit_route_id: route,
+            boarding_time: self.boarding_time,
+            transit_line_id: line,
+            access_facility_id: access.external().to_owned(),
+            egress_facility_id: egress.external().to_owned(),
+        });
+    }
+
     fn handle_person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
+        if self.route_type == Some(PartialRouteTypes::Pt) {
+            self.boarding_time.get_or_insert(event.time);
+            return;
+        }
         if self.route_type == Some(PartialRouteTypes::Generic) {
             panic!("Caught a link enter event on an Generic Route Type!")
         }
@@ -344,7 +389,10 @@ impl PartialRoute {
     }
 
     fn handle_link_enter_event(&mut self, event: &LinkEnterEvent) {
-        self.route.push(event.link.clone());
+        // A transit passenger is told about the vehicle's links but did not choose them.
+        if self.route_type != Some(PartialRouteTypes::Pt) {
+            self.route.push(event.link.clone());
+        }
     }
 
     fn handle_teleportation_arrival(&mut self, event: &TeleportationArrivalEvent) {
@@ -388,6 +436,10 @@ impl PartialRoute {
             self.handle_teleportation_arrival(e);
         } else if let Some(e) = event.as_any().downcast_ref::<PtTeleportationArrivalEvent>() {
             self.handle_pt_teleportation_arrival(e);
+        } else if let Some(e) = event.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
+            self.handle_waiting_for_pt(e);
+        } else if let Some(e) = event.as_any().downcast_ref::<PersonLeavesVehicleEvent>() {
+            self.handle_person_leaves_vehicle(e);
         }
     }
 

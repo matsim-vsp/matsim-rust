@@ -4,6 +4,7 @@ use crate::simulation::events::{
 use crate::simulation::framework_events::{MobsimEvent, MobsimEventsManager, QSimId};
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
+use crate::simulation::pt::runs::TransitVehicleRuns;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scoring::backpacking::backpack::PersonExperience;
 use crate::simulation::scoring::backpacking::backpacking_data_collector::{
@@ -12,6 +13,7 @@ use crate::simulation::scoring::backpacking::backpacking_data_collector::{
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 pub(crate) struct BackpackingWorkerResult {
@@ -25,9 +27,15 @@ pub struct BackpackingEngine {
 }
 
 impl BackpackingEngine {
-    pub fn new(home_person_ids: Vec<Id<InternalPerson>>) -> Self {
+    pub fn new(
+        home_person_ids: Vec<Id<InternalPerson>>,
+        transit_runs: Arc<TransitVehicleRuns>,
+    ) -> Self {
         Self {
-            backpacking_data_collector: BackpackingDataCollector::new(home_person_ids),
+            backpacking_data_collector: BackpackingDataCollector::new(
+                home_person_ids,
+                transit_runs,
+            ),
         }
     }
 

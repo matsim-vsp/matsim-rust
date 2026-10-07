@@ -1,0 +1,55 @@
+modules:
+  scoring:
+    type: Scoring
+    activity_params:
+      - activity_type: h
+        typical_duration_s: 43200.0
+      - activity_type: w
+        typical_duration_s: 28800.0
+      - activity_type: s
+        typical_duration_s: 2400.0
+    mode_params:
+      - mode: walk
+        marginal_utility_of_traveling: -6.0
+        marginal_utility_of_distance: 0.0
+        monetary_distance_cost_rate: 0.0
+        daily_money_constant: 0.0
+        daily_utility_constant: 0.0
+        constant: 0.0
+      - mode: pt
+        marginal_utility_of_traveling: -6.0
+        marginal_utility_of_distance: 0.0
+        monetary_distance_cost_rate: 0.0
+        daily_money_constant: 0.0
+        daily_utility_constant: 0.0
+        constant: 0.0
+  network:
+    type: Network
+    path: ./assets/pt_tutorial/multimodalnetwork.xml
+  population:
+    type: Population
+    path: ./assets/pt_tutorial/plans_1.xml.gz
+  vehicles:
+    type: Vehicles
+    path: ./tests/resources/pt_simulated/vehicles.xml
+  transit:
+    type: Transit
+    schedule_path: ./assets/pt_tutorial/transitschedule.xml
+    simulate_vehicles: true
+  partitioning:
+    type: Partitioning
+    num_parts: 2
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/pt_simulated_two_parts
+    write_events: XmlGz
+  routing:
+    type: Routing
+    mode: UsePlans
+  simulation:
+    type: Simulation
+    last_iteration: 0

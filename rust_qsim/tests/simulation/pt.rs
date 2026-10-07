@@ -29,6 +29,86 @@ fn pt_tutorial_matches_expected_events() {
     .unwrap();
 }
 
+/// A passenger left waiting at the end of the day never boarded, so the simulation has to write
+/// the stuck event MATSim writes for one. Ending the run before the first vehicle departs is the
+/// cheapest way to make that happen.
+#[deterministic_id_test(rust_qsim)]
+fn passengers_still_waiting_when_the_run_ends_are_stuck() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/one_part.yml",
+    ));
+    // The tutorial's first passengers reach a stop around 07:46 and board around 07:50; end
+    // the day in between so someone is left waiting.
+    config.qsim_mut().end_time = 28_000;
+    config.output_mut().output_dir = "./test_output/simulation/pt_simulated_stranded".into();
+    let output_dir = config.output().output_dir.clone();
+
+    ControllerBuilder::default_with_scenario(Scenario::load(config))
+        .build()
+        .unwrap()
+        .run();
+
+    let bytes: Vec<u8> = std::fs::read(output_dir.join("events/events.0.binpb")).unwrap();
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
+    assert!(
+        has(b"waitingForPt"),
+        "no passenger ever waited for a vehicle"
+    );
+    assert!(
+        has(b"stuckAndAbort"),
+        "the waiting passengers were not stuck"
+    );
+}
+
+/// The tutorial's own vehicles file declares no vehicles, so it cannot run the transit engine.
+/// This uses the same network, plans and schedule with a vehicles file that declares the two
+/// transit vehicles the schedule drives, and checks that partitioning does not change the result.
+#[deterministic_id_test(rust_qsim)]
+fn simulated_transit_vehicles_reach_the_same_state_in_one_and_two_partitions() {
+    let run = |config_path: &str| {
+        let config = Config::from_args(CommandLineArgs::new_with_path(config_path));
+        let output_dir = config.output().output_dir.clone();
+        ControllerBuilder::default_with_scenario(Scenario::load(config))
+            .build()
+            .unwrap()
+            .run();
+        output_dir
+    };
+    let one_part = run("./tests/resources/pt_simulated/one_part.yml");
+    let two_parts = run("./tests/resources/pt_simulated/two_parts.yml");
+
+    compare_event_folder(one_part.join("events"), two_parts.join("events")).unwrap();
+
+    // The comparison above would also pass if transit had been teleported, so check that the
+    // vehicles really ran. Event type names are stored as plain strings in the protobuf files.
+    for (dir, expected_files) in [(&one_part, 1), (&two_parts, 2)] {
+        let files: Vec<_> = std::fs::read_dir(dir.join("events"))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "binpb"))
+            .collect();
+        assert_eq!(files.len(), expected_files, "{dir:?}");
+        let bytes: Vec<u8> = files
+            .iter()
+            .flat_map(|path| std::fs::read(path).unwrap())
+            .collect();
+        for event_type in [
+            b"TransitDriverStarts".as_slice(),
+            b"VehicleArrivesAtFacility",
+            b"VehicleDepartsAtFacility",
+            b"waitingForPt",
+        ] {
+            assert!(
+                bytes
+                    .windows(event_type.len())
+                    .any(|window| window == event_type),
+                "{dir:?} recorded no {event_type:?}: transit was not simulated"
+            );
+        }
+    }
+}
+
 #[deterministic_id_test(rust_qsim)]
 fn pt_tutorial_transit_analysis_reports_teleported_service() {
     let mut config = Config::from_args(CommandLineArgs::new_with_path(

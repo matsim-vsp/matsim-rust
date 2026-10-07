@@ -850,6 +850,7 @@ mod tests {
             transit_schedule: Arc::new(
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
+            transit_runs: Default::default(),
             config: config.clone(),
             signals: Arc::new(Signals::default()),
         };
@@ -897,6 +898,7 @@ mod tests {
             transit_schedule: Arc::new(
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
+            transit_runs: Default::default(),
             config: Arc::new(config),
             signals: Arc::new(Signals::default()),
         };

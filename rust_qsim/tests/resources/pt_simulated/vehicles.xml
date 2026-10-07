@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The pt_tutorial vehicles file declares vehicle types but no vehicles, so transit vehicles
+     cannot be simulated with it. This file adds the two the tutorial schedule drives, so a run can
+     turn `transit.simulate_vehicles` on without touching the tutorial's own assets. -->
+<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+    <vehicleType id="walk">
+        <description>This is a pair of shoes</description>
+        <length meter="0.5"/>
+        <width meter="1.0"/>
+        <maximumVelocity meterPerSecond="0.85"/>
+        <passengerCarEquivalents pce="0.1"/>
+        <networkMode networkMode="walk"/>
+        <flowEfficiencyFactor factor="10.0"/>
+    </vehicleType>
+
+    <vehicleType id="pt">
+        <description>Transit vehicle driven by a simulated transit driver</description>
+        <capacity>
+            <seats persons="50"/>
+            <standingRoom persons="30"/>
+        </capacity>
+        <length meter="15.0"/>
+        <width meter="2.5"/>
+        <maximumVelocity meterPerSecond="25.0"/>
+        <passengerCarEquivalents pce="5.0"/>
+        <networkMode networkMode="car"/>
+    </vehicleType>
+
+    <vehicle id="tr_1" type="pt"/>
+    <vehicle id="tr_2" type="pt"/>
+</vehicleDefinitions>

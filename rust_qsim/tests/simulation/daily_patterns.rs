@@ -142,6 +142,7 @@ fn day_plan(home: &str, work: &str) -> InternalPlan {
     InternalPlan {
         score: None,
         selected: true,
+        attributes: Default::default(),
         elements: vec![
             activity("home", home),
             leg("car", home, work),
@@ -433,6 +434,7 @@ fn a_stage_activity_never_counts_towards_a_reached_destination() {
         InternalPlan {
             score: None,
             selected: true,
+            attributes: Default::default(),
             elements: vec![
                 activity("home", "home-link"),
                 leg("walk", "home-link", "walk-link"),

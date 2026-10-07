@@ -51,6 +51,15 @@ For mobsim, the controller splits the population into `MobsimInput`s. Each input
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive
 these inputs per iteration and return agents, which the controller materializes back into the next full population.
 
+Transit vehicles are simulated when `transit.simulate_vehicles` is set, and teleported otherwise. Turning a `Scenario` into
+a `ControllerScenario` then expands the schedule into per-departure vehicle runs once, before the Mobsim threads start, and
+every partition shares them. A link belongs to the partition of its to-node, so a partition's transit engine owns exactly
+the runs whose start link it owns and drives those drivers through the network engine: transit vehicles occupy links and
+compete for capacity like every other vehicle. A
+passenger waits on the partition that owns its access stop's link, which is the same partition as every vehicle serving that
+stop, so the waiting lists never cross partitions. A passenger that rides past a partition boundary travels inside the
+vehicle's backpack, and the partition where it alights resumes the agent.
+
 Each worker owns a thread-local travel-time collector shared between its event buses without a cross-thread lock.
 The collector associates vehicles with the network mode of their current leg and records link observations separately
 per mode. After a worker's Mobsim run (including agent draining), it emits `BeforeCleanup` before sending its normal

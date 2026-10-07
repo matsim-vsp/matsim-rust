@@ -43,6 +43,10 @@ pub struct TransitRouteStop {
     pub await_departure: Option<bool>,
     pub allow_boarding: bool,
     pub allow_alighting: bool,
+    /// A legacy `minimumStopDuration` attribute. MATSim's `TransitRouteStopImpl` has no such
+    /// field and its reader ignores the attribute, so the transit engine must not honour it
+    /// either: a stop's dwell is decided by its doors and its `awaitDeparture`, and nothing else.
+    /// Kept so that a schedule that declares it still round-trips.
     pub minimum_stop_duration: Duration,
 }
 
@@ -122,6 +126,11 @@ impl TransitSchedule {
 
     pub fn lines(&self) -> &IntMap<Id<TransitLine>, TransitLine> {
         &self.lines
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lines_mut(&mut self) -> &mut IntMap<Id<TransitLine>, TransitLine> {
+        &mut self.lines
     }
 
     pub fn facilities(&self) -> &IntMap<Id<TransitStopFacility>, TransitStopFacility> {

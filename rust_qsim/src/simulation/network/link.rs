@@ -9,12 +9,16 @@ use crate::simulation::id::Id;
 use crate::simulation::network::flow_cap::Flowcap;
 use crate::simulation::network::storage_cap::{StorageCap, StorageCapacityDefinition};
 use crate::simulation::network::stuck_timer::StuckTimer;
+use crate::simulation::pt::driver::{StopOutcome, serve_stop};
+use crate::simulation::pt::stops::TransitStops;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::network::Node;
 use crate::simulation::time::{SimClock, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
+use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::time::Duration;
 
 pub enum LinkPosition {
     QStart,
@@ -187,12 +191,23 @@ impl SimLink {
     }
 }
 
+fn dwell_until(clock: SimClock, now: Tick, seconds: f64) -> Tick {
+    clock.time_to_tick(
+        clock
+            .tick_to_time(now)
+            .saturating_add(Duration::from_secs_f64(seconds)),
+    )
+}
+
 #[derive(Debug)]
 pub struct LocalLink {
     pub id: Id<Link>,
     q: VecDeque<VehicleQEntry>,
     buffer: VecDeque<SimulationVehicle>,
     waiting_list: VecDeque<SimulationVehicle>,
+    /// Transit vehicles dwelling at a stop beside the lane, ordered by when they want to leave.
+    /// MATSim's `TransitQLink.transitVehicleStopQueue`.
+    stop_bay: Vec<VehicleQEntry>,
     length: f64,
     free_speed: f64,
     storage_cap: StorageCap,
@@ -207,6 +222,9 @@ pub struct LocalLink {
 struct VehicleQEntry {
     vehicle: SimulationVehicle,
     earliest_exit_time: Tick,
+    /// Whether the vehicle consumed storage when it entered the queue. A transit vehicle that
+    /// departs into a stop bay from the waiting list never did, so it must not release any.
+    occupies_storage: bool,
 }
 
 impl LocalLink {
@@ -281,6 +299,7 @@ impl LocalLink {
             q: VecDeque::new(),
             buffer: VecDeque::new(),
             waiting_list: VecDeque::new(),
+            stop_bay: Vec::new(),
             length,
             free_speed,
             storage_cap,
@@ -320,6 +339,7 @@ impl LocalLink {
         self.q.push_back(VehicleQEntry {
             vehicle,
             earliest_exit_time,
+            occupies_storage: true,
         });
     }
 
@@ -335,17 +355,21 @@ impl LocalLink {
     /// Both is done only if the flow capacity allows this.
     ///
     /// Returns the vehicles that end their leg on the link
-    pub fn do_sim_step(
+    pub(crate) fn do_sim_step(
         &mut self,
         now: impl Into<Tick>,
         comp_env: &mut ThreadLocalComputationalEnvironment,
+        transit: &mut TransitStops,
     ) -> Vec<SimulationVehicle> {
         let now = now.into();
         let now_time = self.clock.tick_to_time(now);
         let buffer_was_empty = self.buffer.is_empty();
         self.update_flow_cap(now);
-        let mut ending_vehicles = self.add_waiting_to_buffer(comp_env, now);
-        ending_vehicles.append(&mut self.add_queue_to_buffer(now));
+        // MATSim's default order: waiting vehicles first, then transit vehicles leaving their
+        // stop bay, then the queue.
+        let mut ending_vehicles = self.add_waiting_to_buffer(comp_env, transit, now);
+        self.release_stop_bay(now);
+        ending_vehicles.append(&mut self.add_queue_to_buffer(comp_env, transit, now));
         if buffer_was_empty && !self.buffer.is_empty() {
             self.restart_stuck_timer(now);
         }
@@ -366,11 +390,16 @@ impl LocalLink {
         ending_vehicles
     }
 
-    fn add_queue_to_buffer(&mut self, now: Tick) -> Vec<SimulationVehicle> {
+    fn add_queue_to_buffer(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        transit: &mut TransitStops,
+        now: Tick,
+    ) -> Vec<SimulationVehicle> {
         let mut released_vehicles = vec![];
 
         loop {
-            let option = self.q.front();
+            let option = self.q.front_mut();
 
             // If queue is empty, break the loop.
             if option.is_none() {
@@ -379,28 +408,58 @@ impl LocalLink {
 
             let veh = option.unwrap();
 
-            let arrive = veh.vehicle.driver().is_wanting_to_arrive_on_current_link();
-            let capacity_left = self.has_flow_capacity_left(&veh.vehicle);
-            let exit = veh.earliest_exit_time <= now;
-
             // If the earliest exit time has not passed, nothing to do
-            if !exit {
+            if veh.earliest_exit_time > now {
                 break;
             }
 
+            // A transit vehicle serves a stop at the end of the link before anything else.
+            let outcome = if veh.vehicle.driver().transit_driver().is_some() {
+                serve_stop(
+                    &mut veh.vehicle,
+                    &self.id,
+                    self.clock.tick_to_time(now),
+                    transit,
+                    &mut comp_env.events_manager_borrow_mut(),
+                )
+            } else {
+                StopOutcome::NoStop
+            };
+            match outcome {
+                StopOutcome::NoStop => {}
+                StopOutcome::Departed => continue,
+                StopOutcome::Dwell {
+                    seconds,
+                    blocks_lane,
+                } => {
+                    veh.earliest_exit_time = dwell_until(self.clock, now, seconds);
+                    if blocks_lane {
+                        // The vehicle stays at the head of the queue and holds everyone behind.
+                        break;
+                    }
+                    let entry = self.q.pop_front().unwrap();
+                    self.park_in_stop_bay(entry);
+                    continue;
+                }
+            }
+
+            let veh = self.q.front().unwrap();
+            let arrive = veh.vehicle.driver().is_wanting_to_arrive_on_current_link();
+            let capacity_left = self.has_flow_capacity_left(&veh.vehicle);
+
             // If the vehicle wants to arrive, remove it from the queue
             if arrive {
-                let veh = self.q.pop_front().unwrap().vehicle;
-                self.storage_cap.release(veh.pce());
-                released_vehicles.push(veh);
+                let entry = self.q.pop_front().unwrap();
+                self.release_storage(&entry);
+                released_vehicles.push(entry.vehicle);
                 continue;
             }
 
             // If the vehicle wants to move to another link, put it into buffer
             if capacity_left {
-                let veh = self.q.pop_front().unwrap().vehicle;
-                self.storage_cap.release(veh.pce());
-                self.buffer.push_back(veh);
+                let entry = self.q.pop_front().unwrap();
+                self.release_storage(&entry);
+                self.buffer.push_back(entry.vehicle);
             } else {
                 break;
             }
@@ -409,9 +468,44 @@ impl LocalLink {
         released_vehicles
     }
 
+    fn release_storage(&mut self, entry: &VehicleQEntry) {
+        if entry.occupies_storage {
+            self.storage_cap.release(entry.vehicle.pce());
+        }
+    }
+
+    /// Keeps the bay ordered as MATSim's stop queue: earliest exit first, and on a tie the
+    /// vehicle with the lexicographically larger id first.
+    ///
+    /// A vehicle in the bay keeps the storage it occupied. MATSim frees it on entering the bay
+    /// and frees it again when the vehicle finally leaves the link, which leaks capacity; here a
+    /// vehicle frees storage once, and a split link never has to report storage growing back.
+    fn park_in_stop_bay(&mut self, entry: VehicleQEntry) {
+        let key = |e: &VehicleQEntry| {
+            (
+                e.earliest_exit_time,
+                Reverse(e.vehicle.id().external().to_owned()),
+            )
+        };
+        let position = self.stop_bay.partition_point(|e| key(e) <= key(&entry));
+        self.stop_bay.insert(position, entry);
+    }
+
+    /// Moves transit vehicles whose dwell has ended back to the head of the queue, in bay order.
+    /// MATSim's `handleTransitVehiclesInStopQueue`.
+    fn release_stop_bay(&mut self, now: Tick) {
+        let due = self
+            .stop_bay
+            .partition_point(|e| e.earliest_exit_time <= now);
+        for entry in self.stop_bay.drain(..due).rev() {
+            self.q.push_front(entry);
+        }
+    }
+
     fn add_waiting_to_buffer(
         &mut self,
         comp_env: &mut ThreadLocalComputationalEnvironment,
+        transit: &mut TransitStops,
         now: Tick,
     ) -> Vec<SimulationVehicle> {
         let mut released_vehicles = vec![];
@@ -422,6 +516,25 @@ impl LocalLink {
             // If waiting list is empty, break the loop.
             if option.is_none() {
                 break;
+            }
+
+            // A transit vehicle enters traffic like MATSim's `moveWaitToRoad`: once the link
+            // accepts it, then it serves the stops at the start of its route.
+            if option.unwrap().driver().transit_driver().is_some() {
+                if !self.is_accepting_from_wait(option.unwrap()) {
+                    break;
+                }
+                let vehicle = self.pop_from_waiting(comp_env, now);
+                let Some(vehicle) = self.serve_stops_on_entry(vehicle, comp_env, transit, now)
+                else {
+                    continue;
+                };
+                if vehicle.driver().is_wanting_to_arrive_on_current_link() {
+                    released_vehicles.push(vehicle);
+                } else {
+                    self.buffer.push_back(vehicle);
+                }
+                continue;
             }
 
             // If arrival on link, remove from waiting list and put into buffer
@@ -466,6 +579,39 @@ impl LocalLink {
         vehicle
     }
 
+    /// Serves every stop on this link a departing transit vehicle reaches before it moves. A
+    /// vehicle that has to dwell goes to the stop bay even at a blocking stop, because it is not
+    /// on the lane yet (MATSim's `addTransitToStopQueue`), and `None` is returned.
+    fn serve_stops_on_entry(
+        &mut self,
+        mut vehicle: SimulationVehicle,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        transit: &mut TransitStops,
+        now: Tick,
+    ) -> Option<SimulationVehicle> {
+        loop {
+            match serve_stop(
+                &mut vehicle,
+                &self.id,
+                self.clock.tick_to_time(now),
+                transit,
+                &mut comp_env.events_manager_borrow_mut(),
+            ) {
+                StopOutcome::NoStop => return Some(vehicle),
+                StopOutcome::Departed => {}
+                StopOutcome::Dwell { seconds, .. } => {
+                    let earliest_exit_time = dwell_until(self.clock, now, seconds);
+                    self.park_in_stop_bay(VehicleQEntry {
+                        vehicle,
+                        earliest_exit_time,
+                        occupies_storage: false,
+                    });
+                    return None;
+                }
+            }
+        }
+    }
+
     fn is_accepting_from_wait(&self, veh: &SimulationVehicle) -> bool {
         self.has_flow_capacity_left(veh)
     }
@@ -507,7 +653,7 @@ impl LocalLink {
 
     #[cfg(test)]
     pub(super) fn veh_count(&self) -> usize {
-        self.q.len() + self.waiting_list.len() + self.buffer.len()
+        self.q.len() + self.waiting_list.len() + self.buffer.len() + self.stop_bay.len()
     }
 
     pub fn is_available(&self) -> bool {
@@ -515,17 +661,22 @@ impl LocalLink {
     }
 
     fn drain(&mut self) -> Vec<SimulationVehicle> {
-        let mut vehicles =
-            Vec::with_capacity(self.q.len() + self.buffer.len() + self.waiting_list.len());
+        let mut vehicles = Vec::with_capacity(
+            self.q.len() + self.buffer.len() + self.waiting_list.len() + self.stop_bay.len(),
+        );
         vehicles.extend(self.q.drain(..).map(|entry| entry.vehicle));
         vehicles.extend(self.buffer.drain(..));
         vehicles.extend(self.waiting_list.drain(..));
+        vehicles.extend(self.stop_bay.drain(..).map(|entry| entry.vehicle));
         vehicles
     }
 
-    /// A link is active, if either the queue, waiting_list or buffer is not empty.
+    /// A link is active, if either the queue, waiting_list, buffer or stop bay is not empty.
     pub(super) fn is_active(&self) -> bool {
-        !self.q.is_empty() || !self.waiting_list.is_empty() || !self.buffer.is_empty()
+        !self.q.is_empty()
+            || !self.waiting_list.is_empty()
+            || !self.buffer.is_empty()
+            || !self.stop_bay.is_empty()
     }
 
     pub(super) fn is_veh_stuck(&self, now: impl Into<Tick>) -> bool {
@@ -685,7 +836,7 @@ mod sim_link_tests {
             unreachable!()
         };
 
-        l.do_sim_step(1, &mut Default::default());
+        l.do_sim_step(1, &mut Default::default(), &mut Default::default());
         let _vehicle = link.pop_veh_and_restart_stuck_timer(1).unwrap();
 
         // After popping, storage is 0.
@@ -718,7 +869,7 @@ mod sim_link_tests {
             unreachable!()
         };
 
-        l.do_sim_step(10, &mut Default::default());
+        l.do_sim_step(10, &mut Default::default(), &mut Default::default());
 
         // this should reduce the flow capacity, so that no other vehicle can leave during this time step
         let popped1 = l.pop_veh_and_restart_stuck_timer(10).unwrap();
@@ -726,10 +877,10 @@ mod sim_link_tests {
 
         // as the flow cap is 0.1/s the next vehicle can leave the link 15s after the first
         for now in 11..24 {
-            l.do_sim_step(now, &mut Default::default());
+            l.do_sim_step(now, &mut Default::default(), &mut Default::default());
             assert!(l.offers_veh().is_none());
         }
-        l.do_sim_step(25, &mut Default::default());
+        l.do_sim_step(25, &mut Default::default(), &mut Default::default());
 
         if let Some(popped2) = link.offers_veh() {
             assert_eq!("2", popped2.id().external());
@@ -763,14 +914,14 @@ mod sim_link_tests {
             let SimLink::Local(l) = &mut link else {
                 unreachable!()
             };
-            l.do_sim_step(now, &mut Default::default());
+            l.do_sim_step(now, &mut Default::default(), &mut Default::default());
             assert!(link.offers_veh().is_none());
         }
 
         let SimLink::Local(l) = &mut link else {
             unreachable!()
         };
-        l.do_sim_step(10, &mut Default::default());
+        l.do_sim_step(10, &mut Default::default(), &mut Default::default());
         assert!(link.offers_veh().is_some())
     }
 
@@ -795,11 +946,11 @@ mod sim_link_tests {
         let SimLink::Local(local_link) = &mut link else {
             unreachable!()
         };
-        local_link.do_sim_step(9, &mut Default::default());
+        local_link.do_sim_step(9, &mut Default::default(), &mut Default::default());
         assert!(local_link.offers_veh().is_none());
         assert!(!local_link.is_veh_stuck(100));
 
-        local_link.do_sim_step(10, &mut Default::default());
+        local_link.do_sim_step(10, &mut Default::default(), &mut Default::default());
         assert!(local_link.offers_veh().is_some());
         assert!(!local_link.is_veh_stuck(19));
         assert!(local_link.is_veh_stuck(20));
@@ -829,7 +980,7 @@ mod sim_link_tests {
         let SimLink::Local(local_link) = &mut link else {
             unreachable!()
         };
-        local_link.do_sim_step(1, &mut Default::default());
+        local_link.do_sim_step(1, &mut Default::default(), &mut Default::default());
         assert!(local_link.offers_veh().is_some());
 
         let popped = local_link.pop_veh_and_restart_stuck_timer(5).unwrap();
@@ -871,17 +1022,17 @@ mod sim_link_tests {
         let SimLink::Local(l) = &mut link else {
             unreachable!()
         };
-        l.do_sim_step(15, &mut Default::default());
+        l.do_sim_step(15, &mut Default::default(), &mut Default::default());
 
         // First vehicle pops after 15 s
         let popped_vehicle1 = l.pop_veh_and_restart_stuck_timer(15).unwrap();
         assert_eq!(id1.to_string(), popped_vehicle1.id().external());
 
-        l.do_sim_step(3614, &mut Default::default());
+        l.do_sim_step(3614, &mut Default::default(), &mut Default::default());
         assert!(l.pop_veh_and_restart_stuck_timer(3614).is_none());
 
         // Second vehicle pops after 3615 s
-        l.do_sim_step(3615, &mut Default::default());
+        l.do_sim_step(3615, &mut Default::default(), &mut Default::default());
         let popped_vehicle2 = link.pop_veh_and_restart_stuck_timer(3615).unwrap();
         assert_eq!(id2.to_string(), popped_vehicle2.id().external());
     }

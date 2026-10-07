@@ -527,9 +527,30 @@ pub struct Vehicles {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Transit {
     pub schedule_path: Option<PathBuf>,
+    /// Drive the schedule's vehicles on the network and let passengers board them, instead of
+    /// teleporting PT legs. MATSim's `transit.usingTransitInMobsim`.
+    #[serde(default)]
+    pub simulate_vehicles: bool,
+    /// Leg modes served by simulated transit vehicles. MATSim's `transit.transitModes`.
+    #[serde(default = "default_transit_modes")]
+    pub transit_modes: Vec<String>,
+}
+
+fn default_transit_modes() -> Vec<String> {
+    vec!["pt".to_string()]
+}
+
+impl Default for Transit {
+    fn default() -> Self {
+        Self {
+            schedule_path: None,
+            simulate_vehicles: false,
+            transit_modes: default_transit_modes(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -551,6 +572,19 @@ register_override!("vehicles.path", |config, value| {
 
 register_override!("transit.schedule_path", |config, value| {
     config.transit_mut().schedule_path = Some(PathBuf::from(value));
+});
+
+register_override!("transit.simulate_vehicles", |config, value| {
+    config.transit_mut().simulate_vehicles = value.parse().unwrap();
+});
+
+register_override!("transit.transit_modes", |config, value| {
+    config.transit_mut().transit_modes = value
+        .split(',')
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .map(ToString::to_string)
+        .collect();
 });
 
 register_override!("ids.path", |config, value| {
@@ -2550,6 +2584,32 @@ modules:
         let config = Config::default();
 
         assert_eq!(None, config.transit().schedule_path);
+        assert!(!config.transit().simulate_vehicles);
+        assert_eq!(vec!["pt"], config.transit().transit_modes);
+    }
+
+    #[test]
+    fn transit_vehicle_simulation_reads_from_yaml_and_overrides() {
+        let yaml = r#"
+modules:
+  transit:
+    type: Transit
+    schedule_path: schedule.xml
+"#;
+        let parsed: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
+        assert!(!parsed.transit().simulate_vehicles);
+        assert_eq!(vec!["pt"], parsed.transit().transit_modes);
+
+        let file = write_temp_config(yaml);
+        let config = Config::from_args(CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![
+                ("transit.simulate_vehicles".to_string(), "true".to_string()),
+                ("transit.transit_modes".to_string(), "bus, rail".to_string()),
+            ],
+        });
+        assert!(config.transit().simulate_vehicles);
+        assert_eq!(vec!["bus", "rail"], config.transit().transit_modes);
     }
 
     #[test]
@@ -2707,6 +2767,7 @@ modules:
         });
         config.set_transit(Transit {
             schedule_path: Some("schedule".into()),
+            ..Transit::default()
         });
         config.set_ids(Ids {
             path: Some("ids".into()),

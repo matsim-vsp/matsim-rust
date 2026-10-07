@@ -4,6 +4,7 @@ pub mod agent_logic;
 use crate::simulation::Identifiable;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
+use crate::simulation::pt::driver::TransitDriver;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{InternalActivity, InternalLeg, InternalPerson};
 use crate::simulation::time::SimTime;
@@ -30,6 +31,15 @@ pub trait SimulationAgentLogic:
     fn wakeup_time(&self, now: SimTime) -> SimTime;
 
     fn into_person(self: Box<Self>) -> Option<InternalPerson>;
+
+    /// The transit driver behind this agent, if it drives a scheduled vehicle.
+    fn transit_driver(&self) -> Option<&TransitDriver> {
+        None
+    }
+
+    fn transit_driver_mut(&mut self) -> Option<&mut TransitDriver> {
+        None
+    }
 }
 
 pub trait EnvironmentalEventObserver {
@@ -51,6 +61,10 @@ pub enum AgentEvent<'a> {
     NetworkLegStarted(),
     LeftLink(),
     NetworkLegFinished(),
+
+    // transit-related events
+    /// A passenger got off a transit vehicle at its egress stop.
+    LeftTransitVehicle(),
 }
 
 pub struct ActivityStartedEvent<'a> {

@@ -4,6 +4,7 @@ use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
+use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::PersonStuckEventBuilder;
 use crate::simulation::framework_events::MobsimEvent;
 use crate::simulation::messaging::sim_communication::SimCommunicator;
@@ -188,12 +189,24 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         )
         .build();
 
+        let start_tick = clock.secs_to_tick(scenario.config.qsim().start_time as u64);
+        let transit_engine = scenario.config.transit().simulate_vehicles.then(|| {
+            TransitEngine::new(
+                &scenario,
+                network_partition.partition(),
+                self.comp_env.clone(),
+                clock,
+                clock.tick_to_time(start_tick),
+            )
+        });
+
         let leg_engine = LegEngine::new(
             network_partition,
             scenario.garage.clone(),
             self.net_message_broker,
             scenario.config.qsim(),
             self.comp_env.clone(),
+            transit_engine,
         );
 
         Simulation {

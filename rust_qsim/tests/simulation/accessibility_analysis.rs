@@ -66,6 +66,7 @@ fn metadata(
     AnalysisRunMetadata::from_run(
         4711,
         1.0,
+        0,
         &Garage::default(),
         expected_travel,
         AnalysisInputPaths::default(),

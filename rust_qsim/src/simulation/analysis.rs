@@ -5490,6 +5490,7 @@ mod tests {
         let metadata = AnalysisRunMetadata::from_run(
             0,
             1.0,
+            0,
             &Garage::default(),
             Vec::new(),
             AnalysisInputPaths::default(),

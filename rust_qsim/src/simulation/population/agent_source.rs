@@ -196,6 +196,7 @@ mod tests {
                 transit_schedule: Arc::new(
                     crate::simulation::scenario::transit::TransitSchedule::default(),
                 ),
+                transit_runs: Default::default(),
                 config,
                 signals: Arc::new(Signals::default()),
             },
