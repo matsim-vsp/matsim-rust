@@ -188,8 +188,15 @@ The CI-equivalent build and test path is stricter and uses release mode, the
 `http` feature, warnings as errors, and single-threaded tests:
 
 ```shell
-RUSTFLAGS="-D warnings" cargo build --release
-RUSTFLAGS="-D warnings" cargo test --release --verbose --features http -- --test-threads=1
+RUSTFLAGS="-D warnings" cargo build --release --locked
+RUSTFLAGS="-D warnings" cargo test --release --locked --features http -- --test-threads=1 --skip 'berlin::'
+```
+
+Pull requests run that path only; the Berlin integration tests run separately on
+`main` because they are too slow for pull request feedback:
+
+```shell
+RUSTFLAGS="-D warnings" cargo test --release --locked --test simulation berlin:: -- --test-threads=1
 ```
 
 Run `cargo fmt --all` after changing Rust code. Do not require `cargo clippy` as

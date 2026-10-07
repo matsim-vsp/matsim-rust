@@ -207,6 +207,12 @@ fn module_status(report_dir: &Path) -> String {
     fs::read_to_string(report_dir.join("module_status.json")).unwrap()
 }
 
+fn statuses(status: &str) -> Vec<serde_json::Value> {
+    let parsed: Vec<serde_json::Value> =
+        serde_json::from_str(status).expect("module status is an array");
+    parsed
+}
+
 #[deterministic_id_test(matsim_rust)]
 fn group_burdens_retain_weights_missing_attributes_and_incomplete_persons() {
     let temp = tempfile::tempdir().unwrap();
@@ -325,16 +331,24 @@ fn group_burdens_retain_weights_missing_attributes_and_incomplete_persons() {
         "{status}"
     );
     // The demographic module is complete; every optional module without input is unavailable.
-    assert_eq!(
-        status.matches("\"status\": \"complete\"").count(),
-        7,
-        "{status}"
-    );
-    assert_eq!(
-        status.matches("\"status\": \"unavailable\"").count(),
-        11,
-        "{status}"
-    );
+    // Asserting per module rather than by count keeps this true as modules are added.
+    for (module, expected) in [
+        (MODULE, "complete"),
+        ("link_coverage", "complete"),
+        ("agent_travel", "complete"),
+        ("activity_patterns", "complete"),
+        ("zones", "unavailable"),
+        ("accessibility", "unavailable"),
+        ("service_performance", "unavailable"),
+        ("modeled_emissions", "unavailable"),
+        ("economic_appraisal", "unavailable"),
+    ] {
+        let entry = statuses(&status)
+            .into_iter()
+            .find(|entry| entry["module"] == module)
+            .unwrap_or_else(|| panic!("{module} is not reported: {status}"));
+        assert_eq!(entry["status"], expected, "{module}: {status}");
+    }
 
     // The report presents the tables and states the equity criterion next to them.
     let html = fs::read_to_string(&report).unwrap();

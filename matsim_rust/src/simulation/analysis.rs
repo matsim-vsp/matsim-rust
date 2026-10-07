@@ -136,6 +136,9 @@ const PERSON_DEMOGRAPHIC_PREVIEW_ROWS: usize = 200;
 const EXPRESSWAY: &str = "expressway";
 /// Leg rows embedded in the local report before it defers to the full `legs.csv`.
 const LEGS_PREVIEW_ROWS: usize = 200;
+/// Rows embedded for each per-person or per-cell table. The report says so when a table is
+/// longer, so a reader can tell a short page from a whole one.
+const PATTERN_PREVIEW_ROWS: usize = 500;
 /// Dimensions every accessibility row is grouped by, as the catalog declares them.
 const ACCESSIBILITY_AGGREGATION_KEY: &str =
     "origin_zone,category,mode,departure_period_start_seconds,threshold_seconds";
@@ -1566,7 +1569,7 @@ fn publish_complete(
         manifest,
         &statuses,
         &link_hourly,
-        Some(&settings.zone_system),
+        &settings.zone_system,
     )?;
     // The report is rendered before its own runtime is timed, so that measurement is
     // patched in afterwards; a failed patch falls back to the tables written first.
@@ -1580,7 +1583,7 @@ fn publish_complete(
             manifest,
             &statuses,
             &link_hourly,
-            Some(&settings.zone_system),
+            &settings.zone_system,
         )?;
     }
     let published = publication::publish(
