@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[deterministic_id_test]
-fn nearest_link_breaks_ties_by_smallest_external_id() {
+    fn nearest_link_breaks_ties_by_smallest_external_id() {
         // Both links are 5 units away. The link created second has the smaller external id.
         let mut network = Network::new();
         add_node(&mut network, "a0", 0.0, 0.0);
