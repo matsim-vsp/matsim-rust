@@ -8,6 +8,7 @@ use crate::simulation::agents::{
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
+use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
     InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalRoute,
@@ -15,6 +16,7 @@ use crate::simulation::scenario::population::{
 use crate::simulation::scenario::trip_structure_utils::{
     find_trip_span_starting_at_activity_default, identify_main_mode,
 };
+use crate::simulation::scenario::{Coordinate, ScenarioCore};
 use crate::simulation::time::SimTime;
 use std::fmt::{Debug, Formatter};
 use std::time::Duration;
@@ -404,12 +406,16 @@ impl AdaptivePlanBasedSimulationLogic {
                 )
             });
 
+        let scenario_core = comp_env.scenario_core();
+        let (from_link, from) = routing_location(scenario_core, origin, &mode);
+        let (to_link, to) = routing_location(scenario_core, destination, &mode);
+
         let payload = InternalRoutingRequestPayloadBuilder::default()
             .person_id(self.delegate.id().external().to_string())
-            .from_link(origin.link_id().external().to_string())
-            .from(origin.coord().clone())
-            .to_link(destination.link_id().external().to_string())
-            .to(destination.coord().clone())
+            .from_link(from_link)
+            .from(from)
+            .to_link(to_link)
+            .to(to)
             .mode(mode.clone())
             .departure_time(departure_time)
             .now(now)
@@ -479,17 +485,133 @@ impl AdaptivePlanBasedSimulationLogic {
     }
 }
 
+/// Returns the link and coordinate under which `activity` is sent to the routing service for a trip
+/// with routing `mode`.
+///
+/// Activities at a facility are connected to the network via the facility's modal link for `mode`,
+/// exactly as in the in-process routing (see [`Facility::modal_link`], which falls back to the base
+/// link). Activities without a facility use their own link.
+fn routing_location(
+    scenario_core: &ScenarioCore,
+    activity: &InternalActivity,
+    mode: &str,
+) -> (String, Coordinate) {
+    let Some(facility_id) = &activity.facility_id else {
+        return (
+            activity.link_id().external().to_string(),
+            activity.coord().clone(),
+        );
+    };
+
+    let facility = scenario_core
+        .facilities
+        .get(facility_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "Activity of type {} references unknown facility {}. Facilities are checked in prepare_for_sim.",
+                activity.act_type.external(),
+                facility_id.external()
+            )
+        });
+    let facility = Facility::ActivityFacility(facility);
+    (
+        facility
+            .modal_link(&Id::get_from_ext(mode))
+            .external()
+            .to_string(),
+        facility.coord().clone(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::external_services::routing::InternalRoutingResponse;
+    use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::population::{
         InternalActivity, InternalLeg, InternalPlan, InternalRoute,
     };
     use macros::deterministic_id_test;
+    use nohash_hasher::IntMap;
+    use std::sync::Arc;
     use uuid::Uuid;
+
+    /// A core with the facility "f1" at (1, 2) whose base link is "base" and whose modal links are
+    /// given as `(mode, link)` pairs.
+    fn scenario_core_with_facility(modal_links: &[(&str, &str)]) -> ScenarioCore {
+        let mode_to_link: IntMap<_, _> = modal_links
+            .iter()
+            .map(|(mode, link)| (Id::create(mode), Id::create(link)))
+            .collect();
+        let mut facilities = ActivityFacilities::default();
+        facilities.add_facility(ActivityFacility {
+            id: Id::create("f1"),
+            coord: Coordinate::new_2d(1.0, 2.0),
+            base_link: Some(Id::create("base")),
+            mode_to_link,
+            desc: None,
+            activities: Vec::new(),
+            attributes: InternalAttributes::default(),
+        });
+        ScenarioCore {
+            facilities: Arc::new(facilities),
+            ..Default::default()
+        }
+    }
+
+    fn make_facility_activity(facility: &str, link: &str) -> InternalActivity {
+        InternalActivity {
+            facility_id: Some(Id::create(facility)),
+            ..make_activity("work", link)
+        }
+    }
+
+    #[deterministic_id_test]
+    fn routing_location_uses_modal_link_of_facility() {
+        let core = scenario_core_with_facility(&[("car", "car-link")]);
+        // After prepare_for_sim, the link of an activity at a facility is the facility's base link.
+        let activity = make_facility_activity("f1", "base");
+
+        let (link, coord) = routing_location(&core, &activity, "car");
+
+        assert_eq!("car-link", link);
+        assert_eq!(Coordinate::new_2d(1.0, 2.0), coord);
+    }
+
+    #[deterministic_id_test]
+    fn routing_location_falls_back_to_base_link_without_modal_link() {
+        let core = scenario_core_with_facility(&[("car", "car-link")]);
+        Id::<String>::create("bike");
+        let activity = make_facility_activity("f1", "base");
+
+        let (link, coord) = routing_location(&core, &activity, "bike");
+
+        assert_eq!("base", link);
+        assert_eq!(Coordinate::new_2d(1.0, 2.0), coord);
+    }
+
+    #[deterministic_id_test]
+    fn routing_location_uses_activity_link_without_facility() {
+        let core = scenario_core_with_facility(&[("car", "car-link")]);
+        let activity = make_activity("home", "l1");
+
+        let (link, coord) = routing_location(&core, &activity, "car");
+
+        assert_eq!("l1", link);
+        assert_eq!(Coordinate::default(), coord);
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "references unknown facility missing")]
+    fn routing_location_panics_for_unknown_facility() {
+        let core = scenario_core_with_facility(&[("car", "car-link")]);
+        let activity = make_facility_activity("missing", "base");
+
+        routing_location(&core, &activity, "car");
+    }
 
     fn make_activity(act_type: &str, link: &str) -> InternalActivity {
         InternalActivity {
