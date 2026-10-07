@@ -15,7 +15,7 @@ use crate::simulation::messaging::sim_communication::local_communicator::Channel
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::population::agent_source::DynAgentSource;
 use crate::simulation::replanning::routing::TripRouter;
-use crate::simulation::replanning::{StrategyManager, replan_population};
+use crate::simulation::replanning::{ReplanningStrategy, StrategyManager, replan_population};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::{MobsimInput, ScenarioCore};
 use crate::simulation::scoring::{
@@ -537,7 +537,11 @@ pub(crate) struct ScoringPool {
 }
 
 impl ReplanningPool {
-    pub(crate) fn new(scenario_core: &ScenarioCore, trip_router: TripRouter) -> Self {
+    pub(crate) fn new(
+        scenario_core: &ScenarioCore,
+        trip_router: TripRouter,
+        custom_strategies: Vec<Box<dyn ReplanningStrategy>>,
+    ) -> Self {
         let config = scenario_core.config.as_ref();
         let threads = config.computational_setup().replanning_threads;
         let pool = if threads == 0 {
@@ -557,6 +561,7 @@ impl ReplanningPool {
                 config.replanning(),
                 trip_router.clone(),
                 scenario_core,
+                custom_strategies,
             ),
             trip_router,
             first_iteration: config.controller().first_iteration,
@@ -900,7 +905,7 @@ mod tests {
             config: Arc::new(config),
             signals: Arc::new(Signals::default()),
         };
-        let pool = ReplanningPool::new(&scenario_core, TripRouter::default());
+        let pool = ReplanningPool::new(&scenario_core, TripRouter::default(), Vec::new());
 
         let population = Population::from_persons(vec![
             person("replanning-pool-person-1"),

@@ -1480,6 +1480,7 @@ mod tests {
                 distance_provenance: "unavailable".to_owned(),
             }],
             legs,
+            planned_activities: 0,
         }
     }
 
@@ -1533,6 +1534,7 @@ mod tests {
             0,
             // Half of the population is simulated, so counts are expanded by two.
             0.5,
+            0,
             &garage,
             expected,
             AnalysisInputPaths::default(),
