@@ -33,7 +33,9 @@ jobs:
         with:
           components: rustfmt
       - name: Install other libraries
-        run: sudo apt -y install libclang-dev llvm-dev libmetis-dev
+        # build-essential and cmake are needed because the protobuf-src dependency
+        # compiles protoc from source.
+        run: sudo apt -y install build-essential cmake libclang-dev llvm-dev libmetis-dev
       - name: Cache cargo and build artifacts
         uses: Swatinem/rust-cache@v2
       - name: Check formatting

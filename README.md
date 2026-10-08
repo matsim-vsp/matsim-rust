@@ -86,10 +86,13 @@ Install the dependencies below before building. Rustup uses the version pinned i
 
 #### Linux - apt
 
-Install dev versions of required packages because dev stuff is required during compilation
+Install dev versions of required packages because dev stuff is required during compilation.
+`build-essential` and `cmake` are needed because the `protobuf-src` dependency compiles
+the `protoc` compiler from source. Setting `PROTOC` to an existing `protoc` skips that
+build step and the two packages.
 
 ```shell
-sudo apt -y install libclang-dev llvm-dev libmetis-dev
+sudo apt -y install build-essential cmake libclang-dev llvm-dev libmetis-dev
 ```
 
 #### macOS
