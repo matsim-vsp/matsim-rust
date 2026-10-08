@@ -1,6 +1,7 @@
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::a_star_core::{
-    AStarCoreResult, AStarRequestBuilder, HeuristicMode, RoutingAStarActions, a_star_core,
+    AStarCoreResult, AStarRequestBuilder, HeuristicMode, RoutingAStarActions, SearchBuffers,
+    a_star_core,
 };
 use crate::simulation::replanning::routing::alt_landmark_data::AltLandmarkData;
 use crate::simulation::replanning::routing::cost::{Disutility, TravelDisutility, TravelTime};
@@ -13,8 +14,17 @@ use crate::simulation::replanning::routing::network_converter::{
 };
 use crate::simulation::scenario::network::{Link, Network, Node};
 use nohash_hasher::IntMap;
+use std::cell::RefCell;
 use std::sync::Arc;
 use tracing::{error, warn};
+
+thread_local! {
+    /// Search buffers of all A* routers on this thread. Replanning runs on long-lived rayon
+    /// threads, so the buffers outlive requests and iterations instead of being allocated in the
+    /// size of the network per request. Routers of different modes share them, which is fine since
+    /// `SearchBuffers::prepare` resets them and grows them as needed at the start of each search.
+    static SEARCH_BUFFERS: RefCell<SearchBuffers> = RefCell::new(SearchBuffers::default());
+}
 
 /// A heuristic to be used in A*. Given a from and to-node, estimates the disutility between them.
 /// Is not allowed to overestimate disutilities. It is expected of implementations to respect this.
@@ -184,7 +194,7 @@ impl<H: AStarHeuristic> AStar<H> {
             })
     }
 
-    /// Given a to-link and a vector of parent links, extracts the path of links to the to-link.
+    /// Given a to-link and the parent links of a search, extracts the path of links to the to-link.
     /// Uses the above extract_node_path to get the path of nodes, and then looks up the
     /// corresponding links in the graph.
     /// Calls the below `verify_path` to check correctness of the found path. Because of this, a
@@ -193,7 +203,7 @@ impl<H: AStarHeuristic> AStar<H> {
         &self,
         to_link: Id<Link>,
         from_link: Id<Link>,
-        parent_links: Vec<Option<LinkIndex>>,
+        parent_links: &[Option<LinkIndex>],
     ) -> Result<Option<Vec<Id<Link>>>, GraphError> {
         // convert given "to" link id to node id, by looking for the start node of the link
         let to_node_id = self.graph.get_start_node(to_link.clone())?;
@@ -244,6 +254,23 @@ impl<H: AStarHeuristic> AStar<H> {
 
 impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
     fn calc_least_cost_path(&self, request: LeastCostPathRequest) -> Option<LeastCostPath> {
+        SEARCH_BUFFERS.with(|cell| match cell.try_borrow_mut() {
+            Ok(mut buffers) => self.calc_with_buffers(request, &mut buffers),
+            // The buffers are borrowed by an outer search on this thread, e.g. if a cost function
+            // uses rayon and work stealing runs another routing task here. Fall back to fresh
+            // buffers, which costs O(N) for this search instead of panicking.
+            Err(_) => self.calc_with_buffers(request, &mut SearchBuffers::default()),
+        })
+    }
+}
+
+impl<H: AStarHeuristic> AStar<H> {
+    /// Calculates the least cost path for the given request, using the given search buffers.
+    fn calc_with_buffers(
+        &self,
+        request: LeastCostPathRequest,
+        buffers: &mut SearchBuffers,
+    ) -> Option<LeastCostPath> {
         // convert given "to" link id to node id, by looking for the start node of the link
         let to_node_id = match self.graph.get_start_node(request.to.clone()).ok() {
             Some(node_id) => node_id, // the link was found as expected
@@ -259,6 +286,9 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
 
         // convert to-node id to node index
         let to_node_idx = self.graph.get_node_idx_from_id(to_node_id);
+
+        // reset the entries written by the previous search on this thread
+        buffers.prepare(self.graph.num_nodes());
 
         // create request for a_star_core
         let a_star_request = match AStarRequestBuilder::default()
@@ -277,7 +307,7 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
                         to_node_idx,
                         self.travel_time.as_ref(),
                         self.travel_disutility.as_ref(),
-                        self.graph.num_nodes(),
+                        &mut buffers.routing,
                     ))
                     .build()
                     .unwrap()
@@ -294,11 +324,11 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
         };
 
         // call a_star_core with the request, and extract the distance to the goal and the
-        // parent links vector from the result
-        let (optimal_disutility, associated_travel_time, parent_links) =
-            match a_star_core(a_star_request) {
+        // associated travel time from the result. The parent links are in the routing buffers.
+        let (optimal_disutility, associated_travel_time) =
+            match a_star_core(a_star_request, &mut buffers.core) {
                 // Standard case: A* returned a valid result.
-                Ok(AStarCoreResult::SingleDisutilWithParents(distance, time, parent_links)) => {
+                Ok(AStarCoreResult::SingleDisutil(distance, time)) => {
                     // if the returned distance to the target is infinity or NaN, it is unreachable, so
                     // we return None
                     if distance == f64::INFINITY || distance.is_nan() {
@@ -309,7 +339,7 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
                         return None;
                     }
                     // else, we take the found shortest "distance" as the optimal disutility
-                    (distance, time, parent_links)
+                    (distance, time)
                 }
                 // Unsuccesful case: Some error occurred in A*, e.g., a given link or node was not
                 // found, so we cannot calculate a path. Return None
@@ -319,13 +349,14 @@ impl<H: AStarHeuristic> LeastCostPathCalculator for AStar<H> {
                 }
                 // Unrecoverable error: A* returned the wrong result type. This should not happen,
                 // since we use the A* use case RoutingAStarActions, which always builds results
-                // of type SingleDistWithParents.
+                // of type SingleDisutil.
                 _ => panic!(
                     "A* with RoutingAStarActions should return \
-                SingleDistWithParents result"
+                SingleDisutil result"
                 ),
             };
 
+        let parent_links = &buffers.routing.parent_links;
         let link_path = match self.extract_link_path(request.to, request.from, parent_links) {
             Ok(Some(link_path)) => link_path, // all good, path was found
             Ok(None) => {
@@ -371,18 +402,20 @@ mod tests {
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::a_star::{
-        AStar, AStarHeuristic, Alt, AltHeuristic, Dijkstra, ZeroHeuristic,
+        AStar, AStarHeuristic, Alt, AltHeuristic, Dijkstra, SEARCH_BUFFERS, ZeroHeuristic,
     };
+    use crate::simulation::replanning::routing::a_star_core::SearchBuffers;
     use crate::simulation::replanning::routing::graph::tests::{
         get_triangle_test_network, net_to_graph,
     };
     use crate::simulation::replanning::routing::least_cost_path_calculator::{
-        LeastCostPath, LeastCostPathRequestBuilder,
+        LeastCostPath, LeastCostPathRequest, LeastCostPathRequestBuilder,
     };
 
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::vehicles::{Garage, InternalVehicle, InternalVehicleType};
     use crate::simulation::time::SimTime;
+    use assert_approx_eq::assert_approx_eq;
     use rayon::prelude::*;
     use std::time::Duration;
 
@@ -926,6 +959,138 @@ mod tests {
                 heuristic_estimate <= test_pair_true_disutilities_freespeed[i],
                 "Heuristic estimate should always be lower or equal to the true distance"
             );
+        }
+    }
+
+    fn load_network(path: &str) -> Arc<Network> {
+        Arc::new(Network::from_file(
+            path,
+            1,
+            &PartitionMethod::Metis(MetisOptions::default()),
+        ))
+    }
+
+    fn lcp_request(from: &str, to: &str) -> LeastCostPathRequest<'static> {
+        LeastCostPathRequestBuilder::default()
+            .from(Id::get_from_ext(from))
+            .to(Id::get_from_ext(to))
+            .build()
+            .unwrap()
+    }
+
+    /// Test that a search does not depend on the state that previous searches left in the
+    /// thread-local search buffers: an unreachable request, a reachable one, start = end and a
+    /// request of a second router on a larger network (sharing the buffers on this thread) all
+    /// yield the same result as a search with fresh buffers.
+    #[deterministic_id_test]
+    fn test_no_state_from_previous_searches() {
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let small = Alt::new(
+            load_network("./assets/adhoc_routing/no_updates/network.xml"),
+            None,
+            travel_cost.clone(),
+            travel_cost.clone(),
+        )
+        .unwrap();
+        let large = Alt::new(
+            load_network("./assets/equil/equil-network.xml"),
+            None,
+            travel_cost.clone(),
+            travel_cost,
+        )
+        .unwrap();
+
+        let unreachable = lcp_request("link6", "link0");
+        let reachable = lcp_request("link0", "link4");
+        // link0 ends and link1 starts at node1
+        let start_equals_end = lcp_request("link0", "link1");
+        let large_request = lcp_request("23", "22");
+
+        // (router, request, expected number of links in the path or None if unreachable)
+        for (router, request, expected_path_len) in [
+            (&small, &unreachable, None),
+            (&small, &reachable, Some(2)),
+            (&large, &large_request, Some(5)),
+            (&small, &start_equals_end, Some(0)),
+            (&small, &reachable, Some(2)),
+        ] {
+            let fresh = router.calc_with_buffers(request.clone(), &mut SearchBuffers::default());
+            assert_eq!(fresh.as_ref().map(|p| p.path.len()), expected_path_len);
+            assert_eq!(router.calc_least_cost_path(request.clone()), fresh);
+        }
+    }
+
+    /// Test that a search nested in another search on the same thread falls back to fresh
+    /// buffers instead of panicking, while the outer search holds the thread-local buffers.
+    #[deterministic_id_test]
+    fn test_nested_search_falls_back_to_fresh_buffers() {
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        let router = Alt::new(
+            Arc::new(get_triangle_test_network()),
+            None,
+            travel_cost.clone(),
+            travel_cost,
+        )
+        .unwrap();
+        let request = lcp_request("1", "2");
+        let expected = router.calc_least_cost_path(request.clone());
+        assert!(expected.is_some());
+
+        // hold the thread-local buffers, as an outer search does
+        let nested = SEARCH_BUFFERS.with_borrow_mut(|_| router.calc_least_cost_path(request));
+        assert_eq!(nested, expected);
+    }
+
+    /// Test that ALT and Dijkstra find paths with the same travel disutility and travel time for
+    /// all pairs of links of real networks (equil contains many equally expensive alternatives).
+    /// Covers the lazy queue together with the reuse of the search buffers over many searches.
+    #[deterministic_id_test]
+    fn test_alt_equals_dijkstra_for_all_link_pairs() {
+        let travel_cost = Arc::new(FreeOrMaxSpeedTravelTimeAndDisutility);
+        for path in [
+            "./assets/equil/equil-network.xml",
+            "./assets/adhoc_routing/no_updates/network.xml",
+        ] {
+            let network = load_network(path);
+            let dijkstra = Dijkstra::new(
+                network.clone(),
+                None,
+                travel_cost.clone(),
+                travel_cost.clone(),
+            )
+            .unwrap();
+            let alt = Alt::new(
+                network.clone(),
+                None,
+                travel_cost.clone(),
+                travel_cost.clone(),
+            )
+            .unwrap();
+
+            let mut link_ids: Vec<Id<Link>> =
+                network.links().iter().map(|l| l.id.clone()).collect();
+            link_ids.sort();
+
+            for from in &link_ids {
+                for to in &link_ids {
+                    let request = LeastCostPathRequestBuilder::default()
+                        .from(from.clone())
+                        .to(to.clone())
+                        .build()
+                        .unwrap();
+                    match (
+                        dijkstra.calc_least_cost_path(request.clone()),
+                        alt.calc_least_cost_path(request),
+                    ) {
+                        (None, None) => {}
+                        (Some(d), Some(a)) => {
+                            assert_approx_eq!(d.travel_disutility, a.travel_disutility, 1e-6);
+                            assert_eq!(d.travel_time, a.travel_time);
+                        }
+                        (d, a) => panic!("from {from} to {to}: Dijkstra {d:?}, ALT {a:?}"),
+                    }
+                }
+            }
         }
     }
 }
