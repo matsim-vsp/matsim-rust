@@ -301,12 +301,13 @@ impl ControllerBuilder {
             routers.insert(
                 mode,
                 Arc::new(
-                    TransitRoutingModule::new(
+                    TransitRoutingModule::new_with_transfer_construction(
                         controller_scenario.core.transit_schedule.clone(),
                         walk.teleported_mode_speed,
                         walk.beeline_distance_factor,
                         controller_scenario.core.garage.clone(),
                         car_fallback,
+                        config.transit().transfer_construction,
                     )
                     .with_personless_fallback(config.transit().personless_car_fallback),
                 ),

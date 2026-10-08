@@ -561,6 +561,21 @@ pub struct Transit {
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
     #[serde(default)]
     pub personless_car_fallback: bool,
+    /// When walking transfer candidates are built for transit routing.
+    #[serde(default)]
+    pub transfer_construction: TransferConstruction,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferConstruction {
+    /// Build all candidate stop transfers when the router is created.
+    #[default]
+    Initial,
+    /// Build and cache candidates the first time each stop is queried.
+    Adaptive,
+    /// Rebuild candidates on every query without retaining them.
+    Online,
 }
 
 fn default_transit_modes() -> Vec<String> {
@@ -574,6 +589,7 @@ impl Default for Transit {
             simulate_vehicles: false,
             transit_modes: default_transit_modes(),
             personless_car_fallback: false,
+            transfer_construction: TransferConstruction::default(),
         }
     }
 }
@@ -2039,6 +2055,7 @@ mod tests {
     use crate::simulation::config::OverwriteFiles;
     use crate::simulation::config::PathBuf;
     use crate::simulation::config::Profiling;
+    use crate::simulation::config::TransferConstruction;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
@@ -2289,6 +2306,24 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn transit_transfer_construction_is_configurable_and_validated() {
+        for (value, expected) in [
+            ("initial", TransferConstruction::Initial),
+            ("adaptive", TransferConstruction::Adaptive),
+            ("online", TransferConstruction::Online),
+        ] {
+            let yaml = format!(
+                "modules:\n  transit:\n    type: Transit\n    transfer_construction: {value}\n"
+            );
+            let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(parsed.transit().transfer_construction, expected);
+        }
+        let invalid =
+            "modules:\n  transit:\n    type: Transit\n    transfer_construction: unknown\n";
+        assert!(serde_yaml::from_str::<Config>(invalid).is_err());
     }
 
     #[test]
