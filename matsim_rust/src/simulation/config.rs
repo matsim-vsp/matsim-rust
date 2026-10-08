@@ -556,6 +556,11 @@ pub struct Transit {
     /// Leg modes served by simulated transit vehicles. MATSim's `transit.transitModes`.
     #[serde(default = "default_transit_modes")]
     pub transit_modes: Vec<String>,
+    /// Let `pt` requests that carry no person fall back to the car router. This is the legacy
+    /// behaviour SILO's zone-to-zone queries rely on; passengers never need it, since a
+    /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
+    #[serde(default)]
+    pub personless_car_fallback: bool,
 }
 
 fn default_transit_modes() -> Vec<String> {
@@ -568,6 +573,7 @@ impl Default for Transit {
             schedule_path: None,
             simulate_vehicles: false,
             transit_modes: default_transit_modes(),
+            personless_car_fallback: false,
         }
     }
 }
@@ -628,6 +634,10 @@ register_override!("transit.transit_modes", |config, value| {
         .filter(|mode| !mode.is_empty())
         .map(ToString::to_string)
         .collect();
+});
+
+register_override!("transit.personless_car_fallback", |config, value| {
+    config.transit_mut().personless_car_fallback = value.parse().unwrap();
 });
 
 register_override!("facilities.path", |config, value| {
@@ -2660,6 +2670,30 @@ modules:
         assert_eq!(None, config.transit().schedule_path);
         assert!(!config.transit().simulate_vehicles);
         assert_eq!(vec!["pt"], config.transit().transit_modes);
+        assert!(!config.transit().personless_car_fallback);
+    }
+
+    /// The legacy fallback for queries without a person is off unless a config asks for it, and
+    /// it can be asked for without touching passenger behaviour.
+    #[test]
+    fn personless_car_fallback_is_opt_in() {
+        let file = write_temp_config(
+            r#"
+modules:
+  transit:
+    type: Transit
+    schedule_path: schedule.xml
+"#,
+        );
+        let config = Config::from_args(CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![(
+                "transit.personless_car_fallback".to_string(),
+                "true".to_string(),
+            )],
+        });
+
+        assert!(config.transit().personless_car_fallback);
     }
 
     #[test]

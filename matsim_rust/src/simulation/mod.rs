@@ -73,6 +73,26 @@ impl InternalAttributes {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
+    /// Reads a boolean attribute, telling a missing value apart from a malformed one.
+    ///
+    /// [`Self::get`] cannot: it answers `None` for both, so a policy that must not read a
+    /// broken value as "no" has no way to notice it. A string counts as a boolean when
+    /// `str::parse::<bool>` accepts it, which is the same rule [`From<IOAttributes>`] applies
+    /// to `class="java.lang.Boolean"`; accepting it therefore keeps XML and protobuf inputs
+    /// agreeing on one logical value. A malformed `java.lang.Boolean` never gets this far:
+    /// the XML conversion already rejects it.
+    pub fn get_bool(&self, key: &str) -> Result<Option<bool>, String> {
+        match self.attributes.get(key) {
+            None => Ok(None),
+            Some(Value::Bool(value)) => Ok(Some(*value)),
+            Some(Value::String(value)) => value
+                .parse::<bool>()
+                .map(Some)
+                .map_err(|_| format!("`{value}` is not a boolean")),
+            Some(value) => Err(format!("{value} is not a boolean")),
+        }
+    }
+
     pub fn iter(&self) -> std::collections::hash_map::Iter<'_, String, Value> {
         self.attributes.iter()
     }
@@ -156,5 +176,74 @@ impl From<&HashMap<String, AttributeValue>> for InternalAttributes {
             };
         }
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AttributeValue, InternalAttributes};
+    use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
+    use std::collections::HashMap;
+
+    /// XML and protobuf serialize the same attribute value differently, so the boolean reader
+    /// has to agree on both: one as a typed boolean, one as the text MATSim writes.
+    #[test]
+    fn a_boolean_attribute_reads_the_same_from_xml_and_protobuf() {
+        let from_xml = |value: &str, class: &str| {
+            InternalAttributes::from(IOAttributes {
+                attributes: vec![IOAttribute::new_with_class(
+                    "ownsCar".to_string(),
+                    class.to_string(),
+                    value.to_string(),
+                )],
+            })
+        };
+        let from_protobuf = |value: AttributeValue| {
+            let attributes = HashMap::from([("ownsCar".to_string(), value)]);
+            InternalAttributes::from(&attributes)
+        };
+
+        for (xml, protobuf) in [
+            (
+                from_xml("true", "java.lang.Boolean"),
+                from_protobuf(AttributeValue::new_bool(true)),
+            ),
+            (
+                from_xml("false", "java.lang.Boolean"),
+                from_protobuf(AttributeValue::new_bool(false)),
+            ),
+            // A value declared as text in one format and as a boolean in the other is still the
+            // same value, so the gate must not depend on how the input spelled it.
+            (
+                from_xml("true", "java.lang.String"),
+                from_protobuf(AttributeValue::new_string("true".to_string())),
+            ),
+        ] {
+            assert_eq!(xml.get_bool("ownsCar"), protobuf.get_bool("ownsCar"));
+        }
+    }
+
+    /// Missing is not malformed: an absent attribute denies a policy but is not an input error.
+    #[test]
+    fn a_missing_boolean_is_absent_rather_than_malformed() {
+        let attributes = InternalAttributes::default();
+        assert_eq!(attributes.get_bool("ownsCar"), Ok(None));
+    }
+
+    #[test]
+    fn a_malformed_boolean_is_reported() {
+        for attributes in [
+            {
+                let mut attributes = InternalAttributes::default();
+                attributes.insert("ownsCar", "yes");
+                attributes
+            },
+            InternalAttributes::from(HashMap::from([(
+                "ownsCar".to_string(),
+                AttributeValue::new_int(1),
+            )])),
+        ] {
+            assert!(attributes.get_bool("ownsCar").is_err(), "{attributes:?}");
+        }
     }
 }

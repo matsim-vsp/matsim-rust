@@ -250,6 +250,14 @@ pub enum RoutingError {
     MissingEndTime { mode: String },
     #[error("Routing for mode {mode} is not implemented")]
     Unsupported { mode: String },
+    /// An attribute a routing policy depends on could not be parsed. Reported instead of
+    /// guessed: reading it as "no" would silently invent trips the agent may not make.
+    #[error("Attribute {key} of person {person} is malformed: {reason}")]
+    MalformedAttribute {
+        person: String,
+        key: String,
+        reason: String,
+    },
 }
 
 /// Facility is a location that has modal access to the network.
@@ -423,6 +431,11 @@ pub trait RoutingModule: Send + Sync {
     fn mode(&self) -> &Id<String>;
 }
 
+/// MATSim's boolean person attribute that states the agent owns a car and may drive one. The
+/// population loaders generate a `{person}_car` vehicle for every person as well, but that is
+/// an execution resource, not a declaration of ownership.
+const OWNS_CAR: &str = "ownsCar";
+
 pub struct TransitRoutingModule {
     mode: Id<String>,
     schedule: Arc<TransitSchedule>,
@@ -437,6 +450,10 @@ pub struct TransitRoutingModule {
     /// from the last stop, as MATSim's transit router does. Simulated transit vehicles need
     /// this; teleported PT gets a single door-to-door leg.
     stop_to_stop_legs: bool,
+    /// Let a request that carries no person fall back to the car router. That is the legacy
+    /// behaviour SILO's zone-to-zone queries rely on; it is an application policy, not a
+    /// passenger one, so it stays off unless a config asks for it. See `with_personless_fallback`.
+    personless_fallback: bool,
 }
 
 #[derive(Clone)]
@@ -574,24 +591,27 @@ impl RoutingModule for TransitRoutingModule {
         let Some(path) = best else {
             // An origin/destination pair that no transit line connects is not an error: SILO
             // expects a car trip instead of teleporting the agent across the city on foot.
-            // Callers that do not carry a person (skims, travel-time matrices) still get an
-            // answer, because the car router works without one.
-            if let Some(fallback) = &self.fallback {
-                let vehicle = request.person.and_then(|person| {
-                    let vehicle_id =
-                        Id::try_get_from_ext(format!("{}_car", person.id().external()).as_str());
-                    vehicle_id.and_then(|vehicle_id| self.garage.vehicles.get(&vehicle_id))
-                });
-                let car_request = RoutingRequestBuilder::default()
-                    .from(request.from)
-                    .to(request.to)
-                    .departure_time(request.departure_time)
-                    .person(request.person)
-                    .vehicle(vehicle)
-                    .attributes(request.attributes.clone())
-                    .build()
-                    .expect("required fallback routing request fields are set");
-                return fallback.calc_route(car_request);
+            // But a car trip is only a legitimate answer for an agent that declares owning one
+            // and has a car to drive. Everyone else gets the no-path outcome, which the caller
+            // turns into a walking trip.
+            if let Some(fallback) = &self.fallback
+                && self.permits_car_fallback(&request)?
+            {
+                let person = request.person();
+                let vehicle = self.car_vehicle(person);
+                // A personless query is never simulated, so it needs no vehicle.
+                if vehicle.is_some() || person.is_none() {
+                    let car_request = RoutingRequestBuilder::default()
+                        .from(request.from)
+                        .to(request.to)
+                        .departure_time(request.departure_time)
+                        .person(person)
+                        .vehicle(vehicle)
+                        .attributes(request.attributes.clone())
+                        .build()
+                        .expect("required fallback routing request fields are set");
+                    return fallback.calc_route(car_request);
+                }
             }
             return Err(RoutingError::NoPath {
                 from: request.from.link().external().to_string(),
@@ -654,6 +674,41 @@ impl TransitRoutingModule {
             Id::<String>::create(Self::INTERACTION);
         }
         self
+    }
+
+    /// Lets requests without a person fall back to the car router, the legacy behaviour SILO
+    /// relies on. Kept separate from car ownership because a zone-to-zone query is not a
+    /// passenger: nobody is asked whether they own a car.
+    pub(crate) fn with_personless_fallback(mut self, enabled: bool) -> Self {
+        self.personless_fallback = enabled;
+        self
+    }
+
+    /// Whether a request that transit cannot connect may be answered with a car trip.
+    ///
+    /// Only the person's own `ownsCar` attribute decides. A malformed value is an error rather
+    /// than a denial, so a bad input cannot pass for a deliberate one.
+    fn permits_car_fallback(&self, request: &RoutingRequest) -> Result<bool, RoutingError> {
+        let Some(person) = request.person() else {
+            return Ok(self.personless_fallback);
+        };
+        let owns_car = person.attributes().get_bool(OWNS_CAR).map_err(|reason| {
+            RoutingError::MalformedAttribute {
+                person: person.id().external().to_string(),
+                key: OWNS_CAR.to_string(),
+                reason,
+            }
+        })?;
+        Ok(owns_car.unwrap_or(false))
+    }
+
+    /// The vehicle a fallback car trip drives. Ownership alone is not enough: the leg engine
+    /// looks up `{person}_car` when the route carries no vehicle, and a trip without one would
+    /// only fail later, during simulation.
+    fn car_vehicle(&self, person: Option<&InternalPerson>) -> Option<&InternalVehicle> {
+        let person = person?;
+        let vehicle_id = Id::try_get_from_ext(format!("{}_car", person.id().external()).as_str())?;
+        self.garage.vehicles.get(&vehicle_id)
     }
 
     /// The trip MATSim's transit router returns: walk to the first stop, one `pt` leg per ride
@@ -795,6 +850,7 @@ impl TransitRoutingModule {
             garage,
             fallback,
             stop_to_stop_legs: false,
+            personless_fallback: false,
         }
     }
 
@@ -1270,18 +1326,25 @@ mod tests {
 #[cfg(test)]
 mod route_proposal_tests {
     use super::{
-        RouteFrequencyProposalBackend, RouteProposal, RouteProposalKey, RouteProposalSeed,
-        RouteProposalTable, RoutingError, RoutingModule, RoutingRequest, RoutingRequestBuilder,
-        TransitRoutingModule,
+        Facility, OWNS_CAR, RouteFrequencyProposalBackend, RouteProposal, RouteProposalKey,
+        RouteProposalSeed, RouteProposalTable, RoutingError, RoutingModule, RoutingRequest,
+        RoutingRequestBuilder, TransitRoutingModule, TripRouter,
     };
+    use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
+    use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::population::{
-        InternalGenericRoute, InternalLeg, InternalPlanElement, InternalRoute,
+        InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement,
+        InternalRoute,
     };
     use crate::simulation::scenario::transit::TransitSchedule;
+    use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
+    use nohash_hasher::IntMap;
+    use serde_json::{Value, json};
+    use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -1379,6 +1442,8 @@ mod route_proposal_tests {
     struct FallbackSpy {
         mode: Id<String>,
         calls: Arc<AtomicUsize>,
+        /// What a real car router answers for a pair its network does not connect.
+        error: Option<RoutingError>,
     }
 
     impl RoutingModule for FallbackSpy {
@@ -1387,6 +1452,9 @@ mod route_proposal_tests {
             request: RoutingRequest,
         ) -> Result<Vec<InternalPlanElement>, RoutingError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(error) = &self.error {
+                return Err(error.clone());
+            }
             let route = InternalGenericRoute::new(
                 request.from.link().clone(),
                 request.to.link().clone(),
@@ -1408,55 +1476,261 @@ mod route_proposal_tests {
         }
     }
 
-    /// SILO asks for travel times between zones without a person, so the pt module has to
-    /// fall back to a car trip there too. Bangkok's earlier Java runs got the same behaviour
-    /// from BangkokPtFallbackModule, which was installed as a controler-wide override.
-    #[deterministic_id_test]
-    fn pt_without_a_person_falls_back_to_the_car_router() {
-        use super::Facility;
-        use crate::simulation::scenario::Coordinate;
-        use crate::simulation::scenario::network::Link;
-        use crate::simulation::scenario::vehicles::Garage;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+    fn spy(calls: &Arc<AtomicUsize>) -> Arc<dyn RoutingModule> {
+        Arc::new(FallbackSpy {
+            mode: Id::create("car"),
+            calls: calls.clone(),
+            error: None,
+        })
+    }
 
-        // An empty schedule leaves the pt module with no transit path to find.
+    /// A person with `ownsCar` set to the given value, or without it, next to the garage the
+    /// population loaders build: a `{person}_car` vehicle exists whether or not the person owns
+    /// a car, because it is only there to be driven.
+    fn person_with_owns_car(id: &str, owns_car: Option<Value>) -> (InternalPerson, Garage) {
+        let mut person = InternalPerson::new(
+            Id::create(id),
+            InternalPlan {
+                score: None,
+                selected: true,
+                elements: Vec::new(),
+                attributes: InternalAttributes::default(),
+            },
+        );
+        if let Some(owns_car) = owns_car {
+            person.attributes_mut().insert(OWNS_CAR, owns_car);
+        }
+        let mut garage = Garage::default();
+        garage.add_veh(InternalVehicle {
+            id: Id::create(&format!("{id}_car")),
+            max_v: 10.0,
+            pce: 1.0,
+            vehicle_type: Id::create("car"),
+            attributes: InternalAttributes::default(),
+        });
+        (person, garage)
+    }
+
+    /// A transit router whose schedule connects nothing, so every request has to fall back.
+    fn pt_without_transit(garage: Garage, calls: &Arc<AtomicUsize>) -> TransitRoutingModule {
+        TransitRoutingModule::new(
+            Arc::new(TransitSchedule::default()),
+            1.0,
+            1.0,
+            Arc::new(garage),
+            Some(spy(calls)),
+        )
+    }
+
+    fn trip_endpoints() -> (Facility<'static>, Facility<'static>) {
+        (
+            Facility::new_link_wrapper(Coordinate::new_2d(0.0, 0.0), Id::<Link>::create("1")),
+            Facility::new_link_wrapper(Coordinate::new_2d(10.0, 10.0), Id::<Link>::create("5")),
+        )
+    }
+
+    fn request<'r>(
+        from: &'r Facility<'r>,
+        to: &'r Facility<'r>,
+        person: Option<&'r InternalPerson>,
+    ) -> RoutingRequest<'r> {
+        RoutingRequestBuilder::default()
+            .from(from)
+            .to(to)
+            .departure_time(SimTime::from_duration(Duration::ZERO))
+            .person(person)
+            .build()
+            .expect("all required routing request fields are set")
+    }
+
+    /// The no-path outcome is what an agent without a permitted fallback receives.
+    fn assert_no_path(result: Result<Vec<InternalPlanElement>, RoutingError>) {
+        assert!(
+            matches!(result, Err(RoutingError::NoPath { .. })),
+            "{result:?}"
+        );
+    }
+
+    /// A car trip may replace a missing transit connection, but only for a person who declares
+    /// owning a car.
+    #[deterministic_id_test]
+    fn a_car_owner_falls_back_to_the_car_router() {
         let calls = Arc::new(AtomicUsize::new(0));
+        let (person, garage) = person_with_owns_car("1", Some(json!(true)));
+        let module = pt_without_transit(garage, &calls);
+        let (from, to) = trip_endpoints();
+
+        let elements = module
+            .calc_route(request(&from, &to, Some(&person)))
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(elements.iter().any(|element| element.as_leg().is_some()));
+    }
+
+    /// The generated `{person}_car` vehicle is an execution resource, not a declaration, so
+    /// neither a missing nor a false `ownsCar` permits the fallback.
+    #[deterministic_id_test]
+    fn ownership_that_is_missing_or_false_denies_the_car_fallback() {
+        for owns_car in [None, Some(json!(false))] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let (person, garage) = person_with_owns_car("1", owns_car);
+            let module = pt_without_transit(garage, &calls);
+            let (from, to) = trip_endpoints();
+
+            assert_no_path(module.calc_route(request(&from, &to, Some(&person))));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    /// A malformed value is a bad input, not a denial, so it is reported instead of read as
+    /// "does not own a car".
+    #[deterministic_id_test]
+    fn malformed_ownership_is_reported() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (person, garage) = person_with_owns_car("1", Some(json!("yes")));
+        let module = pt_without_transit(garage, &calls);
+        let (from, to) = trip_endpoints();
+
+        assert!(matches!(
+            module.calc_route(request(&from, &to, Some(&person))),
+            Err(RoutingError::MalformedAttribute { person, key, .. })
+                if person == "1" && key == OWNS_CAR
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Ownership still needs a car to drive. Without one the leg engine would look for
+    /// `{person}_car` and find nothing, so the agent gets the no-path outcome now.
+    #[deterministic_id_test]
+    fn ownership_without_a_usable_car_reports_no_path() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (person, _garage) = person_with_owns_car("1", Some(json!(true)));
+        let module = pt_without_transit(Garage::default(), &calls);
+        let (from, to) = trip_endpoints();
+
+        assert_no_path(module.calc_route(request(&from, &to, Some(&person))));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// A permitted fallback that cannot route is still a failure: the caller must not receive
+    /// an invented trip.
+    #[deterministic_id_test]
+    fn a_failing_car_route_is_propagated() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (person, garage) = person_with_owns_car("1", Some(json!(true)));
         let module = TransitRoutingModule::new(
             Arc::new(TransitSchedule::default()),
             1.0,
             1.0,
-            Arc::new(Garage::default()),
+            Arc::new(garage),
             Some(Arc::new(FallbackSpy {
                 mode: Id::create("car"),
                 calls: calls.clone(),
+                error: Some(RoutingError::NoPath {
+                    mode: "car".to_string(),
+                    from: "1".to_string(),
+                    to: "5".to_string(),
+                }),
             })),
         );
-        let from =
-            Facility::new_link_wrapper(Coordinate::new_2d(0.0, 0.0), Id::<Link>::create("1"));
-        let to =
-            Facility::new_link_wrapper(Coordinate::new_2d(10.0, 10.0), Id::<Link>::create("5"));
+        let (from, to) = trip_endpoints();
+
+        assert!(matches!(
+            module.calc_route(request(&from, &to, Some(&person))),
+            Err(RoutingError::NoPath { mode, .. }) if mode == "car"
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A zone-to-zone query carries no person, so nobody claims to own a car and it gets the
+    /// no-path outcome instead of a silent car trip.
+    #[deterministic_id_test]
+    fn pt_without_a_person_does_not_use_the_car_router() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let module = pt_without_transit(Garage::default(), &calls);
+        let (from, to) = trip_endpoints();
+
+        assert_no_path(module.calc_route(request(&from, &to, None)));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// The legacy behaviour SILO's zone-to-zone queries rely on stays available, but only when
+    /// a config asks for it. Bangkok's earlier Java runs got the same behaviour from
+    /// BangkokPtFallbackModule, which was installed as a controler-wide override.
+    #[deterministic_id_test]
+    fn pt_without_a_person_uses_the_car_router_only_when_configured() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let module = pt_without_transit(Garage::default(), &calls).with_personless_fallback(true);
+        let (from, to) = trip_endpoints();
+
+        let elements = module.calc_route(request(&from, &to, None)).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(elements.iter().any(|element| element.as_leg().is_some()));
+    }
+
+    /// The gate only applies where transit finds no connection: a passenger who owns a car
+    /// keeps the train where one exists.
+    #[deterministic_id_test]
+    fn a_transit_connection_keeps_a_car_owner_on_transit() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (person, garage) = person_with_owns_car("1", Some(json!(true)));
+        let module = TransitRoutingModule::new(
+            Arc::new(TransitSchedule::from_file(Path::new(
+                "./assets/pt_tutorial/transitschedule.xml",
+            ))),
+            1.0,
+            1.0,
+            Arc::new(garage),
+            Some(spy(&calls)),
+        );
+        // Stops 1 and 3 of the tutorial's Blue Line, which departs from 06:00.
+        let from = Facility::new_link_wrapper(
+            Coordinate::new_2d(1050.0, 1050.0),
+            Id::<Link>::create("11"),
+        );
+        let to = Facility::new_link_wrapper(
+            Coordinate::new_2d(3950.0, 1050.0),
+            Id::<Link>::create("33"),
+        );
         let request = RoutingRequestBuilder::default()
             .from(&from)
             .to(&to)
-            .departure_time(SimTime::from_duration(Duration::ZERO))
+            .departure_time(SimTime::from_secs(5 * 3600))
+            .person(Some(&person))
             .build()
             .unwrap();
 
-        // No person on the request: the answer has to come from the car fallback.
         let elements = module.calc_route(request).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            elements.as_slice(),
+            [InternalPlanElement::Leg(leg)] if matches!(leg.route, Some(InternalRoute::Pt(_)))
+        ));
+    }
+
+    /// The route service SILO queries asks `TripRouter` for one passenger's trip, so the gate
+    /// has to hold there too, and a request without a person has to stay unanswered.
+    #[deterministic_id_test]
+    fn trip_router_gates_the_car_fallback_by_ownership() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (person, garage) = person_with_owns_car("1", Some(json!(true)));
+        let pt: Arc<dyn RoutingModule> = Arc::new(pt_without_transit(garage, &calls));
+        let router = TripRouter::new(IntMap::from_iter([(Id::create("pt"), pt)]));
+        let (from, to) = trip_endpoints();
+
+        let elements = router
+            .calc_route(&Id::create("pt"), request(&from, &to, Some(&person)))
+            .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(elements.iter().any(|element| element.as_leg().is_some()));
+        assert_no_path(router.calc_route(&Id::create("pt"), request(&from, &to, None)));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     /// Without a fallback router there is nothing to answer with, so the caller gets the
     /// no-path error rather than a silently wrong travel time.
     #[deterministic_id_test]
     fn pt_without_transit_or_fallback_reports_no_path() {
-        use super::Facility;
-        use crate::simulation::scenario::Coordinate;
-        use crate::simulation::scenario::network::Link;
-        use crate::simulation::scenario::vehicles::Garage;
-
         let module = TransitRoutingModule::new(
             Arc::new(TransitSchedule::default()),
             1.0,
@@ -1464,20 +1738,8 @@ mod route_proposal_tests {
             Arc::new(Garage::default()),
             None,
         );
-        let from =
-            Facility::new_link_wrapper(Coordinate::new_2d(0.0, 0.0), Id::<Link>::create("1"));
-        let to =
-            Facility::new_link_wrapper(Coordinate::new_2d(10.0, 10.0), Id::<Link>::create("5"));
-        let request = RoutingRequestBuilder::default()
-            .from(&from)
-            .to(&to)
-            .departure_time(SimTime::from_duration(Duration::ZERO))
-            .build()
-            .unwrap();
+        let (from, to) = trip_endpoints();
 
-        assert!(matches!(
-            module.calc_route(request),
-            Err(RoutingError::NoPath { .. })
-        ));
+        assert_no_path(module.calc_route(request(&from, &to, None)));
     }
 }
