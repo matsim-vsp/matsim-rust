@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Differential harness against the pinned MATSim Java reference.
+
+  The MATSim dependency is not resolved from a public repository: `run_reference.sh` builds the
+  pinned commit (tag 2026.0) into the local Maven repository first. See docs/pt_java_reference.md.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.matsimrust</groupId>
+    <artifactId>matsim-java-reference</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>25</maven.compiler.release>
+        <!-- Pinned by run_reference.sh: tag 2026.0 of https://github.com/matsim-org/matsim -->
+        <matsim.version>2026.0</matsim.version>
+        <!-- The version org.matsim:matsim:2026.0 itself depends on. -->
+        <jackson.version>2.21.2</jackson.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.matsim</groupId>
+            <artifactId>matsim</artifactId>
+            <version>${matsim.version}</version>
+        </dependency>
+        <!-- Compile-scope dependency of org.matsim:matsim; declared here so the harness does not
+             rely on a transitive dependency staying compile-scope. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+    </dependencies>
+</project>

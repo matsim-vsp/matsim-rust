@@ -1,0 +1,61 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<!--
+  Routing-probe reference fixture. Same schedule as transit_schedule.xml, an empty population and no
+  routing during the run: the itinerary comes from the recorded request in requests.json, issued
+  through the same TripRouter entry point the Rust probe uses.
+
+  The Rust side runs config.yml from the same directory. Both configs pin the walk parameters the
+  reference and the Rust transit router use for access and egress, because the outcome of the
+  competing candidates depends on them.
+-->
+<config>
+
+	<module name="global">
+		<param name="randomSeed" value="4711" />
+		<param name="coordinateSystem" value="Atlantis" />
+	</module>
+
+	<module name="network">
+		<param name="inputNetworkFile" value="../../../../assets/pt_tutorial/multimodalnetwork.xml" />
+	</module>
+
+	<module name="vehicles">
+		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
+	</module>
+
+	<module name="transit">
+		<param name="transitScheduleFile" value="transit_schedule.xml" />
+		<param name="useTransit" value="true" />
+		<!-- Transit vehicles are not driven: the reference teleports the pt legs, like the Rust
+		     fixture does, so execution stays comparable while the pt router is still registered. -->
+		<param name="usingTransitInMobsim" value="false" />
+	</module>
+
+	<module name="routing">
+			<!-- Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. -->
+		<param name="walkSpeed" value="0.8333333333333334" />
+		<param name="beelineDistanceFactor" value="1.3" />
+	</module>
+
+	<module name="qsim">
+		<param name="startTime" value="0" />
+		<param name="endTime" value="24:00:00" />
+		<param name="timeStepSize" value="1.0" />
+		<param name="insertingWaitingVehiclesBeforeDrivingVehicles" value="true" />
+		<param name="removeStuckVehicles" value="false" />
+		<param name="snapshotperiod" value="00:00:00" />
+	</module>
+
+	<module name="controller">
+		<param name="firstIteration" value="0" />
+		<param name="lastIteration" value="0" />
+		<param name="outputDirectory" value="out" />
+		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
+		<param name="eventsFileFormat" value="xml" />
+		<!-- Uncompressed, so the recorded reference is a readable event file. -->
+		<param name="compressionType" value="none" />
+		<param name="writeEventsInterval" value="1" />
+	</module>
+
+</config>
