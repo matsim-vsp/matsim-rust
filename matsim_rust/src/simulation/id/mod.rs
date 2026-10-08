@@ -84,6 +84,11 @@ pub fn load_from_file(file_path: &Path) {
     ID_STORE.load_from_file(file_path)
 }
 
+/// Returns the number of ids of all types.
+pub(crate) fn count_ids() -> usize {
+    ID_STORE.count()
+}
+
 /// Mark Id as enabled for the nohash_hasher::NoHashHasher t
 impl<T: StableTypeId> nohash_hasher::IsEnabled for Id<T> {}
 impl<T: StableTypeId> nohash_hasher::IsEnabled for &Id<T> {}
@@ -139,6 +144,13 @@ static ID_STORE: Lazy<IdStore> = Lazy::new(IdStore::new);
 #[cfg(any(test, feature = "test_util"))]
 pub fn reset_store() {
     ID_STORE.reset();
+}
+
+/// Returns the external ids of each stable type id, ordered by their internal id. This allows
+/// tests to compare the complete id assignment of two runs.
+#[cfg(any(test, feature = "test_util"))]
+pub fn snapshot_store() -> std::collections::BTreeMap<u64, Vec<String>> {
+    ID_STORE.snapshot()
 }
 
 #[derive(Debug, Error)]
