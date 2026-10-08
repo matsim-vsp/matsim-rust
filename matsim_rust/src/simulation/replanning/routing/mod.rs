@@ -1094,6 +1094,14 @@ impl TransitRoutingModule {
         stops
     }
 
+    #[cfg(test)]
+    fn path_cost(&self, path: &TransitPath, departure_time: SimTime) -> Duration {
+        let transfer_count = path.rides.len().saturating_sub(1) as u32;
+        path.arrival
+            .duration_since(departure_time)
+            .saturating_add(RAPTOR_TRANSFER_COST.saturating_mul(transfer_count))
+    }
+
     fn path_cost_equivalent_seconds(&self, path: &TransitPath, departure_time: SimTime) -> f64 {
         self.cost_equivalent_seconds(
             path.arrival,
