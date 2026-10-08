@@ -1,14 +1,19 @@
+use quick_xml::events::BytesStart;
 use std::io::Read;
 
 /// Number of bytes requested from the underlying reader at once.
 const READ_BYTES: usize = 1024 * 1024;
 
-/// Splits an XML stream into the raw bytes of all elements with a given name, e.g., all `person`
-/// elements of a population. The elements can then be parsed independently of each other.
+/// Splits an XML stream into the raw bytes of all elements with a given local name, e.g., all
+/// `person` elements of a population. The elements can then be parsed independently of each other.
 ///
 /// The splitter doesn't parse the document. It relies on `<` never appearing unescaped in
 /// attribute values or text, so that every `<` outside of comments, CDATA sections, processing
 /// instructions and declarations starts a tag. Elements with the given name must not be nested.
+///
+/// As a simple check that the input is complete, the root element must be closed at the end of
+/// the input. Namespace declarations of the root element are added to elements which don't declare
+/// namespaces themselves, so that the elements can be parsed on their own.
 pub(crate) struct ElementSplitter<R> {
     reader: R,
     name: Vec<u8>,
@@ -17,15 +22,27 @@ pub(crate) struct ElementSplitter<R> {
     pos: usize,
     // Start of the element which is currently being split off.
     element_start: Option<usize>,
+    // Length of the qualified name of the element which is currently being split off.
+    element_name_len: usize,
+    // Qualified name of the root element.
+    root: Option<Vec<u8>>,
+    root_closed: bool,
+    // Namespace declarations of the root element, each preceded by a space.
+    namespaces: Vec<u8>,
     eof: bool,
 }
 
 /// A piece of markup starting with `<`.
 enum Markup {
-    /// Start tag of an element with the searched name.
-    Start { self_closing: bool },
+    /// Start tag of an element with the searched name. `name_len` is the length of its qualified
+    /// name.
+    Start { self_closing: bool, name_len: usize },
     /// End tag of an element with the searched name.
     End,
+    /// Start tag of the root element.
+    RootStart { self_closing: bool, name_len: usize },
+    /// End tag of the root element.
+    RootEnd,
     /// Any other markup, which is skipped.
     Other,
 }
@@ -38,6 +55,10 @@ impl<R: Read> ElementSplitter<R> {
             buffer: Vec::new(),
             pos: 0,
             element_start: None,
+            element_name_len: 0,
+            root: None,
+            root_closed: false,
+            namespaces: Vec::new(),
             eof: false,
         }
     }
@@ -47,7 +68,18 @@ impl<R: Read> ElementSplitter<R> {
     pub(crate) fn next_element_into(&mut self, out: &mut Vec<u8>) -> bool {
         loop {
             if let Some((start, end)) = self.scan() {
-                out.extend_from_slice(&self.buffer[start..end]);
+                let element = &self.buffer[start..end];
+                let name_end = 1 + self.element_name_len;
+                let start_tag_len = find_tag_end(element).unwrap();
+                if self.namespaces.is_empty()
+                    || find_seq(&element[..start_tag_len], b"xmlns").is_some()
+                {
+                    out.extend_from_slice(element);
+                } else {
+                    out.extend_from_slice(&element[..name_end]);
+                    out.extend_from_slice(&self.namespaces);
+                    out.extend_from_slice(&element[name_end..]);
+                }
                 return true;
             }
             if self.eof {
@@ -55,6 +87,10 @@ impl<R: Read> ElementSplitter<R> {
                     self.element_start.is_none(),
                     "Input ended within a <{}> element.",
                     String::from_utf8_lossy(&self.name)
+                );
+                assert!(
+                    self.root_closed,
+                    "Input ended before the end of the root element."
                 );
                 return false;
             }
@@ -76,12 +112,16 @@ impl<R: Read> ElementSplitter<R> {
             self.pos = end;
 
             match markup {
-                Markup::Start { self_closing } => {
+                Markup::Start {
+                    self_closing,
+                    name_len,
+                } => {
                     assert!(
                         self.element_start.is_none(),
                         "Nested <{}> elements are not supported.",
                         String::from_utf8_lossy(&self.name)
                     );
+                    self.element_name_len = name_len;
                     if self_closing {
                         return Some((lt, end));
                     }
@@ -96,6 +136,16 @@ impl<R: Read> ElementSplitter<R> {
                     });
                     return Some((start, end));
                 }
+                Markup::RootStart {
+                    self_closing,
+                    name_len,
+                } => {
+                    let tag = &self.buffer[lt..end];
+                    self.root = Some(tag[1..1 + name_len].to_vec());
+                    self.namespaces = namespace_declarations(tag, name_len);
+                    self.root_closed = self_closing;
+                }
+                Markup::RootEnd => self.root_closed = true,
                 Markup::Other => {}
             }
         }
@@ -109,41 +159,54 @@ impl<R: Read> ElementSplitter<R> {
             return len.map(|len| (Markup::Other, len));
         }
 
-        let (is_end, name_start) = if rest.get(1) == Some(&b'/') {
-            (true, 2)
-        } else {
-            (false, 1)
+        let is_end = rest.get(1) == Some(&b'/');
+        let name_start = if is_end { 2 } else { 1 };
+        let Some(name_len) = rest[name_start..]
+            .iter()
+            .position(|&b| b.is_ascii_whitespace() || b == b'>' || b == b'/')
+        else {
+            // The name is incomplete. At the end of the input, the truncated tag is skipped, so
+            // that the missing end of the root element is reported.
+            return self.eof.then_some((Markup::Other, rest.len()));
         };
-        let name_end = name_start + self.name.len();
-        if rest.len() <= name_end {
-            // Can't decide yet whether the tag has the searched name. At the end of the input,
-            // the tag is incomplete and therefore not an element with the searched name.
-            return self.eof.then_some((Markup::Other, 1));
-        }
-        let follows_name = rest[name_end];
-        let has_name = rest[name_start..name_end] == self.name[..]
-            && (follows_name.is_ascii_whitespace() || follows_name == b'>' || follows_name == b'/');
-        if !has_name {
-            // Other tags may contain `>` in attribute values but never `<`, so scanning can
-            // continue right after the `<`.
-            return Some((Markup::Other, 1));
+        let name = &rest[name_start..name_start + name_len];
+        let is_element = local_name(name) == self.name.as_slice();
+        if !is_element {
+            let outside = self.element_start.is_none();
+            match (&self.root, is_end) {
+                // The first start tag outside of split elements is the one of the root element.
+                (None, false) if outside => {}
+                (Some(root), true) if outside && root == name => {
+                    return Some((Markup::RootEnd, 1));
+                }
+                // Other tags may contain `>` in attribute values but never `<`, so scanning can
+                // continue right after the `<`.
+                _ => return Some((Markup::Other, 1)),
+            }
         }
 
-        let Some(tag_len) = find_tag_end(&rest[name_end..]) else {
+        let Some(tag_len) = find_tag_end(&rest[name_start + name_len..]) else {
             assert!(
                 !self.eof,
                 "Input ended within a <{}> element.",
-                String::from_utf8_lossy(&self.name)
+                String::from_utf8_lossy(name)
             );
             return None;
         };
-        let len = name_end + tag_len;
-        if is_end {
-            Some((Markup::End, len))
-        } else {
-            let self_closing = rest[len - 2] == b'/';
-            Some((Markup::Start { self_closing }, len))
-        }
+        let len = name_start + name_len + tag_len;
+        let self_closing = rest[len - 2] == b'/';
+        let markup = match (is_element, is_end) {
+            (true, true) => Markup::End,
+            (true, false) => Markup::Start {
+                self_closing,
+                name_len,
+            },
+            (false, _) => Markup::RootStart {
+                self_closing,
+                name_len,
+            },
+        };
+        Some((markup, len))
     }
 
     fn fill(&mut self) {
@@ -163,6 +226,39 @@ impl<R: Read> ElementSplitter<R> {
             .unwrap_or_else(|e| panic!("Failed to read XML input: {e}"));
         self.eof = read == 0;
     }
+}
+
+/// Returns the part of a qualified name after the namespace prefix.
+fn local_name(name: &[u8]) -> &[u8] {
+    match name.iter().rposition(|&b| b == b':') {
+        Some(colon) => &name[colon + 1..],
+        None => name,
+    }
+}
+
+/// Returns the namespace declarations of a start tag, each preceded by a space.
+fn namespace_declarations(tag: &[u8], name_len: usize) -> Vec<u8> {
+    let content_end = tag.len() - if tag.ends_with(b"/>") { 2 } else { 1 };
+    let content = String::from_utf8_lossy(&tag[1..content_end]);
+    let mut result = Vec::new();
+    for attribute in BytesStart::from_content(content, name_len).attributes() {
+        let attribute = attribute.expect("Invalid attribute of the root element.");
+        let key = attribute.key.as_ref();
+        if key == b"xmlns" || key.starts_with(b"xmlns:") {
+            // The value is still escaped, so it may only contain the quote, which wasn't used.
+            let quote = if attribute.value.contains(&b'"') {
+                b'\''
+            } else {
+                b'"'
+            };
+            result.push(b' ');
+            result.extend_from_slice(key);
+            result.extend_from_slice(&[b'=', quote]);
+            result.extend_from_slice(&attribute.value);
+            result.push(quote);
+        }
+    }
+    result
 }
 
 /// Handles comments, CDATA sections, processing instructions and declarations like DOCTYPE.
@@ -367,7 +463,40 @@ mod tests {
     fn empty_population_has_no_persons() {
         assert_split("<population></population>", &[]);
         assert_split("<population/>", &[]);
-        assert_split("", &[]);
+    }
+
+    #[test]
+    fn matches_local_names_and_adds_namespace_declarations_of_root() {
+        let xml = "<p:population xmlns:p=\"urn:a\" xmlns='urn:default' other=\"x\">\
+                   <p:person id=\"1\"><p:plan/></p:person>\
+                   <p:person xmlns:p=\"urn:own\" id=\"2\"/>\
+                   </p:population>";
+        assert_split(
+            xml,
+            &[
+                "<p:person xmlns:p=\"urn:a\" xmlns=\"urn:default\" id=\"1\"><p:plan/></p:person>",
+                // Elements which declare namespaces themselves are kept as they are.
+                "<p:person xmlns:p=\"urn:own\" id=\"2\"/>",
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Input ended before the end of the root element.")]
+    fn input_ending_after_a_person_panics() {
+        split("<population><person id=\"1\"/>\n", 1 << 20);
+    }
+
+    #[test]
+    #[should_panic(expected = "Input ended before the end of the root element.")]
+    fn input_ending_within_an_end_tag_panics() {
+        split("<population><person id=\"1\"/></popu", 1 << 20);
+    }
+
+    #[test]
+    #[should_panic(expected = "Input ended before the end of the root element.")]
+    fn empty_input_panics() {
+        split("", 1 << 20);
     }
 
     #[test]

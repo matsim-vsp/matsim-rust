@@ -1225,6 +1225,42 @@ mod tests {
         );
     }
 
+    const PREFIXED_POPULATION_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:population xmlns:p="http://www.matsim.org/population">
+    <p:person id="1">
+        <p:plan selected="yes">
+            <p:activity type="h" link="1" x="0.0" y="0.0" end_time="06:00:00"/>
+            <p:leg mode="car"/>
+            <p:activity type="w" link="2" x="1.0" y="1.0"/>
+        </p:plan>
+    </p:person>
+</p:population>
+"#;
+
+    #[test]
+    fn parallel_parsing_reads_prefixed_elements() {
+        let path = PathBuf::from(
+            "./test_output/simulation/io/xml/population/parallel_parsing_reads_prefixed_elements/plans.xml",
+        );
+        create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, PREFIXED_POPULATION_XML).unwrap();
+
+        let parallel = IOPopulation::from_file_parallel(&path);
+        assert_eq!(1, parallel.persons.len());
+        assert_eq!(IOPopulation::from_file(&path), parallel);
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Input ended before the end of the root element.")]
+    fn population_ending_after_a_person_panics() {
+        let path = write_id_order_xml("population_ending_after_a_person_panics");
+        let xml = std::fs::read_to_string(&path).unwrap();
+        let end_of_first_person = xml.find("</person>").unwrap() + "</person>".len();
+        std::fs::write(&path, &xml[..end_of_first_person]).unwrap();
+
+        Population::from_file(&path, &mut Garage::default());
+    }
+
     #[test]
     fn parallel_parsing_matches_sequential_parsing() {
         let path = write_id_order_xml("parallel_parsing_matches_sequential_parsing");

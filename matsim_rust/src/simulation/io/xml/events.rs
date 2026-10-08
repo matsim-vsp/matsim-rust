@@ -868,6 +868,46 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn reader_reads_prefixed_events() {
+        let folder = PathBuf::from("./test_output/io/xml_events/reader_reads_prefixed_events");
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("events.xml");
+        fs::write(
+            &path,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+             <e:events xmlns:e=\"http://www.matsim.org/events\" version=\"1.0\">\n\
+             <e:event time=\"1\" type=\"travelled\" person=\"a\" distance=\"10\" mode=\"walk\"/>\n\
+             </e:events>\n",
+        )
+        .unwrap();
+
+        let expected = vec![(
+            SimTime::from_secs(1),
+            "<event time=\"1\" type=\"travelled\" person=\"a\" distance=\"10\" mode=\"walk\"/>\n"
+                .to_string(),
+        )];
+        assert_eq!(expected, read_with_reader(&path));
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Input ended before the end of the root element.")]
+    fn events_file_ending_after_an_event_panics() {
+        let folder =
+            PathBuf::from("./test_output/io/xml_events/events_file_ending_after_an_event_panics");
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("events.xml");
+        fs::write(
+            &path,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+             <events version=\"1.0\">\n\
+             <event time=\"1\" type=\"travelled\" person=\"a\" distance=\"10\" mode=\"walk\"/>\n",
+        )
+        .unwrap();
+
+        read_with_reader(&path);
+    }
+
+    #[deterministic_id_test]
     fn reader_unescapes_attribute_values() {
         let folder = PathBuf::from("./test_output/io/xml_events/reader_unescapes_attribute_values");
         fs::create_dir_all(&folder).unwrap();

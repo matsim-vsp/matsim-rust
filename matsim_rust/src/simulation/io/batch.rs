@@ -77,7 +77,7 @@ pub(crate) fn read_in_batches<Source, Open, Read, Process>(
     thread::scope(|scope| {
         let (sender, receiver) = sync_channel(QUEUED_BATCHES);
         // Create a thread which reads the records and sends them in batches to the main thread.
-        scope.spawn(move || {
+        let reader = scope.spawn(move || {
             let mut source = open();
             while let Some(batch) = read_batch(&mut source, &mut read_record, BATCH_BYTES) {
                 // Send waits until there is space in the channel (main purpose is to bound memory usage).
@@ -91,6 +91,12 @@ pub(crate) fn read_in_batches<Source, Open, Read, Process>(
         for batch in receiver {
             // Normally, process is also multithreaded, so it can process the batches in parallel with reading the next batch.
             process(batch);
+        }
+
+        // Propagate a panic of the reader thread with its own message. Otherwise, the scope would
+        // panic with a generic message.
+        if let Err(panic) = reader.join() {
+            std::panic::resume_unwind(panic);
         }
     });
 }
@@ -360,6 +366,12 @@ mod tests {
 
         assert!(num_batches > 1);
         assert_eq!((0..40).collect::<Vec<u8>>(), result);
+    }
+
+    #[test]
+    #[should_panic(expected = "broken record")]
+    fn read_in_batches_propagates_panics_of_the_reader() {
+        read_in_batches(|| (), |_, _| panic!("broken record"), |_| {});
     }
 
     #[test]
