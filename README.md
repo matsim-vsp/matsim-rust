@@ -209,6 +209,12 @@ cd matsim_rust
 cargo run --release --bin local_qsim -- --config tests/resources/equil/equil-config-1.yml
 ```
 
+To make runs traceable, the git state of the source tree is embedded at compile time (e.g. `v1.0.0-12-g4f96e9b2-dirty`).
+It is printed by `local_qsim --version` and logged as the first message whenever logging is initialized, including the
+per-process log files in the output directory.
+The suffix `-dirty` means the binary was built with uncommitted changes to tracked files; `-nogit` means no git metadata
+was available at build time.
+
 ## Create input files
 
 You need to create protobuf files from the xml files. This can be done with the following command:

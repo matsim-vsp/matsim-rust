@@ -13,6 +13,7 @@ use std::fmt::Debug;
 use tracing::warn;
 
 pub mod agents;
+pub mod build_info;
 #[allow(deprecated)]
 pub mod config;
 pub mod controller;
