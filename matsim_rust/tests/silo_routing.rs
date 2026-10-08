@@ -136,7 +136,8 @@ fn same_link_pt_request_is_handled_by_the_pt_router() {
     let mut request: Value =
         serde_json::from_str(&car_request(HOME_LINK, HOME_LINK, START, START)).unwrap();
     request["mode"] = json!("pt");
-    assert!(error_of(&client.request(&request.to_string())).contains("pt"));
+    let response = client.request(&request.to_string());
+    assert!(error_of(&response).contains("pt"));
 }
 
 #[deterministic_id_test(matsim_rust)]
@@ -215,6 +216,7 @@ fn disconnected_link_is_a_no_path_and_the_connection_stays_open() {
     let response = client.request(&car_request(HOME_LINK, "island", START, (30500.0, 30000.0)));
     assert!(!error_of(&response).is_empty());
     assert_eq!(category_of(&response), "no_path");
+    assert_eq!(response["outcome"], "no_path");
 
     assert_eq!(
         client.request(&car_request(HOME_LINK, WORK_LINK, START, WORK_COORD))["error"],

@@ -488,6 +488,30 @@ struct TransitPathState {
     rides: Vec<Ride>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransitSkimOutcome {
+    Transit,
+    Walking,
+    /// At least one endpoint has no nearby stop candidate; direct walking may still be possible.
+    NoPath,
+}
+
+impl TransitSkimOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Transit => "pt",
+            Self::Walking => "walk",
+            Self::NoPath => "no_path",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransitSkimResult {
+    pub outcome: TransitSkimOutcome,
+    pub travel_time: Option<Duration>,
+}
+
 // ponytail: This search cap is fixed at 20 until MATSim's configurable transfer limit is ported.
 const RAPTOR_MAX_TRANSFERS: usize = 20;
 const RAPTOR_MIN_TRANSFER_TIME: Duration = Duration::from_secs(60);
@@ -511,13 +535,26 @@ impl RoutingModule for TransitRoutingModule {
             .into_iter()
             .map(|(stop_id, _)| stop_id)
             .collect();
+        let direct_walk_distance = Coordinate::euclidean_distance(from, to);
+        let direct_walk_time = self.walk_time(direct_walk_distance);
+        let direct_walk = || {
+            InternalPlanElement::Leg(InternalLeg::new(
+                InternalRoute::Generic(InternalGenericRoute::new(
+                    request.from.link().clone(),
+                    request.to.link().clone(),
+                    Some(direct_walk_time),
+                    Some(direct_walk_distance * self.walk_distance_factor),
+                    None,
+                )),
+                Self::WALK_MODE,
+                self.mode.external(),
+                direct_walk_time,
+                Some(request.departure_time),
+            ))
+        };
         let best = self.find_best_path(to, request.departure_time, &access_stops, &egress_stops);
         let Some(path) = best else {
-            // An origin/destination pair that no transit line connects is not an error: SILO
-            // expects a car trip instead of teleporting the agent across the city on foot.
-            // But a car trip is only a legitimate answer for an agent that declares owning one
-            // and has a car to drive. Everyone else gets the no-path outcome, which the caller
-            // turns into a walking trip.
+            // Keep the configured SILO fallback ahead of walking when no transit path exists.
             if let Some(fallback) = &self.fallback
                 && self.permits_car_fallback(&request)?
             {
@@ -537,28 +574,17 @@ impl RoutingModule for TransitRoutingModule {
                     return fallback.calc_route(car_request);
                 }
             }
+            if !access_stops.is_empty() && !egress_stops.is_empty() {
+                return Ok(vec![direct_walk()]);
+            }
             return Err(RoutingError::NoPath {
                 from: request.from.link().external().to_string(),
                 to: request.to.link().external().to_string(),
                 mode: self.mode.external().to_string(),
             });
         };
-        let direct_walk_distance = Coordinate::euclidean_distance(from, to);
-        let direct_walk_time = self.walk_time(direct_walk_distance);
         if direct_walk_time < self.path_cost(&path, request.departure_time) {
-            return Ok(vec![InternalPlanElement::Leg(InternalLeg::new(
-                InternalRoute::Generic(InternalGenericRoute::new(
-                    request.from.link().clone(),
-                    request.to.link().clone(),
-                    Some(direct_walk_time),
-                    Some(direct_walk_distance * self.walk_distance_factor),
-                    None,
-                )),
-                Self::WALK_MODE,
-                self.mode.external(),
-                direct_walk_time,
-                Some(request.departure_time),
-            ))]);
+            return Ok(vec![direct_walk()]);
         }
         Ok(self.stop_to_stop_trip(&request, &path))
     }
@@ -817,79 +843,239 @@ impl TransitRoutingModule {
         destinations: &[Coordinate],
         departure_time: SimTime,
     ) -> Vec<Duration> {
-        let mut arrivals: HashMap<Id<TransitStopFacility>, SimTime> = HashMap::new();
-        let mut queue = BinaryHeap::new();
-        for (stop_id, distance) in self.nearest_stops(origin) {
-            let arrival = departure_time.saturating_add(self.walk_time(distance));
-            if arrivals.get(&stop_id).is_none_or(|old| arrival < *old) {
-                arrivals.insert(stop_id.clone(), arrival);
-                queue.push(Reverse((arrival, stop_id)));
-            }
-        }
+        self.skim_results_from_origin(origin, destinations, departure_time)
+            .into_iter()
+            .zip(destinations)
+            .map(|(result, destination)| {
+                result.travel_time.unwrap_or_else(|| {
+                    self.walk_time(Coordinate::euclidean_distance(origin, destination))
+                })
+            })
+            .collect()
+    }
 
-        while let Some(Reverse((arrival, stop_id))) = queue.pop() {
-            if arrivals.get(&stop_id) != Some(&arrival) {
-                continue;
-            }
-            let Some(route_refs) = self.routes_by_stop.get(&stop_id) else {
-                continue;
-            };
-            for route_ref in route_refs {
-                let line = self.schedule.get_line(&route_ref.line_id);
-                let route = line.routes.get(&route_ref.route_id).unwrap();
-                let board_stop = &route.stops[route_ref.stop_index];
-                if !board_stop.allow_boarding {
-                    continue;
-                }
-                let board_offset = board_stop.departure_offset.unwrap_or_default();
-                for alight_stop in route.stops.iter().skip(route_ref.stop_index + 1) {
-                    if !alight_stop.allow_alighting {
-                        continue;
-                    }
-                    let arrival_offset = alight_stop
-                        .arrival_offset
-                        .or(alight_stop.departure_offset)
-                        .unwrap_or_default();
-                    let next_arrival = route
-                        .departures
-                        .iter()
-                        .filter_map(|departure| {
-                            let boarding = departure.departure_time.saturating_add(board_offset);
-                            let alighting = departure.departure_time.saturating_add(arrival_offset);
-                            (boarding >= arrival && alighting >= boarding).then_some(alighting)
-                        })
-                        .min();
-                    let Some(next_arrival) = next_arrival else {
-                        continue;
-                    };
-                    if arrivals
-                        .get(&alight_stop.facility_id)
-                        .is_none_or(|old| next_arrival < *old)
-                    {
-                        arrivals.insert(alight_stop.facility_id.clone(), next_arrival);
-                        queue.push(Reverse((next_arrival, alight_stop.facility_id.clone())));
-                    }
-                }
-            }
-        }
+    pub fn skim_results_from_origin(
+        &self,
+        origin: &Coordinate,
+        destinations: &[Coordinate],
+        departure_time: SimTime,
+    ) -> Vec<TransitSkimResult> {
+        let access_stops = self.nearest_stops(origin);
+        let tree = self.routing_tree(departure_time, &access_stops);
 
         destinations
             .iter()
             .map(|destination| {
                 let direct_walk =
                     self.walk_time(Coordinate::euclidean_distance(origin, destination));
-                self.nearest_stops(destination)
+                let egress_stops: HashSet<_> = self
+                    .nearest_stops(destination)
                     .into_iter()
-                    .filter_map(|(stop_id, distance)| {
-                        arrivals.get(&stop_id).map(|arrival| {
-                            arrival
-                                .saturating_add(self.walk_time(distance))
-                                .duration_since(departure_time)
-                        })
-                    })
-                    .fold(direct_walk, Duration::min)
+                    .map(|(stop_id, _)| stop_id)
+                    .collect();
+                match self.best_path(destination, departure_time, &egress_stops, &tree) {
+                    Some(path) if direct_walk >= self.path_cost(&path, departure_time) => {
+                        TransitSkimResult {
+                            outcome: TransitSkimOutcome::Transit,
+                            travel_time: Some(path.arrival.duration_since(departure_time)),
+                        }
+                    }
+                    Some(_) => TransitSkimResult {
+                        outcome: TransitSkimOutcome::Walking,
+                        travel_time: Some(direct_walk),
+                    },
+                    None if !access_stops.is_empty() && !egress_stops.is_empty() => {
+                        TransitSkimResult {
+                            outcome: TransitSkimOutcome::Walking,
+                            travel_time: Some(direct_walk),
+                        }
+                    }
+                    None => TransitSkimResult {
+                        outcome: TransitSkimOutcome::NoPath,
+                        travel_time: None,
+                    },
+                }
             })
             .collect()
+    }
+
+    fn routing_tree(
+        &self,
+        departure_time: SimTime,
+        access_stops: &[(Id<TransitStopFacility>, f64)],
+    ) -> HashMap<(Id<TransitStopFacility>, usize), TransitPathState> {
+        let mut states: HashMap<(Id<TransitStopFacility>, usize), TransitPathState> =
+            HashMap::new();
+        let mut queue = BinaryHeap::new();
+        for (stop_id, access_distance) in access_stops {
+            let state = TransitPathState {
+                arrival: departure_time.saturating_add(self.walk_time(*access_distance)),
+                access_distance: *access_distance,
+                rides: Vec::new(),
+            };
+            let key = (stop_id.clone(), 0);
+            if states
+                .get(&key)
+                .is_none_or(|old| state.arrival < old.arrival)
+            {
+                queue.push(Reverse((state.arrival, 0, stop_id.clone())));
+                states.insert(key, state);
+            }
+        }
+
+        while let Some(Reverse((arrival, rides_used, stop_id))) = queue.pop() {
+            let Some(current) = states.get(&(stop_id.clone(), rides_used)).cloned() else {
+                continue;
+            };
+            if current.arrival != arrival {
+                continue;
+            }
+            if !self.routes_by_stop.contains_key(&stop_id) {
+                continue;
+            }
+            if rides_used >= RAPTOR_MAX_TRANSFERS + 1 {
+                continue;
+            }
+            let mut boarding_stops = vec![(
+                stop_id.clone(),
+                0.0,
+                (rides_used > 0).then(|| self.transfer_time(&stop_id, &stop_id, 0.0)),
+            )];
+            if rides_used > 0 {
+                boarding_stops.extend(self.nearby_transfer_stops(&stop_id).into_iter().map(
+                    |(id, distance)| {
+                        let time = self.transfer_time(&stop_id, &id, distance);
+                        (id, distance, Some(time))
+                    },
+                ));
+            }
+            for (boarding_stop, transfer_distance, transfer_time) in boarding_stops {
+                let Some(route_refs) = self.routes_by_stop.get(&boarding_stop) else {
+                    continue;
+                };
+                for route_ref in route_refs {
+                    let line = self.schedule.get_line(&route_ref.line_id);
+                    let route = line.routes.get(&route_ref.route_id).unwrap();
+                    let board_stop = &route.stops[route_ref.stop_index];
+                    if !board_stop.allow_boarding {
+                        continue;
+                    }
+                    let board_offset = board_stop.departure_offset.unwrap_or_default();
+                    let earliest_boarding =
+                        arrival.saturating_add(transfer_time.unwrap_or_default());
+                    for (alight_index, alight_stop) in route
+                        .stops
+                        .iter()
+                        .enumerate()
+                        .skip(route_ref.stop_index + 1)
+                    {
+                        if !alight_stop.allow_alighting {
+                            continue;
+                        }
+                        let arrival_offset = alight_stop
+                            .arrival_offset
+                            .or(alight_stop.departure_offset)
+                            .unwrap_or_default();
+                        for departure in &route.departures {
+                            let boarding_time =
+                                departure.departure_time.saturating_add(board_offset);
+                            if boarding_time < earliest_boarding {
+                                continue;
+                            }
+                            let stop_arrival =
+                                departure.departure_time.saturating_add(arrival_offset);
+                            if stop_arrival < boarding_time {
+                                continue;
+                            }
+                            let ride_distance = route.stops[route_ref.stop_index..=alight_index]
+                                .windows(2)
+                                .map(|pair| {
+                                    let a = self.schedule.get_facility(&pair[0].facility_id);
+                                    let b = self.schedule.get_facility(&pair[1].facility_id);
+                                    Coordinate::euclidean_distance(&a.coord, &b.coord)
+                                })
+                                .sum::<f64>();
+                            let mut rides = current.rides.clone();
+                            rides.push(Ride {
+                                line: line.id.clone(),
+                                route: route.id.clone(),
+                                board: boarding_stop.clone(),
+                                alight: alight_stop.facility_id.clone(),
+                                boarding_time,
+                                alighting_time: stop_arrival,
+                                distance: ride_distance,
+                                transfer_before: transfer_time.map(|time| {
+                                    (
+                                        transfer_distance,
+                                        (transfer_distance * self.walk_distance_factor).ceil(),
+                                        time,
+                                    )
+                                }),
+                            });
+                            let next_stop = alight_stop.facility_id.clone();
+                            let next_rides_used = rides_used + 1;
+                            let key = (next_stop.clone(), next_rides_used);
+                            if states
+                                .get(&key)
+                                .is_some_and(|old| stop_arrival >= old.arrival)
+                            {
+                                continue;
+                            }
+                            queue.push(Reverse((stop_arrival, next_rides_used, next_stop.clone())));
+                            states.insert(
+                                key,
+                                TransitPathState {
+                                    arrival: stop_arrival,
+                                    access_distance: current.access_distance,
+                                    rides,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        states
+    }
+
+    fn best_path(
+        &self,
+        destination: &Coordinate,
+        departure_time: SimTime,
+        egress_stops: &HashSet<Id<TransitStopFacility>>,
+        tree: &HashMap<(Id<TransitStopFacility>, usize), TransitPathState>,
+    ) -> Option<TransitPath> {
+        let mut best: Option<TransitPath> = None;
+        let mut states: Vec<_> = tree.iter().collect();
+        states.sort_by(|(left_key, left), (right_key, right)| {
+            left.arrival
+                .cmp(&right.arrival)
+                .then_with(|| left_key.1.cmp(&right_key.1))
+                .then_with(|| left_key.0.external().cmp(right_key.0.external()))
+        });
+        for ((stop_id, _), current) in states {
+            if !egress_stops.contains(stop_id) || current.rides.is_empty() {
+                continue;
+            }
+            let facility = self.schedule.get_facility(stop_id);
+            let candidate = TransitPath {
+                arrival: current.arrival.saturating_add(
+                    self.walk_time(Coordinate::euclidean_distance(&facility.coord, destination)),
+                ),
+                access_distance: current.access_distance,
+                egress_distance: Coordinate::euclidean_distance(&facility.coord, destination),
+                rides: current.rides.clone(),
+            };
+            if best.as_ref().is_none_or(|old| {
+                self.path_cost(&candidate, departure_time) < self.path_cost(old, departure_time)
+                    || (self.path_cost(&candidate, departure_time)
+                        == self.path_cost(old, departure_time)
+                        && transit_path_tiebreak(&candidate, old).is_lt())
+            }) {
+                best = Some(candidate);
+            }
+        }
+        best
     }
 
     fn cell(&self, coordinate: &Coordinate) -> (i32, i32) {
@@ -1068,158 +1254,8 @@ impl TransitRoutingModule {
         access_stops: &[(Id<TransitStopFacility>, f64)],
         egress_stops: &HashSet<Id<TransitStopFacility>>,
     ) -> Option<TransitPath> {
-        let mut states: HashMap<(Id<TransitStopFacility>, usize), TransitPathState> =
-            HashMap::new();
-        let mut queue = BinaryHeap::new();
-        for (stop_id, access_distance) in access_stops {
-            let state = TransitPathState {
-                arrival: departure_time.saturating_add(self.walk_time(*access_distance)),
-                access_distance: *access_distance,
-                rides: Vec::new(),
-            };
-            let key = (stop_id.clone(), 0);
-            if states
-                .get(&key)
-                .is_none_or(|old| state.arrival < old.arrival)
-            {
-                queue.push(Reverse((state.arrival, 0, stop_id.clone())));
-                states.insert(key, state);
-            }
-        }
-
-        let mut best: Option<TransitPath> = None;
-        while let Some(Reverse((arrival, rides_used, stop_id))) = queue.pop() {
-            let Some(current) = states.get(&(stop_id.clone(), rides_used)).cloned() else {
-                continue;
-            };
-            if current.arrival != arrival {
-                continue;
-            }
-
-            if egress_stops.contains(&stop_id) && !current.rides.is_empty() {
-                let facility = self.schedule.get_facility(&stop_id);
-                let egress_distance = Coordinate::euclidean_distance(&facility.coord, destination);
-                let candidate = TransitPath {
-                    arrival: arrival.saturating_add(self.walk_time(egress_distance)),
-                    access_distance: current.access_distance,
-                    egress_distance,
-                    rides: current.rides.clone(),
-                };
-                if best.as_ref().is_none_or(|old| {
-                    self.path_cost(&candidate, departure_time) < self.path_cost(old, departure_time)
-                        || (self.path_cost(&candidate, departure_time)
-                            == self.path_cost(old, departure_time)
-                            && transit_path_tiebreak(&candidate, old).is_lt())
-                }) {
-                    best = Some(candidate);
-                }
-            }
-
-            if rides_used >= RAPTOR_MAX_TRANSFERS + 1 {
-                continue;
-            }
-            let mut boarding_stops = vec![(
-                stop_id.clone(),
-                0.0,
-                (!current.rides.is_empty()).then(|| self.transfer_time(&stop_id, &stop_id, 0.0)),
-            )];
-            if !current.rides.is_empty() {
-                boarding_stops.extend(self.nearby_transfer_stops(&stop_id).into_iter().map(
-                    |(id, distance)| {
-                        let time = self.transfer_time(&stop_id, &id, distance);
-                        (id, distance, Some(time))
-                    },
-                ));
-            }
-            for (boarding_stop, transfer_distance, transfer_time) in boarding_stops {
-                let Some(route_refs) = self.routes_by_stop.get(&boarding_stop) else {
-                    continue;
-                };
-                for route_ref in route_refs {
-                    let line = self.schedule.get_line(&route_ref.line_id);
-                    let route = line.routes.get(&route_ref.route_id).unwrap();
-                    let board_stop = &route.stops[route_ref.stop_index];
-                    if !board_stop.allow_boarding {
-                        continue;
-                    }
-                    let board_offset = board_stop.departure_offset.unwrap_or_default();
-                    let arrival_at_boarding_stop =
-                        arrival.saturating_add(transfer_time.unwrap_or_default());
-                    let earliest_boarding = arrival_at_boarding_stop;
-
-                    for (alight_index, alight_stop) in route
-                        .stops
-                        .iter()
-                        .enumerate()
-                        .skip(route_ref.stop_index + 1)
-                    {
-                        if !alight_stop.allow_alighting {
-                            continue;
-                        }
-                        let arrival_offset = alight_stop
-                            .arrival_offset
-                            .or(alight_stop.departure_offset)
-                            .unwrap_or_default();
-                        for departure in &route.departures {
-                            let boarding_time =
-                                departure.departure_time.saturating_add(board_offset);
-                            if boarding_time < earliest_boarding {
-                                continue;
-                            }
-                            let stop_arrival =
-                                departure.departure_time.saturating_add(arrival_offset);
-                            if stop_arrival < boarding_time {
-                                continue;
-                            }
-                            let ride_distance = route.stops[route_ref.stop_index..=alight_index]
-                                .windows(2)
-                                .map(|pair| {
-                                    let a = self.schedule.get_facility(&pair[0].facility_id);
-                                    let b = self.schedule.get_facility(&pair[1].facility_id);
-                                    Coordinate::euclidean_distance(&a.coord, &b.coord)
-                                })
-                                .sum::<f64>();
-                            let mut rides = current.rides.clone();
-                            rides.push(Ride {
-                                line: line.id.clone(),
-                                route: route.id.clone(),
-                                board: boarding_stop.clone(),
-                                alight: alight_stop.facility_id.clone(),
-                                boarding_time,
-                                alighting_time: stop_arrival,
-                                distance: ride_distance,
-                                transfer_before: transfer_time.map(|transfer_time| {
-                                    (
-                                        transfer_distance,
-                                        (transfer_distance * self.walk_distance_factor).ceil(),
-                                        transfer_time,
-                                    )
-                                }),
-                            });
-                            let next_stop = alight_stop.facility_id.clone();
-                            let next_rides_used = rides_used + 1;
-                            let key = (next_stop.clone(), next_rides_used);
-                            if states
-                                .get(&key)
-                                .is_some_and(|old| stop_arrival >= old.arrival)
-                            {
-                                continue;
-                            }
-                            queue.push(Reverse((stop_arrival, next_rides_used, next_stop)));
-                            states.insert(
-                                key,
-                                TransitPathState {
-                                    arrival: stop_arrival,
-                                    access_distance: current.access_distance,
-                                    rides,
-                                },
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        best
+        let tree = self.routing_tree(departure_time, access_stops);
+        self.best_path(destination, departure_time, egress_stops, &tree)
     }
 }
 
@@ -1403,7 +1439,7 @@ mod route_proposal_tests {
     use super::{
         Facility, OWNS_CAR, RouteFrequencyProposalBackend, RouteProposal, RouteProposalKey,
         RouteProposalSeed, RouteProposalTable, RoutingError, RoutingModule, RoutingRequest,
-        RoutingRequestBuilder, TransitRoutingModule, TripRouter,
+        RoutingRequestBuilder, TransitRoutingModule, TransitSkimOutcome, TripRouter,
     };
     use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
@@ -1464,6 +1500,94 @@ mod route_proposal_tests {
             Arc::new(Garage::default()),
             None,
         )
+    }
+
+    #[deterministic_id_test]
+    fn one_to_all_skim_matches_passenger_cost_and_keeps_no_path_observable() {
+        let router = reference_router(reference_schedule(), 0.8333333333333334);
+        let origin = Coordinate::new_2d(1050.0, 1050.0);
+        let destinations = [
+            Coordinate::new_2d(3950.0, 1050.0),
+            Coordinate::new_2d(50_000.0, 50_000.0),
+        ];
+
+        let results =
+            router.skim_results_from_origin(&origin, &destinations, SimTime::from_secs(8 * 3600));
+
+        assert_eq!(results[0].outcome, TransitSkimOutcome::Transit);
+        let reference: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/resources/pt_reference/java/routing_direct_vs_transfer.json"
+        ))
+        .unwrap();
+        let reference_travel_time = reference["itineraries"][0]["arrival_time"]
+            .as_f64()
+            .unwrap()
+            - (8 * 3600) as f64;
+        assert_eq!(
+            results[0].travel_time,
+            Some(Duration::from_secs_f64(reference_travel_time))
+        );
+        assert_eq!(results[1].outcome, TransitSkimOutcome::NoPath);
+        assert_eq!(results[1].travel_time, None);
+        assert_eq!(
+            router.skim_times_from_origin(
+                &origin,
+                &destinations[1..],
+                SimTime::from_secs(8 * 3600)
+            ),
+            [router.walk_time(Coordinate::euclidean_distance(&origin, &destinations[1]))]
+        );
+    }
+
+    #[deterministic_id_test]
+    fn one_to_all_skim_reports_walking_when_it_beats_a_late_transit_departure() {
+        let mut schedule = reference_schedule();
+        let line = schedule
+            .lines_mut()
+            .get_mut(&Id::<TransitLine>::create("Reference Line"))
+            .unwrap();
+        for route in line.routes.values_mut() {
+            route.departures.clear();
+        }
+        line.routes
+            .get_mut(&Id::<TransitRoute>::create("a_to_b"))
+            .unwrap()
+            .departures = vec![TransitDeparture {
+            id: Id::create("late"),
+            departure_time: SimTime::from_secs(9 * 3600),
+            vehicle_ref_id: None,
+            attributes: InternalAttributes::default(),
+        }];
+        let router = reference_router(schedule, 0.8333333333333334);
+        let results = router.skim_results_from_origin(
+            &Coordinate::new_2d(1050.0, 2940.0),
+            &[Coordinate::new_2d(2050.0, 2940.0)],
+            SimTime::from_secs(8 * 3600),
+        );
+
+        assert_eq!(results[0].outcome, TransitSkimOutcome::Walking);
+        assert_eq!(results[0].travel_time, Some(Duration::from_secs(1200)));
+    }
+
+    #[deterministic_id_test]
+    fn one_to_all_skim_reports_walking_when_stops_have_no_departures() {
+        let mut schedule = reference_schedule();
+        for route in schedule
+            .lines_mut()
+            .values_mut()
+            .flat_map(|line| line.routes.values_mut())
+        {
+            route.departures.clear();
+        }
+        let router = reference_router(schedule, 0.8333333333333334);
+        let results = router.skim_results_from_origin(
+            &Coordinate::new_2d(1050.0, 1050.0),
+            &[Coordinate::new_2d(3950.0, 1050.0)],
+            SimTime::from_secs(8 * 3600),
+        );
+
+        assert_eq!(results[0].outcome, TransitSkimOutcome::Walking);
+        assert_eq!(results[0].travel_time, Some(Duration::from_secs(58 * 60)));
     }
 
     #[deterministic_id_test]

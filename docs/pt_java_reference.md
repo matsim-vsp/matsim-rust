@@ -9,8 +9,11 @@ simulation integration runner for execution events.
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
 difference that a fixture exercises, and the fixture corpus is currently three scenarios wide. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
-The skims and external routing service entry points remain unchanged and are not covered here; their
-reference semantics belong to ticket 11.
+The external routing service boundary is covered through the same trip router. The one-to-all skim
+uses one per-origin routing tree, and its reachable itinerary is checked against the routing
+reference below; its explicit `pt`, `walk`, and `no_path` outcomes are tested separately. The
+reference harness records trip routes, not `calcTreesObservable`, so tree-specific Java parity is
+not covered yet.
 
 ## The pinned reference
 
