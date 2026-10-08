@@ -205,7 +205,11 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
                 RoutingError::MissingModule { .. } | RoutingError::Unsupported { .. } => {
                     "invalid_request"
                 }
-                RoutingError::MissingEndTime { .. } => "service_error",
+                // The person exists but its loaded attributes cannot be read, which is this
+                // service's own input data and not something SILO sent.
+                RoutingError::MissingEndTime { .. } | RoutingError::MalformedAttribute { .. } => {
+                    "service_error"
+                }
             };
             return RouteResponse::error(category, error.to_string());
         }
