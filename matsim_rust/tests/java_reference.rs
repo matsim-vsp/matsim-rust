@@ -232,6 +232,129 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
     );
 }
 
+/// A transfer between separate platforms retains the walk leg and its five-second safety margin.
+#[deterministic_id_test(matsim_rust)]
+fn a_distinct_platform_transfer_matches_the_pinned_reference() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_distinct_platform_transfer/config.yml",
+    ));
+    let reference = read_reference("routing_distinct_platform_transfer");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+    for (index, expected_rides, end) in [
+        (
+            0,
+            vec![
+                ride("a_to_b", "ra", "rb", 28800.0),
+                ride("b_to_c_bus", "rb_platform", "rc", 29556.0),
+            ],
+            29856.0,
+        ),
+        (
+            1,
+            vec![
+                ride("a_to_b", "ra", "rb", 28801.0),
+                ride("b_to_c_bus", "rb_platform", "rc", 29700.0),
+            ],
+            30000.0,
+        ),
+        (
+            2,
+            vec![
+                ride("a_to_b", "ra", "rb", 31800.0),
+                ride("b_to_c", "rb_platform", "rc", 32700.0),
+            ],
+            33300.0,
+        ),
+        (
+            3,
+            vec![ride("direct_unavailable", "ro", "rc_unavailable", 28800.0)],
+            36000.0,
+        ),
+    ] {
+        let request = load_request_at("routing_distinct_platform_transfer", index);
+        let rust = calc_pt_route(&request, &router);
+        let expected = reference
+            .itineraries
+            .iter()
+            .find(|itinerary| itinerary["id"] == request["id"])
+            .expect("the request is recorded in the reference");
+        assert_eq!(rides(&rust), expected_rides);
+        assert_eq!(rides(&rust), rides(expected));
+        assert_eq!(arrival_time(&rust), end);
+        assert_eq!(arrival_time(&rust), arrival_time(expected));
+        assert_eq!(
+            rust["legs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|leg| leg["mode"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            expected["legs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|leg| leg["mode"].as_str().unwrap())
+                .collect::<Vec<_>>()
+        );
+        if index < 3 {
+            assert!(rust["legs"].as_array().unwrap().iter().any(|leg| {
+                leg["mode"] == "walk"
+                    && leg["arrival_time"].as_f64().unwrap()
+                        - leg["departure_time"].as_f64().unwrap()
+                        == 151.0
+                    && leg["distance"] == 130.0
+            }));
+        }
+    }
+}
+
+/// A plan routed through separate platforms completes its walk and transit legs in QSim.
+#[deterministic_id_test(matsim_rust)]
+fn a_distinct_platform_transfer_executes_through_the_simulation_runner() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_distinct_platform_transfer/execution.yml",
+    ));
+    let output_dir = config.output().output_dir.clone();
+    run(config);
+
+    let events = normalize_events(&output_dir.join("events/events.0.binpb"));
+    let passenger_events: Vec<_> = events
+        .iter()
+        .filter(|event| event["person"] == "transfer-person")
+        .collect();
+    let departures: Vec<_> = passenger_events
+        .iter()
+        .filter(|event| event["type"] == PersonDepartureEvent::TYPE)
+        .map(|event| {
+            (
+                event["legMode"].as_str().unwrap().to_string(),
+                event["link"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        departures,
+        [
+            ("walk".into(), "11".into()),
+            ("pt".into(), "11".into()),
+            ("walk".into(), "12".into()),
+            ("pt".into(), "23".into()),
+            ("walk".into(), "33".into()),
+        ]
+    );
+    let arrivals = passenger_events
+        .iter()
+        .filter(|event| event["type"] == PersonArrivalEvent::TYPE)
+        .count();
+    assert_eq!(arrivals, departures.len());
+    assert!(
+        passenger_events
+            .iter()
+            .any(|event| { event["type"] == ActivityStartEvent::TYPE && event["actType"] == "w" })
+    );
+}
+
 /// Runs one simulation and returns the router its controller built, so both boundaries the fixtures
 /// compare are the ones the simulation itself uses.
 ///
@@ -248,12 +371,16 @@ fn run(config: Config) -> TripRouter {
 }
 
 fn load_request(fixture: &str) -> Value {
+    load_request_at(fixture, 0)
+}
+
+fn load_request_at(fixture: &str, index: usize) -> Value {
     let path = Path::new("./tests/resources/pt_reference")
         .join(fixture)
         .join("requests.json");
     let content: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
         .unwrap_or_else(|e| panic!("cannot read the recorded request at {path:?}: {e}"));
-    content["requests"][0].clone()
+    content["requests"][index].clone()
 }
 
 fn read_reference(fixture: &str) -> Reference {
@@ -500,6 +627,7 @@ fn calc_pt_route(request: &Value, router: &TripRouter) -> Value {
             "mode": leg.mode.external(),
             "departure_time": departure,
             "arrival_time": millis(departure + travel_time),
+            "distance": leg.route.as_ref().and_then(|route| route.as_generic().distance()),
             "rides": rides,
         }));
         arrival = departure + travel_time;

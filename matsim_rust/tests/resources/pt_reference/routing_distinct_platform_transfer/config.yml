@@ -1,0 +1,38 @@
+# Rust side of the routing-probe reference fixture. See config.xml for the MATSim counterpart and
+# docs/pt_java_reference.md for the fixture contract. Input paths are relative to the crate root.
+modules:
+  network:
+    type: Network
+    path: ./assets/pt_tutorial/multimodalnetwork.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/pt_tutorial/vehicles.xml
+  transit:
+    type: Transit
+    schedule_path: ./tests/resources/pt_reference/routing_distinct_platform_transfer/transit_schedule.xml
+  partitioning:
+    type: Partitioning
+    num_parts: 1
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/pt_reference_routing_distinct_platform_transfer
+  routing:
+    type: Routing
+    mode: UsePlans
+    # Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. The competing candidates in the
+    # recorded request are decided by these values.
+    teleported_mode_params:
+      - mode: walk
+        beeline_distance_factor: 1.3
+        teleported_mode_speed: 0.8333333333333334
+  qsim:
+    type: QSim
+    start_time: 0
+    end_time: 86400
+  controller:
+    type: Controller
+    last_iteration: 0
