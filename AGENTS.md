@@ -228,12 +228,8 @@ Before reporting completion:
 
 ### Issue tracker
 
-Issues and specs live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+Issues live in this repository’s GitHub Issues and are managed with `gh`. See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-Single-context: use root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.
+Use a single-context layout with root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
