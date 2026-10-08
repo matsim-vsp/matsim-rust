@@ -1,0 +1,184 @@
+{
+  "schema_version" : 2,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "9133feff831d6dec51cda00a0b1951441e441cdc9ea6d29c396b2103d5bc20a0",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "../routing_direct_vs_transfer/transit_schedule.xml",
+      "sha256" : "8f119b4ee97b9618c55900a4f46de642220529151a00a8628c3eca817559cbbc"
+    } ]
+  },
+  "itineraries" : [ {
+    "id" : "earlier_window_boundary",
+    "request" : {
+      "id" : "earlier_window_boundary",
+      "mode" : "pt",
+      "person" : null,
+      "departure_time" : 28860.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 28800.0,
+      "arrival_time" : 28800.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 28800.0,
+      "arrival_time" : 29400.0,
+      "distance" : 2400.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "a_to_b",
+        "boarding_time" : 28800.0,
+        "access_stop" : "ra",
+        "egress_stop" : "rb"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 29400.0,
+      "arrival_time" : 29400.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 29400.0,
+      "arrival_time" : 30300.0,
+      "distance" : 3700.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "b_to_c",
+        "boarding_time" : 29700.0,
+        "access_stop" : "rb",
+        "egress_stop" : "rc"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 30300.0,
+      "arrival_time" : 30300.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 6.0,
+    "arrival_time" : 30300.0
+  }, {
+    "id" : "later_window_boundary",
+    "request" : {
+      "id" : "later_window_boundary",
+      "mode" : "pt",
+      "person" : null,
+      "departure_time" : 29340.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 29400.0,
+      "arrival_time" : 29400.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 29400.0,
+      "arrival_time" : 30000.0,
+      "distance" : 2400.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "a_to_b",
+        "boarding_time" : 29400.0,
+        "access_stop" : "ra",
+        "egress_stop" : "rb"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 30000.0,
+      "arrival_time" : 30000.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 30000.0,
+      "arrival_time" : 30900.0,
+      "distance" : 3700.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "b_to_c",
+        "boarding_time" : 30300.0,
+        "access_stop" : "rb",
+        "egress_stop" : "rc"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 30900.0,
+      "arrival_time" : 30900.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 6.0,
+    "arrival_time" : 30900.0
+  }, {
+    "id" : "after_final_service",
+    "request" : {
+      "id" : "after_final_service",
+      "mode" : "pt",
+      "person" : null,
+      "departure_time" : 32760.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 32760.0,
+      "arrival_time" : 37284.0,
+      "distance" : 3770.0,
+      "rides" : [ ]
+    } ],
+    "arrival_time" : 37284.0
+  } ],
+  "events" : [ ]
+}

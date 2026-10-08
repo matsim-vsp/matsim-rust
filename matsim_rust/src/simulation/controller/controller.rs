@@ -96,6 +96,7 @@ impl ControllerBuilder {
 
     // Implementing a custom build function in order to set the barrier if not set by the user.
     pub fn build(mut self) -> Result<Controller, String> {
+        self.scenario.config.transit().validate()?;
         self.scenario.config.travel_time_calculator().validate()?;
         let transit = self.scenario.config.transit();
         if transit.use_mode_mapping_for_passengers
@@ -409,6 +410,11 @@ impl ControllerBuilder {
                         config.transit().mode_mapping_for_passengers.clone(),
                         &config.scoring().mode_params,
                         &config.scoring().agent_params,
+                    )
+                    .with_range_queries(
+                        config.transit().range_query_settings.clone(),
+                        config.transit().route_selector_settings.clone(),
+                        config.computational_setup().random_seed,
                     ),
                 ),
             );
