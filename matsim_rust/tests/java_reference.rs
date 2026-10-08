@@ -33,7 +33,7 @@ const REFERENCE_COMMIT: &str = "c7a75ebeddc3ceb62959af046190064bf23770df";
 
 /// The recorded reference carries this, and so must the Rust reader. Bump both when the normalized
 /// shape changes.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Runs the pt tutorial and compares the passenger's observable events against the reference.
 ///
@@ -206,6 +206,14 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
         arrival_time(&rust),
         arrival_time(&expected),
         "Rust's arrival differs from the pinned Java itinerary"
+    );
+    let rust_cost_seconds = arrival_time(&rust) - request["departure_time"].as_f64().unwrap()
+        + 300.0 * rides(&rust).len().saturating_sub(1) as f64;
+    let rust_cost_utils = rust_cost_seconds * 12.0 / 3600.0;
+    assert_eq!(
+        expected["generalized_cost"].as_f64(),
+        Some(rust_cost_utils),
+        "Rust's generalized cost differs from MATSim's selected-route cost"
     );
     assert_eq!(
         rust["legs"]

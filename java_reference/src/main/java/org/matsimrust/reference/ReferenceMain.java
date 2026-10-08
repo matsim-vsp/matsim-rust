@@ -1,5 +1,6 @@
 package org.matsimrust.reference;
 
+import ch.sbb.matsim.routing.pt.raptor.RaptorUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -57,7 +58,7 @@ import java.util.zip.GZIPInputStream;
 public final class ReferenceMain {
 
     /** Bumped whenever the normalized shape changes; the Rust side asserts the same number. */
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -203,6 +204,10 @@ public final class ReferenceMain {
                     node.put("departure_time", round(departure));
                     node.put("arrival_time", round(departure + travelTime));
                     node.put("distance", round(leg.getRoute() == null ? 0.0 : leg.getRoute().getDistance()));
+                    Object generalizedCost = leg.getAttributes().getAttribute(RaptorUtils.TOTAL_ROUTE_COST_ATTR_NAME);
+                    if (generalizedCost instanceof Number cost && !itinerary.has("generalized_cost")) {
+                        itinerary.put("generalized_cost", round(cost.doubleValue()));
+                    }
                     ArrayNode rides = node.putArray("rides");
                     DefaultTransitPassengerRoute route =
                             leg.getRoute() instanceof DefaultTransitPassengerRoute transitRoute ? transitRoute : null;

@@ -78,8 +78,8 @@ router alone. The direct service remains in the schedule so this fixture proves 
 under the pinned default costs instead of a direct-service preference.
 This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits and
 non-default scoring remain outside its coverage.
-The Java fixture records itinerary times but not a utility total, so the 30-minute generalized cost is
-checked against the pinned default weights rather than a Java-emitted score.
+The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
+its time-equivalent cost using the pinned PT time weight before comparing the two.
 
 ## Comparison rules
 
@@ -92,6 +92,7 @@ everything, and a single global tolerance would hide exactly the differences wor
 | Event order | Exact, positional | Both streams are in simulation order. The order carries meaning: boarding, alighting and service identity depend on it. Only genuinely independent events could be reordered, and reordering them would break the alignment. |
 | Agent, mode, activity type, leg mode, link | Exact | A difference is a different journey, never a rounding difference. |
 | `distance` | Exact, full precision | Both implementations compute it from the same link lengths. A rounded form would hide a genuine difference. |
+| Generalized route cost | Exact after converting Rust's time-equivalent cost to utility units | MATSim records RAPTOR's `totalRouteCost`; Rust uses the pinned 12 utils/hour PT time weight and 1 utility per transfer. |
 | `boardingTime` | Exact | A schedule time, not a computed duration. |
 | Service identity (line, route, board/alight stop) | Exact | A different service is a different journey. |
 | Event and leg times | `0 ≤ rust − reference ≤ legs_completed × 1 s` | See below. A tolerance would let a real regression hide inside it. |
