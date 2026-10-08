@@ -7,7 +7,7 @@ recording at the two boundaries where behavior is observable: `TripRouter` for i
 simulation integration runner for execution events.
 
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
-difference that a fixture exercises, and the fixture corpus is currently two scenarios wide. Every
+difference that a fixture exercises, and the fixture corpus is currently three scenarios wide. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
 The skims and external routing service entry points remain unchanged and are not covered here; their
 reference semantics belong to ticket 11.
@@ -89,6 +89,17 @@ utilities, so the direct train service competes with the faster transfer by mapp
 cost. The pinned Java and Rust routers choose the direct service, arrive at 08:50, and expose the
 ride as a `rail` leg. This complements the preceding fixture, which checks route selection with
 mapping disabled.
+
+### `routing_distinct_platform_transfer`
+
+Two requests transfer between `rb` and `rb_platform`, separate facilities 100 m apart. The 08:00
+request selects bus–rail; the 08:50 request selects rail–rail. The 08:00:01 request misses the bus
+by one second, and a fourth request confirms that platforms 201 m apart are not connected by the
+default walking transfer. The reachable requests compete with direct service under the same Java
+route-cost objective. Their itineraries include the transfer walk, its 130 m beeline-adjusted
+distance, and the pinned five-second transfer-walk margin. A separate Rust runner config supplies
+a person plan so the generated access, transfer and egress legs execute in QSim; the routing test
+also round-trips that itinerary through XML and protobuf population files.
 
 ## Comparison rules
 
