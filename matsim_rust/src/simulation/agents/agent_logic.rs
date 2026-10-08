@@ -452,7 +452,8 @@ impl AdaptivePlanBasedSimulationLogic {
 
         trace!(uuid = response.request_id.as_u128());
 
-        self.replace_next_trip(response, _now);
+        let plan = self.delegate.basic_agent_delegate.selected_plan_mut();
+        response.replace_trip(plan, self.delegate.curr_plan_element);
     }
 
     #[tracing::instrument(level = "trace", fields(person_id = self.delegate.id().external()))]
@@ -465,26 +466,6 @@ impl AdaptivePlanBasedSimulationLogic {
         trace!(uuid = response.request_id.as_u128());
 
         response
-    }
-
-    /// Replaces the next trip in the plan with the legs and activities from the given InternalRoutingResponse.
-    #[tracing::instrument(level = "trace", skip(response), fields(person_id = self.delegate.id().external()))]
-    fn replace_next_trip(&mut self, response: InternalRoutingResponse, _now: SimTime) {
-        trace!(uuid = response.request_id.as_u128());
-
-        if response.elements.is_empty() {
-            // If the response is empty, we do not replace anything.
-            return;
-        }
-
-        let plan = self.delegate.basic_agent_delegate.selected_plan_mut();
-        let start_index = self.delegate.curr_plan_element;
-
-        let span = find_trip_span_starting_at_activity_default(&plan.elements, start_index)
-            .expect("No trip found starting at the current plan element");
-
-        // Replace the trip elements (legs and intermediate activities) with the new response
-        span.replace_trip_elements(&mut plan.elements, response.elements);
     }
 }
 
@@ -666,7 +647,10 @@ mod tests {
             request_id: Uuid::now_v7(),
         };
 
-        logic.replace_next_trip(response.clone(), SimTime::default());
+        response.replace_trip(
+            logic.delegate.basic_agent_delegate.selected_plan_mut(),
+            logic.delegate.curr_plan_element,
+        );
         let elements = &logic
             .delegate
             .basic_agent_delegate
