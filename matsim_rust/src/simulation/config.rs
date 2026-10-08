@@ -568,6 +568,9 @@ pub struct Transit {
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
     #[serde(default)]
     pub personless_car_fallback: bool,
+    /// When walking transfer candidates are built for transit routing.
+    #[serde(default)]
+    pub transfer_construction: TransferConstruction,
     /// Search for PT routes within configured departure windows. Empty means use the desired
     /// departure time only; an empty subpopulation list applies to every subpopulation.
     #[serde(default)]
@@ -576,6 +579,18 @@ pub struct Transit {
     /// seconds per transfer, matching the existing pinned router cost.
     #[serde(default)]
     pub route_selector_settings: Vec<TransitRouteSelectorSettings>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferConstruction {
+    /// Build all candidate stop transfers when the router is created.
+    #[default]
+    Initial,
+    /// Build and cache candidates the first time each stop is queried.
+    Adaptive,
+    /// Rebuild candidates on every query without retaining them.
+    Online,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -629,6 +644,7 @@ impl Default for Transit {
             use_mode_mapping_for_passengers: false,
             mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
+            transfer_construction: TransferConstruction::default(),
             range_query_settings: Vec::new(),
             route_selector_settings: Vec::new(),
         }
@@ -2119,6 +2135,7 @@ mod tests {
     use crate::simulation::config::OverwriteFiles;
     use crate::simulation::config::PathBuf;
     use crate::simulation::config::Profiling;
+    use crate::simulation::config::TransferConstruction;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
@@ -2369,6 +2386,24 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn transit_transfer_construction_is_configurable_and_validated() {
+        for (value, expected) in [
+            ("initial", TransferConstruction::Initial),
+            ("adaptive", TransferConstruction::Adaptive),
+            ("online", TransferConstruction::Online),
+        ] {
+            let yaml = format!(
+                "modules:\n  transit:\n    type: Transit\n    transfer_construction: {value}\n"
+            );
+            let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(parsed.transit().transfer_construction, expected);
+        }
+        let invalid =
+            "modules:\n  transit:\n    type: Transit\n    transfer_construction: unknown\n";
+        assert!(serde_yaml::from_str::<Config>(invalid).is_err());
     }
 
     #[test]
