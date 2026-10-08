@@ -1,6 +1,7 @@
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::a_star_core::{
-    AStarCoreResult, AStarRequestBuilder, HeuristicMode, LandmarkCalcAStarActions, a_star_core,
+    AStarBuffers, AStarCoreResult, AStarRequestBuilder, HeuristicMode, LandmarkCalcAStarActions,
+    a_star_core,
 };
 use crate::simulation::replanning::routing::cost::{Disutility, TravelDisutility};
 use crate::simulation::replanning::routing::graph::{GraphError, IndexableGraph, NodeIndex};
@@ -131,7 +132,8 @@ impl AltLandmarkData {
             .build()
             .unwrap();
 
-        let disutilities_result = match a_star_core(a_star_request) {
+        // fresh buffers are fine here, since landmark data is only calculated once per graph
+        let disutilities_result = match a_star_core(a_star_request, &mut AStarBuffers::default()) {
             // some graph error occurred in A* (link or node not found). Return it.
             Err(e) => Err(e),
             // everything fine, A* returned a disutility vector; use it
