@@ -30,6 +30,7 @@ trait FromIOPerson<T> {
     fn from_io(io: T, id: Id<InternalPerson>) -> Self;
 }
 
+#[hotpath::measure]
 pub fn from_file<F: Fn(&InternalPerson) -> bool>(
     path: impl AsRef<Path>,
     garage: &mut Garage,
