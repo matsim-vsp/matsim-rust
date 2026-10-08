@@ -232,6 +232,40 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
     );
 }
 
+/// Passenger mode mappings let competing transit route modes use their own scoring costs.
+#[deterministic_id_test(matsim_rust)]
+fn mapped_passenger_modes_match_the_pinned_java_itinerary() {
+    let request = load_request("routing_mapped_modes");
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_mapped_modes/config.yml",
+    ));
+    let reference = read_reference("routing_mapped_modes");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+    let rust = calc_pt_route(&request, &router);
+
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == request["id"])
+        .expect("the request is recorded in the reference");
+
+    assert_eq!(rides(expected), vec![ride("direct", "ra", "rc", 28800.0)]);
+    assert_eq!(arrival_time(expected), 31800.0);
+    assert_eq!(rides(&rust), rides(expected));
+    assert_eq!(arrival_time(&rust), arrival_time(expected));
+    assert_eq!(
+        rust["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["walk", "rail", "walk"],
+        "mapped train service should produce a rail passenger leg"
+    );
+}
+
 /// A transfer between separate platforms retains the walk leg and its five-second safety margin.
 #[deterministic_id_test(matsim_rust)]
 fn a_distinct_platform_transfer_matches_the_pinned_reference() {
