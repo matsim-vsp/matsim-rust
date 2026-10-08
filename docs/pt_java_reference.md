@@ -101,6 +101,16 @@ distance, and the pinned five-second transfer-walk margin. A separate Rust runne
 a person plan so the generated access, transfer and egress legs execute in QSim; the routing test
 also round-trips that itinerary through XML and protobuf population files.
 
+### `routing_range_boundaries`
+
+This fixture enables SwissRailRaptor range queries with a 60-second earlier and later window. A
+request at 08:01 selects the unique transfer departing at the inclusive earlier boundary, 08:00; a
+request at 08:09 selects the unique transfer departing at the inclusive later boundary, 08:10. A
+request at 09:06 occurs after the final usable service and confirms that neither implementation
+repeats the schedule on the next day. MATSim's top-level `TripRouter` falls back to a direct walk
+when no PT route exists; the Rust PT routing module reports no path. The comparison pins the absence
+of a PT service in both results while preserving that existing wrapper difference.
+
 ## Comparison rules
 
 The reference is recorded once and compared many times, so the rules are fixed and stated here
@@ -139,6 +149,10 @@ should be updated to `0.0` rather than removed.
 The routing fixture's former direct-service divergence was fixed by
 [#72](https://github.com/titipakorn-th/matsim-rust/issues/72). It now compares the complete selected
 itinerary, leg modes and arrival against the same pinned reference.
+
+**2. PT no-path fallback** — `routing_range_boundaries`. After the last service, MATSim's outer
+`TripRouter` emits a direct walk while the Rust PT module returns `NoPath`. The fixture verifies that
+neither side invents a PT service; matching the outer fallback behavior is outside issue 77.
 
 ## Adding a fixture
 
@@ -214,6 +228,14 @@ Not covered by an upstream test in the pinned tree, so not evidence of intended 
 `useTransportModeUtilities`, the `LeastCostRaptorRouteSelector` tie-break, and
 `ModeSpecificTransferCostCalculator`'s clamping. Several production classes carry no license header;
 they remain under the package-level grant in `matsim/LICENSE`.
+
+The Rust router's range-query settings are configured under `transit.range_query_settings` and
+`transit.route_selector_settings`. It evaluates the requested departure, both window boundaries,
+and access-adjusted scheduled departures in the window. Route scores use the configured travel-time,
+departure-deviation, and transfer-count weights. Equal scores use `simulation::random::get_rng`
+keyed by seed, person, and requested departure; this is deterministic but intentionally does not
+reuse Java's random stream. Route selection leaves the previous activity's scheduled end time as
+loaded, preserving the pinned timing limitation.
 
 ### Execution
 

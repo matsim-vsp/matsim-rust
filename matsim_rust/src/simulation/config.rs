@@ -568,6 +568,52 @@ pub struct Transit {
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
     #[serde(default)]
     pub personless_car_fallback: bool,
+    /// Search for PT routes within configured departure windows. Empty means use the desired
+    /// departure time only; an empty subpopulation list applies to every subpopulation.
+    #[serde(default)]
+    pub range_query_settings: Vec<TransitRangeQuerySettings>,
+    /// Route choice weights for window searches. The default score is travel time plus 300
+    /// seconds per transfer, matching the existing pinned router cost.
+    #[serde(default)]
+    pub route_selector_settings: Vec<TransitRouteSelectorSettings>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct TransitRangeQuerySettings {
+    pub max_earlier_departure_sec: u64,
+    pub max_later_departure_sec: u64,
+    pub subpopulations: Vec<String>,
+}
+
+impl Default for TransitRangeQuerySettings {
+    fn default() -> Self {
+        Self {
+            max_earlier_departure_sec: 0,
+            max_later_departure_sec: 0,
+            subpopulations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct TransitRouteSelectorSettings {
+    pub beta_travel_time: f64,
+    pub beta_departure_time: f64,
+    pub beta_transfer_count: f64,
+    pub subpopulations: Vec<String>,
+}
+
+impl Default for TransitRouteSelectorSettings {
+    fn default() -> Self {
+        Self {
+            beta_travel_time: 1.0,
+            beta_departure_time: 0.0,
+            beta_transfer_count: 300.0,
+            subpopulations: Vec::new(),
+        }
+    }
 }
 
 fn default_transit_modes() -> Vec<String> {
@@ -583,7 +629,25 @@ impl Default for Transit {
             use_mode_mapping_for_passengers: false,
             mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
+            range_query_settings: Vec::new(),
+            route_selector_settings: Vec::new(),
         }
+    }
+}
+
+impl Transit {
+    pub fn validate(&self) -> Result<(), String> {
+        for (index, selector) in self.route_selector_settings.iter().enumerate() {
+            if !selector.beta_travel_time.is_finite()
+                || !selector.beta_departure_time.is_finite()
+                || !selector.beta_transfer_count.is_finite()
+            {
+                return Err(format!(
+                    "transit.route_selector_settings[{index}] weights must be finite"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2689,6 +2753,45 @@ modules:
         assert!(!config.transit().use_mode_mapping_for_passengers);
         assert!(config.transit().mode_mapping_for_passengers.is_empty());
         assert!(!config.transit().personless_car_fallback);
+        assert!(config.transit().range_query_settings.is_empty());
+        assert!(config.transit().route_selector_settings.is_empty());
+    }
+
+    #[test]
+    fn transit_range_query_and_selector_settings_load_from_yaml() {
+        let file = write_temp_config(
+            r#"
+modules:
+  transit:
+    type: Transit
+    range_query_settings:
+      - max_earlier_departure_sec: 300
+        max_later_departure_sec: 600
+        subpopulations: [freight]
+    route_selector_settings:
+      - beta_travel_time: 1.0
+        beta_departure_time: 0.5
+        beta_transfer_count: 300.0
+        subpopulations: [freight]
+"#,
+        );
+        let config = Config::from_args(CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![],
+        });
+
+        assert_eq!(
+            300,
+            config.transit().range_query_settings[0].max_earlier_departure_sec
+        );
+        assert_eq!(
+            600,
+            config.transit().range_query_settings[0].max_later_departure_sec
+        );
+        assert_eq!(
+            "freight",
+            config.transit().route_selector_settings[0].subpopulations[0]
+        );
     }
 
     /// The legacy fallback for queries without a person is off unless a config asks for it, and
