@@ -258,11 +258,13 @@ impl LocalLink {
         from: Id<Node>,
         to: Id<Node>,
     ) -> Self {
+        let storage_factor = config.storage_capacity_factor.unwrap_or(config.sample_size);
         let storage_capacity = StorageCapacityDefinition::build(
             length,
             perm_lanes,
             capacity_h,
             config.sample_size,
+            storage_factor,
             effective_cell_size,
             free_speed,
         );
