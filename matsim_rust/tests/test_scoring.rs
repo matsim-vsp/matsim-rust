@@ -1,5 +1,5 @@
 use macros::deterministic_id_test;
-use matsim_rust::simulation::config::{CommandLineArgs, Config};
+use matsim_rust::simulation::config::{CommandLineArgs, Config, ScoringMode};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::io;
 use matsim_rust::simulation::scenario::Scenario;
@@ -64,6 +64,37 @@ fn controller_builder_uses_custom_travel_time_scorer() {
         );
     }
     assert!(has_trip, "Expected at least one completed trip");
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn disabled_scoring_skips_backpacking_and_clears_scores() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/equil/equil-config-1-scoring.yml",
+    ));
+    config.scoring_mut().mode = ScoringMode::Disabled;
+    config.output_mut().output_dir = "./test_output/simulation/scoring_disabled".into();
+    let output_dir = io::resolve_path(config.context(), &config.output().output_dir);
+    let scenario = Scenario::load(config);
+    ControllerBuilder::default_with_scenario(scenario)
+        .build()
+        .unwrap()
+        .run();
+
+    // The input plans carry scores, so this also checks that the selected scores are cleared.
+    let selected = load_population(&output_dir.join("output_plans.xml.zst"));
+    assert!(!selected.persons.is_empty());
+    for person in selected.persons.values() {
+        assert_eq!(person.selected_plan().unwrap().score, None);
+    }
+    for file in [
+        output_dir.join("output_experienced_plans.xml.zst"),
+        output_dir
+            .join("ITERS")
+            .join("it.1")
+            .join("output_experienced_plans.xml.zst"),
+    ] {
+        assert!(!file.exists(), "Unexpected {}", file.display());
+    }
 }
 
 fn run_and_load(config_path: &str) -> Population {

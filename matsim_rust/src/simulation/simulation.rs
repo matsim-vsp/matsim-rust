@@ -29,7 +29,7 @@ where
     C: SimCommunicator,
 {
     #[hotpath::measure]
-    #[tracing::instrument(level = "info", skip(self), fields(rank = self.leg_engine.net_message_broker().rank()))]
+    #[tracing::instrument(level = "info", skip(self), fields(rank = self.leg_engine.net_message_broker().rank(), iteration = self.comp_env.mobsim_events_manager_borrow_mut().iteration()))]
     pub fn run(&mut self) -> Vec<SimulationAgent> {
         // use fixed start and end times
         let mut now = self.start_tick;
