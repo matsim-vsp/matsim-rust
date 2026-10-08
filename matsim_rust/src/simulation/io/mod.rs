@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+pub(crate) mod batch;
 pub mod proto;
 pub mod xml;
 

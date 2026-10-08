@@ -102,6 +102,7 @@ impl<C: SimCommunicator> LegEngine<C> {
     ///
     /// So, minimal time on a link is `2` steps. Thus, in the upper case without partitions, the link travel time is 1 time step + 1 time step due to
     /// `move_nodes`. For all travel times greater than this, it is the same.
+    #[hotpath::measure]
     #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
     pub(crate) fn do_step(
         &mut self,

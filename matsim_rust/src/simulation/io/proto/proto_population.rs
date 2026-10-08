@@ -1,22 +1,24 @@
-use crate::generated;
-use crate::generated::MessageIter;
 use crate::generated::general::Coordinate;
 use crate::generated::population::leg::Route;
 use crate::generated::population::{
     Activity, GenericRoute, Header, Leg, NetworkRoute, Person, Plan, PtRoute, PtRouteDescription,
 };
-use crate::simulation::id::Id;
+use crate::simulation::io::batch::read_in_batches;
+use crate::simulation::io::proto::{next_delimiter_length, read_length_delimited};
 use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPerson,
     InternalPlan, InternalPtRoute, InternalPtRouteDescription, InternalRoute, Population,
+    ProtoPersonDraft,
 };
 use crate::simulation::time::SimTime;
 use nohash_hasher::IntMap;
 use prost::Message;
+use rayon::prelude::*;
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
+use std::time::{Duration, Instant};
 use tracing::info;
 
 fn duration_to_u64_nanos(duration: std::time::Duration) -> u64 {
@@ -26,16 +28,24 @@ fn duration_to_u64_nanos(duration: std::time::Duration) -> u64 {
         .expect("duration exceeds u64::MAX nanoseconds for proto encoding")
 }
 
+/// Loads a population written by [`write_to_proto`]. The ids must already be loaded into the id
+/// store.
+///
+/// A reader thread reads the length delimited persons in batches. The persons of a batch are
+/// decoded and converted in parallel without creating ids. Afterwards, the remaining ids are
+/// created and the filter is applied sequentially in file order, so that the result and the id
+/// assignment don't depend on the number of threads.
 pub fn load_from_proto<F>(path: impl AsRef<Path>, filter: F) -> Population
 where
     F: Fn(&InternalPerson) -> bool,
 {
     info!("Loading population from file at: {:?}", path.as_ref());
+    let start = Instant::now();
     let file = File::open(path.as_ref())
         .unwrap_or_else(|_| panic!("Could not open File at {:?}", path.as_ref()));
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::with_capacity(1024 * 1024, file);
 
-    if let Some(header_delim) = generated::read_delimiter(&mut reader) {
+    if let Some(header_delim) = next_delimiter_length(&mut reader) {
         let mut buffer = vec![0; header_delim];
         reader
             .read_exact(&mut buffer)
@@ -45,17 +55,39 @@ where
     }
 
     let mut persons = IntMap::default();
+    let mut decoding = Duration::ZERO;
+    let mut merging = Duration::ZERO;
 
-    for person in MessageIter::<Person, BufReader<File>>::new(reader) {
-        let id = Id::get_from_ext(&person.id);
-        let internal_person = InternalPerson::from(person);
+    read_in_batches(
+        move || reader,
+        |reader, buffer| read_length_delimited(reader, buffer),
+        |batch| {
+            let decode_start = Instant::now();
+            let drafts: Vec<ProtoPersonDraft> = batch
+                .par_records()
+                .map(|bytes| {
+                    let person = Person::decode(bytes).expect("Failed to decode person");
+                    ProtoPersonDraft::from(person)
+                })
+                .collect();
+            decoding += decode_start.elapsed();
 
-        if filter(&internal_person) {
-            persons.insert(id, internal_person);
-        }
-    }
+            let merge_start = Instant::now();
+            for draft in drafts {
+                let internal_person = draft.into_person();
+                if filter(&internal_person) {
+                    persons.insert(internal_person.id().clone(), internal_person);
+                }
+            }
+            merging += merge_start.elapsed();
+        },
+    );
 
-    info!("Finished loading population");
+    info!(
+        "Finished loading population with {} persons in {:.2?} (decoding: {decoding:.2?}, merging: {merging:.2?}).",
+        persons.len(),
+        start.elapsed()
+    );
 
     Population { persons }
 }
@@ -209,11 +241,15 @@ impl PtRouteDescription {
 #[cfg(test)]
 mod tests {
     use crate::generated::population::Activity;
-    use crate::generated::population::{Leg, Person, Plan, PtRouteDescription};
+    use crate::generated::population::{Header, Leg, Person, Plan, PtRouteDescription};
+    use crate::simulation::id;
     use crate::simulation::id::Id;
+    use crate::simulation::id::serializable_type::StableTypeId;
+    use crate::simulation::io::proto::proto_population::load_from_proto;
     use crate::simulation::io::xml::population::{IOActivity, IOPlan, IOPopulation};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::facilities::ActivityFacility;
+    use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::{
         InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
@@ -224,6 +260,7 @@ mod tests {
     use macros::deterministic_id_test;
     use prost::Message;
     use quick_xml::{de::from_str, se::to_string};
+    use std::path::Path;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -536,5 +573,113 @@ mod tests {
         let expected_id: Id<InternalPerson> = Id::get_from_ext("1");
         assert_eq!(1, proto_pop.persons.len());
         assert!(proto_pop.persons.contains_key(&expected_id));
+    }
+
+    fn write_persons(path: &Path, persons: &[Person]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = Header {
+            version: 1,
+            size: persons.len() as u32,
+        }
+        .encode_length_delimited_to_vec();
+        for person in persons {
+            person.encode_length_delimited(&mut bytes).unwrap();
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn proto_person(id: &str, subpopulation: Option<&str>) -> Person {
+        Person {
+            id: id.to_string(),
+            plan: vec![Plan {
+                selected: true,
+                acts: vec![Activity {
+                    act_type: "home".to_string(),
+                    link_id: Some("l1".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            attributes: Default::default(),
+            subpopulation: subpopulation.map(str::to_string),
+        }
+    }
+
+    #[deterministic_id_test]
+    fn proto_loading_creates_missing_subpopulations_in_file_order() {
+        let folder = PathBuf::from(
+            "./test_output/simulation/io/proto/proto_population/proto_loading_creates_missing_subpopulations_in_file_order",
+        );
+        let plans = folder.join("plans.binpb");
+        let ids = folder.join("ids.binpb");
+
+        // Many persons, so that they are converted on different threads. Only the subpopulations
+        // are missing from the id store.
+        let subpopulations = ["zeta", "alpha", "freight", "alpha"];
+        let persons: Vec<_> = (0..1000)
+            .map(|i| {
+                let subpopulation = (i % 7 == 0).then(|| subpopulations[(i / 7) % 4]);
+                proto_person(&format!("p{i:04}"), subpopulation)
+            })
+            .collect();
+        for person in &persons {
+            Id::<InternalPerson>::create(&person.id);
+        }
+        Id::<String>::create("home");
+        Id::<Link>::create("l1");
+        id::store_to_file(&ids);
+        write_persons(&plans, &persons);
+
+        let mut results = Vec::new();
+        for threads in [1, 8] {
+            id::reset_store();
+            id::load_from_file(&ids);
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let population = pool.install(|| load_from_proto(&plans, |_| true));
+            assert_eq!(1000, population.persons.len());
+            results.push((id::snapshot_store(), population));
+        }
+
+        // Person p0000 has subpopulation "zeta", p0001 none, i.e., "person".
+        assert_eq!(
+            vec!["home", "zeta", "person", "alpha", "freight"],
+            results[0].0[&String::stable_type_id()].as_slice()
+        );
+        assert_eq!(results[0], results[1]);
+    }
+
+    #[deterministic_id_test]
+    fn proto_loading_reads_short_last_person_and_empty_population() {
+        let folder = PathBuf::from(
+            "./test_output/simulation/io/proto/proto_population/proto_loading_reads_short_last_person_and_empty_population",
+        );
+        Id::<InternalPerson>::create("a");
+        Id::<InternalPerson>::create("b");
+        Id::<String>::create("home");
+        Id::<String>::create("person");
+        Id::<Link>::create("l1");
+
+        // The last person encodes to fewer bytes than the maximum length of a length delimiter.
+        let short = Person {
+            id: "b".to_string(),
+            ..Default::default()
+        };
+        assert!(short.encode_length_delimited_to_vec().len() < 10);
+        let plans = folder.join("plans.binpb");
+        write_persons(&plans, &[proto_person("a", None), short]);
+        let population = load_from_proto(&plans, |_| true);
+        assert_eq!(2, population.persons.len());
+        assert!(
+            population.persons[&Id::get_from_ext("b")]
+                .plans()
+                .is_empty()
+        );
+
+        let empty = folder.join("empty.binpb");
+        write_persons(&empty, &[]);
+        assert!(load_from_proto(&empty, |_| true).persons.is_empty());
     }
 }

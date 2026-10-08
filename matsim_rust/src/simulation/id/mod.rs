@@ -84,6 +84,38 @@ pub fn load_from_file(file_path: &Path) {
     ID_STORE.load_from_file(file_path)
 }
 
+/// Returns the number of ids of all types.
+pub(crate) fn count_ids() -> usize {
+    ID_STORE.count()
+}
+
+/// Resolves external ids while converting input data, e.g., events.
+///
+/// Conversions which are generic over the resolver can run either creating missing ids or only
+/// looking ids up. The latter allows converting in parallel without assigning internal ids in a
+/// random order.
+pub(crate) trait IdResolver {
+    fn resolve<T: StableTypeId>(&self, external: &str) -> Option<Id<T>>;
+}
+
+/// Creates ids which don't exist yet. Never returns `None`.
+pub(crate) struct CreateMissingIds;
+
+impl IdResolver for CreateMissingIds {
+    fn resolve<T: StableTypeId>(&self, external: &str) -> Option<Id<T>> {
+        Some(Id::create(external))
+    }
+}
+
+/// Only looks ids up and returns `None` for ids which don't exist yet.
+pub(crate) struct ExistingIds;
+
+impl IdResolver for ExistingIds {
+    fn resolve<T: StableTypeId>(&self, external: &str) -> Option<Id<T>> {
+        Id::try_get_from_ext(external)
+    }
+}
+
 /// Mark Id as enabled for the nohash_hasher::NoHashHasher t
 impl<T: StableTypeId> nohash_hasher::IsEnabled for Id<T> {}
 impl<T: StableTypeId> nohash_hasher::IsEnabled for &Id<T> {}
@@ -139,6 +171,13 @@ static ID_STORE: Lazy<IdStore> = Lazy::new(IdStore::new);
 #[cfg(any(test, feature = "test_util"))]
 pub fn reset_store() {
     ID_STORE.reset();
+}
+
+/// Returns the external ids of each stable type id, ordered by their internal id. This allows
+/// tests to compare the complete id assignment of two runs.
+#[cfg(any(test, feature = "test_util"))]
+pub fn snapshot_store() -> std::collections::BTreeMap<u64, Vec<String>> {
+    ID_STORE.snapshot()
 }
 
 #[derive(Debug, Error)]

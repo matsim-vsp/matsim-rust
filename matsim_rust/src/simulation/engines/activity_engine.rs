@@ -42,6 +42,7 @@ impl ActivityEngine {
             .collect()
     }
 
+    #[hotpath::measure]
     #[instrument(level = "trace", skip(self, now, agents))]
     pub(crate) fn do_step(
         &mut self,

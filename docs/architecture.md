@@ -19,6 +19,13 @@ Network links must list their allowed modes explicitly: a link without modes all
 assumes `car` for links without a `modes` attribute, nothing is implied. Loading a network with such links logs a
 warning.
 
+Populations are read in parallel, both from XML and from protobuf. A reader thread splits the input into persons,
+which are parsed and converted by the rayon thread pool. The id store must stay independent of the number of threads:
+for protobuf, all ids except missing subpopulations are only looked up, and these are created in file order afterwards.
+For XML, all ids are created sequentially before the persons are converted, in the order in which converting the
+persons sorted by id one after another would create them (see `for_each_id_of_io_person`). Internal ids are the
+creation index of an id and never depend on hashing.
+
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
 (`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the

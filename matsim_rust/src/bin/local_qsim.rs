@@ -6,6 +6,7 @@ use matsim_rust::simulation::scenario::Scenario;
 use std::sync::Arc;
 use tracing::info;
 
+#[hotpath::main]
 fn main() {
     let _guard = init_std_out_logging_thread_local();
 

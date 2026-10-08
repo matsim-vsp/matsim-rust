@@ -1,31 +1,60 @@
 use nohash_hasher::IntMap;
+use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
+use std::time::Instant;
 use tracing::{info, warn};
 
 use crate::simulation::InternalAttributes;
+use crate::simulation::id;
 use crate::simulation::id::Id;
+use crate::simulation::io::batch::{ReadAhead, read_in_batches};
 use crate::simulation::io::xml;
 
 use crate::simulation::io::xml::attributes::IOAttributes;
+use crate::simulation::io::xml::element_splitter::ElementSplitter;
 use crate::simulation::scenario::population::{
     InternalActivity, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement,
-    InternalRoute, Population, SUBPOPULATION,
+    InternalRoute, Population, SUBPOPULATION, for_each_id_of_io_person,
 };
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
 
+/// Number of persons whose missing ids are collected in parallel before they are created.
+const ID_CREATION_CHUNK: usize = 4096;
+
+/// Loads a population from XML.
+///
+/// Parsing and converting persons runs in parallel. All ids are created sequentially beforehand,
+/// in the order in which converting the persons sorted by id one after another would create them.
+/// Thus, the internal ids don't depend on the number of threads.
 pub(crate) fn load_from_xml(
     path: impl AsRef<Path>,
     garage: &mut Garage,
 ) -> IntMap<Id<InternalPerson>, InternalPerson> {
-    let mut io_pop = IOPopulation::from_file(path);
+    let start = Instant::now();
+    let mut io_pop = IOPopulation::from_file_parallel(path);
+    let parsed = Instant::now();
 
     info!("Sorting population by id.");
-    io_pop.persons.sort_by(|a, b| a.id.cmp(&b.id));
+    io_pop.persons.par_sort_by(|a, b| a.id.cmp(&b.id));
+    let sorted = Instant::now();
 
     create_ids(&io_pop, garage);
-    create_population(io_pop)
+    create_remaining_ids(&io_pop);
+    let created_ids = Instant::now();
+
+    let population = create_population(io_pop);
+    info!(
+        "Finished loading population with {} persons in {:.2?} (parsing: {:.2?}, sorting: {:.2?}, creating ids: {:.2?}, converting: {:.2?}).",
+        population.len(),
+        start.elapsed(),
+        parsed - start,
+        sorted - parsed,
+        created_ids - sorted,
+        created_ids.elapsed()
+    );
+    population
 }
 
 pub(crate) fn write_to_xml(population: &Population, path: impl AsRef<Path>) {
@@ -77,10 +106,47 @@ fn create_ids(io_pop: &IOPopulation, garage: &mut Garage) {
         });
 }
 
+/// Creates all ids that converting the persons creates and which `create_ids` hasn't created.
+fn create_remaining_ids(io_pop: &IOPopulation) {
+    info!("Creating remaining ids");
+    for chunk in io_pop.persons.chunks(ID_CREATION_CHUNK) {
+        // The store is not modified while the missing ids of a chunk are collected. Creating them
+        // afterwards in the order of the persons and their elements therefore assigns the same
+        // internal ids as converting the persons one after another.
+        let missing: Vec<_> = chunk
+            .par_iter()
+            .map(|io_person| {
+                let mut missing = Vec::new();
+                for_each_id_of_io_person(io_person, |id| {
+                    if !id.exists() {
+                        missing.push(id);
+                    }
+                });
+                missing
+            })
+            .collect();
+        for id in missing.iter().flatten() {
+            id.create();
+        }
+    }
+}
+
 fn create_population(io_pop: IOPopulation) -> IntMap<Id<InternalPerson>, InternalPerson> {
+    let num_ids = id::count_ids();
+    let persons: Vec<_> = io_pop
+        .persons
+        .into_par_iter()
+        .map(InternalPerson::from)
+        .collect();
+    // Ids created during the parallel conversion would get internal ids in a random order.
+    assert_eq!(
+        num_ids,
+        id::count_ids(),
+        "Converting persons created ids. All ids must be created beforehand, see for_each_id_of_io_person."
+    );
+
     let mut result = IntMap::default();
-    for io_person in io_pop.persons {
-        let person = InternalPerson::from(io_person);
+    for person in persons {
         result.insert(person.id().clone(), person);
     }
     result
@@ -427,6 +493,36 @@ impl IOPopulation {
         population
     }
 
+    /// Like [`IOPopulation::from_file`], but parses the persons in parallel. Separate threads
+    /// decompress the file and split it into persons.
+    pub(crate) fn from_file_parallel(file_path: impl AsRef<Path>) -> IOPopulation {
+        info!(
+            "IOPopulation: Reading population from file {} in parallel",
+            file_path.as_ref().display()
+        );
+        let path = file_path.as_ref().to_path_buf();
+        let mut persons = Vec::new();
+        read_in_batches(
+            // Decompressing and splitting the input run on separate threads.
+            || ElementSplitter::new(ReadAhead::spawn(|| xml::open_xml_reader(path)), "person"),
+            |splitter, buffer| splitter.next_element_into(buffer),
+            |batch| {
+                let first = persons.len();
+                let parsed: Vec<IOPerson> = batch
+                    .par_records()
+                    .enumerate()
+                    .map(|(i, bytes)| parse_person(bytes, first + i))
+                    .collect();
+                persons.extend(parsed);
+            },
+        );
+        info!(
+            "IOPopulation: Finished reading population. Population contains {} persons",
+            persons.len()
+        );
+        IOPopulation { persons }
+    }
+
     pub fn to_file(&self, file_path: impl AsRef<Path>) {
         xml::write_to_file(
             self,
@@ -465,6 +561,16 @@ impl From<&Population> for IOPopulation {
     }
 }
 
+/// Parses the XML of a single person. `index` is the position of the person in the file.
+fn parse_person(bytes: &[u8], index: usize) -> IOPerson {
+    let xml = std::str::from_utf8(bytes)
+        .unwrap_or_else(|e| panic!("Person number {index} in the file is not valid UTF-8: {e}"));
+    let mut de = quick_xml::de::Deserializer::from_str(xml);
+    serde_path_to_error::deserialize(&mut de).unwrap_or_else(|err| {
+        panic!("Failed to deserialize person number {index} in the file:\n{err:#?}")
+    })
+}
+
 fn io_person_attributes(internal_person: &InternalPerson) -> Option<IOAttributes> {
     let mut attributes = internal_person.attributes().clone();
     attributes.insert(
@@ -480,19 +586,26 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::simulation::config::{MetisOptions, PartitionMethod};
+    use crate::simulation::id;
     use crate::simulation::id::Id;
+    use crate::simulation::id::serializable_type::StableTypeId;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
     use crate::simulation::io::xml::population::{
-        IOActivity, IOLeg, IOPerson, IOPlan, IOPlanElement, IOPopulation, load_from_xml,
-        write_to_xml,
+        IOActivity, IOLeg, IOPerson, IOPlan, IOPlanElement, IOPopulation, create_ids,
+        load_from_xml, write_to_xml,
     };
     use crate::simulation::logging::init_std_out_logging_thread_local;
+    use crate::simulation::scenario::facilities::ActivityFacility;
+    use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::{InternalPerson, InternalPlan, Population};
     use crate::simulation::scenario::vehicles::Garage;
     use macros::deterministic_id_test;
+    use nohash_hasher::IntMap;
     use quick_xml::de::from_str;
     use quick_xml::se::to_string;
+    use std::collections::BTreeMap;
+    use std::path::Path;
 
     /**
     This tests against the first person from the equil mod. Probably this doesn't cover all
@@ -897,5 +1010,263 @@ mod tests {
             replace_none_vehicles_with_default(person);
         }
         assert_eq!(io_pop, io_pop_from_written_output);
+    }
+
+    const ID_ORDER_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+    <attributes>
+        <attribute name="coordinateReferenceSystem" class="java.lang.String">Atlantis</attribute>
+    </attributes>
+    <!-- persons are not sorted by id, and <person id="ignored"></person> is a comment -->
+    <person id="b">
+        <attributes>
+            <attribute name="subpopulation" class="java.lang.String">freight</attribute>
+        </attributes>
+        <plan selected="yes" score="1.5">
+            <activity type="home" link="l1" x="0.0" y="0.0" end_time="08:00:00"/>
+            <leg mode="drt" dep_time="08:00:00">
+                <attributes>
+                    <attribute name="routingMode" class="java.lang.String">drt_routing</attribute>
+                </attributes>
+                <route type="links" start_link="l1" end_link="l3" vehicleRefId="null">l1 new-2 l3</route>
+            </leg>
+            <activity type="work" facility="f1" x="1.0" y="1.0" max_dur="01:00:00"/>
+            <leg mode="pt">
+                <route type="default_pt" start_link="l3" end_link="new-4" trav_time="00:10:00" vehicleRefId="bus 1">{"transitRouteId":"r1","boardingTime":"08:10:00","transitLineId":"line1","accessFacilityId":"s1","egressFacilityId":"s2"}</route>
+            </leg>
+            <activity type="pt interaction" link="new-4" x="2.0" y="2.0" max_dur="00:00:00"/>
+            <leg mode="walk">
+                <route type="generic" start_link="new-4" end_link="new-5" trav_time="00:05:00" distance="10.0"/>
+            </leg>
+            <activity type="home" link="new-5" facility="f2" x="0.0" y="0.0"/>
+        </plan>
+        <plan selected="no">
+            <activity type="home" link="l1" x="0.0" y="0.0" end_time="09:00:00"/>
+            <leg mode="bike" trav_time="00:20:00"/>
+            <activity type="home" link="l1" x="0.0" y="0.0"/>
+        </plan>
+    </person>
+    <person id="a">
+        <attributes>
+            <attribute name="subpopulation" class="java.lang.Integer">3</attribute>
+        </attributes>
+        <plan selected="yes">
+            <activity type="shop" link="new-6" end_time="10:00:00"/>
+            <leg mode="car">
+                <route type="links" start_link="new-6" end_link="new-6" vehicleRefId="">new-6</route>
+            </leg>
+            <activity type="home" link="l1"/>
+        </plan>
+    </person>
+    <person id="c"><plan selected="yes"><activity type="home" link="l3"/></plan></person>
+</population>
+"#;
+
+    fn write_id_order_xml(test: &str) -> PathBuf {
+        let path = PathBuf::from(format!(
+            "./test_output/simulation/io/xml/population/{test}/plans.xml"
+        ));
+        create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, ID_ORDER_XML).unwrap();
+        path
+    }
+
+    type Loaded = (
+        BTreeMap<u64, Vec<String>>,
+        IntMap<Id<InternalPerson>, InternalPerson>,
+    );
+
+    /// Loads the population like the sequential implementation did before persons were converted
+    /// in parallel.
+    fn load_sequentially(path: &Path, setup: &dyn Fn() -> Garage) -> Loaded {
+        id::reset_store();
+        let mut garage = setup();
+        let mut io_pop = IOPopulation::from_file(path);
+        io_pop.persons.sort_by(|a, b| a.id.cmp(&b.id));
+        create_ids(&io_pop, &mut garage);
+        let persons = io_pop
+            .persons
+            .into_iter()
+            .map(InternalPerson::from)
+            .map(|p| (p.id().clone(), p))
+            .collect();
+        (id::snapshot_store(), persons)
+    }
+
+    fn load_in_parallel(path: &Path, setup: &dyn Fn() -> Garage, threads: usize) -> Loaded {
+        id::reset_store();
+        let mut garage = setup();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        let persons = pool.install(|| load_from_xml(path, &mut garage));
+        (id::snapshot_store(), persons)
+    }
+
+    fn assert_parallel_matches_sequential(
+        path: &Path,
+        setup: &dyn Fn() -> Garage,
+        thread_counts: &[usize],
+    ) {
+        let (expected_ids, expected_persons) = load_sequentially(path, setup);
+        assert!(!expected_persons.is_empty());
+        for &threads in thread_counts {
+            let (ids, persons) = load_in_parallel(path, setup, threads);
+            assert_eq!(expected_ids, ids, "ids with {threads} threads");
+            assert_eq!(expected_persons, persons, "persons with {threads} threads");
+        }
+    }
+
+    #[deterministic_id_test]
+    fn parallel_loading_creates_ids_in_sequential_order() {
+        let path = write_id_order_xml("parallel_loading_creates_ids_in_sequential_order");
+        let setup = || {
+            // Links which exist before the population is loaded, like the links of a network.
+            for link in ["l1", "l3"] {
+                Id::<Link>::create(link);
+            }
+            Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"))
+        };
+        assert_parallel_matches_sequential(&path, &setup, &[1, 8]);
+
+        // Check the interleaving explicitly for the ids which are created by the conversion.
+        let (ids, persons) = load_in_parallel(&path, &setup, 8);
+        // The garage creates the modes of the vehicle types and `create_ids` the interaction and
+        // activity types. Afterwards, the ids of each person are created in the order of the
+        // sorted persons, with the subpopulation after all plans.
+        assert_eq!(
+            vec![
+                "car",
+                "walk",
+                "car interaction",
+                "walk interaction",
+                "shop",
+                "home",
+                "work",
+                "pt interaction",
+                "person",
+                "drt_routing",
+                "drt",
+                "pt",
+                "bike",
+                "freight"
+            ],
+            ids[&String::stable_type_id()].as_slice()
+        );
+        let links = &ids[&Link::stable_type_id()];
+        let new_links: Vec<_> = links.iter().filter(|l| l.starts_with("new-")).collect();
+        assert_eq!(vec!["new-6", "new-2", "new-4", "new-5"], new_links);
+        assert_eq!(
+            vec!["f1", "f2"],
+            ids[&ActivityFacility::stable_type_id()].as_slice()
+        );
+
+        assert_eq!(3, persons.len());
+        let b = &persons[&Id::get_from_ext("b")];
+        assert_eq!("freight", b.subpopulation().external());
+        assert_eq!(
+            "person",
+            persons[&Id::get_from_ext("a")].subpopulation().external()
+        );
+        let pt_route = b.plans()[0].legs()[1].route.as_ref().unwrap();
+        assert_eq!(
+            "bus 1",
+            pt_route.as_generic().vehicle().as_ref().unwrap().external()
+        );
+        let drt_route = b.plans()[0].legs()[0].route.as_ref().unwrap();
+        assert_eq!(
+            "b_drt",
+            drt_route
+                .as_generic()
+                .vehicle()
+                .as_ref()
+                .unwrap()
+                .external()
+        );
+    }
+
+    #[deterministic_id_test]
+    fn parallel_loading_matches_sequential_loading_of_equil() {
+        let setup = || {
+            Network::from_file_as_is(&PathBuf::from("./assets/equil/equil-network.xml"));
+            Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"))
+        };
+        assert_parallel_matches_sequential(
+            &PathBuf::from("./assets/equil/equil-plans.xml.gz"),
+            &setup,
+            &[1, 8],
+        );
+    }
+
+    #[deterministic_id_test]
+    fn parallel_loading_matches_sequential_loading_of_berlin() {
+        // No network is loaded, so that all links of routes are created while loading.
+        let setup = || {
+            Garage::from_file(&PathBuf::from(
+                "./assets/berlin-v6.4/berlin-v6.4-vehicleTypes.xml",
+            ))
+        };
+        assert_parallel_matches_sequential(
+            &PathBuf::from("./assets/berlin-v6.4/berlin-v6.4-0.1pct.plans-filtered.xml.gz"),
+            &setup,
+            // Only one parallel run, since loading is slow in debug builds.
+            &[8],
+        );
+    }
+
+    #[deterministic_id_test]
+    fn parallel_loading_matches_sequential_loading_of_34_persons() {
+        assert_parallel_matches_sequential(
+            &PathBuf::from("./assets/population-v6-34-persons.xml"),
+            &Garage::default,
+            &[1, 8],
+        );
+    }
+
+    const PREFIXED_POPULATION_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:population xmlns:p="http://www.matsim.org/population">
+    <p:person id="1">
+        <p:plan selected="yes">
+            <p:activity type="h" link="1" x="0.0" y="0.0" end_time="06:00:00"/>
+            <p:leg mode="car"/>
+            <p:activity type="w" link="2" x="1.0" y="1.0"/>
+        </p:plan>
+    </p:person>
+</p:population>
+"#;
+
+    #[test]
+    fn parallel_parsing_reads_prefixed_elements() {
+        let path = PathBuf::from(
+            "./test_output/simulation/io/xml/population/parallel_parsing_reads_prefixed_elements/plans.xml",
+        );
+        create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, PREFIXED_POPULATION_XML).unwrap();
+
+        let parallel = IOPopulation::from_file_parallel(&path);
+        assert_eq!(1, parallel.persons.len());
+        assert_eq!(IOPopulation::from_file(&path), parallel);
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Input ended before the end of the root element.")]
+    fn population_ending_after_a_person_panics() {
+        let path = write_id_order_xml("population_ending_after_a_person_panics");
+        let xml = std::fs::read_to_string(&path).unwrap();
+        let end_of_first_person = xml.find("</person>").unwrap() + "</person>".len();
+        std::fs::write(&path, &xml[..end_of_first_person]).unwrap();
+
+        Population::from_file(&path, &mut Garage::default());
+    }
+
+    #[test]
+    fn parallel_parsing_matches_sequential_parsing() {
+        let path = write_id_order_xml("parallel_parsing_matches_sequential_parsing");
+        assert_eq!(
+            IOPopulation::from_file(&path),
+            IOPopulation::from_file_parallel(&path)
+        );
     }
 }

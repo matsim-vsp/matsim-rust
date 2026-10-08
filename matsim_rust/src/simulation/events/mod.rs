@@ -2,7 +2,7 @@ mod comparison;
 pub mod utils;
 
 use crate::simulation::InternalAttributes;
-use crate::simulation::id::Id;
+use crate::simulation::id::{CreateMissingIds, Id, IdResolver};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
@@ -210,13 +210,25 @@ pub struct GenericEvent {
 impl GenericEvent {
     pub const TYPE: &'static str = "generic";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        _ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        GenericEventBuilder::default()
-            .time(time)
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            GenericEventBuilder::default()
+                .time(time)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -234,21 +246,33 @@ pub struct ActivityStartEvent {
 impl ActivityStartEvent {
     pub const TYPE: &'static str = "actstart";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        ActivityStartEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .act_type(Id::create(&event.attributes["act_type"].as_string()))
-            .coordinate(Coordinate::new_3d(
-                event.attributes["x"].as_double(),
-                event.attributes["y"].as_double(),
-                event.attributes["z"].as_double_opt().unwrap_or_default(),
-            ))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            ActivityStartEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .act_type(ids.resolve(&event.attributes["act_type"].as_string())?)
+                .coordinate(Coordinate::new_3d(
+                    event.attributes["x"].as_double(),
+                    event.attributes["y"].as_double(),
+                    event.attributes["z"].as_double_opt().unwrap_or_default(),
+                ))
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -266,21 +290,33 @@ pub struct ActivityEndEvent {
 impl ActivityEndEvent {
     pub const TYPE: &'static str = "actend";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        ActivityEndEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .act_type(Id::create(&event.attributes["act_type"].as_string()))
-            .coordinate(Coordinate::new_3d(
-                event.attributes["x"].as_double(),
-                event.attributes["y"].as_double(),
-                event.attributes["z"].as_double_opt().unwrap_or_default(),
-            ))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            ActivityEndEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .act_type(ids.resolve(&event.attributes["act_type"].as_string())?)
+                .coordinate(Coordinate::new_3d(
+                    event.attributes["x"].as_double(),
+                    event.attributes["y"].as_double(),
+                    event.attributes["z"].as_double_opt().unwrap_or_default(),
+                ))
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -296,15 +332,27 @@ pub struct LinkEnterEvent {
 impl LinkEnterEvent {
     pub const TYPE: &'static str = "entered link";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        LinkEnterEventBuilder::default()
-            .time(time)
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            LinkEnterEventBuilder::default()
+                .time(time)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -320,15 +368,27 @@ pub struct LinkLeaveEvent {
 impl LinkLeaveEvent {
     pub const TYPE: &'static str = "left link";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        LinkLeaveEventBuilder::default()
-            .time(time)
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            LinkLeaveEventBuilder::default()
+                .time(time)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -348,18 +408,30 @@ pub struct VehicleEntersTrafficEvent {
 impl VehicleEntersTrafficEvent {
     pub const TYPE: &'static str = "vehicle enters traffic";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        VehicleEntersTrafficEventBuilder::default()
-            .time(time)
-            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .network_mode(Id::create(&event.attributes["network_mode"].as_string()))
-            .relative_position(event.attributes["relative_position"].as_double())
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            VehicleEntersTrafficEventBuilder::default()
+                .time(time)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .network_mode(ids.resolve(&event.attributes["network_mode"].as_string())?)
+                .relative_position(event.attributes["relative_position"].as_double())
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -379,18 +451,30 @@ pub struct VehicleLeavesTrafficEvent {
 impl VehicleLeavesTrafficEvent {
     pub const TYPE: &'static str = "vehicle leaves traffic";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        VehicleLeavesTrafficEventBuilder::default()
-            .time(time)
-            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .network_mode(Id::create(&event.attributes["network_mode"].as_string()))
-            .relative_position(event.attributes["relative_position"].as_double())
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            VehicleLeavesTrafficEventBuilder::default()
+                .time(time)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .network_mode(ids.resolve(&event.attributes["network_mode"].as_string())?)
+                .relative_position(event.attributes["relative_position"].as_double())
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -406,15 +490,27 @@ pub struct PersonEntersVehicleEvent {
 impl PersonEntersVehicleEvent {
     pub const TYPE: &'static str = "PersonEntersVehicle";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        PersonEntersVehicleEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            PersonEntersVehicleEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -430,15 +526,27 @@ pub struct PersonLeavesVehicleEvent {
 impl PersonLeavesVehicleEvent {
     pub const TYPE: &'static str = "PersonLeavesVehicle";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        PersonLeavesVehicleEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .vehicle(Id::create(&event.attributes["vehicle"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            PersonLeavesVehicleEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -456,17 +564,29 @@ pub struct PersonDepartureEvent {
 impl PersonDepartureEvent {
     pub const TYPE: &'static str = "departure";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        PersonDepartureEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .leg_mode(Id::create(&event.attributes["mode"].as_string()))
-            .routing_mode(Id::create(&event.attributes["routing_mode"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            PersonDepartureEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .leg_mode(ids.resolve(&event.attributes["mode"].as_string())?)
+                .routing_mode(ids.resolve(&event.attributes["routing_mode"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -483,16 +603,28 @@ pub struct PersonArrivalEvent {
 impl PersonArrivalEvent {
     pub const TYPE: &'static str = "arrival";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        PersonArrivalEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .link(Id::create(&event.attributes["link"].as_string()))
-            .leg_mode(Id::create(&event.attributes["mode"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            PersonArrivalEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .link(ids.resolve(&event.attributes["link"].as_string())?)
+                .leg_mode(ids.resolve(&event.attributes["mode"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -509,16 +641,28 @@ pub struct TeleportationArrivalEvent {
 impl TeleportationArrivalEvent {
     pub const TYPE: &'static str = "travelled";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        TeleportationArrivalEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .mode(Id::create(&event.attributes["mode"].as_string()))
-            .distance(event.attributes["distance"].as_string().parse().unwrap())
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            TeleportationArrivalEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .mode(ids.resolve(&event.attributes["mode"].as_string())?)
+                .distance(event.attributes["distance"].as_string().parse().unwrap())
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -540,26 +684,38 @@ pub struct PtTeleportationArrivalEvent {
 impl PtTeleportationArrivalEvent {
     pub const TYPE: &'static str = "travelled with pt";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        PtTeleportationArrivalEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .distance(event.attributes["distance"].as_string().parse().unwrap())
-            .mode(Id::create(&event.attributes["mode"].as_string()))
-            .route(Id::create(&event.attributes["route"].as_string()))
-            .line(Id::create(&event.attributes["line"].as_string()))
-            .boarding_time(SimTime::from_nanos(
-                event.attributes["boardingTimeNs"]
-                    .as_string()
-                    .parse()
-                    .unwrap(),
-            ))
-            .access_facility(Id::create(&event.attributes["accessFacility"].as_string()))
-            .egress_facility(Id::create(&event.attributes["egressFacility"].as_string()))
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            PtTeleportationArrivalEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .distance(event.attributes["distance"].as_string().parse().unwrap())
+                .mode(ids.resolve(&event.attributes["mode"].as_string())?)
+                .route(ids.resolve(&event.attributes["route"].as_string())?)
+                .line(ids.resolve(&event.attributes["line"].as_string())?)
+                .boarding_time(SimTime::from_nanos(
+                    event.attributes["boardingTimeNs"]
+                        .as_string()
+                        .parse()
+                        .unwrap(),
+                ))
+                .access_facility(ids.resolve(&event.attributes["accessFacility"].as_string())?)
+                .egress_facility(ids.resolve(&event.attributes["egressFacility"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
@@ -580,32 +736,40 @@ pub struct PersonStuckEvent {
 impl PersonStuckEvent {
     pub const TYPE: &'static str = "stuckAndAbort";
     pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
         let attrs = InternalAttributes::from(&event.attributes);
         assert!(event.r#type.eq(Self::TYPE));
-        PersonStuckEventBuilder::default()
-            .time(time)
-            .person(Id::create(&event.attributes["person"].as_string()))
-            .leg_mode(
-                event
-                    .attributes
-                    .get("leg_mode")
-                    .map(|value| Id::create(&value.as_string())),
-            )
-            .link(
-                event
-                    .attributes
-                    .get("link")
-                    .map(|value| Id::create(&value.as_string())),
-            )
-            .reason(
-                event
-                    .attributes
-                    .get("reason")
-                    .map(|value| value.as_string()),
-            )
-            .attributes(attrs)
-            .build()
-            .unwrap()
+        Some(
+            PersonStuckEventBuilder::default()
+                .time(time)
+                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .leg_mode(match event.attributes.get("leg_mode") {
+                    Some(value) => Some(ids.resolve(&value.as_string())?),
+                    None => None,
+                })
+                .link(match event.attributes.get("link") {
+                    Some(value) => Some(ids.resolve(&value.as_string())?),
+                    None => None,
+                })
+                .reason(
+                    event
+                        .attributes
+                        .get("reason")
+                        .map(|value| value.as_string()),
+                )
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
     }
 }
 
