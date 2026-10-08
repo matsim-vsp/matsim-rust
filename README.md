@@ -27,7 +27,9 @@ Recent upgrades extend the simulation, routing, and analysis workflow:
   and publish mode-specific travel-time snapshots for the next iteration's routing.
 - Public transport vehicles can run through the network, board and alight passengers,
   and compete for link capacity. Enable this with `transit.simulate_vehicles: true`;
-  transit legs are teleported by default.
+  transit legs are teleported by default. Transit route searches can also use per-subpopulation
+  departure windows and route-choice weights through `transit.range_query_settings` and
+  `transit.route_selector_settings`.
 - Activity facilities support mode-specific link selection. The controller also accepts
   custom scoring functions and replanning strategies.
 - Traffic signals use approach-link green windows. `qsim.remove_stuck_vehicles: true`

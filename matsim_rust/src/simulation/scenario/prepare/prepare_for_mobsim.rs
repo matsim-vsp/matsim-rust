@@ -414,12 +414,14 @@ mod tests {
     use super::add_travel_distance;
     use super::prepare_for_mobsim;
     use crate::simulation::InternalAttributes;
-    use crate::simulation::config::{Config, ModalLinkSelection};
+    use crate::simulation::config::{
+        Config, ModalLinkSelection, TransitRangeQuerySettings, TransitRouteSelectorSettings,
+    };
     use crate::simulation::id::Id;
     use crate::simulation::network::signals::Signals;
     use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
     use crate::simulation::replanning::routing::{
-        RoutingError, RoutingModule, RoutingRequest, TripRouter,
+        RoutingError, RoutingModule, RoutingRequest, TransitRoutingModule, TripRouter,
     };
     use crate::simulation::scenario::facilities::ActivityFacilities;
     use crate::simulation::scenario::network::{Link, Network, Node};
@@ -477,6 +479,92 @@ mod tests {
                 .population
                 .persons
                 .contains_key(&Id::get_from_ext("person-2"))
+        );
+    }
+
+    #[deterministic_id_test]
+    fn prepares_a_transit_range_route_into_the_selected_plan() {
+        let person_id = Id::create("range-person");
+        let mut plan = InternalPlan::default();
+        plan.add_act(InternalActivity::new(
+            Some(Coordinate::new_2d(1050.0, 1050.0)),
+            "home",
+            Id::create("link-1"),
+            None,
+            Some(SimTime::from_secs(8 * 3600)),
+            None,
+        ));
+        plan.add_leg(unrouted_leg("pt"));
+        plan.add_act(InternalActivity::new(
+            Some(Coordinate::new_2d(3950.0, 1050.0)),
+            "work",
+            Id::create("link-2"),
+            None,
+            None,
+            None,
+        ));
+        let mut persons = IntMap::default();
+        persons.insert(
+            person_id.clone(),
+            InternalPerson::new(person_id.clone(), plan),
+        );
+        let mut modules: IntMap<Id<String>, Arc<dyn RoutingModule>> = IntMap::default();
+        let mode = Id::create("pt");
+        modules.insert(
+            mode.clone(),
+            Arc::new(
+                TransitRoutingModule::new(
+                    Arc::new(TransitSchedule::from_file(
+                        "./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml"
+                            .as_ref(),
+                    )),
+                    0.8333333333333334,
+                    1.3,
+                    Arc::new(Garage::default()),
+                    None,
+                )
+                .with_range_queries(
+                    vec![TransitRangeQuerySettings {
+                        max_earlier_departure_sec: 120,
+                        max_later_departure_sec: 120,
+                        subpopulations: Vec::new(),
+                    }],
+                    vec![TransitRouteSelectorSettings::default()],
+                    4711,
+                ),
+            ),
+        );
+        let mut scenario = scenario_with_parts(
+            sequential_network(2, None),
+            Garage::default(),
+            Population { persons },
+            Config::default(),
+        );
+
+        prepare_for_mobsim(&mut scenario, &TripRouter::new(modules)).unwrap();
+
+        let prepared = scenario.population.persons[&person_id]
+            .selected_plan()
+            .unwrap();
+        assert!(
+            prepared.legs().len() >= 3,
+            "access, transit and egress legs remain in the plan"
+        );
+        assert!(
+            prepared
+                .legs()
+                .iter()
+                .any(|leg| leg.mode.external() == "pt")
+        );
+        assert!(
+            prepared
+                .legs()
+                .iter()
+                .all(|leg| leg.routing_mode.as_ref() == Some(&mode))
+        );
+        assert_eq!(
+            Some(SimTime::from_secs(8 * 3600)),
+            prepared.acts()[0].end_time
         );
     }
 

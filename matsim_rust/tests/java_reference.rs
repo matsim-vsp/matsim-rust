@@ -17,6 +17,7 @@ use matsim_rust::simulation::events::{
     PersonDepartureEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
 };
 use matsim_rust::simulation::id::Id;
+use matsim_rust::simulation::replanning::routing::RoutingError;
 use matsim_rust::simulation::replanning::routing::{Facility, RoutingRequestBuilder, TripRouter};
 use matsim_rust::simulation::scenario::network::Link;
 use matsim_rust::simulation::scenario::population::InternalPerson;
@@ -230,6 +231,98 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
             .collect::<Vec<_>>(),
         "Rust's access, transfer and egress legs differ from the pinned Java itinerary"
     );
+}
+
+/// Passenger mode mappings let competing transit route modes use their own scoring costs.
+#[deterministic_id_test(matsim_rust)]
+fn mapped_passenger_modes_match_the_pinned_java_itinerary() {
+    let request = load_request("routing_mapped_modes");
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_mapped_modes/config.yml",
+    ));
+    let reference = read_reference("routing_mapped_modes");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+    let rust = calc_pt_route(&request, &router);
+
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == request["id"])
+        .expect("the request is recorded in the reference");
+
+    assert_eq!(rides(expected), vec![ride("direct", "ra", "rc", 28800.0)]);
+    assert_eq!(arrival_time(expected), 31800.0);
+    assert_eq!(rides(&rust), rides(expected));
+    assert_eq!(arrival_time(&rust), arrival_time(expected));
+    assert_eq!(
+        rust["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["walk", "rail", "walk"],
+        "mapped train service should produce a rail passenger leg"
+    );
+}
+
+/// The range profile includes both inclusive window boundaries and never repeats yesterday's
+/// schedule after the final service. The pinned Java router falls back to walking when no PT route
+/// exists; Rust reports no PT path at that boundary.
+#[deterministic_id_test(matsim_rust)]
+fn range_query_matches_java_at_both_window_boundaries_and_after_final_service() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_range_boundaries/config.yml",
+    ));
+    let reference = read_reference("routing_range_boundaries");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+
+    for (index, id, departure) in [
+        (0, "earlier_window_boundary", 28_800.0),
+        (1, "later_window_boundary", 29_400.0),
+    ] {
+        let request = load_request_at("routing_range_boundaries", index);
+        let rust = calc_pt_route(&request, &router);
+        let expected = reference
+            .itineraries
+            .iter()
+            .find(|itinerary| itinerary["id"] == id)
+            .expect("the boundary request is recorded in the reference");
+
+        assert_eq!(
+            rides(expected),
+            vec![
+                ride("a_to_b", "ra", "rb", departure),
+                ride("b_to_c", "rb", "rc", departure + 900.0),
+            ],
+            "the pinned reference no longer selects the unique transfer at {id}"
+        );
+        assert_eq!(rides(&rust), rides(expected), "service differs at {id}");
+        assert_eq!(
+            rust["legs"][0]["departure_time"], departure,
+            "Rust's selected departure is not on the inclusive window boundary at {id}"
+        );
+        assert_eq!(rust["arrival_time"], expected["arrival_time"]);
+    }
+
+    let request = load_request_at("routing_range_boundaries", 2);
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == "after_final_service")
+        .expect("the after-final-service request is recorded in the reference");
+    assert_eq!(expected["result"], "found");
+    assert_eq!(expected["legs"][0]["mode"], "walk");
+    assert!(
+        rides(expected).is_empty(),
+        "Java must not repeat a PT departure"
+    );
+    assert!(matches!(
+        calc_pt_route_result(&request, &router),
+        Value::Object(ref result) if result["result"] == "no_path"
+    ));
 }
 
 /// A transfer between separate platforms retains the walk leg and its five-second safety margin.
@@ -578,6 +671,15 @@ fn millis(value: f64) -> f64 {
 }
 
 fn calc_pt_route(request: &Value, router: &TripRouter) -> Value {
+    let result = calc_pt_route_result(request, router);
+    assert_eq!(
+        result["result"], "found",
+        "the recorded request has a route"
+    );
+    result
+}
+
+fn calc_pt_route_result(request: &Value, router: &TripRouter) -> Value {
     let facility = |end: &str| {
         let end = &request[end];
         Facility::new_link_wrapper(
@@ -587,19 +689,21 @@ fn calc_pt_route(request: &Value, router: &TripRouter) -> Value {
     };
     let from = facility("from");
     let to = facility("to");
-    let elements = router
-        .calc_route(
-            &Id::create(request["mode"].as_str().unwrap()),
-            RoutingRequestBuilder::default()
-                .from(&from)
-                .to(&to)
-                .departure_time(SimTime::from_secs(
-                    request["departure_time"].as_f64().unwrap() as u64,
-                ))
-                .build()
-                .unwrap(),
-        )
-        .expect("the recorded request has a path on both sides");
+    let elements = match router.calc_route(
+        &Id::create(request["mode"].as_str().unwrap()),
+        RoutingRequestBuilder::default()
+            .from(&from)
+            .to(&to)
+            .departure_time(SimTime::from_secs(
+                request["departure_time"].as_f64().unwrap() as u64,
+            ))
+            .build()
+            .unwrap(),
+    ) {
+        Ok(elements) => elements,
+        Err(RoutingError::NoPath { .. }) => return json!({"result": "no_path"}),
+        Err(error) => panic!("routing request failed: {error}"),
+    };
 
     let mut arrival = request["departure_time"].as_f64().unwrap();
     let mut legs = Vec::new();
