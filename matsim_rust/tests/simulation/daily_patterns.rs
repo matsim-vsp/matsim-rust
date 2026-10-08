@@ -808,37 +808,42 @@ fn pattern_and_zone_metrics_are_exported_presented_and_statused() {
     let report = analyze(&events, population, partial_zone_system());
 
     let html = fs::read_to_string(report.dir.join("index.html")).unwrap();
-    for (table, section) in [
-        (
-            "activity_patterns.csv",
-            "Per-person activity chains and mode chains",
-        ),
-        (
-            "activity_durations.csv",
-            "Observed activity intervals and censoring",
-        ),
-        ("activity_type_summary.csv", "Activity type totals"),
-        (
-            "activity_pattern_summary.csv",
-            "Pattern totals by status and person zone",
-        ),
-        ("zone_od.csv", "Zone OD by interval and mode"),
-        ("zone_flows.csv", "Zone boundary crossings"),
-        ("zone_summary.csv", "Zone totals"),
-        ("urban_area_summary.csv", "Urban-area summary"),
+    for table in [
+        "activity_patterns.csv",
+        "activity_durations.csv",
+        "activity_type_summary.csv",
+        "activity_pattern_summary.csv",
+        "zone_od.csv",
+        "zone_flows.csv",
+        "zone_summary.csv",
+        "urban_area_summary.csv",
     ] {
         assert!(report.dir.join(table).is_file(), "{table} was not exported");
+        let source = super::visual_report_table(&html, table);
         assert!(
-            html.contains(section),
-            "the report has no {section} section"
+            source["records"].as_u64().unwrap() > 0,
+            "missing records in {table}"
         );
-        assert!(html.contains(table), "the report does not link {table}");
+        assert!(
+            !source["columns"].as_array().unwrap().is_empty(),
+            "missing numeric charts for {table}"
+        );
     }
-    // The rows themselves are embedded, so the metrics are readable and not only exported.
-    assert!(html.contains("person_id,person_zone,status"), "{html}");
-    assert!(html.contains("origin_zone,destination_zone"), "{html}");
+    // The metrics are readable as all-record summaries; raw person and OD rows stay outside HTML.
+    for table in [
+        "activity_patterns.csv",
+        "activity_durations.csv",
+        "zone_od.csv",
+    ] {
+        assert!(
+            super::visual_report_table(&html, table)["rows"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
     // The report says which zone system produced the zones, and what censoring means.
-    assert!(html.contains("Zone system: berlin-2018"), "{html}");
+    assert!(html.contains("\"zone_name\":\"berlin-2018\""), "{html}");
     assert!(html.contains("left-censored"), "{html}");
     assert!(html.contains("right-censored"), "{html}");
 

@@ -299,7 +299,14 @@ impl Garage {
             pce: veh_type.pce,
         };
 
-        self.add_veh(vehicle);
+        self.add_veh(vehicle.clone());
+
+        let bare_id = Id::create(person_id.external());
+        if type_id.external() == "car" {
+            let mut bare_vehicle = vehicle;
+            bare_vehicle.id = bare_id.clone();
+            self.vehicles.insert(bare_id, bare_vehicle);
+        }
     }
 
     pub fn add_veh(&mut self, veh: InternalVehicle) {
@@ -325,6 +332,17 @@ impl Garage {
         let vehicle = self
             .vehicles
             .get(&id)
+            .or_else(|| {
+                let car_id = Id::get_from_ext(&format!("{}_car", id.external()));
+                self.vehicles.get(&car_id)
+            })
+            .or_else(|| {
+                let ext = id.external();
+                ext.rfind('_').and_then(|idx| {
+                    let bare_id = Id::get_from_ext(&ext[..idx]);
+                    self.vehicles.get(&bare_id)
+                })
+            })
             .unwrap_or_else(|| {
                 panic!("Can't unpark vehicle with id {id}. It was not parked in this garage.")
             })
@@ -446,13 +464,17 @@ mod tests {
         let person_id = Id::create("person");
         garage.add_veh_by_type(&person_id, &type_id);
         let vehicle_id = garage.veh_id(&person_id, &type_id);
+        let vehicles_before = garage.vehicles.len();
         let garage = Arc::new(garage);
         let agent = SimulationAgent::new_plan_based(person("person"));
 
         let vehicle = garage.unpark_veh(agent, vehicle_id);
 
+        // Unparking hands out the typed id, even though the car is also catalogued under the
+        // bare person id so that plans referencing either resolve.
         assert_eq!("person_car", vehicle.id().external());
-        assert_eq!(1, garage.vehicles.len());
+        assert!(garage.vehicles.contains_key(&Id::get_from_ext("person")));
+        assert_eq!(vehicles_before, garage.vehicles.len());
     }
 
     #[deterministic_id_test]

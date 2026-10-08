@@ -133,8 +133,8 @@ pub(crate) fn create_registrations(
     let experienced_plans = ExperiencedPlansCollection::default();
     let callback_experienced_plans = experienced_plans.clone();
     let controller_registration = Box::new(move |events: &mut ControllerEventsManager| {
-        events.on_event(move |event| match &event.payload {
-            ControllerEvent::AfterMobsim(_) => {
+        events.on_event(move |event| {
+            if let ControllerEvent::AfterMobsim(_) = &event.payload {
                 let mut populations_by_rank: IntMap<
                     QSimId,
                     IntMap<Id<InternalPerson>, PersonExperience>,
@@ -177,7 +177,6 @@ pub(crate) fn create_registrations(
                     .collect();
                 callback_experienced_plans.store(event.meta.iteration, plans);
             }
-            _ => {}
         });
     });
 

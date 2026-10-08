@@ -54,6 +54,13 @@ impl ActivityEngine {
         let now = now.into();
         let now_time = self.clock.tick_to_time(now);
         for mut agent in agents {
+            // Every agent reaching the activity engine has left a leg. A stranded one had its
+            // vehicle removed, so its leg is abandoned rather than completed: it has already been
+            // reported as `stuckAndAbort` and will never produce an arrival or a `travelled`
+            // event. Clearing the flag resumes the agent's plan at its next activity, which is
+            // where MATSim places a passenger whose vehicle was removed, and keeps the agent from
+            // being reported as permanently stuck afterwards.
+            agent.clear_stuck();
             agent.advance_plan(now_time);
             self.receive_agent(now, AsleepSimulationAgent::build(agent, now_time));
         }
@@ -290,6 +297,7 @@ mod tests {
     };
     use crate::simulation::Identifiable;
     use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::SimulationAgentState;
     use crate::simulation::agents::agent::SimulationAgent;
     use crate::simulation::config::Config;
     use crate::simulation::controller::{
@@ -399,6 +407,66 @@ mod tests {
         let agents = engine.drain();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].id(), &person_id);
+    }
+
+    #[deterministic_id_test]
+    fn stranded_agent_resumes_at_its_next_activity_and_runs_its_next_leg() {
+        let mut agent = SimulationAgent::new_plan_based(InternalPerson::new(
+            Id::create("stranded-person"),
+            create_two_leg_plan(),
+        ));
+        agent.advance_plan(SimTime::from_secs(10));
+        assert_eq!(agent.state(), SimulationAgentState::LEG);
+        agent.mark_stuck();
+
+        let mut engine = create_engine(vec![], Default::default());
+
+        // The stranded agent is picked up and started on its next activity rather than dropped,
+        // so it is asleep rather than handed straight back out, and it is no longer reported as
+        // stuck.
+        assert!(engine.do_step(11, vec![agent]).is_empty());
+        let drained = engine.drain();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].state(), SimulationAgentState::ACTIVITY);
+    }
+
+    #[deterministic_id_test]
+    fn stranded_agent_resumes_and_then_runs_its_next_leg() {
+        let mut agent = SimulationAgent::new_plan_based(InternalPerson::new(
+            Id::create("stranded-then-leg"),
+            create_two_leg_plan(),
+        ));
+        agent.advance_plan(SimTime::from_secs(10));
+        agent.mark_stuck();
+
+        let mut engine = create_engine(vec![], Default::default());
+        assert!(engine.do_step(11, vec![agent]).is_empty());
+
+        // Having resumed, it ends that activity and is handed on for the leg after the one it
+        // was stranded on. The leg engine, not this engine, advances it onto that leg.
+        let agents = engine.do_step(21, vec![]);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].state(), SimulationAgentState::ACTIVITY);
+        assert!(agents[0].next_leg().is_some());
+    }
+
+    #[deterministic_id_test]
+    fn stranded_agent_on_its_final_leg_still_performs_its_final_activity() {
+        let mut agent = SimulationAgent::new_plan_based(InternalPerson::new(
+            Id::create("last-leg"),
+            create_plan(),
+        ));
+        agent.advance_plan(SimTime::from_secs(10));
+        agent.mark_stuck();
+
+        let mut engine = create_engine(vec![], Default::default());
+
+        // A plan always ends with an activity, so a stranded agent on its final leg still
+        // resumes: it goes on to perform the activity it was heading for.
+        assert!(engine.do_step(11, vec![agent]).is_empty());
+        let drained = engine.drain();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].state(), SimulationAgentState::ACTIVITY);
     }
 
     #[deterministic_id_test]
@@ -546,6 +614,34 @@ mod tests {
         comp_env: ThreadLocalComputationalEnvironment,
     ) -> ActivityEngine {
         ActivityEngineBuilder::new(agents, &Config::default(), comp_env).build()
+    }
+
+    /// A plan with a leg after the leg an agent can get stranded on, so that resuming has
+    /// somewhere to resume to.
+    fn create_two_leg_plan() -> InternalPlan {
+        let mut plan = create_plan();
+        plan.add_leg(InternalLeg::new(
+            InternalRoute::Generic(InternalGenericRoute::new(
+                Id::create("end"),
+                Id::create("home-again"),
+                None,
+                None,
+                None,
+            )),
+            "mode",
+            "mode",
+            Duration::from_secs(1),
+            Some(SimTime::from_secs(2)),
+        ));
+        plan.add_act(InternalActivity::new(
+            Some(Coordinate::default()),
+            "home",
+            Id::create("home-again"),
+            None,
+            None,
+            Some(Duration::from_secs(10)),
+        ));
+        plan
     }
 
     fn create_plan() -> InternalPlan {

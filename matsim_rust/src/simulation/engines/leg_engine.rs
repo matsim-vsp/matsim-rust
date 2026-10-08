@@ -127,7 +127,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         }
 
         self.network_engine.move_nodes(now);
-        let (network_vehicles, alighted_passengers) = self
+        let (network_vehicles, alighted_passengers, stranded_agents) = self
             .network_engine
             .move_links(now, &mut self.net_message_broker);
 
@@ -194,6 +194,10 @@ impl<C: SimCommunicator> LegEngine<C> {
             }
         }
         agents.extend(self.publish_teleported_end_events(now, teleported_vehicles));
+        // A stranded agent has already been reported as `stuckAndAbort`, so it is passed on
+        // without an arrival, a `PersonLeavesVehicle`, or a `PersonEntersVehicle`: its leg was
+        // abandoned, not completed. The activity engine resumes it at its next activity.
+        agents.extend(stranded_agents);
         agents
     }
 

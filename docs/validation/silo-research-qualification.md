@@ -56,6 +56,20 @@ Rust and Java encode transit link movement differently, so total link-entry coun
 
 The first stuck-removal run exposed a second defect: aborted agents were omitted from the population returned for scoring, causing a population-size assertion after QSim. The fix retains aborted agents as terminal `STUCK` agents, preserving their partial plans for scoring while avoiding a duplicate end-of-day stuck event. The corrected standalone 1% QSim completed scoring and wrote events/plans under `BKK_CASE/scenOutput/VMV_BAU_1pct_matsimrs_routing_stuck_abort_retained`. The earlier failed output is preserved under `..._stuck_abort`.
 
+### Stranded agents are now resumed, not terminal
+
+Treating a stranded agent as terminal turned out to be a second defect, and the largest one in this pair. It kept the population size correct but ended the agent's day on the spot, so every remaining leg of its plan was never attempted.
+
+Measured on the same 1% export as the table above: the two engines agree within 1% on per-hour departures through hour 04, after which the Rust curve falls to 50-58% of Java's and never recovers — 251,893 legs that Java executes and Rust does not. Rust strands *fewer* agents than Java (72,207 versus 88,876 `stuckAndAbort` events) while executing far fewer legs, which is the contradiction that identifies the cause rather than congestion. Of the distinct persons who strand, 29.1% emit any later event in Java and 2.94% in Rust.
+
+The cause was a missing path. `RemoveStuck` marked the agent and parked it in `SimNetwork::stuck_agents`; that vector was drained only after the day loop exited, and `Simulation::emit_stuck_events` returned `None` for `STUCK`, so no stranded agent was ever re-queued.
+
+A stranded agent now abandons its leg and resumes its plan at the next activity. The leg is not completed: no arrival, no `travelled` event, no `PersonLeavesVehicle`, and the `stuckAndAbort` event already published stands as the record of the failure. A plan always ends with an activity, so an agent stranded on its final leg still performs that final activity rather than being dropped; the activity engine's existing end-of-activity routing accounts for it as a completed agent. `SimNetwork::move_links` now returns stranded agents in the per-step result instead of withholding them until `drain`.
+
+This supersedes the terminal-`STUCK` decision above. The invariant it must keep is the population-size one that fix was introduced for: no stranded agent is dropped from the population, whether it resumes or finishes. `stranded_agent_resumes_at_its_next_activity_and_runs_its_next_leg`, `stranded_agent_resumes_and_then_runs_its_next_leg`, and `stranded_agent_on_its_final_leg_still_performs_its_final_activity` in `activity_engine` cover it.
+
+The comparison above predates this change and has not been re-measured.
+
 ## Qualification gates
 
 1. **Integration operation — passed for the fixed 1% run:** SILO reached `Finished SILO`; Rust QSim completed; its route service remained available through reporting; routing success and fallback counts were recorded.

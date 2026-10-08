@@ -40,14 +40,14 @@ impl NetworkSpatialIndex {
             GeomWithData::new(Line::new([from.x, from.y], [to.x, to.y]), link.id.clone())
         };
 
-        let all_links = RTree::bulk_load(links.iter().map(|link| to_indexed(*link)).collect());
+        let all_links = RTree::bulk_load(links.iter().map(|link| to_indexed(link)).collect());
         let links_by_mode = modes
             .iter()
             .map(|mode| {
                 let mode_links = links
                     .iter()
                     .filter(|link| link.modes.contains(mode))
-                    .map(|link| to_indexed(*link))
+                    .map(|link| to_indexed(link))
                     .collect();
                 (mode.clone(), RTree::bulk_load(mode_links))
             })

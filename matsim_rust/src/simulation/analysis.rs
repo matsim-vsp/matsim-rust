@@ -131,14 +131,8 @@ impl std::error::Error for AnalysisError {}
 
 /// Reported category for a link whose label is absent or only whitespace.
 const UNKNOWN: &str = "unknown";
-const PERSON_DEMOGRAPHIC_PREVIEW_ROWS: usize = 200;
 /// Road-type label the coverage map renders as a dashed expressway.
 const EXPRESSWAY: &str = "expressway";
-/// Leg rows embedded in the local report before it defers to the full `legs.csv`.
-const LEGS_PREVIEW_ROWS: usize = 200;
-/// Rows embedded for each per-person or per-cell table. The report says so when a table is
-/// longer, so a reader can tell a short page from a whole one.
-const PATTERN_PREVIEW_ROWS: usize = 500;
 /// Dimensions every accessibility row is grouped by, as the catalog declares them.
 const ACCESSIBILITY_AGGREGATION_KEY: &str =
     "origin_zone,category,mode,departure_period_start_seconds,threshold_seconds";
@@ -833,6 +827,23 @@ pub fn analyze_final_iteration(
     )
 }
 
+/// Refresh only the visual report from a completed run's existing metric exports.
+/// Publishes HTML atomically and leaves every metric, event and metadata file untouched.
+pub fn refresh_completed_report(output_dir: &Path) -> Result<PathBuf, AnalysisError> {
+    let path = output_dir.join(ANALYSIS_DIR);
+    let manifest: Manifest = read_json(&path.join(MANIFEST_FILE))?;
+    if manifest.status != STATUS_COMPLETE {
+        return Err(AnalysisError::new(
+            "cannot render an incomplete analysis report",
+        ));
+    }
+    let statuses: serde_json::Value = read_json(&path.join(MODULE_STATUS_FILE))?;
+    if !statuses.is_array() {
+        return Err(AnalysisError::new("module status must be an array"));
+    }
+    report::refresh_visual_report(&path, &manifest, &statuses)
+}
+
 /// Regenerate the final-iteration report of a completed run from its recorded outputs.
 ///
 /// Only the analysis outputs are rewritten; event files, plans, network and ID store are read but
@@ -1305,7 +1316,7 @@ fn publish_complete(
     let agent_travel = &replayed.agent_travel;
     let link_hourly = link_hourly_metrics(
         ordered_links,
-        &classifications,
+        classifications,
         counts,
         interval,
         simulation_end_time,
@@ -1342,7 +1353,7 @@ fn publish_complete(
         &journey_rows,
         &agent_travel.observed_legs,
         &replayed.planned_days,
-        &classifications,
+        classifications,
         &settings.zone_system,
     );
     activity_pattern::write_activity_tables(&staging, &patterns)?;
@@ -1352,7 +1363,7 @@ fn publish_complete(
         &journey_rows,
         &patterns,
         ordered_links,
-        &classifications,
+        classifications,
         &settings.zone_system,
     )?;
     // Without a supplied zone system there is nothing to resolve locations against, so the
@@ -1417,16 +1428,16 @@ fn publish_complete(
         transit::write_empty_observed(&staging)?;
     }
 
-    write_classification(&staging, ordered_links, &classifications)?;
+    write_classification(&staging, ordered_links, classifications)?;
     write_group_coverage(
         &staging,
         ordered_links,
-        &classifications,
+        classifications,
         counts,
         interval,
         simulation_end_time,
     )?;
-    write_network_map(&staging, ordered_links, network, &classifications, counts)?;
+    write_network_map(&staging, ordered_links, network, classifications, counts)?;
     write_json(&staging.join(RUN_METADATA_FILE), run_metadata)?;
     let mut runtime = run_metadata.runtime.clone().unwrap_or_default();
     runtime.analysis_seconds = Some(analysis_started.elapsed().as_secs_f64());
@@ -5045,24 +5056,24 @@ mod tests {
             .find(|status| status["module"] == "economic_appraisal")
             .unwrap();
         assert_eq!(economic_status["status"], STATUS_COMPLETE);
-        // The local report presents the agent-travel tables, not only the CSVs.
+        // The local report presents agent-travel charts and all-record metrics alongside the CSVs.
         let report_html = fs::read_to_string(output.join("index.html")).unwrap();
         assert!(report_html.contains("<h2>Agent travel</h2>"));
-        assert!(report_html.contains("<h2>Economic appraisal</h2>"));
+        assert!(report_html.contains("Economic appraisal"));
         assert!(report_html.contains("economic_appraisal.csv"));
         assert!(report_html.contains("Operating, investment, and external costs stay separate"));
         assert!(report_html.contains("traveler_utility_money_equivalent"));
-        assert!(report_html.contains("<h2>Modeled emissions</h2>"));
+        assert!(report_html.contains("Modeled emissions"));
         assert!(report_html.contains("emissions-network-map"));
-        assert!(report_html.contains("csvTable('#emissions'"));
+        assert!(report_html.contains("data-family=\"all\""));
         let emissions = fs::read_to_string(output.join("emissions_hourly.csv")).unwrap();
         assert!(emissions.contains("3600,\"CO2\",\"g\",\"passenger_car\""));
-        assert!(report_html.contains("href=\"legs.csv\""));
-        assert!(report_html.contains("travelers,2,5.000000"));
-        assert!(report_html.contains("missed_plan_leg"));
-        // Leg rows are embedded, so the leg-level metric has a presentation and not just a link.
-        assert!(report_html.contains("person_id,leg_index,mode,departure_seconds"));
-        assert!(report_html.contains("stuck_midway"));
+        assert!(report_html.contains("legs.csv"));
+        assert!(report_html.contains("daily_summary.csv"));
+        assert!(!report_html.contains("missed_plan_leg"));
+        // Leg metrics include every record, while person identifiers stay in the separate CSV.
+        assert!(report_html.contains("Minimum, row mean and maximum"));
+        assert!(!report_html.contains("stuck_midway"));
         let statuses: serde_json::Value = read_json(&output.join("module_status.json")).unwrap();
         let emissions_status = statuses
             .as_array()
@@ -5147,7 +5158,7 @@ mod tests {
         assert!(summary.contains("r1,0,3600,exposure,dB,42,energy_mean,,noise_map_0.svg"));
         assert!(output.join("noise_map_0.svg").is_file());
         let html = fs::read_to_string(&report).unwrap();
-        assert!(html.contains("id=\"noise-maps\""));
+        assert!(html.contains("noise-maps"));
         assert!(html.contains("noise_map_0.svg"));
         let statuses: serde_json::Value = read_json(&output.join(MODULE_STATUS_FILE)).unwrap();
         assert!(

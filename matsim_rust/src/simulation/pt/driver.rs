@@ -388,7 +388,12 @@ impl SimulationAgentLogic for TransitDriver {
     }
 
     fn next_act(&self) -> &InternalActivity {
-        let next = self.curr_element + if self.curr_element % 2 == 0 { 2 } else { 1 };
+        let next = self.curr_element
+            + if self.curr_element.is_multiple_of(2) {
+                2
+            } else {
+                1
+            };
         self.elements[next].as_activity().unwrap()
     }
 
@@ -397,7 +402,12 @@ impl SimulationAgentLogic for TransitDriver {
     }
 
     fn next_leg(&self) -> Option<&InternalLeg> {
-        let next = self.curr_element + if self.curr_element % 2 == 0 { 1 } else { 2 };
+        let next = self.curr_element
+            + if self.curr_element.is_multiple_of(2) {
+                1
+            } else {
+                2
+            };
         self.elements
             .get(next)
             .and_then(InternalPlanElement::as_leg)

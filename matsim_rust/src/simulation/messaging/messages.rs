@@ -59,7 +59,7 @@ impl TeleportationMessage {
     }
 
     pub(crate) fn take_attachments(&mut self) -> PartitionChangeAttachments {
-        std::mem::replace(&mut self.attachments, PartitionChangeAttachments::default())
+        std::mem::take(&mut self.attachments)
     }
 }
 

@@ -83,20 +83,20 @@ impl PartialPlan {
     }
 
     pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
-        if let Some(_) = event.as_any().downcast_ref::<PersonStuckEvent>() {
+        if event.as_any().is::<PersonStuckEvent>() {
             self.handle_stuck();
             return;
         }
-        if let Some(_) = event.as_any().downcast_ref::<PersonDepartureEvent>() {
+        if event.as_any().is::<PersonDepartureEvent>() {
             self.handle_person_departure();
-        } else if let Some(_) = event.as_any().downcast_ref::<ActivityStartEvent>() {
+        } else if event.as_any().is::<ActivityStartEvent>() {
             self.handle_activity_start();
         }
 
-        if self.current_leg.is_some() {
-            self.current_leg.as_mut().unwrap().handle_event(event);
-        } else if self.current_activity.is_some() {
-            self.current_activity.as_mut().unwrap().handle_event(event);
+        if let Some(leg) = self.current_leg.as_mut() {
+            leg.handle_event(event);
+        } else if let Some(activity) = self.current_activity.as_mut() {
+            activity.handle_event(event);
         } else {
             panic!(
                 "Tried to handle an event with neither leg nor activity being initialized! Event type: {}",
@@ -104,9 +104,9 @@ impl PartialPlan {
             )
         }
 
-        if let Some(_) = event.as_any().downcast_ref::<PersonArrivalEvent>() {
+        if event.as_any().is::<PersonArrivalEvent>() {
             self.handle_person_arrival();
-        } else if let Some(_) = event.as_any().downcast_ref::<ActivityEndEvent>() {
+        } else if event.as_any().is::<ActivityEndEvent>() {
             self.handle_activity_end();
         }
     }
@@ -131,6 +131,7 @@ impl PartialPlan {
     }
 }
 
+#[derive(Default)]
 struct PartialActivity {
     pub act_type: Option<Id<String>>,
     pub link_id: Option<Id<Link>>,
@@ -138,19 +139,6 @@ struct PartialActivity {
     pub start_time: Option<SimTime>,
     pub end_time: Option<SimTime>,
     pub aborted: bool,
-}
-
-impl Default for PartialActivity {
-    fn default() -> Self {
-        Self {
-            act_type: None,
-            link_id: None,
-            coordinate: None,
-            start_time: None,
-            end_time: None,
-            aborted: false,
-        }
-    }
 }
 
 impl PartialActivity {
@@ -200,24 +188,13 @@ impl PartialActivity {
     }
 }
 
+#[derive(Default)]
 struct PartialLeg {
     pub mode: Option<Id<String>>,
     pub routing_mode: Option<Id<String>>,
     pub dep_time: Option<SimTime>,
     pub trav_time: Option<Duration>,
     pub partial_route: PartialRoute,
-}
-
-impl Default for PartialLeg {
-    fn default() -> Self {
-        Self {
-            mode: None,
-            routing_mode: None,
-            dep_time: None,
-            trav_time: None,
-            partial_route: PartialRoute::default(),
-        }
-    }
 }
 
 impl PartialLeg {
@@ -280,6 +257,7 @@ enum PartialRouteTypes {
     Pt,
 }
 
+#[derive(Default)]
 struct PartialRoute {
     route_type: Option<PartialRouteTypes>,
 
@@ -301,26 +279,6 @@ struct PartialRoute {
 
     // Network Route Type
     route: Vec<Id<Link>>, // LinkEnter events contain links entered after the departure link.
-}
-
-impl Default for PartialRoute {
-    fn default() -> Self {
-        Self {
-            route_type: None,
-            start_link: None,
-            end_link: None,
-            start_time: None,
-            end_time: None,
-            distance: None,
-            vehicle: None,
-            pt_description: None,
-            pt_stops: None,
-            boarding_time: None,
-            relative_position_on_departure_link: None,
-            relative_position_on_arrival_link: None,
-            route: Vec::default(),
-        }
-    }
 }
 
 impl PartialRoute {

@@ -111,7 +111,7 @@ An empty experienced plan receives zero points from either built-in scorer.
 `simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
 `analyze_final_iteration` once, which replays the final iteration's event partitions in
 chronological order and publishes per-interval link-volume, link-speed, link-classification and
-agent-travel tables plus a self-contained HTML report under `<output_dir>/analysis`. The interval
+agent-travel tables plus an offline visual HTML report with separate SVG assets under `<output_dir>/analysis`. The interval
 width comes from
 `output.analysis.interval_seconds` (3600 by default), so the tables are hourly unless configured
 otherwise. Inputs that cannot be recovered from the event files -- the final-iteration
@@ -210,8 +210,8 @@ the table that exports it.
 
 `simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
 `analyze_final_iteration` once, which replays the final iteration's event partitions in
-chronological order and publishes per-interval link-volume and coverage tables plus a
-self-contained HTML report under `<output_dir>/analysis`. The interval width comes from
+chronological order and publishes per-interval link-volume and coverage tables plus an
+offline visual HTML report with separate SVG assets under `<output_dir>/analysis`. The interval width comes from
 `output.analysis.interval_seconds` (3600 by default), so the tables are hourly unless configured
 otherwise. Inputs that cannot be recovered from the event files -- the final-iteration
 expected-travel snapshot and the vehicle/PCE catalog -- are moved into a compact

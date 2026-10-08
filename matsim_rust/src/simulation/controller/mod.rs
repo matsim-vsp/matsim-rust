@@ -656,7 +656,7 @@ impl ScoringPool {
 
     pub(crate) fn score_population(
         &self,
-        experienced_plans: &mut Vec<PersonExperiences>,
+        experienced_plans: &mut [PersonExperiences],
         population: &mut Population,
     ) {
         match &self.pool {
@@ -773,7 +773,7 @@ impl IterationEventsWriter {
     }
 
     fn should_write(&self, iteration: u32) -> bool {
-        iteration == self.last_iteration || iteration % self.write_events_interval == 0
+        iteration == self.last_iteration || iteration.is_multiple_of(self.write_events_interval)
     }
 
     fn on_any(&self, event: &dyn EventTrait) {

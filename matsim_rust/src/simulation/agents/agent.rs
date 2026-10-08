@@ -49,6 +49,12 @@ impl SimulationAgent {
         self.stuck = true;
     }
 
+    /// Clears the stranded flag once the agent has been resumed, so that later state checks
+    /// report the activity it is performing rather than a permanent `STUCK`.
+    pub(crate) fn clear_stuck(&mut self) {
+        self.stuck = false;
+    }
+
     pub fn into_person(self) -> Option<InternalPerson> {
         self.logic.into_person()
     }
