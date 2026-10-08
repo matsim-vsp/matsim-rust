@@ -70,7 +70,9 @@ module verifies iteration and rank and merges the populations deterministically 
 scores each reconstructed experienced plan and copies the result to exactly the selected original plan. Experienced
 plans receive the same score and are written only when `scoring.write_experienced_plans` and the configured plan
 writing interval allow it. Collection and scoring always run, even when experienced-plan output is disabled, so
-replanning can consume the updated selected-plan scores. Backpacks do not return to an initial or "home" partition.
+replanning can consume the updated selected-plan scores. The only exception is `scoring.mode: Disabled`: the controller
+then registers no backpacking engines, collects no experienced plans, and sets the score of each selected plan to
+`None`. Backpacks do not return to an initial or "home" partition.
 Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.

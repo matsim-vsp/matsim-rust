@@ -800,15 +800,25 @@ impl Default for Replanning {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Scoring {
+    pub mode: ScoringMode,
     pub write_experienced_plans: bool,
     pub activity_params: Vec<ActivityParameter>,
     pub mode_params: Vec<ModeParameter>,
     pub agent_params: Vec<AgentParameter>,
 }
 
+/// `Disabled` skips backpacking and scoring entirely. Selected plans then receive no score.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+pub enum ScoringMode {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
 impl Default for Scoring {
     fn default() -> Self {
         Self {
+            mode: ScoringMode::Enabled,
             write_experienced_plans: true,
             activity_params: vec![
                 ActivityParameter::default_for_activity_type("home"),
@@ -828,6 +838,14 @@ impl Default for Scoring {
         }
     }
 }
+
+register_override!("scoring.mode", |config, value| {
+    config.scoring_mut().mode = match value.to_lowercase().as_str() {
+        "enabled" => ScoringMode::Enabled,
+        "disabled" => ScoringMode::Disabled,
+        _ => panic!("Invalid scoring mode: {}", value),
+    };
+});
 
 register_override!("scoring.write_experienced_plans", |config, value| {
     config.scoring_mut().write_experienced_plans = value.parse().unwrap();
@@ -1561,7 +1579,7 @@ mod tests {
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
         Config, Controller, EdgeWeight, MetisOptions, ModeParameter, PartitionMethod, Partitioning,
-        QSim, Replanning, Routing, Scoring, StrategySetting, TeleportedParams,
+        QSim, Replanning, Routing, Scoring, ScoringMode, StrategySetting, TeleportedParams,
         TravelTimeCalculator, VertexWeight, parse_key_val,
     };
     use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
@@ -1899,6 +1917,7 @@ mod tests {
         modules:
           scoring:
             type: Scoring
+            mode: Disabled
             write_experienced_plans: true
             activity_params:
               - activity_type: home
@@ -1923,6 +1942,7 @@ mod tests {
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         let expected = Scoring {
+            mode: ScoringMode::Disabled,
             write_experienced_plans: true,
             activity_params: vec![ActivityParameter {
                 activity_type: "home".to_string(),
@@ -2489,6 +2509,16 @@ modules:
         )]);
 
         assert!(!config.scoring().write_experienced_plans);
+    }
+
+    #[test]
+    fn override_scoring_mode() {
+        let mut config = base_config();
+        assert_eq!(config.scoring().mode, ScoringMode::Enabled);
+
+        config.apply_overrides(&[("scoring.mode".to_string(), "disabled".to_string())]);
+
+        assert_eq!(config.scoring().mode, ScoringMode::Disabled);
     }
 
     #[test]

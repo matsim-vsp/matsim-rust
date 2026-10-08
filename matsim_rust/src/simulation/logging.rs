@@ -38,10 +38,19 @@ pub fn init_std_out_logging_thread_local() -> DefaultGuard {
 }
 
 pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
-    let file_discriminant = part.to_string();
+    init_logging_for(config, &part.to_string(), part == 0)
+}
+
+/// Logging is thread-local. The controller thread runs scoring and replanning, so it needs its own
+/// subscriber to write their spans into the instrument files.
+pub(crate) fn init_controller_logging(config: &Config) -> LogGuards {
+    init_logging_for(config, "controller", true)
+}
+
+fn init_logging_for(config: &Config, file_discriminant: &str, primary: bool) -> LogGuards {
     let dir = resolve_path(config.context(), &config.output().output_dir);
 
-    let csv_layers = init_tracing(config, part, &file_discriminant, &dir);
+    let csv_layers = init_tracing(config, primary, file_discriminant, &dir);
     let (log_layer, log_guard) = if Logging::Info == config.output().logging {
         let log_file_name = format!("logs/log_process_{file_discriminant}.txt");
         let log_file_appender = rolling::never(&dir, log_file_name);
@@ -56,7 +65,7 @@ pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
         (None, None)
     };
 
-    let console_layer = (part == 0).then(|| {
+    let console_layer = primary.then(|| {
         fmt::layer()
             .with_writer(io::stdout)
             .with_span_events(FmtSpan::CLOSE)
@@ -84,10 +93,10 @@ pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
     }
 }
 
-fn init_tracing(config: &Config, part: u32, file_discriminant: &String, dir: &Path) -> FileLayers {
+fn init_tracing(config: &Config, primary: bool, file_discriminant: &str, dir: &Path) -> FileLayers {
     // if we set profiling at all and if profiling is set to level trace, then each process creates an instrumenting file
-    // if profiling level is set to INFO, only process 0 creates an instrument file. This is important if we run on a lot of
-    // processes, because then we spent a lot of computing time on creating instrument files for each process.
+    // if profiling level is set to INFO, only process 0 and the controller create an instrument file. This is important if we run on a lot of
+    // processes, because then we spend a lot of computing time on creating instrument files for each process.
     let instrument_dir = dir.join("instrument");
     let duration_file_name = format!("instrument_process_{file_discriminant}");
     let mut duration_path = instrument_dir.join(duration_file_name);
@@ -98,7 +107,7 @@ fn init_tracing(config: &Config, part: u32, file_discriminant: &String, dir: &Pa
     match &config.output().profiling {
         Profiling::CSV(level_string) => {
             let level = level_string.create_tracing_level();
-            if level.eq(&Level::INFO) && part == 0 || level.eq(&Level::TRACE) {
+            if level.eq(&Level::INFO) && primary || level.eq(&Level::TRACE) {
                 duration_path.set_extension("csv");
                 routing_path.set_extension("csv");
                 let (general, general_guard) = SpanDurationToFileLayer::new_csv(&duration_path);
@@ -117,7 +126,7 @@ fn init_tracing(config: &Config, part: u32, file_discriminant: &String, dir: &Pa
         }
         Profiling::Parquet(p) => {
             let level = p.create_tracing_level();
-            if level.eq(&Level::INFO) && part == 0 || level.eq(&Level::TRACE) {
+            if level.eq(&Level::INFO) && primary || level.eq(&Level::TRACE) {
                 duration_path.set_extension("parquet");
                 routing_path.set_extension("parquet");
                 let (general, general_guard) =

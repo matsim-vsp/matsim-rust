@@ -1,5 +1,7 @@
 use crate::external_services::AdapterHandle;
-use crate::simulation::config::{Config, Logging, OverwriteFiles, WriteEvents, write_config};
+use crate::simulation::config::{
+    Config, Logging, OverwriteFiles, ScoringMode, WriteEvents, write_config,
+};
 use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
     ScoringPool, create_output_filename,
@@ -27,7 +29,7 @@ use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
 use crate::simulation::scoring::{PersonExperiences, PlanScorer};
-use crate::simulation::{id, io};
+use crate::simulation::{id, io, logging};
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
 use itertools::Itertools;
@@ -116,15 +118,21 @@ impl ControllerBuilder {
         let scenario: ControllerScenario = self.scenario.into();
         let config = scenario.core.config.clone();
 
-        let (worker_registrations, controller_registration, experienced_plans) =
-            scoring::create_registrations(&scenario);
-        for (rank, registrations) in worker_registrations {
-            self.worker_listener_register_fn
-                .entry(rank)
-                .or_default()
-                .extend(registrations);
-        }
-        controller_registration(&mut controller_event_manager);
+        // Without scoring, no backpacking engines are registered and no experienced plans are collected.
+        let experienced_plans = if config.scoring().mode == ScoringMode::Enabled {
+            let (worker_registrations, controller_registration, experienced_plans) =
+                scoring::create_registrations(&scenario);
+            for (rank, registrations) in worker_registrations {
+                self.worker_listener_register_fn
+                    .entry(rank)
+                    .or_default()
+                    .extend(registrations);
+            }
+            controller_registration(&mut controller_event_manager);
+            experienced_plans
+        } else {
+            scoring::ExperiencedPlansCollection::default()
+        };
 
         let global_ttc = Arc::new(GlobalTravelTimeCalculator::new(
             num_parts as usize,
@@ -312,6 +320,9 @@ impl Controller {
             fs::create_dir_all(&log_path).expect("Failed to create logs output path");
         }
 
+        // Initialized after the output directory is prepared, so the controller files are not deleted.
+        let _log_guards = logging::init_controller_logging(&self.config);
+
         let mut mobsim_workers = self.start_mobsim_workers();
         let scoring_pool = ScoringPool::new(&self.scenario.core, self.scoring_function.take());
         let replanning_pool = ReplanningPool::new(&self.scenario.core, self.trip_router.clone());
@@ -419,6 +430,7 @@ impl Controller {
         Population::from_agents(agents)
     }
 
+    #[tracing::instrument(level = "info", skip_all, fields(iteration = iteration))]
     fn run_scoring_phase(
         &mut self,
         iteration: u32,
@@ -430,6 +442,14 @@ impl Controller {
 
         self.controller_events_manager
             .process_event(ControllerEvent::scoring(is_last_iteration));
+
+        if self.config.scoring().mode == ScoringMode::Disabled {
+            info!("Scoring is disabled. Selected plans receive no score in iteration {iteration}");
+            for person in population.persons.values_mut() {
+                person.selected_plan_mut().score = None;
+            }
+            return population;
+        }
 
         let mut experienced_plans = self.experienced_plan_collection.take(iteration);
         assert_eq!(
@@ -466,6 +486,7 @@ impl Controller {
         population
     }
 
+    #[tracing::instrument(level = "info", skip_all, fields(iteration = iteration))]
     fn run_replanning_phase(
         &mut self,
         iteration: u32,
