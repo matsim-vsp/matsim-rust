@@ -1,6 +1,7 @@
 use crate::simulation::InternalAttributes;
 use crate::simulation::config::{
-    ModalLinkSelection, TransitRangeQuerySettings, TransitRouteSelectorSettings,
+    ModalLinkSelection, TransferConstruction, TransitRangeQuerySettings,
+    TransitRouteSelectorSettings,
 };
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
@@ -23,7 +24,7 @@ use std::collections::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -449,6 +450,8 @@ pub struct TransitRoutingModule {
     walk_distance_factor: f64,
     garage: Arc<Garage>,
     fallback: Option<Arc<dyn RoutingModule>>,
+    transfer_construction: TransferConstruction,
+    transfer_cache: RwLock<HashMap<Id<TransitStopFacility>, Vec<(Id<TransitStopFacility>, f64)>>>,
     /// Let a request that carries no person fall back to the car router. That is the legacy
     /// behaviour SILO's zone-to-zone queries rely on; it is an application policy, not a
     /// passenger one, so it stays off unless a config asks for it. See `with_personless_fallback`.
@@ -840,6 +843,24 @@ impl TransitRoutingModule {
         garage: Arc<Garage>,
         fallback: Option<Arc<dyn RoutingModule>>,
     ) -> Self {
+        Self::new_with_transfer_construction(
+            schedule,
+            walk_speed,
+            walk_distance_factor,
+            garage,
+            fallback,
+            TransferConstruction::default(),
+        )
+    }
+
+    pub(crate) fn new_with_transfer_construction(
+        schedule: Arc<TransitSchedule>,
+        walk_speed: f64,
+        walk_distance_factor: f64,
+        garage: Arc<Garage>,
+        fallback: Option<Arc<dyn RoutingModule>>,
+        transfer_construction: TransferConstruction,
+    ) -> Self {
         let mut stops_by_cell: HashMap<(i32, i32), Vec<Id<TransitStopFacility>>> = HashMap::new();
         for facility in schedule.facilities().values() {
             stops_by_cell
@@ -884,7 +905,7 @@ impl TransitRoutingModule {
         // before any of them route concurrently.
         Id::<String>::create(Self::WALK_MODE);
         Id::<String>::create(Self::INTERACTION);
-        Self {
+        let router = Self {
             mode: Id::create("pt"),
             schedule,
             stops_by_cell,
@@ -894,6 +915,8 @@ impl TransitRoutingModule {
             walk_distance_factor,
             garage,
             fallback,
+            transfer_construction,
+            transfer_cache: RwLock::new(HashMap::new()),
             personless_fallback: false,
             passenger_modes: std::collections::BTreeMap::new(),
             use_passenger_mode_mapping: false,
@@ -903,7 +926,17 @@ impl TransitRoutingModule {
             range_query_settings: Vec::new(),
             route_selector_settings: vec![TransitRouteSelectorSettings::default()],
             random_seed: crate::simulation::config::DEFAULT_RANDOM_SEED,
+        };
+        if transfer_construction == TransferConstruction::Initial {
+            let mut cache = router.transfer_cache.write().unwrap();
+            for stop_id in router.routes_by_stop.keys() {
+                cache.insert(
+                    stop_id.clone(),
+                    router.calculate_nearby_transfer_stops(stop_id),
+                );
+            }
         }
+        router
     }
 
     pub fn new_for_skim(
@@ -1120,6 +1153,28 @@ impl TransitRoutingModule {
     }
 
     fn nearby_transfer_stops(
+        &self,
+        stop_id: &Id<TransitStopFacility>,
+    ) -> Vec<(Id<TransitStopFacility>, f64)> {
+        match self.transfer_construction {
+            TransferConstruction::Initial => self.transfer_cache.read().unwrap()[stop_id].clone(),
+            TransferConstruction::Adaptive => {
+                if let Some(candidates) = self.transfer_cache.read().unwrap().get(stop_id) {
+                    return candidates.clone();
+                }
+                let candidates = self.calculate_nearby_transfer_stops(stop_id);
+                self.transfer_cache
+                    .write()
+                    .unwrap()
+                    .entry(stop_id.clone())
+                    .or_insert(candidates)
+                    .clone()
+            }
+            TransferConstruction::Online => self.calculate_nearby_transfer_stops(stop_id),
+        }
+    }
+
+    fn calculate_nearby_transfer_stops(
         &self,
         stop_id: &Id<TransitStopFacility>,
     ) -> Vec<(Id<TransitStopFacility>, f64)> {
@@ -1719,6 +1774,7 @@ mod route_proposal_tests {
         transit_path_tiebreak,
     };
     use crate::simulation::InternalAttributes;
+    use crate::simulation::config::TransferConstruction;
     use crate::simulation::config::{TransitRangeQuerySettings, TransitRouteSelectorSettings};
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
@@ -1777,6 +1833,29 @@ mod route_proposal_tests {
             1.0,
             Arc::new(Garage::default()),
             None,
+        )
+    }
+
+    fn transfer_construction_modes() -> [TransferConstruction; 3] {
+        [
+            TransferConstruction::Initial,
+            TransferConstruction::Adaptive,
+            TransferConstruction::Online,
+        ]
+    }
+
+    fn reference_router_with_construction(
+        schedule: TransitSchedule,
+        walk_speed: f64,
+        construction: TransferConstruction,
+    ) -> TransitRoutingModule {
+        TransitRoutingModule::new_with_transfer_construction(
+            Arc::new(schedule),
+            walk_speed,
+            1.3,
+            Arc::new(Garage::default()),
+            None,
+            construction,
         )
     }
 
@@ -1922,22 +2001,22 @@ mod route_proposal_tests {
             vehicle_ref_id: None,
             attributes: InternalAttributes::default(),
         }];
-        let router = TransitRoutingModule::new(
-            Arc::new(schedule.clone()),
-            0.8333333333333334,
-            1.3,
-            Arc::new(Garage::default()),
-            None,
-        );
-        assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
-        assert_eq!(
-            router.transfer_time(&Id::create("rb"), &Id::create("rb"), 0.0),
-            Duration::from_secs(60)
-        );
-        let just_catches = router
-            .find_best_path(&destination, departure, &access, &egress)
-            .unwrap();
-        assert_eq!(just_catches.rides.len(), 2);
+        for construction in transfer_construction_modes() {
+            let router = reference_router_with_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                construction,
+            );
+            assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
+            assert_eq!(
+                router.transfer_time(&Id::create("rb"), &Id::create("rb"), 0.0),
+                Duration::from_secs(60)
+            );
+            let just_catches = router
+                .find_best_path(&destination, departure, &access, &egress)
+                .unwrap();
+            assert_eq!(just_catches.rides.len(), 2);
+        }
 
         schedule
             .lines_mut()
@@ -1948,12 +2027,18 @@ mod route_proposal_tests {
             .unwrap()
             .departures[0]
             .departure_time = SimTime::from_secs(8 * 3600 + 11 * 60 - 1);
-        let router = reference_router(schedule, 0.8333333333333334);
-        assert!(
-            router
-                .find_best_path(&destination, departure, &access, &egress)
-                .is_none()
-        );
+        for construction in transfer_construction_modes() {
+            let router = reference_router_with_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                construction,
+            );
+            assert!(
+                router
+                    .find_best_path(&destination, departure, &access, &egress)
+                    .is_none()
+            );
+        }
     }
 
     #[deterministic_id_test]
@@ -1968,22 +2053,79 @@ mod route_proposal_tests {
             .unwrap()
             .departures
             .clear();
-        let router = reference_router(schedule, 0.8333333333333334);
         let departure = SimTime::from_secs(8 * 3600);
         let access = [(Id::create("ra"), 0.0)];
         let egress = HashSet::from([Id::create("rc")]);
+        for construction in transfer_construction_modes() {
+            let router = reference_router_with_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                construction,
+            );
+            assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
+            assert!(
+                router
+                    .find_best_path(
+                        &Coordinate::new_2d(3950.0, 1050.0),
+                        departure,
+                        &access,
+                        &egress,
+                    )
+                    .is_none()
+            );
+        }
+    }
 
-        assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
-        assert!(
-            router
-                .find_best_path(
-                    &Coordinate::new_2d(3950.0, 1050.0),
-                    departure,
-                    &access,
-                    &egress,
-                )
-                .is_none()
-        );
+    #[deterministic_id_test]
+    fn transfer_construction_modes_select_the_same_unique_itinerary_on_repeated_queries() {
+        let schedule = Arc::new(separate_platform_schedule(2150));
+        let departure = SimTime::from_secs(8 * 3600);
+        let destination = Coordinate::new_2d(3950.0, 1050.0);
+        let access = [(Id::create("ra"), 0.0)];
+        let egress = HashSet::from([Id::create("rc")]);
+        let expected = vec![
+            ("a_to_b".to_string(), "ra".to_string(), "rb".to_string()),
+            (
+                "b_to_c".to_string(),
+                "rb_platform".to_string(),
+                "rc".to_string(),
+            ),
+        ];
+        let mut expected_arrival = None;
+
+        for construction in transfer_construction_modes() {
+            let router = TransitRoutingModule::new_with_transfer_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                1.0,
+                Arc::new(Garage::default()),
+                None,
+                construction,
+            );
+            let path = router
+                .find_best_path(&destination, departure, &access, &egress)
+                .unwrap();
+            assert_eq!(*expected_arrival.get_or_insert(path.arrival), path.arrival);
+            let itinerary = path
+                .rides
+                .iter()
+                .map(|ride| {
+                    (
+                        ride.route.external().to_string(),
+                        ride.board.external().to_string(),
+                        ride.alight.external().to_string(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(itinerary, expected);
+            assert_eq!(
+                router
+                    .find_best_path(&destination, departure, &access, &egress)
+                    .unwrap()
+                    .arrival,
+                path.arrival
+            );
+        }
     }
 
     #[deterministic_id_test]

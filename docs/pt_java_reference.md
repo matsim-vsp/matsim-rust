@@ -111,6 +111,20 @@ repeats the schedule on the next day. MATSim's top-level `TripRouter` falls back
 when no PT route exists; the Rust PT routing module reports no path. The comparison pins the absence
 of a PT service in both results while preserving that existing wrapper difference.
 
+### Transfer construction
+
+`transit.transfer_construction` accepts `initial` (default), `adaptive`, and `online`. Initial builds
+and retains candidates for every used stop at router creation. Adaptive builds candidates on first
+use and retains them in a synchronized cache. Online rebuilds candidates on each query. The three
+modes use the same candidate ordering and transfer rules, so repeated requests select the same
+itinerary; the choice changes when candidate construction and retained memory occur. Initial trades
+up-front work and memory for reuse, Adaptive spreads that work across encountered stops, and Online
+avoids retaining candidate lists.
+
+The pinned MATSim 2026.0 `RaptorTransferCalculation` exposes Initial and Adaptive. Online is a
+Rust extension and has no direct mode-level reference comparison; its route choices are covered by
+the same fixture assertions against the other two modes.
+
 ## Comparison rules
 
 The reference is recorded once and compared many times, so the rules are fixed and stated here
