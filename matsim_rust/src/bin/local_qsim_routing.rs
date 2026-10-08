@@ -19,6 +19,7 @@ struct RoutingCommandLineArgs {
     delegate: matsim_rust::simulation::config::CommandLineArgs,
 }
 
+#[hotpath::main]
 fn main() {
     let _guard = init_std_out_logging_thread_local();
     let args = RoutingCommandLineArgs::parse();

@@ -1,8 +1,9 @@
 use crate::simulation::messaging::messages::{InternalSimMessage, InternalSyncMessage};
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::time::Tick;
+use hotpath::wrap::std::sync::mpsc::{Receiver, Sender};
 use nohash_hasher::{IntMap, IntSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Barrier};
 
 pub struct ChannelSimCommunicator {
@@ -72,7 +73,11 @@ impl ChannelSimCommunicator {
         let barrier = Arc::new(Barrier::new(num_parts as usize));
 
         for rank in 0..num_parts {
-            let (sender, receiver) = channel();
+            // if the feature `hotpath` is deactivated, this is a no-op!
+            let (sender, receiver) = hotpath::channel!(
+                channel::<InternalSimMessage>(),
+                label = "partition-messages"
+            );
             let comm = ChannelSimCommunicator {
                 receiver,
                 senders: vec![],

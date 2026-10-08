@@ -25,6 +25,7 @@ use crate::simulation::simulation::{Simulation, SimulationBuilder};
 use crate::simulation::{io, logging};
 use derive_builder::Builder;
 use derive_more::Debug;
+use hotpath::wrap::std::sync::mpsc::{Receiver as StdReceiver, Sender as StdSender};
 use nohash_hasher::IntMap;
 use std::any::Any;
 use std::cell::{RefCell, RefMut};
@@ -33,7 +34,7 @@ use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::{self, Receiver as StdReceiver, Sender as StdSender};
+use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Sender;
@@ -244,7 +245,10 @@ impl MobsimWorkerPool {
     pub(crate) fn spawn(mut args: MobsimWorkerPoolArguments) -> Self {
         let num_parts = args.scenario_core.config.partitioning().num_parts;
         let comms = ChannelSimCommunicator::create_n_2_n(num_parts);
-        let (result_sender, result_receiver) = mpsc::channel();
+        let (result_sender, result_receiver) = hotpath::channel!(
+            mpsc::channel::<MobsimWorkerResult>(),
+            label = "mobsim-worker-results"
+        );
         let mut command_senders = IntMap::default();
         let mut handles = IntMap::default();
 
@@ -252,7 +256,10 @@ impl MobsimWorkerPool {
         // synchronization. Keep them on dedicated threads; Replanning uses Rayon separately.
         for comm in comms {
             let rank = comm.rank();
-            let (command_sender, command_receiver) = mpsc::channel();
+            let (command_sender, command_receiver) = hotpath::channel!(
+                mpsc::channel::<MobsimWorkerCommand>(),
+                label = "mobsim-worker-commands"
+            );
             let worker_result_sender = result_sender.clone();
             let worker_args = MobsimWorkerArgumentsBuilder::default()
                 .rank(rank)
@@ -284,6 +291,7 @@ impl MobsimWorkerPool {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn run_mobsim(
         &mut self,
         iteration: u32,
@@ -483,6 +491,7 @@ impl MobsimWorker {
         self.comp_env.finish_events();
     }
 
+    #[hotpath::measure]
     fn run_iteration(&mut self, iteration: u32, input: MobsimInput) -> Vec<SimulationAgent> {
         self.comp_env.reset_iteration(iteration);
         assert_eq!(
@@ -569,6 +578,7 @@ impl ReplanningPool {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn replan(
         &self,
         population: Population,
@@ -637,6 +647,7 @@ impl ScoringPool {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn score_population(
         &self,
         experienced_plans: &mut Vec<PersonExperiences>,

@@ -7,12 +7,15 @@ use crate::simulation::events::{
     PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
 };
+use crate::simulation::id::{CreateMissingIds, ExistingIds, IdResolver};
+use crate::simulation::io::batch::BatchPipeline;
+use crate::simulation::io::proto::read_length_delimited;
 use crate::simulation::time::SimTime;
 use prost::Message;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -467,91 +470,127 @@ pub(crate) fn event_to_proto(event: &dyn EventTrait) -> GenericEvent {
     }
 }
 
-pub struct ProtoEventsReader<R: Read + Seek> {
-    reader: BufReader<R>,
+/// Proto events are decoded in batches of about this many bytes. Decoded events need a multiple of
+/// their encoded size, so the batches are smaller than for other inputs.
+///
+/// Test builds use small batches, so that test inputs consist of many batches.
+const EVENT_BATCH_BYTES: usize = if cfg!(test) { 4 * 1024 } else { 1024 * 1024 };
+
+/// Reads the time steps of a proto events file in file order.
+///
+/// The reader reads the input on a separate thread and decodes the time steps in parallel, see
+/// [`BatchPipeline`].
+pub struct ProtoEventsReader {
+    pipeline: BatchPipeline<(SimTime, Vec<GenericEvent>)>,
 }
 
-impl<R: Read + Seek> ProtoEventsReader<R> {
-    pub fn new(reader: R) -> Self {
-        ProtoEventsReader {
-            reader: BufReader::new(reader),
+impl ProtoEventsReader {
+    pub fn new(reader: impl Read + Send + 'static) -> Self {
+        Self {
+            pipeline: time_step_pipeline(reader, decode_time_step),
         }
     }
 
-    fn read_delim(&mut self) -> Option<usize> {
-        // read the delimiter of the message. Prost says delimiter is between 1 and 10 bytes
-        // so, read the first 10 bytes of the buffer
-        let mut delim_buffer: [u8; 10] = [0; 10];
-
-        // this could crash
-        match self.reader.read_exact(&mut delim_buffer) {
-            Ok(_) => {} // go on.
-            Err(e) => match e.kind() {
-                ErrorKind::UnexpectedEof => return None,
-                _ => {
-                    panic!("Error while reading file: {}", e);
-                }
-            },
-        }
-        let delimiter = prost::decode_length_delimiter(delim_buffer.as_slice())
-            .expect("error reading delimiter");
-
-        // since the delimiter is a varint figure out how many bytes the delimiter was actually taking
-        // up in the buffer. Set the buffers position to the first byte after the delimiter, which
-        // should be the start of the TimeStep message
-        let delim_encoded_len = prost::encoding::encoded_len_varint(delimiter as u64) as i64;
-        let offset = delim_encoded_len - (delim_buffer.len() as i64);
-        self.reader
-            .seek_relative(offset)
-            .expect("Seeking relative failed");
-
-        Some(delimiter)
-    }
-
-    fn read_time_step(&mut self, delimiter: usize) -> TimeStep {
-        // allocate a buffer with the message length and read into it
-        let mut msg_buffer: Vec<u8> = vec![0; delimiter];
-        self.reader
-            .read_exact(&mut msg_buffer)
-            .expect("Error reading msg buffer");
-
-        // then decode it.
-        TimeStep::decode(msg_buffer.as_slice()).expect("Could not decode TimeStep message")
-    }
-
-    fn read_events(&mut self, time_step: TimeStep) -> Vec<GenericEvent> {
-        let data_len = time_step.data.len() as u64;
-
-        let mut cursor = Cursor::new(time_step.data);
-        let mut result = Vec::new();
-
-        while cursor.position() < data_len {
-            let event =
-                GenericEvent::decode_length_delimited(&mut cursor).expect("Error decoding event");
-            result.push(event);
-        }
-
-        result
+    pub fn from_file(path: &Path) -> Self {
+        Self::new(open_events_file(path))
     }
 }
 
-impl<R: Read + Seek> Iterator for ProtoEventsReader<R> {
+impl Iterator for ProtoEventsReader {
     type Item = (SimTime, Vec<GenericEvent>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let delimiter = self.read_delim()?;
-        let time_step = self.read_time_step(delimiter);
-        let time = SimTime::from_nanos(time_step.time_ns);
-        let events = self.read_events(time_step);
-
-        Some((time, events))
+        // The writer only writes an empty time step for files without any events. It carries no
+        // information, so it is skipped.
+        self.pipeline
+            .by_ref()
+            .find(|(_, events)| !events.is_empty())
     }
 }
 
-impl ProtoEventsReader<File> {
-    pub fn from_file(path: &Path) -> Self {
-        let file = File::open(path).unwrap_or_else(|_e| panic!("Failed to open File at: {path:?}"));
-        Self::new(file)
+fn open_events_file(path: &Path) -> File {
+    File::open(path).unwrap_or_else(|_e| panic!("Failed to open File at: {path:?}"))
+}
+
+/// Reads the time steps from `reader` on a separate thread and applies `transform` to the encoded
+/// time steps in parallel.
+fn time_step_pipeline<T: Send + 'static>(
+    reader: impl Read + Send + 'static,
+    transform: impl Fn(&[u8]) -> T + Send + Sync + 'static,
+) -> BatchPipeline<T> {
+    BatchPipeline::spawn(
+        EVENT_BATCH_BYTES,
+        move || BufReader::with_capacity(1024 * 1024, reader),
+        |reader, buffer| read_length_delimited(reader, buffer),
+        move |_, bytes| transform(bytes),
+    )
+}
+
+fn decode_time_step(bytes: &[u8]) -> (SimTime, Vec<GenericEvent>) {
+    let time_step = TimeStep::decode(bytes).expect("Could not decode TimeStep message");
+    let mut data = time_step.data.as_slice();
+    let mut events = Vec::new();
+    while !data.is_empty() {
+        let event = GenericEvent::decode_length_delimited(&mut data).expect("Error decoding event");
+        events.push(event);
+    }
+    (SimTime::from_nanos(time_step.time_ns), events)
+}
+
+/// A proto event, which is already converted into an internal event if all its ids existed when
+/// it was read.
+pub(crate) enum PreparedEvent {
+    Converted(Box<dyn EventTrait>),
+    Pending(GenericEvent),
+}
+
+impl PreparedEvent {
+    /// Calls `f` with the internal event. Pending events are converted, creating missing ids.
+    pub(crate) fn with_event(&self, time: SimTime, f: impl FnOnce(&dyn EventTrait)) {
+        match self {
+            PreparedEvent::Converted(event) => f(event.as_ref()),
+            PreparedEvent::Pending(proto_event) => f(event_from_proto(time, proto_event).as_ref()),
+        }
+    }
+}
+
+/// Reads the time steps of a proto events file like [`ProtoEventsReader::from_file`] and
+/// additionally converts the events into internal events in parallel.
+///
+/// The parallel conversion only looks ids up. Events with ids which don't exist yet stay
+/// pending. Converting them with [`PreparedEvent::with_event`] in processing order creates the
+/// missing ids in the same order as converting all events one after another.
+pub(crate) struct PreparedProtoEventsReader {
+    pipeline: BatchPipeline<(SimTime, Vec<PreparedEvent>)>,
+}
+
+impl PreparedProtoEventsReader {
+    pub(crate) fn from_file(path: &Path) -> Self {
+        let pipeline = time_step_pipeline(open_events_file(path), |bytes| {
+            let (time, events) = decode_time_step(bytes);
+            let prepared = events
+                .into_iter()
+                .map(
+                    |event| match try_event_from_proto(time, &event, &ExistingIds) {
+                        Some(converted) => PreparedEvent::Converted(converted),
+                        None => PreparedEvent::Pending(event),
+                    },
+                )
+                .collect();
+            (time, prepared)
+        });
+        Self { pipeline }
+    }
+}
+
+impl Iterator for PreparedProtoEventsReader {
+    type Item = (SimTime, Vec<PreparedEvent>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Skip empty time steps like `ProtoEventsReader` does.
+        self.pipeline
+            .by_ref()
+            .find(|(_, events)| !events.is_empty())
     }
 }
 
@@ -562,26 +601,37 @@ pub fn process_events(time: SimTime, events: &Vec<GenericEvent>, manager: &mut E
     }
 }
 
-#[rustfmt::skip]
 pub(crate) fn event_from_proto(time: SimTime, proto_event: &GenericEvent) -> Box<dyn EventTrait> {
+    try_event_from_proto(time, proto_event, &CreateMissingIds)
+        .expect("Creating missing ids never fails.")
+}
+
+/// Like [`event_from_proto`], but returns `None` if `ids` doesn't resolve an id.
+#[rustfmt::skip]
+pub(crate) fn try_event_from_proto(
+    time: SimTime,
+    proto_event: &GenericEvent,
+    ids: &impl IdResolver,
+) -> Option<Box<dyn EventTrait>> {
     let type_ = proto_event.r#type.as_str();
-    match type_ {
-        crate::simulation::events::GenericEvent::TYPE => Box::new(crate::simulation::events::GenericEvent::from_proto_event(proto_event, time)),
-        ActivityStartEvent::TYPE => Box::new(ActivityStartEvent::from_proto_event(proto_event, time)),
-        ActivityEndEvent::TYPE => Box::new(ActivityEndEvent::from_proto_event(proto_event, time)),
-        LinkEnterEvent::TYPE => Box::new(LinkEnterEvent::from_proto_event(proto_event, time)),
-        LinkLeaveEvent::TYPE => Box::new(LinkLeaveEvent::from_proto_event(proto_event, time)),
-        PersonEntersVehicleEvent::TYPE => Box::new(PersonEntersVehicleEvent::from_proto_event(proto_event, time)),
-        PersonLeavesVehicleEvent::TYPE => Box::new(PersonLeavesVehicleEvent::from_proto_event(proto_event, time)),
-        PersonDepartureEvent::TYPE => Box::new(PersonDepartureEvent::from_proto_event(proto_event, time)),
-        PersonArrivalEvent::TYPE => Box::new(PersonArrivalEvent::from_proto_event(proto_event, time)),
-        TeleportationArrivalEvent::TYPE => Box::new(TeleportationArrivalEvent::from_proto_event(proto_event, time)),
-        PtTeleportationArrivalEvent::TYPE => Box::new(PtTeleportationArrivalEvent::from_proto_event(proto_event, time)),
-        VehicleEntersTrafficEvent::TYPE => Box::new(VehicleEntersTrafficEvent::from_proto_event(proto_event, time)),
-        VehicleLeavesTrafficEvent::TYPE => Box::new(VehicleLeavesTrafficEvent::from_proto_event(proto_event, time)),
-        PersonStuckEvent::TYPE => Box::new(PersonStuckEvent::from_proto_event(proto_event, time)),
+    let event: Box<dyn EventTrait> = match type_ {
+        crate::simulation::events::GenericEvent::TYPE => Box::new(crate::simulation::events::GenericEvent::try_from_proto_event(proto_event, time, ids)?),
+        ActivityStartEvent::TYPE => Box::new(ActivityStartEvent::try_from_proto_event(proto_event, time, ids)?),
+        ActivityEndEvent::TYPE => Box::new(ActivityEndEvent::try_from_proto_event(proto_event, time, ids)?),
+        LinkEnterEvent::TYPE => Box::new(LinkEnterEvent::try_from_proto_event(proto_event, time, ids)?),
+        LinkLeaveEvent::TYPE => Box::new(LinkLeaveEvent::try_from_proto_event(proto_event, time, ids)?),
+        PersonEntersVehicleEvent::TYPE => Box::new(PersonEntersVehicleEvent::try_from_proto_event(proto_event, time, ids)?),
+        PersonLeavesVehicleEvent::TYPE => Box::new(PersonLeavesVehicleEvent::try_from_proto_event(proto_event, time, ids)?),
+        PersonDepartureEvent::TYPE => Box::new(PersonDepartureEvent::try_from_proto_event(proto_event, time, ids)?),
+        PersonArrivalEvent::TYPE => Box::new(PersonArrivalEvent::try_from_proto_event(proto_event, time, ids)?),
+        TeleportationArrivalEvent::TYPE => Box::new(TeleportationArrivalEvent::try_from_proto_event(proto_event, time, ids)?),
+        PtTeleportationArrivalEvent::TYPE => Box::new(PtTeleportationArrivalEvent::try_from_proto_event(proto_event, time, ids)?),
+        VehicleEntersTrafficEvent::TYPE => Box::new(VehicleEntersTrafficEvent::try_from_proto_event(proto_event, time, ids)?),
+        VehicleLeavesTrafficEvent::TYPE => Box::new(VehicleLeavesTrafficEvent::try_from_proto_event(proto_event, time, ids)?),
+        PersonStuckEvent::TYPE => Box::new(PersonStuckEvent::try_from_proto_event(proto_event, time, ids)?),
         _ => panic!("Unknown event type: {:?}", type_),
-    }
+    };
+    Some(event)
 }
 
 #[cfg(test)]
@@ -804,6 +854,42 @@ mod tests {
                 match_events(issued_events.get(index).unwrap(), event);
             }
         }
+    }
+
+    #[deterministic_id_test]
+    fn reader_returns_all_time_steps_in_order() {
+        let path = create_path_with_prefix(
+            "./test_output/io/proto_events/reader_returns_all_time_steps_in_order/events.binpb",
+        );
+        let mut writer = ProtoEventsWriter::new(&path);
+        let mut expected = Vec::new();
+        for time_step in 0..500 {
+            // Some time steps have no events, others many, so that batches end within and between
+            // time steps.
+            let mut events = Vec::new();
+            for i in 0..time_step % 7 {
+                let event = ActivityEndEventBuilder::default()
+                    .time(SimTime::from_secs(time_step))
+                    .person(Id::create(&format!("person {i}")))
+                    .link(Id::create(&format!("link {time_step}")))
+                    .act_type(Id::create("home"))
+                    .coordinate(Coordinate::default())
+                    .build()
+                    .unwrap();
+                writer.on_any(&event);
+                events.push(event_to_proto(&event));
+            }
+            if !events.is_empty() {
+                expected.push((SimTime::from_secs(time_step), events));
+            }
+        }
+        writer.finish();
+
+        let from_file: Vec<_> = ProtoEventsReader::from_file(&path).collect();
+        assert_eq!(expected, from_file);
+        let bytes = std::io::Cursor::new(fs::read(&path).unwrap());
+        let from_reader: Vec<_> = ProtoEventsReader::new(bytes).collect();
+        assert_eq!(expected, from_reader);
     }
 
     fn create_path_with_prefix(path: &str) -> PathBuf {
