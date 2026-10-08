@@ -78,6 +78,8 @@ router alone. The direct service remains in the schedule so this fixture proves 
 under the pinned default costs instead of a direct-service preference.
 This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits and
 non-default scoring remain outside its coverage.
+The Java fixture records itinerary times but not a utility total, so the 30-minute generalized cost is
+checked against the pinned default weights rather than a Java-emitted score.
 
 ## Comparison rules
 
