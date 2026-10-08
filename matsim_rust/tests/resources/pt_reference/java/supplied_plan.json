@@ -1,5 +1,5 @@
 {
-  "schema_version" : 2,
+  "schema_version" : 3,
   "reference" : {
     "implementation" : "matsim",
     "version" : "2026.0",
@@ -29,6 +29,7 @@
     } ]
   },
   "itineraries" : [ ],
+  "trees" : [ ],
   "events" : [ {
     "time" : 27126.0,
     "type" : "actend",

@@ -1,5 +1,5 @@
 {
-  "schema_version" : 2,
+  "schema_version" : 3,
   "reference" : {
     "implementation" : "matsim",
     "version" : "2026.0",
@@ -21,7 +21,11 @@
     }, {
       "role" : "transit_schedule",
       "path" : "transit_schedule.xml",
-      "sha256" : "8f119b4ee97b9618c55900a4f46de642220529151a00a8628c3eca817559cbbc"
+      "sha256" : "4e3df3d9b2c8feaa07a2d55aaa9e09dc0cf6f3e7bc06dfbd6e80a32273d4f02b"
+    }, {
+      "role" : "routing_requests",
+      "path" : "requests.json",
+      "sha256" : "59cbf8b747ae5ee9c40ff54f1086b97464570dde5988dd457be744fddbc2ac7f"
     } ]
   },
   "itineraries" : [ {
@@ -70,7 +74,7 @@
     }, {
       "mode" : "pt",
       "departure_time" : 29400.0,
-      "arrival_time" : 30300.0,
+            "arrival_time" : 30300.0,
       "distance" : 3700.0,
       "rides" : [ {
         "line" : "Reference Line",
@@ -88,6 +92,47 @@
     } ],
     "generalized_cost" : 6.0,
     "arrival_time" : 30300.0
+  } ],
+  "trees" : [ {
+    "id" : "ra_service_at_0800",
+    "from_stop" : "ra",
+    "departures" : [ {
+      "departure_time" : 28800.0,
+      "destinations" : [ {
+        "stop" : "rb",
+        "result" : "found",
+        "arrival_time" : 29400.0,
+        "transfer_count" : 0
+      }, {
+        "stop" : "rc",
+        "result" : "found",
+        "arrival_time" : 30300.0,
+        "transfer_count" : 1
+      }, {
+        "stop" : "rd",
+        "result" : "no_path"
+      } ]
+    } ]
+  }, {
+    "id" : "ra_just_after_0800_service",
+    "from_stop" : "ra",
+    "departures" : [ {
+      "departure_time" : 29400.0,
+      "destinations" : [ {
+        "stop" : "rb",
+        "result" : "found",
+        "arrival_time" : 30000.0,
+        "transfer_count" : 0
+      }, {
+        "stop" : "rc",
+        "result" : "found",
+        "arrival_time" : 30900.0,
+        "transfer_count" : 1
+      }, {
+        "stop" : "rd",
+        "result" : "no_path"
+      } ]
+    } ]
   } ],
   "events" : [ ]
 }

@@ -9,5 +9,29 @@
       "from": { "link": "11", "x": 1050.0, "y": 1050.0 },
       "to": { "link": "33", "x": 3950.0, "y": 1050.0 }
     }
+  ],
+  "trees": [
+    {
+      "id": "ra_service_at_0800",
+      "from_stop": "ra",
+      "earliest_departure_time": 28800.0,
+      "latest_start_time": 28800.0,
+      "destinations": [
+        { "stop": "rb" },
+        { "stop": "rc" },
+        { "stop": "rd" }
+      ]
+    },
+    {
+      "id": "ra_just_after_0800_service",
+      "from_stop": "ra",
+      "earliest_departure_time": 28801.0,
+      "latest_start_time": 29400.0,
+      "destinations": [
+        { "stop": "rb" },
+        { "stop": "rc" },
+        { "stop": "rd" }
+      ]
+    }
   ]
 }
