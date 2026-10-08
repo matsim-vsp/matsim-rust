@@ -64,15 +64,15 @@ pub fn run(
         facilities.as_mut(),
     );
 
-    crate::simulation::id::store_to_file(&create_file_path(&args, "ids"));
-    net.to_file(&create_file_path(&args, "network"));
-    veh.to_file(&create_file_path(&args, "vehicles"));
-    pop.to_file(&create_file_path(&args, "plans"));
+    crate::simulation::id::store_to_file(&create_file_path(args, "ids"));
+    net.to_file(&create_file_path(args, "network"));
+    veh.to_file(&create_file_path(args, "vehicles"));
+    pop.to_file(&create_file_path(args, "plans"));
     if let Some(transit_schedule) = transit_schedule.as_ref() {
-        transit_schedule.to_file(&create_file_path(&args, "transit_schedule"));
+        transit_schedule.to_file(&create_file_path(args, "transit_schedule"));
     }
     if let Some(facilities) = facilities.as_ref() {
-        facilities.to_file(&create_file_path(&args, "facilities"));
+        facilities.to_file(&create_file_path(args, "facilities"));
     }
 }
 

@@ -1328,6 +1328,7 @@ pub struct QSim {
     pub end_time: u32,
     pub ticks_per_second: u32,
     pub sample_size: f64,
+    pub storage_capacity_factor: Option<f64>,
     pub stuck_threshold: u32,
     pub remove_stuck_vehicles: bool,
     pub main_modes: Vec<String>,
@@ -1406,7 +1407,7 @@ pub struct Controller {
 
 impl Controller {
     pub fn should_write_plans(&self, iteration: u32, is_last_iteration: bool) -> bool {
-        is_last_iteration || iteration % self.write_plans_interval == 0
+        is_last_iteration || iteration.is_multiple_of(self.write_plans_interval)
     }
 }
 
@@ -1433,6 +1434,7 @@ impl From<&Simulation> for QSim {
             end_time: value.end_time,
             ticks_per_second: value.ticks_per_second,
             sample_size: value.sample_size,
+            storage_capacity_factor: None,
             stuck_threshold: value.stuck_threshold,
             remove_stuck_vehicles: false,
             main_modes: value.main_modes.clone(),
@@ -1732,6 +1734,7 @@ impl Default for QSim {
             end_time: 86400,
             ticks_per_second: 1,
             sample_size: 1.0,
+            storage_capacity_factor: None,
             stuck_threshold: 10,
             remove_stuck_vehicles: false,
             main_modes: vec![],
@@ -2068,6 +2071,7 @@ mod tests {
             end_time: 42,
             ticks_per_second: 1,
             sample_size: 0.1,
+            storage_capacity_factor: None,
             stuck_threshold: 1,
             remove_stuck_vehicles: true,
             main_modes: vec!["bike".to_string()],

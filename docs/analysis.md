@@ -1,7 +1,55 @@
 # Automatic analysis
 
 Automatic final-iteration analysis can be enabled with `output.analysis.enabled`.
-It writes an offline HTML report and CSV/JSON/SVG files under `output/analysis`.
+It writes an offline visual HTML report and CSV/JSON/SVG files under `output/analysis`.
+
+The report opens with an overview of travel demand and journey completion, then follows
+travel, network conditions, capacity, activities and transit in narrative sections. Mode,
+destination-purpose and time-window radio groups apply to the charts they describe. Unavailable
+or failed modules share a compact section with their recorded reasons.
+
+Detailed link, person, journey and activity records are downloads rather than embedded HTML
+tables. Every exported numeric column also has a metric view showing its minimum, maximum,
+unweighted record mean, finite-record count, missing count and invalid/non-finite count. This
+view scans every record, including records beyond the bounded narrative summary. It groups
+units, currencies, modes, purposes, road classifications, statuses, metric types, pollutants
+and accounting categories separately. A record
+mean is not a population-weighted mean or a simulation total; the metric view states this
+distinction explicitly. Narrative charts embed at most 200 rows per summary source, with
+the source record count and any limit shown in its metric view. Maps remain separate SVG
+assets, so keep the report directory together when sharing it. The default network widget
+supports dragging, wheel zoom, keyboard navigation and reset without network services.
+
+To refresh only the presentation from existing exports, without replaying events or changing
+any CSV/JSON/SVG results:
+
+```shell
+cargo run -p matsim-rust --bin analyze -- --run-dir RUN --report-only
+```
+
+This command replaces only `analysis/index.html`, atomically after rendering succeeds.
+Omit `--report-only` for the existing event-replay reanalysis path.
+
+To place coverage over streets and place labels, generate separate geographic map assets
+with an explicit network CRS. The helper requires Python and `pyproj`; it reads the output
+network and uses the coverage SVG's plotted link IDs and used/unused flags without changing
+simulation metrics. For the Bangkok UTM zone 47N network:
+
+```shell
+python3 -m venv .venv-map
+.venv-map/bin/pip install pyproj
+.venv-map/bin/python scripts/analysis_map.py --run-dir RUN --crs EPSG:32647
+cargo run -p matsim-rust --bin analyze -- --run-dir RUN --report-only
+```
+
+The helper downloads pinned Leaflet 1.9.4 assets on its first invocation. Link geometry is
+stored in `network_coverage.js`, outside the small report HTML; the widget is lazy-loaded
+from `network_coverage.html`. It provides used/unused layer toggles, link popups, place labels,
+pan, zoom and fit-to-network. Street and label tiles come from CARTO and require internet;
+local links remain visible if tiles fail. Attribution is displayed in the map. Keep
+`map_assets/` and the geographic map files alongside the report when sharing it. A map older
+than `network_map.svg` is not used: regenerate it after replaying analysis. CRS is never
+guessed from coordinate magnitudes or location names.
 
 ## Economic appraisal
 
@@ -237,9 +285,8 @@ area, so the summary is keyed by it and the person geography contributes `reside
 `unmapped_residents`. Without one it falls back to the link classification the report already
 computes, and the residents are zero because no person geography was supplied. Either way an
 activity whose link the report cannot place is counted as `unclassified` rather than attributed
-to an area it does not belong to, and every location is reported. The report embeds a bounded
-preview of `activity_patterns.csv`, `activity_durations.csv` and `zone_od.csv` and says so when a
-table is longer, as it does for `legs.csv`.
+to an area it does not belong to, and every location is reported. The report charts summary metrics and all-record numeric ranges; `activity_patterns.csv`,
+`activity_durations.csv`, `zone_od.csv` and `legs.csv` remain separate downloads.
 
 The supplied zone system is recorded in `manifest.json`, so a standalone rerun rebuilds the same
 geographic report.
@@ -753,11 +800,9 @@ projection, up to 24 panels; further combinations stay in the CSVs and
 `map_panels_omitted` counts them. A filled circle is an origin zone shaded across a
 single-hue ramp normalized to its own panel, a gray circle is an origin with no
 supplied cost, and a green ring is a zone holding opportunities of that category,
-sized by their total weight. The per-zone and per-person tables are embedded in
-`index.html` as bounded previews of 500 rows, because a per-person table over several
-categories, modes, periods and thresholds outgrows a page; the summary and
-diagnostics tables are embedded in full because each holds one row per reported
-combination rather than per person. The CSVs hold every row either way.
+sized by their total weight. The per-zone and per-person records remain in separate CSVs. `index.html` presents
+all-record numeric ranges and bounded summary charts rather than raw record tables;
+the SVG map is a separate asset. The CSVs retain every row.
 
 For example:
 

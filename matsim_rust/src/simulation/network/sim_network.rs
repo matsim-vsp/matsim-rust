@@ -468,6 +468,11 @@ impl SimNetworkPartition {
             vehicles_exit_partition,
             vehicles_end_leg,
             passengers_end_leg: self.transit_stops.take_alighted(),
+            // Stranded agents leave the network in this step's result rather than waiting for
+            // `drain`, so the caller can resume them at their next activity. Anything stranded on
+            // the final step is picked up there, because `Simulation::run` chains the engine's
+            // per-step result into its end-of-day drain.
+            agents_stuck: std::mem::take(&mut self.stuck_agents),
             storage_cap_updates,
         }
     }
@@ -845,6 +850,10 @@ pub struct MoveAllLinksResult {
     pub vehicles_end_leg: Vec<SimulationVehicle>,
     /// Transit passengers who got off at a stop; their arrival has been published already.
     pub passengers_end_leg: Vec<SimulationAgent>,
+    /// Agents whose vehicle was removed because it was stuck. Their `stuckAndAbort` event has
+    /// already been published, and their leg produced no arrival, so the caller must not publish
+    /// one for them either.
+    pub agents_stuck: Vec<SimulationAgent>,
     pub storage_cap_updates: Vec<StorageUpdate>,
 }
 

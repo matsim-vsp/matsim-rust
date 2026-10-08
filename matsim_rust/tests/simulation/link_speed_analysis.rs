@@ -276,10 +276,10 @@ fn network_distance_time_conserves_partial_and_cross_interval_traversals() {
     assert!(tables["en_route_agents.csv"].contains("0,1,0,0,0,1,5.000000"));
     assert!(tables["en_route_agents.csv"].contains("60,0,1,0,1,1,5.000000"));
     assert!(tables["index.html"].contains("Network distance, time and congestion"));
-    assert!(tables["index.html"].contains("Peak interval by total signed free-flow delay"));
-    assert!(tables["index.html"].contains("En-route agent profile"));
-    assert!(tables["index.html"].contains("Traversal exclusions"));
-    assert!(tables["index.html"].contains("Lowest relative-speed interval"));
+    assert!(tables["index.html"].contains("Signed delay relative to free flow"));
+    assert!(tables["index.html"].contains("Peak en-route agents"));
+    assert!(tables["index.html"].contains("network_distance_time_diagnostics.csv"));
+    assert!(tables["index.html"].contains("Relative speed · ratio"));
     assert!(tables["module_status.json"].contains("network_distance_time"));
     assert!(tables["metric_catalog.json"].contains("relative_speed_ratio"));
     assert!(tables["metric_catalog.json"].contains("network_clipped_excess_delay_seconds"));
@@ -491,10 +491,15 @@ fn link_speed_reports_representative_and_vehicle_speed_metrics() {
     );
     assert!(catalog.contains("\"unit\": \"m/s\""), "{catalog}");
     let html = &tables["index.html"];
-    assert!(html.contains("Interval link speeds"), "{html}");
+    assert!(html.contains("Mean link speed · km/h"), "{html}");
+    let source = super::visual_report_table(html, "link_speed_hourly.csv");
+    assert!(source["rows"].as_array().unwrap().is_empty());
     assert!(
-        html.contains("const linkSpeeds=[\"link_id,hour_start_seconds,observations"),
-        "{html}"
+        source["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "representative_speed_mps" && c["count"].as_u64().unwrap() > 0)
     );
     assert!(html.contains("link_speed_histogram.csv"), "{html}");
 }

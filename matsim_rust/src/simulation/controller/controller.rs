@@ -804,7 +804,7 @@ pub(crate) fn write_experienced_population(
                 });
             experience.convert_to_person(original)
         })
-        .sorted_by(|a, b| a.id().cmp(&b.id()))
+        .sorted_by(|a, b| a.id().cmp(b.id()))
         .collect();
     let filename = config
         .controller()

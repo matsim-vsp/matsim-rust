@@ -18,11 +18,12 @@ impl StorageCapacityDefinition {
         perm_lanes: f64,
         capacity_h: f64,
         sample_size: f64,
+        storage_factor: f64,
         effective_cell_size: f64,
         free_speed: f64,
     ) -> Self {
         let flow_cap_s = capacity_h * sample_size / 3600.;
-        let cap = length * perm_lanes * sample_size / effective_cell_size;
+        let cap = length * perm_lanes * storage_factor / effective_cell_size;
 
         // set storage capacity to at least flow capacity. Otherwise, the flow capacity would never be fully used during `move_node`.
         let max_storage_cap = flow_cap_s.max(cap);
@@ -62,6 +63,7 @@ pub struct LinkStorageCapacities {
 impl LinkStorageCapacities {
     pub fn from_network(network: &Network, config: &config::QSim) -> Self {
         let effective_cell_size = network.effective_cell_size();
+        let storage_factor = config.storage_capacity_factor.unwrap_or(config.sample_size);
         let capacities = network
             .links()
             .into_iter()
@@ -71,6 +73,7 @@ impl LinkStorageCapacities {
                     link.permlanes,
                     link.capacity,
                     config.sample_size,
+                    storage_factor,
                     effective_cell_size,
                     link.freespeed,
                 );
@@ -144,6 +147,7 @@ impl StorageCap {
             perm_lanes,
             capacity_h,
             sample_size,
+            sample_size,
             effective_cell_size,
             free_speed,
         );
@@ -203,14 +207,14 @@ mod test {
 
     #[test]
     fn storage_capacity_definition_with_freespeed_adjustment() {
-        let definition = StorageCapacityDefinition::build(100., 3., 360000., 0.2, 7.5, 10.);
+        let definition = StorageCapacityDefinition::build(100., 3., 360000., 0.2, 0.2, 7.5, 10.);
         assert_eq!(Some(200.), definition.qsim_override());
         assert_eq!(20., definition.original());
     }
 
     #[test]
     fn storage_capacity_definition_does_not_adjust_equal_capacity() {
-        let definition = StorageCapacityDefinition::build(100., 3., 360000., 0.2, 7.5, 100.);
+        let definition = StorageCapacityDefinition::build(100., 3., 360000., 0.2, 0.2, 7.5, 100.);
         assert_eq!(None, definition.qsim_override());
         assert_eq!(20., definition.original());
     }

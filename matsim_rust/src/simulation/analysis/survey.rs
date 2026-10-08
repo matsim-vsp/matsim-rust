@@ -194,7 +194,7 @@ pub(super) fn write(report: &Path, source: &Path) -> Result<(), AnalysisError> {
     }
 
     let mut keys: BTreeSet<Key> = survey.keys().cloned().collect();
-    for ((metric, category), _) in &simulated {
+    for (metric, category) in simulated.keys() {
         for split in ["calibration", "holdout"] {
             keys.insert((split.to_owned(), metric.clone(), category.clone()));
         }

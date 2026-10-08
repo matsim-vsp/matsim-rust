@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>All-run link coverage</title><link rel="stylesheet" href="map_assets/leaflet.css">
+<style>
+*{box-sizing:border-box}body{margin:0;font:13px system-ui;color:#152d40}#map{height:calc(100vh - 44px);min-height:280px;background:#edf1f4}footer{height:44px;padding:8px 10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}button{font:inherit;background:white;color:inherit;border:1px solid #dce5eb;border-radius:6px;padding:5px 8px;cursor:pointer}.leaflet-control-layers{font:13px system-ui}.leaflet-control-attribution{font-size:10px}#fallback{position:absolute;inset:0 0 44px;width:100%;height:calc(100% - 44px);object-fit:contain;background:white}[hidden]{display:none!important}@media(max-width:450px){footer{font-size:11px;gap:8px}.leaflet-control-layers{font-size:11px}}
+</style></head><body>
+<div id="map" role="region" aria-label="All-run link coverage on a street map"></div>
+<img id="fallback" src="network_map.svg" alt="Offline link coverage map">
+<footer><button id="reset" type="button">Fit network</button><span id="status" role="status">Loading map…</span></footer>
+<script src="map_assets/leaflet.js"></script><script src="network_coverage.js"></script>
+<script>
+'use strict';
+try{
+ const check=new URLSearchParams(location.search).has('check');
+ const map=L.map('map',{preferCanvas:true,zoomAnimation:!check,fadeAnimation:!check}).setView(COVERAGE.nodes[0],10);
+ const streets=L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+ map.createPane('labels');map.getPane('labels').style.zIndex=650;map.getPane('labels').style.pointerEvents='none';
+ const labels=L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',{pane:'labels',maxZoom:19}).addTo(map);
+ const used=L.featureGroup(),unused=L.featureGroup();
+ for(const [id,start,end,active] of COVERAGE.links){const line=L.polyline([COVERAGE.nodes[start],COVERAGE.nodes[end]],{color:active?'#228572':'#8b949d',weight:active?2:1,opacity:active?.85:.5});line.bindPopup(()=>{const text=document.createElement('span');text.textContent=id+' · '+(active?'Used at least once':'Unused');return text});(active?used:unused).addLayer(line)}
+ unused.addTo(map);used.addTo(map);const bounds=L.latLngBounds(COVERAGE.nodes),fit=()=>map.fitBounds(bounds,{padding:[20,20],animate:false});fit();
+ L.control.layers({}, {'Used links':used,'Unused links':unused,'Place labels':labels},{collapsed:false}).addTo(map);L.control.scale({imperial:false}).addTo(map);
+ document.getElementById('reset').onclick=fit;document.getElementById('fallback').hidden=true;
+ const status=document.getElementById('status');status.textContent=COVERAGE.links.length.toLocaleString()+' links · streets require internet';
+ streets.on('tileerror',()=>{status.textContent='Street tiles unavailable · simulation links remain visible'});
+ streets.on('tileload',()=>{document.body.dataset.tiles='loaded'});
+ if(check){const initial=map.getZoom();map.zoomIn(1,{animate:false});if(map.getZoom()!==initial+1)throw Error('Zoom failed');const center=map.getCenter();map.panBy([40,0],{animate:false});if(center.equals(map.getCenter()))throw Error('Pan failed');map.removeLayer(unused);if(map.hasLayer(unused))throw Error('Layer toggle failed');unused.addTo(map);const line=used.getLayers()[0]||unused.getLayers()[0];line.openPopup();if(!document.querySelector('.leaflet-popup-content')?.textContent.includes(' · '))throw Error('Link details failed');map.closePopup();document.getElementById('reset').click();if(!map.getBounds().contains(bounds))throw Error('Fit failed');if(used.getLayers().length+unused.getLayers().length!==COVERAGE.links.length)throw Error('Missing links');document.body.dataset.check='passed';}
+}catch(error){document.getElementById('status').textContent='Interactive map unavailable · '+error.message;document.body.dataset.check='failed';}
+</script></body></html>

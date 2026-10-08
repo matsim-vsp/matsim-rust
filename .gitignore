@@ -7,3 +7,6 @@ matsim_rust/test_output/
 /assets/routing_tests/*
 
 .DS_Store
+__pycache__/
+# cargo refine keeps its wallet private key and mining state here
+/.refine/

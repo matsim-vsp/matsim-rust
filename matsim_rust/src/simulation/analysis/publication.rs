@@ -50,13 +50,11 @@ pub(super) fn publish(
         fs::rename(published, backup).map_err(io_error)?;
     }
     if let Err(error) = fs::rename(staging, published) {
-        if had_published {
-            if let Err(restore) = fs::rename(backup, published) {
-                warn!(
-                    "Could not restore the previous report from {}: {restore}",
-                    backup.display()
-                );
-            }
+        if had_published && let Err(restore) = fs::rename(backup, published) {
+            warn!(
+                "Could not restore the previous report from {}: {restore}",
+                backup.display()
+            );
         }
         return Err(io_error(error));
     }

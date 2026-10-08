@@ -60,7 +60,7 @@ impl Backpack {
 
 impl PersonExperience {
     pub(crate) fn plan(&self) -> &InternalPlan {
-        &self.dummy_person.selected_plan().unwrap()
+        self.dummy_person.selected_plan().unwrap()
     }
 
     pub(crate) fn plan_mut(&mut self) -> &mut InternalPlan {

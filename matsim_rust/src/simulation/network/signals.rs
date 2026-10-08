@@ -206,15 +206,15 @@ impl Signals {
             let entry = approach.entry(system.id).or_default();
             for signal in &system.signals.signals {
                 let link = Id::get_from_ext(&signal.link_id_ref);
-                if let Some(previous) = entry.insert(signal.id, link.clone()) {
-                    if previous != link {
-                        warn!(
-                            "signal {} of system {} is defined on two approach links; keeping {}",
-                            signal.id,
-                            system.id,
-                            link.external()
-                        );
-                    }
+                if let Some(previous) = entry.insert(signal.id, link.clone())
+                    && previous != link
+                {
+                    warn!(
+                        "signal {} of system {} is defined on two approach links; keeping {}",
+                        signal.id,
+                        system.id,
+                        link.external()
+                    );
                 }
             }
         }

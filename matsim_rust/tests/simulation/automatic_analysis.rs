@@ -249,21 +249,28 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
             .is_file()
     );
     let html = fs::read_to_string(&report).unwrap();
-    // The report embeds the hourly rows and the coverage CSV verbatim; assert the
-    // payload's columns and values rather than a bare variable declaration.
-    assert!(html.contains(
-        "\"link_id\":\"used\",\"hour_start_seconds\":3600,\"entry_vehicles\":1,\"exit_vehicles\":1"
-    ));
-    assert!(html.contains("id=\"cross-run\""));
-    assert!(html.contains("csvTable('#cross-run'"));
-    assert!(
-        html.contains("Economic appraisal is unavailable: No economic input CSV is configured.")
-    );
+    // The report reduces all hourly records and embeds bounded coverage summaries;
+    // assert the payload's columns and values rather than a bare variable declaration.
+    let hourly = super::visual_report_table(&html, "link_hourly.csv");
+    assert!(hourly["rows"].as_array().unwrap().is_empty());
+    let entries = hourly["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "entry_vehicles")
+        .unwrap();
+    assert_eq!(entries["max"], 1.0);
+    assert!(html.contains("cross_run_comparison.csv"));
+    assert!(html.contains("No economic input CSV is configured"));
     assert!(!html.contains("Traveler utility is converted"));
+    let visual_coverage = super::visual_report_table(&html, "coverage.csv");
+    assert_eq!(visual_coverage["headers"][0], "hour_start_seconds");
     assert!(
-        html.contains(
-            "[\"hour_start_seconds,eligible_links,used_links,unused_links,used_percent\","
-        )
+        visual_coverage["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row[0] == "3600")
     );
     let status = fs::read_to_string(report.parent().unwrap().join("module_status.json")).unwrap();
     assert!(status.contains("\"status\": \"unavailable\""));
@@ -322,10 +329,21 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
     assert!(report_html.contains("link_capacity.csv"));
     assert!(report_html.contains("vc_histogram.csv"));
     // The report opens on the entry-V/C distribution and can switch to the exit one.
-    assert!(report_html.contains("Entry V/C (default view)"));
-    assert!(report_html.contains("Show exit V/C"));
-    assert!(report_html.contains("let metric='entry_vc'"));
-    assert!(report_html.contains("'Show exit V/C':'Show entry V/C'"));
+    assert!(report_html.contains("id=\"vc-side\""));
+    let bins = super::visual_report_table(&report_html, "vc_histogram.csv");
+    for metric in ["entry_vc", "exit_vc"] {
+        let values = bins["histogram"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|bin| bin["metric"] == metric)
+            .collect::<Vec<_>>();
+        assert_eq!(values.len(), VC_BIN_COUNT);
+        assert!(
+            values.iter().all(|bin| bin["links"] == 0),
+            "unavailable ratios must not become zero-valued observations"
+        );
+    }
 
     let invalid_sample = analyze_final_iteration(
         output,
@@ -665,9 +683,9 @@ fn shared_analysis_reconstructs_staged_and_incomplete_journeys() {
     ));
     let html = fs::read_to_string(&report).unwrap();
     assert!(html.contains("journey_mode_share.csv"));
-    assert!(html.contains("Journey duration and distance distributions"));
-    assert!(html.contains("journey-summary"));
-    assert!(html.contains("Journey mode share by hour, purpose, and distance"));
+    assert!(html.contains("Completed journey duration"));
+    assert!(html.contains("journey_summary.csv"));
+    assert!(html.contains("journey_mode_share.csv"));
     assert!(html.contains("Travel survey comparison"));
     let survey_rows = fs::read_to_string(report_dir.join("journey_survey_comparison.csv")).unwrap();
     assert!(survey_rows.contains("calibration,mode,pt,2.000000,0.666667,3.000000,1,0.250000"));
@@ -1568,17 +1586,15 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
     assert!(map.contains("stroke=\"#287a3d\""));
     assert!(map.contains("stroke=\"#c8ccd0\""));
     assert!(map.contains("stroke-dasharray=\"8 3\""));
-    // The report inlines the map so the classification filters can hide links.
+    // The map retains classification attributes in its separate asset.
     assert!(map.contains("data-road-type=\"expressway\""));
     assert!(map.contains("data-road-size=\"__METRICS__\""));
     let html = fs::read_to_string(report).unwrap();
-    // The map is inlined, so this id reaches the report only if the SVG was
-    // substituted in rather than merely written as the standalone export.
-    assert!(html.contains("id=\"network-map\""));
-    // FILTER_DIMENSIONS is the single dimension list, so the CSV columns, the
-    // per-link map attributes and the report's own filter list must all agree.
+    // The map is referenced as an image rather than expanding every link into the HTML.
+    assert!(html.contains("src=\"network_map.svg\""));
+    // FILTER_DIMENSIONS is the single dimension list, so the CSV columns and
+    // per-link map attributes must agree with the all-record metric groups.
     assert!(classifications.starts_with("link_id,\"urban_area\",\"road_type\",\"road_size\""));
-    assert!(html.contains("[[\"urban_area\",\"Urban area\"],[\"road_type\",\"Road type\"],[\"road_size\",\"Road size\"]]"));
     for key in ["urban_area", "road_type", "road_size"] {
         let attribute = format!("data-{}=\"", key.replace('_', "-"));
         assert!(
@@ -1586,25 +1602,22 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
             "map lines need one filter attribute per dimension: {attribute}"
         );
     }
-    // Payload assertions: these strings exist only in generated data, so they fail
-    // if substitution breaks or if a label collides with a template token.
-    assert!(html.contains("group_used_link_percent"));
-    assert!(html.contains("\"urban_area\":\"cross_boundary\""));
-    assert!(html.contains("\"road_size\":\"__METRICS__\""));
-    // The filter wiring is observable only as script source: the repo has no JS
-    // runtime in the test harness, so these pin that the path stays connected.
-    assert!(html.contains("row[key]===select.value"));
-    assert!(html.contains("renderGroups(rows)"));
-    assert!(html.contains("updateMap()"));
-    // Each filter change re-renders these tables, so the helper must replace its
-    // contents; appending would stack a new table under the previous one on every
-    // interaction.
+    // Payload assertions fail if substitution breaks or a label collides with a template token.
+    let groups = super::visual_report_table(&html, "group_coverage.csv");
     assert!(
-        html.contains("root.replaceChildren(t)"),
-        "the table helper must replace, not append"
+        groups["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|column| column["group"].as_str().unwrap().contains("__METRICS__"))
     );
-    assert!(html.contains("document.querySelector('#metrics')"));
-    assert!(html.contains("document.querySelector('#coverage')"));
+    assert!(html.contains("group_used_link_percent"));
+    assert!(html.contains("cross_boundary"));
+    // The filter wiring is observable as script source; live browser checks verify interaction.
+    assert!(html.contains("source.onchange"));
+    assert!(html.contains("metric.onchange"));
+    // Each filter change replaces the chart rather than appending another copy.
+    assert!(html.contains("root.replaceChildren()"));
 
     let explicitly_classified = analyze_final_iteration(
         output,
@@ -1836,10 +1849,17 @@ fn service_performance_reports_outcomes_distance_and_constraints() {
     // The settings are recorded so a standalone reanalysis reads the same records.
     let manifest = table("manifest.json");
     assert!(manifest.contains("requests.csv") && manifest.contains("max_wait_seconds"));
-    // The local report presents the tables, and each metric is catalogued.
+    // The local report presents all-record metric charts, and each metric is catalogued.
     let html = fs::read_to_string(&report).unwrap();
-    assert!(html.contains("id=\"service-summary\""));
-    assert!(html.contains("group,\\\"young\\\",2,1,1,0,0.500000"));
+    assert!(html.contains("DRT and taxi service performance"));
+    let source = super::visual_report_table(&html, "service_summary.csv");
+    assert!(
+        source["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "served_share" && c["count"].as_u64().unwrap() > 0)
+    );
     let catalog = table("metric_catalog.json");
     for metric in [
         "served_share",
@@ -1925,7 +1945,9 @@ fn service_performance_rejects_invalid_inputs_in_its_own_module() {
     let output = temp.path();
     let service = |requests: &str, fleet: Option<&str>| {
         fs::write(output.join("requests.csv"), requests).unwrap();
-        fleet.map(|fleet| fs::write(output.join("fleet.csv"), fleet).unwrap());
+        if let Some(fleet) = fleet {
+            fs::write(output.join("fleet.csv"), fleet).unwrap();
+        }
         ServiceInputs {
             requests: PathBuf::from("requests.csv"),
             passengers: None,

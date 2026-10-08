@@ -307,14 +307,14 @@ fn cumulative_opportunities_count_weights_within_an_inclusive_threshold() {
     assert_eq!(walk_28800["status"], "unavailable:no_travel_costs");
     assert_eq!(walk_28800["opportunities"], "");
 
-    // The report renders the measure, the map and the tables, and links the full CSVs.
+    // The report renders the measure and all-record metrics, and references the separate map and CSVs.
     let html = fs::read_to_string(report.join("index.html")).unwrap();
     assert!(html.contains("Accessibility to supplied opportunities"));
     assert!(html.contains("cumulative_opportunities_within_threshold"));
-    assert!(html.contains("id=\"accessibility-zones\""));
-    assert!(html.contains("id=\"accessibility-summary\""));
-    assert!(html.contains("id=\"accessibility-persons\""));
-    assert!(html.contains("id=\"accessibility-map\""));
+    assert!(html.contains("accessibility_zones.csv"));
+    assert!(html.contains("accessibility_summary.csv"));
+    assert!(html.contains("accessibility_persons.csv"));
+    assert!(html.contains("accessibility_map.svg"));
     assert!(html.contains("accessibility_zones.csv"));
     assert!(report.join("accessibility_map.svg").is_file());
     let map = fs::read_to_string(report.join("accessibility_map.svg")).unwrap();

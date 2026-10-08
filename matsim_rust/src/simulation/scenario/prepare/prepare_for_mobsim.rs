@@ -82,7 +82,7 @@ enum TripAssessment {
     NeedsRouting(Id<String>),
 }
 
-fn prepare_plan<'a>(
+fn prepare_plan(
     context: &PrepareForMobsimContext<'_>,
     person: &InternalPerson,
     plan: &InternalPlan,

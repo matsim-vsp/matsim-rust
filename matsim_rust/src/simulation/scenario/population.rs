@@ -1283,8 +1283,9 @@ mod tests {
                 .all(|type_id| expected_veh_types.contains(type_id.external()))
         );
 
-        // check that we have a vehicle for each mode and for each person
-        assert_eq!(9, garage.vehicles.len());
+        // check that we have a vehicle for each mode and for each person: three agents with a car,
+        // a bike and a walk leg each, plus each agent's car again under its bare person id
+        assert_eq!(12, garage.vehicles.len());
 
         // check population
         // activity types should be done as id. If id is not present this will crash

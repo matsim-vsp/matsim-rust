@@ -87,6 +87,7 @@ pub fn qsim_config() -> config::QSim {
         end_time: 0,
         ticks_per_second: 1,
         sample_size: 1.0,
+        storage_capacity_factor: None,
         stuck_threshold: u32::MAX,
         remove_stuck_vehicles: false,
         main_modes: vec![String::from("car")],
