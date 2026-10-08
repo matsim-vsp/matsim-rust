@@ -308,7 +308,6 @@ impl ControllerBuilder {
                         controller_scenario.core.garage.clone(),
                         car_fallback,
                     )
-                    .with_stop_to_stop_legs(config.transit().simulate_vehicles)
                     .with_personless_fallback(config.transit().personless_car_fallback),
                 ),
             );

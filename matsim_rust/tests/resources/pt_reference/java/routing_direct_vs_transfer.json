@@ -1,5 +1,5 @@
 {
-  "schema_version" : 1,
+  "schema_version" : 2,
   "reference" : {
     "implementation" : "matsim",
     "version" : "2026.0",
@@ -86,6 +86,7 @@
       "distance" : 0.0,
       "rides" : [ ]
     } ],
+    "generalized_cost" : 6.0,
     "arrival_time" : 30300.0
   } ],
   "events" : [ ]

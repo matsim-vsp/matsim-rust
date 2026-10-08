@@ -9,6 +9,8 @@ simulation integration runner for execution events.
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
 difference that a fixture exercises, and the fixture corpus is currently two scenarios wide. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
+The skims and external routing service entry points remain unchanged and are not covered here; their
+reference semantics belong to ticket 11.
 
 ## The pinned reference
 
@@ -68,12 +70,16 @@ A request from stop `ra` to stop `rc` at 08:00 where three candidates exist:
 | Candidate | Result |
 |---|---|
 | `a_to_b` 08:00 → 08:10 at `rb` | |
-| `b_to_c` 08:15 → 08:25 at `rc` | **reference chooses this** |
-| `direct` 08:00 → 08:50 at `rc` | **Rust chooses this** |
+| `b_to_c` 08:15 → 08:25 at `rc` | **Java and Rust choose this** |
+| `direct` 08:00 → 08:50 at `rc` | |
 
 The population is empty; the itinerary comes from the recorded request, so the assertion is about the
-router alone. This fixture is a known-divergence fixture, not a parity fixture. See
-[Known divergences](#known-divergences).
+router alone. The direct service remains in the schedule so this fixture proves that routes compete
+under the pinned default costs instead of a direct-service preference.
+This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits and
+non-default scoring remain outside its coverage.
+The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
+its time-equivalent cost using the pinned PT time weight before comparing the two.
 
 ## Comparison rules
 
@@ -86,6 +92,7 @@ everything, and a single global tolerance would hide exactly the differences wor
 | Event order | Exact, positional | Both streams are in simulation order. The order carries meaning: boarding, alighting and service identity depend on it. Only genuinely independent events could be reordered, and reordering them would break the alignment. |
 | Agent, mode, activity type, leg mode, link | Exact | A difference is a different journey, never a rounding difference. |
 | `distance` | Exact, full precision | Both implementations compute it from the same link lengths. A rounded form would hide a genuine difference. |
+| Generalized route cost | Exact after converting Rust's time-equivalent cost to utility units | MATSim records RAPTOR's `totalRouteCost`; Rust uses the pinned 12 utils/hour PT time weight and 1 utility per transfer. |
 | `boardingTime` | Exact | A schedule time, not a computed duration. |
 | Service identity (line, route, board/alight stop) | Exact | A different service is a different journey. |
 | Event and leg times | `0 ≤ rust − reference ≤ legs_completed × 1 s` | See below. A tolerance would let a real regression hide inside it. |
@@ -109,17 +116,9 @@ Owner: [#81](https://github.com/titipakorn-th/matsim-rust/issues/81) (queue-base
 execution). When it is fixed, the `worst_lag` assertion in `tests/java_reference.rs` will fail and
 should be updated to `0.0` rather than removed.
 
-**2. Direct service wins over a faster transfer** — `routing_direct_vs_transfer`. The Rust transit
-router searches transfers only when no direct service connects the pair, and selects by arrival
-time rather than by the reference's RAPTOR costs. On this fixture that costs 25 minutes
-(30300 s → 31800 s). Owner:
-[#72](https://github.com/titipakorn-th/matsim-rust/issues/72) (competing direct and transfer
-journeys). When it is fixed, the routing test fails and the fixture should be retired rather than
-relaxed.
-
-The routing test asserts **both** sides of the divergence, not just that they differ. That way a
-change in either direction is visible, and neither implementation's behavior can drift unnoticed
-while the test still passes.
+The routing fixture's former direct-service divergence was fixed by
+[#72](https://github.com/titipakorn-th/matsim-rust/issues/72). It now compares the complete selected
+itinerary, leg modes and arrival against the same pinned reference.
 
 ## Adding a fixture
 

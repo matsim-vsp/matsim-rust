@@ -26,7 +26,7 @@ MATSIM_DIR="$CACHE_DIR/matsim"
 MAVEN_REPOSITORY="$CACHE_DIR/m2"
 
 : "${JAVA_HOME:?set JAVA_HOME to a JDK 25; MATSim 2026.0 compiles with maven.compiler.release=25}"
-JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -E 's/.*version "([0-9]+).*/\1/')"
+JAVA_MAJOR="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -nE 's/.*version "([0-9]+).*/\1/p')"
 if [ "$JAVA_MAJOR" -lt 25 ]; then
   echo "MATSim 2026.0 needs a JDK 25, found $JAVA_MAJOR at $JAVA_HOME" >&2
   exit 1

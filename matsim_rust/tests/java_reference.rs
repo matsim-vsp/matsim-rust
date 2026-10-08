@@ -33,7 +33,7 @@ const REFERENCE_COMMIT: &str = "c7a75ebeddc3ceb62959af046190064bf23770df";
 
 /// The recorded reference carries this, and so must the Rust reader. Bump both when the normalized
 /// shape changes.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Runs the pt tutorial and compares the passenger's observable events against the reference.
 ///
@@ -165,14 +165,9 @@ fn verify_same_conditions(reference: &Reference, config: &Config) {
     }
 }
 
-/// Issues the recorded routing request and asserts the known routing gap is still the recorded one.
-///
-/// The reference beats a direct service with a faster transfer; the Rust transit router only
-/// searches transfers when no direct service connects the pair, so it takes the direct service and
-/// arrives later. Both outcomes are pinned, so a change in either direction is visible. This is not
-/// a claim of parity: #72 replaces the Rust behavior and retires this fixture.
-#[test]
-fn the_reference_beats_a_direct_service_with_a_transfer_and_rust_does_not() {
+/// The faster shared-stop transfer beats a direct service under the pinned Java default costs.
+#[deterministic_id_test(matsim_rust)]
+fn a_faster_shared_stop_transfer_beats_a_direct_service() {
     let request = load_request("routing_direct_vs_transfer");
     let config = Config::from_args(CommandLineArgs::new_with_path(
         "./tests/resources/pt_reference/routing_direct_vs_transfer/config.yml",
@@ -188,7 +183,6 @@ fn the_reference_beats_a_direct_service_with_a_transfer_and_rust_does_not() {
         .find(|itinerary| itinerary["id"] == request["id"])
         .expect("the request is recorded in the reference");
 
-    // The reference's transfer, and the direct service it beats, are the point of the fixture.
     assert_eq!(
         rides(&expected),
         vec![
@@ -203,23 +197,38 @@ fn the_reference_beats_a_direct_service_with_a_transfer_and_rust_does_not() {
         "the reference's transfer arrival changed"
     );
 
-    // Rust takes the direct service the reference rejects.
     assert_eq!(
         rides(&rust),
-        vec![ride("direct", "ra", "rc", 28800.0)],
-        "Rust stopped taking the direct service; #72 replaced this known gap, so the fixture and its \
-         assertions can be retired"
+        rides(&expected),
+        "Rust's selected services differ from the pinned Java itinerary"
     );
     assert_eq!(
         arrival_time(&rust),
-        31800.0,
-        "Rust's direct arrival changed"
+        arrival_time(&expected),
+        "Rust's arrival differs from the pinned Java itinerary"
     );
-
-    assert!(
-        arrival_time(expected) < arrival_time(&rust),
-        "the two implementations must still disagree on this request, otherwise the fixture no longer \
-         demonstrates anything"
+    let rust_cost_seconds = arrival_time(&rust) - request["departure_time"].as_f64().unwrap()
+        + 300.0 * rides(&rust).len().saturating_sub(1) as f64;
+    let rust_cost_utils = rust_cost_seconds * 12.0 / 3600.0;
+    assert_eq!(
+        expected["generalized_cost"].as_f64(),
+        Some(rust_cost_utils),
+        "Rust's generalized cost differs from MATSim's selected-route cost"
+    );
+    assert_eq!(
+        rust["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        "Rust's access, transfer and egress legs differ from the pinned Java itinerary"
     );
 }
 
