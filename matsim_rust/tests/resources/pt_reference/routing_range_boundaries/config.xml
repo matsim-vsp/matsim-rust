@@ -1,0 +1,52 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<config>
+	<module name="global">
+		<param name="randomSeed" value="4711" />
+		<param name="coordinateSystem" value="Atlantis" />
+	</module>
+	<module name="network">
+		<param name="inputNetworkFile" value="../../../../assets/pt_tutorial/multimodalnetwork.xml" />
+	</module>
+	<module name="vehicles">
+		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
+	</module>
+	<module name="transit">
+		<param name="transitScheduleFile" value="transit_schedule.xml" />
+		<param name="useTransit" value="true" />
+		<param name="usingTransitInMobsim" value="false" />
+	</module>
+	<module name="swissRailRaptor">
+		<param name="useRangeQuery" value="true" />
+		<parameterset type="rangeQuerySettings">
+			<param name="maxEarlierDeparture_sec" value="60" />
+			<param name="maxLaterDeparture_sec" value="60" />
+		</parameterset>
+		<parameterset type="routeSelector">
+			<param name="betaDepartureTime" value="1.0" />
+			<param name="betaTravelTime" value="1.0" />
+			<param name="betaTransferCount" value="300.0" />
+		</parameterset>
+	</module>
+	<module name="routing">
+		<param name="walkSpeed" value="0.8333333333333334" />
+		<param name="beelineDistanceFactor" value="1.3" />
+	</module>
+	<module name="qsim">
+		<param name="startTime" value="0" />
+		<param name="endTime" value="24:00:00" />
+		<param name="timeStepSize" value="1.0" />
+		<param name="insertingWaitingVehiclesBeforeDrivingVehicles" value="true" />
+		<param name="removeStuckVehicles" value="false" />
+		<param name="snapshotperiod" value="00:00:00" />
+	</module>
+	<module name="controller">
+		<param name="firstIteration" value="0" />
+		<param name="lastIteration" value="0" />
+		<param name="outputDirectory" value="out" />
+		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
+		<param name="eventsFileFormat" value="xml" />
+		<param name="compressionType" value="none" />
+		<param name="writeEventsInterval" value="1" />
+	</module>
+</config>

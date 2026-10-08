@@ -1,5 +1,7 @@
 package org.matsimrust.reference;
 
+import ch.sbb.matsim.config.SwissRailRaptorConfigGroup;
+import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptorModule;
 import ch.sbb.matsim.routing.pt.raptor.RaptorUtils;
 import ch.sbb.matsim.routing.pt.raptor.RaptorParameters;
 import ch.sbb.matsim.routing.pt.raptor.RaptorStaticConfig;
@@ -109,11 +111,19 @@ public final class ReferenceMain {
         Path outputPath = Path.of(require(options, "--out"));
 
         Config config = ConfigUtils.loadConfig(configPath.toAbsolutePath().toString());
+        boolean useSwissRailRaptor = config.getModules().containsKey(SwissRailRaptorConfigGroup.GROUP);
+        if (useSwissRailRaptor) {
+            config = ConfigUtils.loadConfig(
+                    configPath.toAbsolutePath().toString(), new SwissRailRaptorConfigGroup());
+        }
         // loadScenario reads the input files named in the config; createScenario alone leaves the
         // scenario empty. `Controler` (one l) is the concrete implementation; `ControlerUtils` is
         // deprecated upstream.
         Scenario scenario = ScenarioUtils.loadScenario(config);
         Controler controler = new Controler(scenario);
+        if (useSwissRailRaptor) {
+            controler.addOverridingModule(new SwissRailRaptorModule());
+        }
         controler.run();
 
         ObjectNode root = MAPPER.createObjectNode();

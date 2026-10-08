@@ -421,21 +421,18 @@ mod tests {
         assert_eq!(serde_json::to_value(&response).unwrap()["outcome"], "pt");
     }
 
+    /// The transit module answers a query walking beats with the walk it selected. It reports
+    /// `NoPath` only when transit cannot connect the endpoints at all; see
+    /// `personless_pt_query_reports_no_path_instead_of_a_car_trip`.
     #[deterministic_id_test]
     fn personless_pt_query_exposes_direct_walking_as_the_success_outcome() {
         Id::<crate::simulation::scenario::network::Link>::create("11");
         Id::<crate::simulation::scenario::network::Link>::create("12");
-        let mut schedule = TransitSchedule::from_file(
+        // 1 km apart, while the only transit path detours through `rb` and `rc`.
+        let schedule = TransitSchedule::from_file(
             "./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml"
                 .as_ref(),
         );
-        for route in schedule
-            .lines_mut()
-            .values_mut()
-            .flat_map(|line| line.routes.values_mut())
-        {
-            route.departures.clear();
-        }
         let pt = TransitRoutingModule::new(
             Arc::new(schedule),
             0.8333333333333334,
