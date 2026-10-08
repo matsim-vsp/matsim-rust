@@ -1,0 +1,278 @@
+{
+  "schema_version" : 1,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "ac637ed159c94419540ab7993074a70985c2c623f853c9dd5768ac16e9899029",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "../../../../assets/pt_tutorial/plans_1.xml.gz",
+      "sha256" : "623c295dc0d37fee44e3ca24fcbc72c1298d9637a4676d127a5e0fec8c6a01af"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "../../../../assets/pt_tutorial/transitschedule.xml",
+      "sha256" : "87fd74d2a0fbb20fa43e974404ea0b8f9a47bd2dbe9a9781161eb9141a85370b"
+    } ]
+  },
+  "itineraries" : [ ],
+  "events" : [ {
+    "time" : 27126.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "h",
+    "link" : "1112",
+    "x" : 938.0,
+    "y" : 642.0
+  }, {
+    "time" : 27126.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "1112"
+  }, {
+    "time" : 27787.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 550.0213814025778
+  }, {
+    "time" : 27787.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 28740.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "pt",
+    "distance" : 6100.0
+  }, {
+    "time" : 28740.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 28740.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28740.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28740.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 29319.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 481.9652477098323
+  }, {
+    "time" : 29319.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "3141"
+  }, {
+    "time" : 29319.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "w",
+    "link" : "3141",
+    "x" : 3619.0,
+    "y" : 1217.0
+  }, {
+    "time" : 62844.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "w",
+    "link" : "3141",
+    "x" : 3619.0,
+    "y" : 1217.0
+  }, {
+    "time" : 62844.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "3141"
+  }, {
+    "time" : 63189.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 287.7232176936717
+  }, {
+    "time" : 63189.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "4142"
+  }, {
+    "time" : 63189.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "s",
+    "link" : "4142",
+    "x" : 3840.0,
+    "y" : 1205.0
+  }, {
+    "time" : 66310.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "s",
+    "link" : "4142",
+    "x" : 3840.0,
+    "y" : 1205.0
+  }, {
+    "time" : 66310.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "4142"
+  }, {
+    "time" : 66607.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 247.08551151372677
+  }, {
+    "time" : 66607.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "33"
+  }, {
+    "time" : 66607.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 66607.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 66607.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 67740.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "pt",
+    "distance" : 6100.0
+  }, {
+    "time" : 67740.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 67740.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 67740.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 67740.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 68401.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 550.0213814025778
+  }, {
+    "time" : 68401.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "1112"
+  }, {
+    "time" : 68401.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "h",
+    "link" : "1112",
+    "x" : 938.0,
+    "y" : 642.0
+  } ]
+}

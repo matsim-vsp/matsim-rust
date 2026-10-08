@@ -56,8 +56,9 @@ code, the crate is imported as `matsim_rust`.
 
 Up to version 0.3.0, the core crate was called `rust_qsim` and the repository `parallel_qsim_rust`.
 
-See [architecture](docs/architecture.md), [testing](docs/tests.md), and
-[analysis](docs/analysis.md) for the detailed contracts.
+See [architecture](docs/architecture.md), [testing](docs/tests.md),
+[analysis](docs/analysis.md), and the [Java reference harness](docs/pt_java_reference.md) for the
+detailed contracts.
 
 ## Prerequisites
 
