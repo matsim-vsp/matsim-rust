@@ -33,6 +33,30 @@ impl RecordBatch {
             .par_iter()
             .map(|range| &self.bytes[range.clone()])
     }
+
+    /// Returns the records of this batch in input order.
+    pub(crate) fn records(&self) -> impl Iterator<Item = &[u8]> {
+        self.ranges.iter().map(|range| &self.bytes[range.clone()])
+    }
+}
+
+/// Reads records until the batch holds at least `target_bytes`. Returns `None` at the end of the
+/// input. `read_record` appends the bytes of the next record to the given buffer and returns
+/// `false` at the end of the input.
+fn read_batch<Source>(
+    source: &mut Source,
+    read_record: &mut impl FnMut(&mut Source, &mut Vec<u8>) -> bool,
+    target_bytes: usize,
+) -> Option<RecordBatch> {
+    let mut batch = RecordBatch::default();
+    while batch.bytes.len() < target_bytes {
+        let start = batch.bytes.len();
+        if !read_record(source, &mut batch.bytes) {
+            break;
+        }
+        batch.ranges.push(start..batch.bytes.len());
+    }
+    (batch.len() > 0).then_some(batch)
 }
 
 /// Reads records on a separate thread and processes them in batches on the calling thread. If `process` is multithreaded,
@@ -55,25 +79,12 @@ pub(crate) fn read_in_batches<Source, Open, Read, Process>(
         // Create a thread which reads the records and sends them in batches to the main thread.
         scope.spawn(move || {
             let mut source = open();
-            let mut batch = RecordBatch::default();
-            loop {
-                let start = batch.bytes.len();
-                if !read_record(&mut source, &mut batch.bytes) {
-                    break;
-                }
-                batch.ranges.push(start..batch.bytes.len());
-
+            while let Some(batch) = read_batch(&mut source, &mut read_record, BATCH_BYTES) {
                 // Send waits until there is space in the channel (main purpose is to bound memory usage).
-                if batch.bytes.len() >= BATCH_BYTES
-                    && sender.send(std::mem::take(&mut batch)).is_err()
-                {
+                if sender.send(batch).is_err() {
                     // The receiving side stopped, e.g., because processing panicked.
                     return;
                 }
-            }
-            if batch.len() > 0 {
-                // An error means that the receiving side stopped. There is nothing left to do then.
-                let _ = sender.send(batch);
             }
         });
 
@@ -82,6 +93,92 @@ pub(crate) fn read_in_batches<Source, Open, Read, Process>(
             process(batch);
         }
     });
+}
+
+/// Reads records and transforms them on a separate thread, so that this overlaps with consuming
+/// the results on the calling thread. The records of a batch are transformed in parallel. The
+/// results are returned in input order.
+pub(crate) struct BatchPipeline<T> {
+    receiver: Receiver<Vec<T>>,
+    current: std::vec::IntoIter<T>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl<T: Send + 'static> BatchPipeline<T> {
+    /// Spawns the thread of the pipeline. `open` and `read_record` behave like in
+    /// [`read_in_batches`] and run on that thread. `transform` receives the index of a record in
+    /// the input and its bytes. Batches hold about `target_bytes` of input.
+    pub(crate) fn spawn<Source, Open, ReadRecord, Transform>(
+        target_bytes: usize,
+        open: Open,
+        mut read_record: ReadRecord,
+        transform: Transform,
+    ) -> Self
+    where
+        Open: FnOnce() -> Source + Send + 'static,
+        ReadRecord: FnMut(&mut Source, &mut Vec<u8>) -> bool + Send + 'static,
+        Transform: Fn(usize, &[u8]) -> T + Send + Sync + 'static,
+    {
+        // The pipeline thread transforms in the global rayon pool, while the calling thread waits
+        // for the results. If the calling thread is a rayon worker itself, the pool might have no
+        // worker left for the pipeline, so the pipeline transforms sequentially then.
+        let parallel = rayon::current_thread_index().is_none();
+        let (sender, receiver) = sync_channel(QUEUED_BATCHES);
+        let handle = thread::spawn(move || {
+            let mut source = open();
+            let mut first_index = 0;
+            while let Some(batch) = read_batch(&mut source, &mut read_record, target_bytes) {
+                let results: Vec<T> = if parallel {
+                    batch
+                        .par_records()
+                        .enumerate()
+                        .map(|(i, record)| transform(first_index + i, record))
+                        .collect()
+                } else {
+                    batch
+                        .records()
+                        .enumerate()
+                        .map(|(i, record)| transform(first_index + i, record))
+                        .collect()
+                };
+                first_index += results.len();
+                if sender.send(results).is_err() {
+                    // The consuming side was dropped. There is nothing left to do then.
+                    return;
+                }
+            }
+        });
+        Self {
+            receiver,
+            current: Vec::new().into_iter(),
+            handle: Some(handle),
+        }
+    }
+}
+
+impl<T> Iterator for BatchPipeline<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        loop {
+            if let Some(result) = self.current.next() {
+                return Some(result);
+            }
+            match self.receiver.recv() {
+                Ok(batch) => self.current = batch.into_iter(),
+                Err(_) => {
+                    // The thread has finished. If it panicked, the input is incomplete, so the
+                    // panic must not be mistaken for the end of the input.
+                    if let Some(handle) = self.handle.take()
+                        && let Err(panic) = handle.join()
+                    {
+                        std::panic::resume_unwind(panic);
+                    }
+                    return None;
+                }
+            }
+        }
+    }
 }
 
 /// Reads blocks of the input on a separate thread, so that, e.g., decompressing the input overlaps with processing it.
@@ -149,9 +246,68 @@ impl Read for ReadAhead {
 
 #[cfg(test)]
 mod tests {
-    use super::{BATCH_BYTES, READ_AHEAD_BYTES, ReadAhead, read_in_batches};
+    use super::{BATCH_BYTES, BatchPipeline, READ_AHEAD_BYTES, ReadAhead, read_in_batches};
     use rayon::prelude::*;
     use std::io::Read;
+
+    fn byte_records(
+        count: u32,
+    ) -> impl FnMut(&mut std::ops::Range<u32>, &mut Vec<u8>) -> bool + Send + 'static {
+        move |source, buffer| match source.next() {
+            Some(i) if i < count => {
+                buffer.extend_from_slice(&i.to_le_bytes());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn pipeline_returns_results_in_input_order() {
+        // Batches of 64 bytes, i.e., 16 records each.
+        let pipeline = BatchPipeline::spawn(
+            64,
+            || 0..u32::MAX,
+            byte_records(1000),
+            |i, bytes| (i, u32::from_le_bytes(bytes.try_into().unwrap())),
+        );
+        let results: Vec<_> = pipeline.collect();
+        let expected: Vec<_> = (0..1000).map(|i| (i as usize, i)).collect();
+        assert_eq!(expected, results);
+    }
+
+    #[test]
+    fn pipeline_inside_single_threaded_pool_completes() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let sum: u64 = pool.install(|| {
+            BatchPipeline::spawn(
+                64,
+                || 0..u32::MAX,
+                byte_records(1000),
+                |_, bytes| u64::from(u32::from_le_bytes(bytes.try_into().unwrap())),
+            )
+            .sum()
+        });
+        assert_eq!(999 * 1000 / 2, sum);
+    }
+
+    #[test]
+    #[should_panic(expected = "broken record")]
+    fn pipeline_propagates_panics() {
+        let pipeline = BatchPipeline::spawn(
+            64,
+            || 0..u32::MAX,
+            byte_records(100),
+            |i, _| {
+                assert!(i < 50, "broken record");
+                i
+            },
+        );
+        pipeline.for_each(drop);
+    }
 
     #[test]
     fn read_ahead_returns_complete_input() {
