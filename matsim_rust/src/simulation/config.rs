@@ -9,6 +9,7 @@ use dyn_clone::DynClone;
 use reqwest::Url;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
@@ -556,6 +557,12 @@ pub struct Transit {
     /// Leg modes served by simulated transit vehicles. MATSim's `transit.transitModes`.
     #[serde(default = "default_transit_modes")]
     pub transit_modes: Vec<String>,
+    /// Use service-to-passenger mode mappings for transit routing, scoring, and returned ride legs.
+    #[serde(default)]
+    pub use_mode_mapping_for_passengers: bool,
+    /// Map schedule route modes to the passenger leg modes used by MATSim's SwissRailRaptor.
+    #[serde(default)]
+    pub mode_mapping_for_passengers: BTreeMap<String, String>,
     /// Let `pt` requests that carry no person fall back to the car router. This is the legacy
     /// behaviour SILO's zone-to-zone queries rely on; passengers never need it, since a
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
@@ -573,6 +580,8 @@ impl Default for Transit {
             schedule_path: None,
             simulate_vehicles: false,
             transit_modes: default_transit_modes(),
+            use_mode_mapping_for_passengers: false,
+            mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
         }
     }
@@ -635,6 +644,13 @@ register_override!("transit.transit_modes", |config, value| {
         .map(ToString::to_string)
         .collect();
 });
+
+register_override!(
+    "transit.use_mode_mapping_for_passengers",
+    |config, value| {
+        config.transit_mut().use_mode_mapping_for_passengers = value.parse().unwrap();
+    }
+);
 
 register_override!("transit.personless_car_fallback", |config, value| {
     config.transit_mut().personless_car_fallback = value.parse().unwrap();
@@ -2670,6 +2686,8 @@ modules:
         assert_eq!(None, config.transit().schedule_path);
         assert!(!config.transit().simulate_vehicles);
         assert_eq!(vec!["pt"], config.transit().transit_modes);
+        assert!(!config.transit().use_mode_mapping_for_passengers);
+        assert!(config.transit().mode_mapping_for_passengers.is_empty());
         assert!(!config.transit().personless_car_fallback);
     }
 
@@ -2718,6 +2736,30 @@ modules:
         });
         assert!(config.transit().simulate_vehicles);
         assert_eq!(vec!["bus", "rail"], config.transit().transit_modes);
+    }
+
+    #[test]
+    fn transit_passenger_mode_mappings_read_from_yaml() {
+        let config: Config = serde_yaml::from_str(
+            r#"
+modules:
+  transit:
+    type: Transit
+    use_mode_mapping_for_passengers: true
+    transit_modes: [rail, road]
+    mode_mapping_for_passengers:
+      train: rail
+      bus: road
+"#,
+        )
+        .expect("failed to parse passenger mode mappings");
+
+        assert!(config.transit().use_mode_mapping_for_passengers);
+        assert_eq!(
+            "rail",
+            config.transit().mode_mapping_for_passengers["train"]
+        );
+        assert_eq!("road", config.transit().mode_mapping_for_passengers["bus"]);
     }
 
     #[test]

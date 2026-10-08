@@ -81,6 +81,15 @@ non-default scoring remain outside its coverage.
 The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
 its time-equivalent cost using the pinned PT time weight before comparing the two.
 
+### `routing_mapped_modes`
+
+The same request and schedule with the `b_to_c` route changed to `bus`. Both configs enable
+passenger mode mappings (`train` → `rail`, `bus` → `road`); rail and road have different travel
+utilities, so the direct train service competes with the faster transfer by mapped passenger-mode
+cost. The pinned Java and Rust routers choose the direct service, arrive at 08:50, and expose the
+ride as a `rail` leg. This complements the preceding fixture, which checks route selection with
+mapping disabled.
+
 ## Comparison rules
 
 The reference is recorded once and compared many times, so the rules are fixed and stated here
