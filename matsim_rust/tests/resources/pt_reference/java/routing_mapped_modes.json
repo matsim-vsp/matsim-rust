@@ -1,5 +1,5 @@
 {
-  "schema_version" : 2,
+  "schema_version" : 3,
   "reference" : {
     "implementation" : "matsim",
     "version" : "2026.0",
@@ -22,6 +22,10 @@
       "role" : "transit_schedule",
       "path" : "transit_schedule.xml",
       "sha256" : "b7d8904b0208697ecdc43fb33b442b694bf8445f82d5fafeaa2d08ec731f6334"
+    }, {
+      "role" : "routing_requests",
+      "path" : "requests.json",
+      "sha256" : "070a388be48fee31e43d1aa99356889edf387d9c4d438e24882a2d66ebaa33f7"
     } ]
   },
   "itineraries" : [ {
@@ -71,5 +75,6 @@
     "generalized_cost" : 5.833,
     "arrival_time" : 31800.0
   } ],
+  "trees" : [ ],
   "events" : [ ]
 }

@@ -17,16 +17,20 @@ use matsim_rust::simulation::events::{
     PersonDepartureEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
 };
 use matsim_rust::simulation::id::Id;
-use matsim_rust::simulation::replanning::routing::RoutingError;
-use matsim_rust::simulation::replanning::routing::{Facility, RoutingRequestBuilder, TripRouter};
+use matsim_rust::simulation::replanning::routing::{
+    Facility, RoutingError, RoutingRequestBuilder, TransitRoutingModule, TransitSkimOutcome,
+    TripRouter,
+};
 use matsim_rust::simulation::scenario::network::Link;
 use matsim_rust::simulation::scenario::population::InternalPerson;
+use matsim_rust::simulation::scenario::transit::TransitStopFacility;
 use matsim_rust::simulation::scenario::{Coordinate, Scenario};
 use matsim_rust::simulation::time::SimTime;
 use serde_json::{Map, Value, json};
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 
 const FIXTURES: &str = "./tests/resources/pt_reference";
 const JAVA_REFERENCE: &str = "./tests/resources/pt_reference/java";
@@ -34,7 +38,7 @@ const REFERENCE_COMMIT: &str = "c7a75ebeddc3ceb62959af046190064bf23770df";
 
 /// The recorded reference carries this, and so must the Rust reader. Bump both when the normalized
 /// shape changes.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Runs the pt tutorial and compares the passenger's observable events against the reference.
 ///
@@ -231,6 +235,101 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
             .collect::<Vec<_>>(),
         "Rust's access, transfer and egress legs differ from the pinned Java itinerary"
     );
+}
+
+/// The one-to-all tree matches MATSim's observable trees at and just after a scheduled departure.
+#[deterministic_id_test(matsim_rust)]
+fn one_to_all_tree_matches_observable_java_results() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_direct_vs_transfer/config.yml",
+    ));
+    let reference = read_reference("routing_direct_vs_transfer");
+    verify_same_conditions(&reference, &config);
+    let scenario = Scenario::load(config);
+    let schedule = Arc::new(scenario.transit_schedule);
+    let skim = TransitRoutingModule::new_for_skim(schedule.clone(), 0.8333333333333334, 1.3);
+    let requests: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(FIXTURES)
+                .join("routing_direct_vs_transfer")
+                .join("requests.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    for request in requests["trees"].as_array().unwrap() {
+        let expected = reference
+            .trees
+            .iter()
+            .find(|tree| tree["id"] == request["id"])
+            .expect("the reference records each requested tree");
+        let observed_departures: Vec<_> = expected["departures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|departure| departure["departure_time"].as_f64().unwrap())
+            .collect();
+        let expected_departures = match request["id"].as_str().unwrap() {
+            "ra_service_at_0800" => vec![28800.0],
+            "ra_just_after_0800_service" => vec![29400.0],
+            id => panic!("unexpected one-to-all query {id}"),
+        };
+        assert_eq!(observed_departures, expected_departures);
+        let from_id = request["from_stop"].as_str().unwrap();
+        let from = stop_by_external_id(&schedule, from_id);
+
+        for departure in expected["departures"].as_array().unwrap() {
+            let destinations = request["destinations"].as_array().unwrap();
+            let stops: Vec<_> = destinations
+                .iter()
+                .map(|destination| {
+                    stop_by_external_id(&schedule, destination["stop"].as_str().unwrap())
+                })
+                .collect();
+            let coordinates: Vec<_> = stops.iter().map(|stop| stop.coord.clone()).collect();
+            let rust = skim.skim_results_from_origin(
+                &from.coord,
+                &coordinates,
+                SimTime::from_secs(departure["departure_time"].as_f64().unwrap() as u64),
+            );
+
+            for ((destination, stop), result) in destinations.iter().zip(stops).zip(rust) {
+                let expected_destination = departure["destinations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["stop"] == destination["stop"])
+                    .expect("Java records every requested destination");
+                assert_eq!(stop.id.external(), destination["stop"].as_str().unwrap());
+                if expected_destination["result"] == "found" {
+                    assert_eq!(result.outcome, TransitSkimOutcome::Transit);
+                    assert_eq!(
+                        result.travel_time.unwrap().as_secs_f64(),
+                        expected_destination["arrival_time"].as_f64().unwrap()
+                            - departure["departure_time"].as_f64().unwrap(),
+                        "tree arrival differs for {} at {}",
+                        destination["stop"],
+                        departure["departure_time"]
+                    );
+                } else {
+                    assert_eq!(expected_destination["result"], "no_path");
+                    assert_eq!(result.outcome, TransitSkimOutcome::Walking);
+                }
+            }
+        }
+    }
+}
+
+fn stop_by_external_id<'a>(
+    schedule: &'a matsim_rust::simulation::scenario::transit::TransitSchedule,
+    external_id: &str,
+) -> &'a TransitStopFacility {
+    schedule
+        .facilities()
+        .values()
+        .find(|stop| stop.id.external() == external_id)
+        .expect("tree fixture stop exists in the schedule")
 }
 
 /// Passenger mode mappings let competing transit route modes use their own scoring costs.
@@ -515,6 +614,7 @@ fn read_reference(fixture: &str) -> Reference {
             })
             .collect(),
         itineraries: content["itineraries"].as_array().unwrap().clone(),
+        trees: content["trees"].as_array().unwrap().clone(),
         events: content["events"].as_array().unwrap().clone(),
     }
 }
@@ -526,6 +626,7 @@ struct Reference {
     time_step_size: f64,
     inputs: Vec<Input>,
     itineraries: Vec<Value>,
+    trees: Vec<Value>,
     events: Vec<Value>,
 }
 

@@ -7,7 +7,7 @@ modules:
     path: ./assets/pt_tutorial/vehicles.xml
   transit:
     type: Transit
-    schedule_path: ./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml
+    schedule_path: ./tests/resources/pt_reference/routing_range_boundaries/transit_schedule.xml
     range_query_settings:
       - max_earlier_departure_sec: 60
         max_later_departure_sec: 60

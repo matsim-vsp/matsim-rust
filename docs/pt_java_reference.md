@@ -9,8 +9,10 @@ simulation integration runner for execution events.
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
 difference that a fixture exercises, and the fixture corpus is currently three scenarios wide. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
-The skims and external routing service entry points remain unchanged and are not covered here; their
-reference semantics belong to ticket 11.
+The external routing service boundary is covered through the same trip router. The one-to-all skim
+uses one per-origin routing tree; its reachable and unreachable stop results, including a missed
+departure boundary, are compared with MATSim's `calcTreesObservable`. The skim's explicit `pt`,
+`walk`, and `no_path` outcomes and external result classifications are tested separately.
 
 ## The pinned reference
 
@@ -45,7 +47,7 @@ A fixture is a directory under `matsim_rust/tests/resources/pt_reference/`:
 | File | Role |
 |---|---|
 | `config.xml` | MATSim's own configuration. Input paths are relative to this file. |
-| `requests.json` | Routing requests issued through `TripRouter` after the run. Optional. |
+| `requests.json` | Routing requests issued through `TripRouter` and one-to-all tree queries after the run. Optional. |
 | `*.yml` | The Rust configuration for the same scenario, where one is needed. |
 | shared inputs | Reused from `matsim_rust/assets/` rather than duplicated. |
 | `../java/<fixture>.json` | The recorded reference. Regenerate; never hand-edit. |
@@ -78,6 +80,10 @@ router alone. The direct service remains in the schedule so this fixture proves 
 under the pinned default costs instead of a direct-service preference.
 This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits and
 non-default scoring remain outside its coverage.
+The same fixture records `calcTreesObservable` from stop `ra` for the 08:00 departure and for the
+window beginning one second later through 08:10. It compares arrivals at `rb` and `rc`; isolated
+stop `rd` must remain absent from the transit tree. The Rust skim queries those stops at their exact
+coordinates, so the comparison covers the shared transit tree without adding access or egress time.
 The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
 its time-equivalent cost using the pinned PT time weight before comparing the two.
 
@@ -110,6 +116,12 @@ request at 09:06 occurs after the final usable service and confirms that neither
 repeats the schedule on the next day. MATSim's top-level `TripRouter` falls back to a direct walk
 when no PT route exists; the Rust PT routing module reports no path. The comparison pins the absence
 of a PT service in both results while preserving that existing wrapper difference.
+
+This fixture keeps its own copy of the transit schedule instead of reading
+`../routing_direct_vs_transfer/transit_schedule.xml`. That schedule now carries stop `rd`, which the
+one-to-all fixture added, and a reference is only comparable against the inputs it was recorded
+with: an extra stop beside the access point changes the candidate stops and therefore the selected
+departure.
 
 ### Transfer construction
 
