@@ -4,10 +4,7 @@ use crate::generated::routing::{Request, Response};
 use crate::simulation::config::Config;
 use crate::simulation::data_structures::RingIter;
 use crate::simulation::scenario::Coordinate;
-use crate::simulation::scenario::population::{
-    InternalActivity, InternalLeg, InternalPlan, InternalPlanElement,
-};
-use crate::simulation::scenario::trip_structure_utils::find_trip_span_starting_at_activity_default;
+use crate::simulation::scenario::population::{InternalActivity, InternalLeg, InternalPlanElement};
 use crate::simulation::time::SimTime;
 use derive_builder::Builder;
 use itertools::{EitherOrBoth, Itertools};
@@ -61,18 +58,6 @@ impl InternalRoutingRequestPayload {
 pub struct InternalRoutingResponse {
     pub(crate) elements: Vec<InternalPlanElement>,
     pub(crate) request_id: Uuid,
-}
-
-impl InternalRoutingResponse {
-    pub(crate) fn replace_trip(self, plan: &mut InternalPlan, start_index: usize) {
-        if self.elements.is_empty() {
-            return;
-        }
-
-        let span = find_trip_span_starting_at_activity_default(&plan.elements, start_index)
-            .expect("No trip found starting at the current plan element");
-        span.replace_trip_elements(&mut plan.elements, self.elements);
-    }
 }
 
 impl From<InternalRoutingRequestPayload> for Request {
