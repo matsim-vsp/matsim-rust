@@ -1,13 +1,10 @@
-use crate::generated::events::GenericEvent;
 use crate::simulation::events::{EventTrait, EventsManager, GenericEventBuilder, comparison};
-use crate::simulation::io::proto::proto_events::{ProtoEventsReader, process_events};
+use crate::simulation::io::proto::proto_events::{PreparedEvent, PreparedProtoEventsReader};
 use crate::simulation::io::xml::events::{XmlEventsReader, XmlEventsWriter};
 use crate::simulation::time::SimTime;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
-use std::fs::File;
-use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use tracing::info;
 
@@ -24,21 +21,21 @@ trait StatefulReader {
     fn get_preloaded_time(&self) -> SimTime;
 }
 
-struct StatefulProtoReader<R: Read + Seek> {
-    reader: ProtoEventsReader<R>,
-    preloaded_time_step: (SimTime, Vec<GenericEvent>),
+struct StatefulProtoReader {
+    reader: PreparedProtoEventsReader,
+    preloaded_time_step: (SimTime, Vec<PreparedEvent>),
 }
 
-impl StatefulProtoReader<File> {
+impl StatefulProtoReader {
     fn from_file(path: impl AsRef<Path>) -> Self {
         Self {
-            reader: ProtoEventsReader::from_file(path.as_ref()),
+            reader: PreparedProtoEventsReader::from_file(path.as_ref()),
             preloaded_time_step: (SimTime::default(), Vec::new()),
         }
     }
 }
 
-impl StatefulReader for StatefulProtoReader<File> {
+impl StatefulReader for StatefulProtoReader {
     fn load_next(&mut self) -> bool {
         match self.reader.next() {
             None => false,
@@ -49,11 +46,11 @@ impl StatefulReader for StatefulProtoReader<File> {
         }
     }
     fn process_preloaded_events(&self, manager: &mut EventsManager) {
-        process_events(
-            self.preloaded_time_step.0,
-            &self.preloaded_time_step.1,
-            manager,
-        )
+        // Pending events are converted here, so that missing ids are created in processing order.
+        let (time, events) = &self.preloaded_time_step;
+        for event in events {
+            event.with_event(*time, |event| manager.process_event(event));
+        }
     }
 
     fn get_preloaded_time(&self) -> SimTime {
@@ -529,5 +526,252 @@ mod test {
             event_string_collection.lock().unwrap().clone(),
             expected_string_collection
         );
+    }
+
+    use crate::simulation::events::{
+        ActivityEndEventBuilder, LinkEnterEventBuilder, PersonDepartureEventBuilder,
+        PersonStuckEventBuilder, PtTeleportationArrivalEventBuilder,
+        TeleportationArrivalEventBuilder,
+    };
+    use crate::simulation::id;
+    use crate::simulation::id::Id;
+    use crate::simulation::io::proto::proto_events::ProtoEventsWriter;
+    use crate::simulation::scenario::Coordinate;
+    use std::collections::BTreeMap;
+
+    const SYNTHETIC_PARTS: u32 = 3;
+
+    /// Events of one partition. Partitions have events at partly the same and partly different
+    /// times, and new ids appear throughout the file, so that both the merge order and the order
+    /// of id creation are observable.
+    fn synthetic_events(part: u32) -> Vec<Box<dyn EventTrait>> {
+        let mut events: Vec<Box<dyn EventTrait>> = Vec::new();
+        for step in 0..300u32 {
+            if (step + part) % 4 == 0 {
+                // No events of this partition at this time.
+                continue;
+            }
+            let time = SimTime::from_secs(u64::from(step * 3 + part % 2));
+            let person = format!("person_{}_{}", part, step % 17);
+            let link = format!("link_{}", (step * 7 + part) % 41);
+            let mode = format!("mode_{}", step % 11);
+            events.push(Box::new(
+                ActivityEndEventBuilder::default()
+                    .time(time)
+                    .person(Id::create(&person))
+                    .link(Id::create(&link))
+                    .act_type(Id::create(&format!("act_{}", step % 5)))
+                    .coordinate(Coordinate::new_2d(f64::from(step), 0.5))
+                    .build()
+                    .unwrap(),
+            ));
+            events.push(Box::new(
+                PersonDepartureEventBuilder::default()
+                    .time(time)
+                    .person(Id::create(&person))
+                    .link(Id::create(&link))
+                    .leg_mode(Id::create(&mode))
+                    .routing_mode(Id::create(&format!("routing_{}", step % 3)))
+                    .build()
+                    .unwrap(),
+            ));
+            events.push(Box::new(
+                LinkEnterEventBuilder::default()
+                    .time(time)
+                    .link(Id::create(&format!("link_{}", step % 53)))
+                    .vehicle(Id::create(&format!("{person}_{mode}")))
+                    .build()
+                    .unwrap(),
+            ));
+            if step % 5 == 0 {
+                events.push(Box::new(
+                    TeleportationArrivalEventBuilder::default()
+                        .time(time)
+                        .person(Id::create(&person))
+                        .mode(Id::create(&mode))
+                        .distance(f64::from(step) * 1.5)
+                        .build()
+                        .unwrap(),
+                ));
+                events.push(Box::new(
+                    PtTeleportationArrivalEventBuilder::default()
+                        .time(time)
+                        .person(Id::create(&person))
+                        .distance(12.25)
+                        .mode(Id::create("pt"))
+                        .route(Id::create(&format!("route_{}", step % 7)))
+                        .line(Id::create(&format!("line_{}", step % 4)))
+                        .boarding_time(time)
+                        .access_facility(Id::create(&format!("stop_{}", step % 9)))
+                        .egress_facility(Id::create(&format!("stop_{}", step % 10)))
+                        .build()
+                        .unwrap(),
+                ));
+            }
+            if step % 37 == 0 {
+                let mut stuck = PersonStuckEventBuilder::default();
+                stuck.time(time).person(Id::create(&person));
+                if step % 2 == 0 {
+                    stuck
+                        .link(Some(Id::create(&link)))
+                        .leg_mode(Some(Id::create(&mode)));
+                }
+                events.push(Box::new(stuck.build().unwrap()));
+            }
+        }
+        events
+    }
+
+    /// Writes the synthetic events of all partitions as `events.{part}.{extension}` and stores the
+    /// created ids as `ids.binpb`. Returns the number of events.
+    fn write_synthetic_events(folder: &Path, extension: &str) -> usize {
+        std::fs::create_dir_all(folder).unwrap();
+        let mut num_events = 0;
+        for part in 0..SYNTHETIC_PARTS {
+            let path = folder.join(format!("events.{part}.{extension}"));
+            let mut manager = EventsManager::new();
+            if extension == "binpb" {
+                ProtoEventsWriter::register_fn(path)(&mut manager);
+            } else {
+                XmlEventsWriter::register_fn(path)(&mut manager);
+            }
+            for event in synthetic_events(part) {
+                manager.process_event(event.as_ref());
+                num_events += 1;
+            }
+            manager.finish();
+        }
+        id::store_to_file(&folder.join("ids.binpb"));
+        num_events
+    }
+
+    type Recorded = (Vec<String>, BTreeMap<u64, Vec<String>>);
+
+    /// Reads with `read` and records the processed events and the resulting id store.
+    fn record(ids: Option<&Path>, read: &dyn Fn(&mut EventsManager)) -> Recorded {
+        id::reset_store();
+        if let Some(ids) = ids {
+            id::load_from_file(ids);
+        }
+        let collected = Arc::new(Mutex::new(Vec::new()));
+        let mut manager = EventsManager::new();
+        EventsToVecCollector::register_fn(collected.clone())(&mut manager);
+        read(&mut manager);
+        let events = collected.lock().unwrap().clone();
+        (events, id::snapshot_store())
+    }
+
+    /// Reads with `read` once on the main thread, where the pipelines convert in the global rayon
+    /// pool, and once inside a rayon pool, where the pipelines convert on their own thread. Both
+    /// must process the same events and create the same ids.
+    fn assert_independent_of_threads(
+        num_events: usize,
+        ids: Option<&Path>,
+        read: impl Fn(&mut EventsManager) + Sync,
+    ) {
+        let in_global_pool = record(ids, &read);
+        assert_eq!(num_events, in_global_pool.0.len());
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let in_pool = pool.install(|| record(ids, &read));
+        assert_eq!(in_global_pool, in_pool);
+    }
+
+    fn assert_partitioned_reading_is_independent_of_threads(extension: &str) {
+        let folder = PathBuf::from(format!(
+            "./test_output/simulation/events/utils/partitioned_reading_is_independent_of_threads/{extension}"
+        ));
+        let num_events = write_synthetic_events(&folder, extension);
+        let ids = folder.join("ids.binpb");
+        let read_all = |manager: &mut EventsManager| {
+            read_partitioned_events(manager, &folder, "events", SYNTHETIC_PARTS, extension).unwrap()
+        };
+        let first = folder.join(format!("events.0.{extension}"));
+        let read_first = |manager: &mut EventsManager| read_events(manager, &first).unwrap();
+        let num_events_first = synthetic_events(0).len();
+
+        for ids in [None, Some(ids.as_path())] {
+            assert_independent_of_threads(num_events, ids, read_all);
+            assert_independent_of_threads(num_events_first, ids, read_first);
+        }
+    }
+
+    #[deterministic_id_test]
+    fn partitioned_xml_reading_is_independent_of_threads() {
+        assert_partitioned_reading_is_independent_of_threads("xml.gz");
+    }
+
+    #[deterministic_id_test]
+    fn partitioned_proto_reading_is_independent_of_threads() {
+        assert_partitioned_reading_is_independent_of_threads("binpb");
+    }
+
+    #[deterministic_id_test]
+    fn files_without_events_are_read() {
+        let folder = PathBuf::from("./test_output/simulation/events/utils/files_without_events");
+        std::fs::create_dir_all(&folder).unwrap();
+        for extension in ["xml.gz", "binpb"] {
+            let path = folder.join(format!("events.0.{extension}"));
+            let mut manager = EventsManager::new();
+            if extension == "binpb" {
+                ProtoEventsWriter::register_fn(path.clone())(&mut manager);
+            } else {
+                XmlEventsWriter::register_fn(path.clone())(&mut manager);
+            }
+            manager.finish();
+
+            let (events, _) = record(None, &|manager| read_events(manager, &path).unwrap());
+            assert!(events.is_empty(), "{extension}");
+        }
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Failed to read input")]
+    fn truncated_gz_file_panics() {
+        let folder = PathBuf::from("./test_output/simulation/events/utils/truncated_gz_file");
+        write_synthetic_events(&folder, "xml.gz");
+        let path = folder.join("events.0.xml.gz");
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes.truncate(bytes.len() / 2);
+        std::fs::write(&path, bytes).unwrap();
+
+        let mut manager = EventsManager::new();
+        read_events(&mut manager, &path).unwrap();
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Failed to parse event number 1")]
+    fn invalid_event_element_panics() {
+        let folder = PathBuf::from("./test_output/simulation/events/utils/invalid_event_element");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("events.xml");
+        std::fs::write(
+            &path,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<events version=\"1.0\">\n\
+             <event time=\"1\" type=\"travelled\" person=\"a\" distance=\"1\" mode=\"walk\"/>\n\
+             <event time=\"2\" type=\"travelled\" person=a distance=\"1\" mode=\"walk\"/>\n\
+             </events>\n",
+        )
+        .unwrap();
+
+        let mut manager = EventsManager::new();
+        read_events(&mut manager, &path).unwrap();
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Failed to read delimited buffer")]
+    fn truncated_proto_file_panics() {
+        let folder = PathBuf::from("./test_output/simulation/events/utils/truncated_proto_file");
+        write_synthetic_events(&folder, "binpb");
+        let path = folder.join("events.0.binpb");
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes.truncate(bytes.len() - 3);
+        std::fs::write(&path, bytes).unwrap();
+
+        let mut manager = EventsManager::new();
+        read_events(&mut manager, &path).unwrap();
     }
 }

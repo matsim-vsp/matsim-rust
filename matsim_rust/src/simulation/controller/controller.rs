@@ -275,6 +275,7 @@ impl ControllerBuilder {
     }
 }
 
+#[hotpath::measure_all]
 impl Controller {
     /// Runs the simulation and joins all threads before returning.
     pub fn run(mut self) {

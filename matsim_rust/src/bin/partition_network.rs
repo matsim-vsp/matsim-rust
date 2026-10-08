@@ -13,7 +13,7 @@ use matsim_rust::simulation::scenario::network::Network;
 /// The new file has the same name as the input file, but with the number of parts appended to the name.
 /// e.g. `network.binpb` -> `network.4.binpb`
 fn main() {
-    matsim_rust::simulation::logging::init_std_out_logging_thread_local();
+    let _guard = matsim_rust::simulation::logging::init_std_out_logging_thread_local();
     let args = InputArgs::parse();
 
     if let Some(id_path) = args.id_path {
