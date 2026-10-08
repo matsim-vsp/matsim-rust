@@ -1,3 +1,4 @@
+use crate::simulation::build_info::GIT_VERSION;
 use crate::simulation::config::VertexWeight::InLinkCapacity;
 use crate::simulation::io::is_url;
 use crate::simulation::replanning::{KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME};
@@ -39,7 +40,7 @@ struct OverrideHandler {
 inventory::collect!(OverrideHandler);
 
 #[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version = GIT_VERSION, about, long_about = None)]
 pub struct CommandLineArgs {
     #[arg(long, short)]
     pub config: String,

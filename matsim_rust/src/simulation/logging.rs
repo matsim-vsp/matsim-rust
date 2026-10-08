@@ -1,7 +1,7 @@
 use std::io;
 use std::path::Path;
-use tracing::Level;
 use tracing::dispatcher::DefaultGuard;
+use tracing::{Level, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{non_blocking, rolling};
 use tracing_subscriber::filter::LevelFilter;
@@ -10,6 +10,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Layer};
 use tracing_subscriber::{fmt, registry};
 
+use crate::simulation::build_info::GIT_VERSION;
 use crate::simulation::config::{Config, Logging, Profiling};
 use crate::simulation::io::resolve_path;
 use crate::simulation::profiling::SpanDurationToFileLayer;
@@ -23,13 +24,17 @@ pub(crate) struct LogGuards {
     default: DefaultGuard,
 }
 
+#[must_use = "dropping the guard immediately disables logging; bind it, e.g. `let _guard = ...`"]
 pub fn init_std_out_logging_thread_local() -> DefaultGuard {
     let collector = tracing_subscriber::registry().with(
         fmt::Layer::new()
             .with_writer(io::stdout)
             .with_filter(LevelFilter::INFO),
     );
-    tracing::subscriber::set_default(collector)
+    let guard = tracing::subscriber::set_default(collector);
+    // Log the code state first, so that every log documents which build produced it.
+    info!("matsim-rust version {GIT_VERSION}");
+    guard
 }
 
 pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
@@ -69,6 +74,8 @@ pub(crate) fn init_logging(config: &Config, part: u32) -> LogGuards {
         .with(csv_layers.routing.map(|(s, e)| s.with_filter(e)));
 
     let default = tracing::subscriber::set_default(collector);
+    // Log the code state first, so that every log documents which build produced it.
+    info!("matsim-rust version {GIT_VERSION}");
 
     LogGuards {
         tracing_guards: csv_layers.writer_guards,
