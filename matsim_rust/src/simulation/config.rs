@@ -1379,25 +1379,24 @@ impl Scoring {
                 }
             }
         }
-        if self
-            .agent_params
-            .iter()
-            .any(|params| params.subpopulation == "person")
-            && let Some(performing) = self
-                .agent_params
-                .iter()
-                .find(|params| params.subpopulation == "person")
-                .map(|params| params.performing)
-            && let Some(pt_utility) = self
+        for agent in &self.agent_params {
+            let performing = agent.performing;
+            let pt_utility = self
                 .mode_params
                 .iter()
-                .find(|params| params.mode == "pt")
-                .map(|params| params.marginal_utility_of_traveling)
-            && performing == pt_utility
-        {
-            return Err(
-                "scoring parameters for pt must produce a non-zero travel-time cost".to_owned(),
-            );
+                .find(|params| params.mode == "pt" && params.subpopulation == agent.subpopulation)
+                .or_else(|| {
+                    self.mode_params
+                        .iter()
+                        .find(|params| params.mode == "pt" && params.subpopulation.is_empty())
+                })
+                .map_or(-6.0, |params| params.marginal_utility_of_traveling);
+            if performing == pt_utility {
+                return Err(format!(
+                    "scoring parameters for subpopulation {} must produce a non-zero travel-time cost for pt",
+                    agent.subpopulation
+                ));
+            }
         }
         Ok(())
     }
@@ -3402,6 +3401,29 @@ modules:
         let error = scoring.validate().unwrap_err();
         assert!(
             error.contains("scoring agent subpopulation person has a non-finite performing"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// `Scoring::validate()` must catch the `performing == pt_utility` divide-by-zero for *every*
+    /// agent subpopulation, not only the hard-coded "person" one. The pre-issue-75 implementation
+    /// only checked "person", so a freight subpopulation with a matching utility would slip through
+    /// and break transit routing at runtime.
+    #[test]
+    fn scoring_validate_catches_performing_eq_pt_utility_for_every_subpopulation() {
+        let mut scoring = Scoring::default();
+        // Add a second agent_params entry whose performing matches the empty-subpopulation
+        // `pt` utility (-6.0) and would have escaped the old "person"-only check.
+        scoring.agent_params.push({
+            let mut params = scoring.agent_params[0].clone();
+            params.subpopulation = "freight".to_string();
+            params.performing = -6.0;
+            params
+        });
+
+        let error = scoring.validate().unwrap_err();
+        assert!(
+            error.contains("subpopulation freight"),
             "unexpected error: {error}"
         );
     }
