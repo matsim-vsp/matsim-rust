@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "requests": [
+    {
+      "id": "unavailable_bike_feeder",
+      "mode": "pt",
+      "person": "eligible",
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 1000.0, "y": 1050.0 },
+      "to": { "link": "11", "x": 1100.0, "y": 1050.0 }
+    }
+  ]
+}

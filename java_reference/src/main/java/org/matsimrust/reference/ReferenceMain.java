@@ -1,6 +1,12 @@
 package org.matsimrust.reference;
 
+import ch.sbb.matsim.config.SwissRailRaptorConfigGroup;
+import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptorModule;
 import ch.sbb.matsim.routing.pt.raptor.RaptorUtils;
+import ch.sbb.matsim.routing.pt.raptor.RaptorParameters;
+import ch.sbb.matsim.routing.pt.raptor.RaptorStaticConfig;
+import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptor;
+import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptorData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -20,6 +26,7 @@ import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.utils.misc.OptionalTime;
 import org.matsim.facilities.ActivityFacility;
 import org.matsim.pt.routes.DefaultTransitPassengerRoute;
+import org.matsim.pt.transitSchedule.api.TransitStopFacility;
 import org.matsim.utils.objectattributes.attributable.AttributesImpl;
 
 import java.io.BufferedReader;
@@ -114,18 +121,26 @@ public final class ReferenceMain {
         Path outputPath = Path.of(require(options, "--out"));
 
         Config config = ConfigUtils.loadConfig(configPath.toAbsolutePath().toString());
+        boolean useSwissRailRaptor = config.getModules().containsKey(SwissRailRaptorConfigGroup.GROUP);
+        if (useSwissRailRaptor) {
+            config = ConfigUtils.loadConfig(
+                    configPath.toAbsolutePath().toString(), new SwissRailRaptorConfigGroup());
+        }
         // loadScenario reads the input files named in the config; createScenario alone leaves the
         // scenario empty. `Controler` (one l) is the concrete implementation; `ControlerUtils` is
         // deprecated upstream.
         Scenario scenario = ScenarioUtils.loadScenario(config);
         Controler controler = new Controler(scenario);
+        if (useSwissRailRaptor) {
+            controler.addOverridingModule(new SwissRailRaptorModule());
+        }
         controler.run();
 
         ObjectNode root = MAPPER.createObjectNode();
         root.put("schema_version", SCHEMA_VERSION);
         root.set("reference", reference(config, configPath, options));
         root.set("itineraries", itineraries(controler, options));
-        root.putArray("trees");
+        root.set("trees", trees(controler, options));
         root.set("events", events(Path.of(config.controller().getOutputDirectory())));
 
         Files.createDirectories(outputPath.toAbsolutePath().getParent());
@@ -163,6 +178,15 @@ public final class ReferenceMain {
                 node.put("sha256", sha256(Path.of(path)));
             }
         }
+        if (options.containsKey("--requests")) {
+            String path = options.get("--requests");
+            ObjectNode node = inputs.addObject();
+            node.put("role", "routing_requests");
+            node.put("path", Path.of(path).getFileName().toString());
+            if (Files.isRegularFile(Path.of(path))) {
+                node.put("sha256", sha256(Path.of(path)));
+            }
+        }
         return reference;
     }
 
@@ -185,7 +209,7 @@ public final class ReferenceMain {
             itinerary.put("id", request.string("id"));
             itinerary.set("request", request.node());
 
-            Person person = request.field("person") == null
+            Person person = !request.node().hasNonNull("person")
                     ? null
                     : controler.getScenario().getPopulation().getPersons().get(Id.create(request.string("person"), Person.class));
             Facility from = facility(controler.getScenario(), "probe_from_" + request.string("id"), request.field("from"));
@@ -241,6 +265,74 @@ public final class ReferenceMain {
         }
         return itineraries;
     }
+
+    /** Runs explicit one-to-all trees, recording absent destinations as no-path results. */
+    private static ArrayNode trees(Controler controler, Map<String, String> options) throws IOException {
+        ArrayNode trees = MAPPER.createArrayNode();
+        Path requestsPath = options.containsKey("--requests") ? Path.of(options.get("--requests")) : null;
+        if (requestsPath == null) {
+            return trees;
+        }
+
+        Json requests = Json.read(requestsPath);
+        if (!requests.node().has("trees")) {
+            return trees;
+        }
+        RaptorStaticConfig staticConfig = RaptorUtils.createStaticConfig(controler.getConfig());
+        staticConfig.setOptimization(RaptorStaticConfig.RaptorOptimization.OneToAllRouting);
+        SwissRailRaptorData data = SwissRailRaptorData.create(
+                controler.getScenario().getTransitSchedule(), null, staticConfig,
+                controler.getScenario().getNetwork(), null);
+        SwissRailRaptor raptor = new SwissRailRaptor.Builder(data, controler.getConfig()).build();
+
+        for (Json request : requests.array("trees")) {
+            String id = request.string("id");
+            TransitStopFacility from = controler.getScenario().getTransitSchedule().getFacilities()
+                    .get(Id.create(request.string("from_stop"), TransitStopFacility.class));
+            if (from == null) {
+                throw new IllegalArgumentException("unknown tree origin stop " + request.string("from_stop"));
+            }
+            ObjectNode tree = MAPPER.createObjectNode();
+            tree.put("id", id);
+            tree.put("from_stop", request.string("from_stop"));
+            ArrayNode departures = tree.putArray("departures");
+            Map<Double, Map<String, TreeArrival>> results = new TreeMap<>();
+            RaptorParameters parameters = RaptorUtils.createParameters(controler.getConfig());
+            raptor.calcTreesObservable(from, request.number("earliest_departure_time"),
+                    request.number("latest_start_time"), parameters, null,
+                    new SwissRailRaptor.RaptorObserver() {
+                        @Override
+                        public void arrivedAtStop(double departureTime, TransitStopFacility stopFacility,
+                                double arrivalTime, int transferCount,
+                                java.util.function.Supplier<ch.sbb.matsim.routing.pt.raptor.RaptorRoute> route) {
+                            results.computeIfAbsent(departureTime, ignored -> new LinkedHashMap<>())
+                                    .put(stopFacility.getId().toString(), new TreeArrival(arrivalTime, transferCount));
+                        }
+                    });
+            for (Map.Entry<Double, Map<String, TreeArrival>> result : results.entrySet()) {
+                ObjectNode departure = departures.addObject();
+                departure.put("departure_time", roundTime(result.getKey()));
+                ArrayNode destinations = departure.putArray("destinations");
+                for (Json destination : request.array("destinations")) {
+                    String stop = destination.string("stop");
+                    ObjectNode item = destinations.addObject();
+                    item.put("stop", stop);
+                    TreeArrival info = result.getValue().get(stop);
+                    if (info == null) {
+                        item.put("result", "no_path");
+                    } else {
+                        item.put("result", "found");
+                        item.put("arrival_time", roundTime(info.arrivalTime()));
+                        item.put("transfer_count", info.transferCount);
+                    }
+                }
+            }
+            trees.add(tree);
+        }
+        return trees;
+    }
+
+    private record TreeArrival(double arrivalTime, int transferCount) {}
 
     private static Facility facility(Scenario scenario, String id, Json end) {
         ActivityFacility facility = scenario.getActivityFacilities().getFactory().createActivityFacility(

@@ -34,6 +34,7 @@ struct RouteResponse {
     distance_meters: Option<f64>,
     error: Option<String>,
     failure_category: Option<&'static str>,
+    outcome: Option<&'static str>,
 }
 
 impl RouteResponse {
@@ -43,6 +44,7 @@ impl RouteResponse {
             distance_meters: None,
             error: Some(message.into()),
             failure_category: Some(category),
+            outcome: (category == "no_path").then_some("no_path"),
         }
     }
 }
@@ -207,9 +209,9 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
                 }
                 // The person exists but its loaded attributes cannot be read, which is this
                 // service's own input data and not something SILO sent.
-                RoutingError::MissingEndTime { .. } | RoutingError::MalformedAttribute { .. } => {
-                    "service_error"
-                }
+                RoutingError::MissingEndTime { .. }
+                | RoutingError::MalformedAttribute { .. }
+                | RoutingError::MalformedTransitStopAttribute { .. } => "service_error",
             };
             return RouteResponse::error(category, error.to_string());
         }
@@ -231,12 +233,28 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
             InternalPlanElement::Activity(_) => None,
         })
         .sum();
+    let outcome = if elements.iter().any(|element| {
+        element
+            .as_leg()
+            .is_some_and(|leg| leg.mode.external() == "pt")
+    }) {
+        "pt"
+    } else if elements.iter().any(|element| {
+        element
+            .as_leg()
+            .is_some_and(|leg| leg.mode.external() == "walk")
+    }) {
+        "walk"
+    } else {
+        "other"
+    };
 
     RouteResponse {
         travel_time_seconds: Some(arrival.duration_since(departure_time).as_secs_f64()),
         distance_meters: Some(distance),
         error: None,
         failure_category: None,
+        outcome: Some(outcome),
     }
 }
 
@@ -353,6 +371,11 @@ mod tests {
         );
 
         assert_eq!(response.failure_category, Some("no_path"));
+        assert_eq!(response.outcome, Some("no_path"));
+        assert_eq!(
+            serde_json::to_value(&response).unwrap()["outcome"],
+            "no_path"
+        );
         assert!(
             !response
                 .error
@@ -362,6 +385,78 @@ mod tests {
             "the car fallback was consulted: {:?}",
             response.error
         );
+    }
+
+    #[deterministic_id_test]
+    fn personless_pt_query_exposes_transit_as_the_success_outcome() {
+        Id::<crate::simulation::scenario::network::Link>::create("11");
+        Id::<crate::simulation::scenario::network::Link>::create("33");
+        let schedule = TransitSchedule::from_file(
+            "./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml"
+                .as_ref(),
+        );
+        let pt = TransitRoutingModule::new(
+            Arc::new(schedule),
+            0.8333333333333334,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        );
+        let mut modules: IntMap<Id<String>, Arc<dyn RoutingModule>> = IntMap::default();
+        modules.insert(Id::create("pt"), Arc::new(pt));
+        let mut request = pt_request(None);
+        request.from_link_id = "11".to_string();
+        request.from_x = 1050.0;
+        request.from_y = 1050.0;
+        request.to_link_id = "33".to_string();
+        request.to_x = 3950.0;
+        request.to_y = 1050.0;
+        request.departure_time_seconds = 8.0 * 3600.0;
+
+        let response = route(&TripRouter::new(modules), &Population::new(), request);
+
+        assert_eq!(response.outcome, Some("pt"), "{response:?}");
+        assert_eq!(response.failure_category, None);
+        assert!(response.travel_time_seconds.is_some());
+        assert_eq!(serde_json::to_value(&response).unwrap()["outcome"], "pt");
+    }
+
+    /// The transit module answers a query walking beats with the walk it selected. It reports
+    /// `NoPath` only when transit cannot connect the endpoints at all; see
+    /// `personless_pt_query_reports_no_path_instead_of_a_car_trip`.
+    #[deterministic_id_test]
+    fn personless_pt_query_exposes_direct_walking_as_the_success_outcome() {
+        Id::<crate::simulation::scenario::network::Link>::create("11");
+        Id::<crate::simulation::scenario::network::Link>::create("12");
+        // 1 km apart, while the only transit path detours through `rb` and `rc`.
+        let schedule = TransitSchedule::from_file(
+            "./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml"
+                .as_ref(),
+        );
+        let pt = TransitRoutingModule::new(
+            Arc::new(schedule),
+            0.8333333333333334,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        );
+        let mut modules: IntMap<Id<String>, Arc<dyn RoutingModule>> = IntMap::default();
+        modules.insert(Id::create("pt"), Arc::new(pt));
+        let mut request = pt_request(None);
+        request.from_link_id = "11".to_string();
+        request.from_x = 1050.0;
+        request.from_y = 2940.0;
+        request.to_link_id = "12".to_string();
+        request.to_x = 2050.0;
+        request.to_y = 2940.0;
+        request.departure_time_seconds = 8.0 * 3600.0;
+
+        let response = route(&TripRouter::new(modules), &Population::new(), request);
+
+        assert_eq!(response.outcome, Some("walk"));
+        assert_eq!(response.failure_category, None);
+        assert_eq!(response.travel_time_seconds, Some(1200.0));
+        assert_eq!(serde_json::to_value(&response).unwrap()["outcome"], "walk");
     }
 
     /// A personless query may still be answered with a car trip, but only when the integrator

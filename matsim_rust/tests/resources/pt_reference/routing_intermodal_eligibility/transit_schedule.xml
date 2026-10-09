@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v1.dtd">
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v2.dtd">
 
 <!--
   Routing-probe reference fixture: a direct service that a faster transfer beats.
@@ -18,10 +18,14 @@
 -->
 <transitSchedule>
 	<transitStops>
-		<stopFacility id="ra" x="1050" y="1050" linkRefId="11" />
+		<stopFacility id="ra" x="1050" y="1050" linkRefId="11">
+			<attributes>
+				<attribute name="bikeAccess" class="java.lang.String">true</attribute>
+				<attribute name="bikeLink" class="java.lang.String">12</attribute>
+			</attributes>
+		</stopFacility>
 		<stopFacility id="rb" x="2050" y="2940" linkRefId="12" />
 		<stopFacility id="rc" x="3950" y="1050" linkRefId="33" />
-		<stopFacility id="rd" x="1051" y="1050" linkRefId="11" />
 	</transitStops>
 
 	<transitLine id="Reference Line">

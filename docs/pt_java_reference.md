@@ -7,10 +7,12 @@ recording at the two boundaries where behavior is observable: `TripRouter` for i
 simulation integration runner for execution events.
 
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
-difference that a fixture exercises, and the fixture corpus is currently ten scenarios wide. Every
+difference that a fixture exercises, and the fixture corpus is still small and focused. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
-The skims and external routing service entry points remain unchanged and are not covered here; their
-reference semantics belong to ticket 11.
+The external routing service boundary is covered through the same trip router. The one-to-all skim
+uses one per-origin routing tree; its reachable and unreachable stop results, including a missed
+departure boundary, are compared with MATSim's `calcTreesObservable`. The skim's explicit `pt`,
+`walk`, and `no_path` outcomes and external result classifications are tested separately.
 
 ## The pinned reference
 
@@ -45,7 +47,7 @@ A fixture is a directory under `matsim_rust/tests/resources/pt_reference/`:
 | File | Role |
 |---|---|
 | `config.xml` | MATSim's own configuration. Input paths are relative to this file. |
-| `requests.json` | Routing requests issued through `TripRouter` after the run. Optional. |
+| `requests.json` | Routing requests issued through `TripRouter` and one-to-all tree queries after the run. Optional. |
 | `*.yml` | The Rust configuration for the same scenario, where one is needed. |
 | shared inputs | Reused from `matsim_rust/assets/` rather than duplicated. |
 | `../java/<fixture>.json` | The recorded reference. Regenerate; never hand-edit. |
@@ -126,8 +128,21 @@ router alone. The direct service remains in the schedule so this fixture proves 
 under the pinned default costs instead of a direct-service preference.
 This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits and
 non-default scoring remain outside its coverage.
+The same fixture records `calcTreesObservable` from stop `ra` for the 08:00 departure and for the
+window beginning one second later through 08:10. It compares arrivals at `rb` and `rc`; isolated
+stop `rd` must remain absent from the transit tree. The Rust skim queries those stops at their exact
+coordinates, so the comparison covers the shared transit tree without adding access or egress time.
 The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
 its time-equivalent cost using the pinned PT time weight before comparing the two.
+
+### `routing_mapped_modes`
+
+The same request and schedule with the `b_to_c` route changed to `bus`. Both configs enable
+passenger mode mappings (`train` → `rail`, `bus` → `road`); rail and road have different travel
+utilities, so the direct train service competes with the faster transfer by mapped passenger-mode
+cost. The pinned Java and Rust routers choose the direct service, arrive at 08:50, and expose the
+ride as a `rail` leg. This complements the preceding fixture, which checks route selection with
+mapping disabled.
 
 ### `routing_distinct_platform_transfer`
 
@@ -139,6 +154,55 @@ route-cost objective. Their itineraries include the transfer walk, its 130 m bee
 distance, and the pinned five-second transfer-walk margin. A separate Rust runner config supplies
 a person plan so the generated access, transfer and egress legs execute in QSim; the routing test
 also round-trips that itinerary through XML and protobuf population files.
+
+### `routing_intermodal_access_egress`
+
+The endpoints are near one stop and no transit ride is useful. `avoid` returns the feeder-only
+itinerary, selecting bike over walking by cost. This pins the no-PT policy and the walk/bike
+alternative.
+
+### `routing_intermodal_eligibility`
+
+Three requests cover an eligible person at a bike-enabled stop, an ineligible person, and an
+eligible person at a stop that disallows bike access. The enabled stop maps the bike feeder to a
+different link, so the returned plan also includes MATSim's zero-time walk connectors. The Rust
+fixture compares passenger modes, arrival times and the outer `pt` routing mode.
+
+### `routing_intermodal_unavailable_feeder`
+
+The bike mode is eligible, but its capped search radius contains no eligible stop. MATSim and Rust
+skip that feeder candidate and return the available walking itinerary. A separate Rust unit test
+covers a feeder router that returns `NoPath` for a candidate stop.
+
+### `routing_range_boundaries`
+
+This fixture enables SwissRailRaptor range queries with a 60-second earlier and later window. A
+request at 08:01 selects the unique transfer departing at the inclusive earlier boundary, 08:00; a
+request at 08:09 selects the unique transfer departing at the inclusive later boundary, 08:10. A
+request at 09:06 occurs after the final usable service and confirms that neither implementation
+repeats the schedule on the next day. MATSim's top-level `TripRouter` falls back to a direct walk
+when no PT route exists; the Rust PT routing module reports no path. The comparison pins the absence
+of a PT service in both results while preserving that existing wrapper difference.
+
+This fixture keeps its own copy of the transit schedule instead of reading
+`../routing_direct_vs_transfer/transit_schedule.xml`. That schedule now carries stop `rd`, which the
+one-to-all fixture added, and a reference is only comparable against the inputs it was recorded
+with: an extra stop beside the access point changes the candidate stops and therefore the selected
+departure.
+
+### Transfer construction
+
+`transit.transfer_construction` accepts `initial` (default), `adaptive`, and `online`. Initial builds
+and retains candidates for every used stop at router creation. Adaptive builds candidates on first
+use and retains them in a synchronized cache. Online rebuilds candidates on each query. The three
+modes use the same candidate ordering and transfer rules, so repeated requests select the same
+itinerary; the choice changes when candidate construction and retained memory occur. Initial trades
+up-front work and memory for reuse, Adaptive spreads that work across encountered stops, and Online
+avoids retaining candidate lists.
+
+The pinned MATSim 2026.0 `RaptorTransferCalculation` exposes Initial and Adaptive. Online is a
+Rust extension and has no direct mode-level reference comparison; its route choices are covered by
+the same fixture assertions against the other two modes.
 
 ## Comparison rules
 
@@ -176,6 +240,10 @@ The test now pins the worst lag to zero.
 The routing fixture's former direct-service divergence was fixed by
 [#72](https://github.com/titipakorn-th/matsim-rust/issues/72). It now compares the complete selected
 itinerary, leg modes and arrival against the same pinned reference.
+
+**2. PT no-path fallback** — `routing_range_boundaries`. After the last service, MATSim's outer
+`TripRouter` emits a direct walk while the Rust PT module returns `NoPath`. The fixture verifies that
+neither side invents a PT service; matching the outer fallback behavior is outside issue 77.
 
 ## Adding a fixture
 
@@ -251,6 +319,14 @@ Not covered by an upstream test in the pinned tree, so not evidence of intended 
 `useTransportModeUtilities`, the `LeastCostRaptorRouteSelector` tie-break, and
 `ModeSpecificTransferCostCalculator`'s clamping. Several production classes carry no license header;
 they remain under the package-level grant in `matsim/LICENSE`.
+
+The Rust router's range-query settings are configured under `transit.range_query_settings` and
+`transit.route_selector_settings`. It evaluates the requested departure, both window boundaries,
+and access-adjusted scheduled departures in the window. Route scores use the configured travel-time,
+departure-deviation, and transfer-count weights. Equal scores use `simulation::random::get_rng`
+keyed by seed, person, and requested departure; this is deterministic but intentionally does not
+reuse Java's random stream. Route selection leaves the previous activity's scheduled end time as
+loaded, preserving the pinned timing limitation.
 
 ### Execution
 
