@@ -23,6 +23,7 @@ pub struct Simulation<C: SimCommunicator> {
     start_tick: Tick,
     end_tick: Tick,
     clock: SimClock,
+    pending_leg_agents: Vec<(Tick, SimulationAgent)>,
 }
 
 impl<C> Simulation<C>
@@ -79,6 +80,7 @@ where
             .into_iter()
             .chain(self.leg_engine.drain())
             .chain(agents_changing_engine)
+            .chain(self.pending_leg_agents.drain(..).map(|(_, agent)| agent))
             .collect::<Vec<_>>();
 
         // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
@@ -120,11 +122,22 @@ where
     }
 
     /// Performs a sim step for the activity engine and the leg engine.
-    /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
+    /// Leg arrivals start their next activity in the same tick; resulting legs enter the leg engine
+    /// on the next exchange while keeping their original event time.
     fn do_sim_step(&mut self, now: Tick, agents: Vec<SimulationAgent>) -> Vec<SimulationAgent> {
         let agents_act_to_leg = self.activity_engine.do_step(now, agents);
-
-        self.leg_engine.do_step(now, agents_act_to_leg)
+        for (event_time, agent) in self.pending_leg_agents.drain(..) {
+            self.leg_engine
+                .receive_agents_at(now, event_time, vec![agent]);
+        }
+        let agents_leg_to_act = self.leg_engine.do_step(now, agents_act_to_leg);
+        self.pending_leg_agents = self
+            .activity_engine
+            .complete_legs_same_tick(now, agents_leg_to_act)
+            .into_iter()
+            .map(|agent| (now, agent))
+            .collect();
+        Vec::new()
     }
 
     pub(crate) fn is_local_route(
@@ -217,6 +230,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             start_tick: clock.secs_to_tick(scenario.config.qsim().start_time as u64),
             end_tick: clock.secs_to_tick(scenario.config.qsim().end_time as u64),
             clock,
+            pending_leg_agents: Vec::new(),
         }
     }
 }

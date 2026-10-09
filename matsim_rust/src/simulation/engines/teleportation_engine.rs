@@ -77,19 +77,19 @@ impl TeleportationEngine {
             .collect()
     }
 
-    pub(crate) fn receive_agent<C: SimCommunicator>(
+    pub(crate) fn receive_agent_at<C: SimCommunicator>(
         &mut self,
         now: Tick,
+        event_time: SimTime,
         mut agent: SimulationAgent,
         net_message_broker: &mut NetMessageBroker<C>,
     ) {
-        let now_time = self.clock.tick_to_time(now);
-        agent.notify_event(&mut AgentEvent::TeleportationStarted(), now_time);
-        let end_time = agent.end_time(now_time);
+        agent.notify_event(&mut AgentEvent::TeleportationStarted(), event_time);
+        let end_time = agent.end_time(event_time);
         let teleportation = TeleportedAgent::new(agent, end_time);
 
         if Simulation::is_local_route(teleportation.agent(), net_message_broker) {
-            self.enqueue(teleportation, now_time);
+            self.enqueue(teleportation, event_time);
         } else {
             let to = net_message_broker.rank_for_link(
                 teleportation
@@ -101,10 +101,10 @@ impl TeleportationEngine {
                 &mut self.comp_env,
                 teleportation.agent(),
                 to,
-                now_time,
+                event_time,
             );
             let context = PartitionChangeContext {
-                time: now_time,
+                time: event_time,
                 from: net_message_broker.rank(),
                 to,
             };

@@ -1,0 +1,100 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<!--
+  Supplied-plan reference fixture.
+
+  The same scenario as matsim_rust/tests/resources/pt_tutorial/pt_tutorial_config.yml: the tutorial
+  network, transit schedule, plans and vehicle types, executed with the supplied plan. The Rust side
+  runs pt_tutorial_config.yml, so this file only restates the same choices in MATSim's own
+  configuration format. Input paths are relative to this file, and the recorded reference output
+  carries their digests, so a moved or edited input cannot pass unnoticed.
+
+  Walk parameters are pinned to the same values on both sides, because the reference walks access
+  and egress legs with them.
+-->
+<config>
+
+	<module name="global">
+		<param name="randomSeed" value="4711" />
+		<param name="coordinateSystem" value="Atlantis" />
+	</module>
+
+	<module name="network">
+		<param name="inputNetworkFile" value="../../../../assets/pt_tutorial/multimodalnetwork.xml" />
+	</module>
+
+	<module name="plans">
+		<param name="inputPlansFile" value="plans.xml" />
+	</module>
+
+	<module name="vehicles">
+		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
+	</module>
+
+	<module name="transit">
+		<param name="vehiclesFile" value="transitVehicles.xml" />
+		<param name="transitScheduleFile" value="transitSchedule.xml" />
+		<param name="useTransit" value="true" />
+		<!-- Use the same supplied plans while MATSim drives the scheduled transit vehicles. -->
+		<param name="usingTransitInMobsim" value="true" />
+	</module>
+
+	<module name="routing">
+			<!-- Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. -->
+		<param name="walkSpeed" value="0.8333333333333334" />
+		<param name="beelineDistanceFactor" value="1.3" />
+	</module>
+
+	<module name="qsim">
+		<param name="startTime" value="0" />
+		<param name="endTime" value="24:00:00" />
+		<param name="timeStepSize" value="1.0" />
+		<param name="insertingWaitingVehiclesBeforeDrivingVehicles" value="true" />
+		<param name="removeStuckVehicles" value="false" />
+		<param name="snapshotperiod" value="00:00:00" />
+	</module>
+
+	<module name="controller">
+		<param name="firstIteration" value="0" />
+		<param name="lastIteration" value="0" />
+		<param name="outputDirectory" value="queue_missed_connection_out" />
+		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
+		<param name="eventsFileFormat" value="xml" />
+		<!-- Uncompressed, so the recorded reference is a readable event file. -->
+		<param name="compressionType" value="none" />
+		<param name="writeEventsInterval" value="1" />
+	</module>
+
+	<module name="scoring">
+		<parameterset type="scoringParameters">
+			<parameterset type="modeParams">
+				<param name="mode" value="car" />
+				<param name="marginalUtilityOfTraveling_util_hr" value="-6.0" />
+				<param name="marginalUtilityOfDistance_util_m" value="0.0" />
+			</parameterset>
+			<parameterset type="modeParams">
+				<param name="mode" value="walk" />
+				<param name="marginalUtilityOfTraveling_util_hr" value="-6.0" />
+				<param name="marginalUtilityOfDistance_util_m" value="0.0" />
+			</parameterset>
+			<parameterset type="modeParams">
+				<param name="mode" value="pt" />
+				<param name="marginalUtilityOfTraveling_util_hr" value="-6.0" />
+				<param name="marginalUtilityOfDistance_util_m" value="0.0" />
+			</parameterset>
+			<parameterset type="activityParams">
+				<param name="activityType" value="h" />
+				<param name="typicalDuration" value="12:00:00" />
+			</parameterset>
+			<parameterset type="activityParams">
+				<param name="activityType" value="w" />
+				<param name="typicalDuration" value="8:00:00" />
+			</parameterset>
+			<parameterset type="activityParams">
+				<param name="activityType" value="s" />
+				<param name="typicalDuration" value="0:40:00" />
+			</parameterset>
+		</parameterset>
+	</module>
+
+</config>

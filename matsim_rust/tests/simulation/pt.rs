@@ -136,8 +136,8 @@ fn pt_tutorial_transit_analysis_reports_teleported_service() {
 
     let report = output_dir.join("analysis");
     let trips = std::fs::read_to_string(report.join("transit_trips.csv")).unwrap();
-    // Person 102 waits 412 s for the 07:50 departure and rides 541 s, one second behind schedule.
-    assert!(trips.contains("\"102\",\"pt\",teleported,boarded,\"Blue Line\",\"1to3\",\"1\",\"3\",27788.000000,28200.000000,28741.000000,412.000000,541.000000,28740.000000,1.000000,\"11\",\"tr_1\""), "{trips}");
+    // Person 102 waits 413 s for the 07:50 departure and rides 540 s, one second behind schedule.
+    assert!(trips.contains("\"102\",\"pt\",teleported,boarded,\"Blue Line\",\"1to3\",\"1\",\"3\",27787.000000,28200.000000,28740.000000,413.000000,540.000000,28740.000000,0.000000,\"11\",\"tr_1\""), "{trips}");
     // The tutorial's vehicle file declares no transit vehicles, so no load factor exists.
     let availability = std::fs::read_to_string(report.join("transit_availability.csv")).unwrap();
     assert!(availability.contains("\"load_factor\",unavailable,"));
