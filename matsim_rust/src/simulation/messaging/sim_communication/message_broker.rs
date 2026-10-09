@@ -103,6 +103,7 @@ where
         });
     }
 
+    #[hotpath::measure]
     pub fn send_recv(&mut self, now: impl Into<Tick>) -> Vec<InternalSyncMessage> {
         let now = now.into();
         let vehicles = self.prepare_send_recv(now);

@@ -3179,7 +3179,7 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), AnalysisError> 
 enum PartitionReader {
     Xml(Box<XmlEventsReader>),
     Proto {
-        reader: ProtoEventsReader<File>,
+        reader: ProtoEventsReader,
         pending: Option<(
             SimTime,
             std::vec::IntoIter<crate::generated::events::GenericEvent>,
@@ -3199,10 +3199,7 @@ impl PartitionReader {
                 {
                     return Ok(Some((*time, event_from_proto(*time, &event))));
                 }
-                let Some((time, events)) = reader.try_next().map_err(|error| {
-                    AnalysisError(format!("failed to parse protobuf events: {error}"))
-                })?
-                else {
+                let Some((time, events)) = reader.next() else {
                     return Ok(None);
                 };
                 *pending = Some((time, events.into_iter()));

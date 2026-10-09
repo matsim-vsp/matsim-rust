@@ -52,11 +52,13 @@ impl NetworkEngine {
         self.network.send_veh_en_route(vehicle, events, now)
     }
 
+    #[hotpath::measure]
     #[instrument(level = "trace", skip(self), fields(rank = self.network.partition()))]
     pub(super) fn move_nodes(&mut self, now: Tick) {
         self.network.move_nodes(&mut self.comp_env, now)
     }
 
+    #[hotpath::measure]
     #[instrument(level = "trace", skip(self, net_message_broker), fields(rank = self.network.partition()))]
     pub(super) fn move_links<C: SimCommunicator>(
         &mut self,

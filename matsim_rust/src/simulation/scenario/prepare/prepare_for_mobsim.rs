@@ -24,6 +24,7 @@ use thiserror::Error;
 
 /// Prepares the population before every mobsim iteration: plans are validated and repaired, e.g.
 /// trips without valid routes are routed with the current travel times.
+#[hotpath::measure]
 pub(crate) fn prepare_for_mobsim(
     scenario: &mut ControllerScenario,
     trip_router: &TripRouter,

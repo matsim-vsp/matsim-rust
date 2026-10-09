@@ -5,7 +5,7 @@ use matsim_rust::simulation::scenario::vehicles::Garage;
 use std::path::PathBuf;
 
 fn main() {
-    matsim_rust::simulation::logging::init_std_out_logging_thread_local();
+    let _guard = matsim_rust::simulation::logging::init_std_out_logging_thread_local();
     let args = InputArgs::parse();
 
     id::load_from_file(&args.id_path);

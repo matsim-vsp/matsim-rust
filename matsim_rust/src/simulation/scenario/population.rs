@@ -4,6 +4,7 @@ use crate::simulation::InternalAttributes;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_population::{load_from_proto, write_to_proto};
+use crate::simulation::io::xml::attributes::IOAttributes;
 use crate::simulation::io::xml::population::{
     IOActivity, IOLeg, IOPTRouteDescription, IOPerson, IOPlan, IOPlanElement, IORoute,
 };
@@ -16,6 +17,7 @@ use crate::simulation::time::SimTime;
 use itertools::{EitherOrBoth, Itertools};
 use nohash_hasher::IntMap;
 use serde_json::{Error, Value};
+use std::borrow::Cow;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
@@ -28,6 +30,7 @@ trait FromIOPerson<T> {
     fn from_io(io: T, id: Id<InternalPerson>) -> Self;
 }
 
+#[hotpath::measure]
 pub fn from_file<F: Fn(&InternalPerson) -> bool>(
     path: impl AsRef<Path>,
     garage: &mut Garage,
@@ -565,10 +568,8 @@ impl InternalRoute {
     }
 
     fn from_io(io: IORoute, id: Id<InternalPerson>, mode: Id<String>) -> Self {
-        let external = match io.vehicle {
-            Some(v) if v != "null" && !v.is_empty() => v,
-            _ => format!("{}_{}", id.external(), mode.external()),
-        };
+        let external =
+            route_vehicle_external(io.vehicle.as_deref(), id.external(), mode.external());
         let generic = InternalGenericRoute::new(
             Id::create(io.start_link.expect("Route must have start link").as_str()),
             Id::create(io.end_link.expect("Route must have end link").as_str()),
@@ -931,6 +932,21 @@ fn parse_duration(value: &str) -> Option<Duration> {
     parse_time(value).map(SimTime::as_duration)
 }
 
+/// Returns the external id of the vehicle of a route read from XML. Routes without a vehicle use
+/// the vehicle `<person>_<mode>`.
+fn route_vehicle_external<'a>(vehicle: Option<&'a str>, person: &str, mode: &str) -> Cow<'a, str> {
+    match vehicle {
+        Some(v) if v != "null" && !v.is_empty() => Cow::Borrowed(v),
+        _ => Cow::Owned(format!("{}_{}", person, mode)),
+    }
+}
+
+fn subpopulation_of(attributes: &InternalAttributes) -> String {
+    attributes
+        .get::<String>(SUBPOPULATION)
+        .unwrap_or_else(|| DEFAULT_SUBPOPULATION.to_string())
+}
+
 impl From<IOPerson> for InternalPerson {
     fn from(io: IOPerson) -> Self {
         let id = Id::create(&io.id);
@@ -938,9 +954,7 @@ impl From<IOPerson> for InternalPerson {
             .attributes
             .map(InternalAttributes::from)
             .unwrap_or_default();
-        let subpopulation = attributes
-            .get::<String>(SUBPOPULATION)
-            .unwrap_or_else(|| DEFAULT_SUBPOPULATION.to_string());
+        let subpopulation = subpopulation_of(&attributes);
         InternalPerson {
             id: id.clone(),
             plans: io
@@ -954,17 +968,162 @@ impl From<IOPerson> for InternalPerson {
     }
 }
 
+/// An id which is created when an [`IOPerson`] is converted into an [`InternalPerson`].
+#[derive(Debug)]
+pub(crate) enum IOPersonId<'a> {
+    Person(&'a str),
+    String(Cow<'a, str>),
+    Link(&'a str),
+    Facility(&'a str),
+    Vehicle(Cow<'a, str>),
+}
+
+impl IOPersonId<'_> {
+    pub(crate) fn exists(&self) -> bool {
+        match self {
+            IOPersonId::Person(id) => Id::<InternalPerson>::try_get_from_ext(id).is_some(),
+            IOPersonId::String(id) => Id::<String>::try_get_from_ext(id).is_some(),
+            IOPersonId::Link(id) => Id::<Link>::try_get_from_ext(id).is_some(),
+            IOPersonId::Facility(id) => Id::<ActivityFacility>::try_get_from_ext(id).is_some(),
+            IOPersonId::Vehicle(id) => Id::<InternalVehicle>::try_get_from_ext(id).is_some(),
+        }
+    }
+
+    pub(crate) fn create(&self) {
+        match self {
+            IOPersonId::Person(id) => {
+                Id::<InternalPerson>::create(id);
+            }
+            IOPersonId::String(id) => {
+                Id::<String>::create(id);
+            }
+            IOPersonId::Link(id) => {
+                Id::<Link>::create(id);
+            }
+            IOPersonId::Facility(id) => {
+                Id::<ActivityFacility>::create(id);
+            }
+            IOPersonId::Vehicle(id) => {
+                Id::<InternalVehicle>::create(id);
+            }
+        }
+    }
+}
+
+/// Calls `f` for each id which `InternalPerson::from(io)` creates, in the same order.
+///
+/// This allows creating the ids of many persons sequentially in a deterministic order before
+/// converting the persons in parallel. Keep this function in sync with the `from`/`from_io`
+/// conversions of persons, plans, activities, legs and routes above. Ids which the conversion
+/// can't create, because it panics on invalid input, may be skipped.
+pub(crate) fn for_each_id_of_io_person<'a>(io: &'a IOPerson, mut f: impl FnMut(IOPersonId<'a>)) {
+    f(IOPersonId::Person(&io.id));
+    for element in io.plans.iter().flat_map(|plan| plan.elements.iter()) {
+        match element {
+            IOPlanElement::Activity(act) => {
+                f(IOPersonId::String(Cow::Borrowed(&act.r#type)));
+                if let Some(link) = &act.link {
+                    f(IOPersonId::Link(link));
+                }
+                if let Some(facility) = &act.facility {
+                    f(IOPersonId::Facility(facility));
+                }
+            }
+            IOPlanElement::Leg(leg) => {
+                let routing_mode = leg.attributes.as_ref().and_then(|a| a.find("routingMode"));
+                if let Some(routing_mode) = routing_mode {
+                    f(IOPersonId::String(Cow::Borrowed(routing_mode)));
+                }
+                f(IOPersonId::String(Cow::Borrowed(&leg.mode)));
+                let Some(route) = &leg.route else {
+                    continue;
+                };
+                let (Some(start_link), Some(end_link)) = (&route.start_link, &route.end_link)
+                else {
+                    continue;
+                };
+                f(IOPersonId::Link(start_link));
+                f(IOPersonId::Link(end_link));
+                f(IOPersonId::Vehicle(route_vehicle_external(
+                    route.vehicle.as_deref(),
+                    &io.id,
+                    &leg.mode,
+                )));
+                if route.r#type.as_deref() == Some("links") {
+                    for link in route
+                        .route
+                        .as_deref()
+                        .unwrap_or_default()
+                        .split_whitespace()
+                    {
+                        f(IOPersonId::Link(link));
+                    }
+                }
+            }
+        }
+    }
+
+    // Only the subpopulation attribute matters here. Each attribute is converted independently,
+    // so converting just the attributes with this name yields the same value as converting all.
+    let subpopulation_attributes = io.attributes.as_ref().map(|attrs| IOAttributes {
+        attributes: attrs
+            .attributes
+            .iter()
+            .filter(|attr| attr.name == SUBPOPULATION)
+            .cloned()
+            .collect(),
+    });
+    let subpopulation = subpopulation_of(
+        &subpopulation_attributes
+            .map(InternalAttributes::from)
+            .unwrap_or_default(),
+    );
+    f(IOPersonId::String(Cow::Owned(subpopulation)));
+}
+
 impl From<Person> for InternalPerson {
+    fn from(value: Person) -> Self {
+        ProtoPersonDraft::from(value).into_person()
+    }
+}
+
+/// A person converted from protobuf, whose subpopulation id may not exist yet.
+///
+/// All other ids of a protobuf person are only looked up, so that the conversion into a draft
+/// doesn't create ids and can run in parallel. The subpopulation id is created by
+/// [`ProtoPersonDraft::into_person`]. Calling it in file order assigns the same internal ids as a
+/// sequential conversion.
+pub(crate) struct ProtoPersonDraft {
+    id: Id<InternalPerson>,
+    plans: Vec<InternalPlan>,
+    subpopulation: Result<Id<String>, String>,
+    attributes: InternalAttributes,
+}
+
+impl From<Person> for ProtoPersonDraft {
     fn from(value: Person) -> Self {
         let id: Id<InternalPerson> = Id::get_from_ext(&value.id);
         let subpopulation = value
             .subpopulation
             .unwrap_or_else(|| DEFAULT_SUBPOPULATION.to_string());
-        InternalPerson {
-            id: id.clone(),
+        ProtoPersonDraft {
+            id,
             plans: value.plan.into_iter().map(InternalPlan::from).collect(),
-            subpopulation: Id::create(&subpopulation),
+            subpopulation: Id::try_get_from_ext(&subpopulation).ok_or(subpopulation),
             attributes: InternalAttributes::from(&value.attributes),
+        }
+    }
+}
+
+impl ProtoPersonDraft {
+    pub(crate) fn into_person(self) -> InternalPerson {
+        InternalPerson {
+            id: self.id,
+            plans: self.plans,
+            subpopulation: self
+                .subpopulation
+                .unwrap_or_else(|subpopulation| Id::create(&subpopulation)),
+            attributes: self.attributes,
         }
     }
 }

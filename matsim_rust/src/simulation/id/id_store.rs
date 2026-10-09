@@ -1,6 +1,8 @@
+use arc_swap::ArcSwap;
 use bytes::{Buf, BufMut};
 use dashmap::DashMap;
 use lz4::BlockMode;
+use nohash_hasher::IntMap;
 use prost::Message;
 use prost::encoding::{DecodeContext, WireType};
 use std::fmt::{Debug, Formatter};
@@ -8,7 +10,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Cursor, Read, Seek, Write};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::info;
 
 use crate::generated::MessageIter;
@@ -37,12 +39,10 @@ fn serialize_to_file(store: &IdStore, file_path: &Path, compression: IdCompressi
 }
 
 fn serialize<W: Write>(store: &IdStore, writer: &mut W, compression: IdCompression) {
-    for entry in &store.ids {
-        let type_id = entry.key();
-        let ids = entry.value();
-        let data = serialize_ids(ids, compression);
+    for (type_id, ids) in store.sorted_ids() {
+        let data = serialize_ids(&ids, compression);
         let ids = IdsWithType {
-            type_id: *type_id,
+            type_id,
             data: Some(data),
         };
         let encoded_typed_ids = ids.encode_length_delimited_to_vec();
@@ -192,12 +192,67 @@ impl UntypedId {
     }
 }
 
+/// Hasher for the lookup maps of the store. The seeds are fixed, so that the store does not depend
+/// on a process-random state. Hash values never influence internal ids, see [`IdStore`].
+type LookupHasher = ahash::RandomState;
+
+fn lookup_hasher() -> LookupHasher {
+    LookupHasher::with_seeds(
+        0x243f_6a88_85a3_08d3,
+        0x1319_8a2e_0370_7344,
+        0xa409_3822_299f_31d0,
+        0x082e_fa98_ec4e_6c89,
+    )
+}
+
+/// All ids of one stable type id.
+#[derive(Debug)]
+struct TypeIds {
+    // Dense storage: internal id == index in this vector. Its write lock also serializes the creation of ids of this type.
+    // RwLock allows multiple readers but only one writer at a time.
+    ids: RwLock<Vec<Arc<UntypedId>>>,
+    // Reverse lookup by external id text. It points to the same shared ids as `ids`, so that a lookup by external id needs only one map access.
+    mapping: DashMap<Arc<str>, Arc<UntypedId>, LookupHasher>,
+}
+
+impl TypeIds {
+    fn new() -> Self {
+        Self {
+            ids: RwLock::new(Vec::new()),
+            mapping: DashMap::with_hasher(lookup_hasher()),
+        }
+    }
+
+    fn create(&self, external: &str) -> Arc<UntypedId> {
+        let mut ids = self.ids.write().expect("Id store lock is poisoned.");
+        // First check if the ID already exists. Another thread might have created it while this
+        // thread was waiting for the lock.
+        if let Some(existing) = self.mapping.get(external) {
+            return existing.clone();
+        }
+
+        // If not, create a new one
+        let next_id = Arc::new(UntypedId::new(ids.len() as u64, external));
+        ids.push(next_id.clone());
+        self.mapping
+            .insert(next_id.external.clone(), next_id.clone());
+        next_id
+    }
+}
+
+/// Internal ids are assigned exclusively when an id is created: the internal id is the index at
+/// which the id is pushed into the dense per-type vector. Serialization and
+/// [`IdStore::replace_ids`] use these vectors as well. The hash maps are only used to look ids up and
+/// are never iterated, so the hasher (and its implementation in a future version of `ahash`) can't
+/// change the order of internal ids.
 #[derive(Debug)]
 pub struct IdStore {
-    // Dense per-type storage: internal id == index in this vector.
-    ids: DashMap<u64, Vec<Arc<UntypedId>>>,
-    // Per-type reverse lookup by external id text.
-    mapping: DashMap<u64, DashMap<Arc<str>, u64>>,
+    // Ids by stable type id. Reading the map is lock-free, so that parallel lookups don't contend
+    // on a shared lock. The map is replaced as a whole when a new type is added, which happens
+    // rarely.
+    types: ArcSwap<IntMap<u64, Arc<TypeIds>>>,
+    // Needed to serialize replacing the map of types. This is only used when a new type is added, which happens rarely.
+    types_update: Mutex<()>,
 }
 
 /// Cache for ids. All methods are public, so that they can be used from mod.rs. The module doesn't
@@ -205,44 +260,57 @@ pub struct IdStore {
 impl IdStore {
     pub fn new() -> Self {
         Self {
-            ids: DashMap::default(),
-            mapping: DashMap::default(),
+            types: ArcSwap::from_pointee(IntMap::default()),
+            types_update: Mutex::new(()),
         }
+    }
+
+    fn type_ids_or_insert(&self, type_id: u64) -> Arc<TypeIds> {
+        if let Some(type_ids) = self.types.load().get(&type_id) {
+            return type_ids.clone();
+        }
+
+        // wait until the lock is released so that only one thread creates the new type ids and updates the map of types.
+        let _guard = self
+            .types_update
+            .lock()
+            .expect("Id store lock is poisoned.");
+        let types = self.types.load_full();
+        if let Some(type_ids) = types.get(&type_id) {
+            return type_ids.clone();
+        }
+        let type_ids = Arc::new(TypeIds::new());
+        let mut new_types = IntMap::clone(&types);
+        new_types.insert(type_id, type_ids.clone());
+        self.types.store(Arc::new(new_types));
+        type_ids
+    }
+
+    fn lookup(&self, external: &str, type_id: u64) -> Option<Arc<UntypedId>> {
+        let types = self.types.load();
+        let id = types.get(&type_id)?.mapping.get(external)?.clone();
+        Some(id)
     }
 
     fn create_id_with_type_id(&self, id: &str, type_id: u64) -> Arc<UntypedId> {
-        let type_mapping = self.mapping.entry(type_id).or_default();
-
-        // First check if the ID already exists
-        if let Some(internal) = type_mapping.get(id) {
-            return self
-                .ids
-                .get(&type_id)
-                .unwrap()
-                .get(*internal as usize)
-                .unwrap()
-                .clone();
+        // Most calls ask for ids which already exist. Looking them up doesn't take a write lock,
+        // so that such calls don't block each other when they run in parallel.
+        if let Some(existing) = self.lookup(id, type_id) {
+            return existing;
         }
-
-        // If not, create a new one
-        let mut type_ids = self.ids.entry(type_id).or_default();
-        let next_internal = type_ids.len() as u64;
-        let next_id = Arc::new(UntypedId::new(next_internal, id));
-        type_ids.push(next_id.clone());
-        type_mapping.insert(next_id.external.clone(), next_id.internal);
-        next_id
+        self.type_ids_or_insert(type_id).create(id)
     }
 
     fn replace_ids(&self, ids: &Vec<String>, type_id: u64) {
-        if let Some(type_mapping) = self.mapping.get_mut(&type_id) {
-            type_mapping.clear();
-        }
-        if let Some(mut type_ids) = self.ids.get_mut(&type_id) {
-            type_ids.clear();
+        let type_ids = self.type_ids_or_insert(type_id);
+        {
+            let mut existing = type_ids.ids.write().expect("Id store lock is poisoned.");
+            type_ids.mapping.clear();
+            existing.clear();
         }
 
         for external_id in ids {
-            self.create_id_with_type_id(external_id, type_id);
+            type_ids.create(external_id);
         }
     }
 
@@ -253,11 +321,15 @@ impl IdStore {
 
     pub(crate) fn get<T: StableTypeId>(&self, internal: u64) -> Id<T> {
         let type_id = T::stable_type_id();
-        let type_ids = self.ids.get(&type_id).unwrap_or_else(|| {
+        let types = self.types.load();
+        let type_ids = types.get(&type_id).unwrap_or_else(|| {
             panic!("No ids for type {type_id:?}. Use Id::create::<T>(...) to create ids")
         });
 
         let untyped_id = type_ids
+            .ids
+            .read()
+            .expect("Id store lock is poisoned.")
             .get(internal as usize)
             .unwrap_or_else(|| panic!("No id found for internal {internal}"))
             .clone();
@@ -266,24 +338,50 @@ impl IdStore {
 
     pub(crate) fn try_get_from_ext<T: StableTypeId>(&self, external: &str) -> Option<Id<T>> {
         let type_id = T::stable_type_id();
-        let type_mapping = self.mapping.get(&type_id)?;
-
-        let index = type_mapping.get(external)?;
-        let id = self.get(*index);
-        Some(id)
+        self.lookup(external, type_id).map(Id::new)
     }
 
     pub(crate) fn get_from_ext<T: StableTypeId>(&self, external: &str) -> Id<T> {
         let type_id = T::stable_type_id();
-        let type_mapping = self.mapping.get(&type_id).unwrap_or_else(|| {
+        // This call fixes the pointer. Subsequently, there will be no consistency problems within this method, even if another thread replaces the map of types.
+        let types = self.types.load();
+        let type_ids = types.get(&type_id).unwrap_or_else(|| {
             panic!("No ids for type {type_id:?}. Use Id::create::<T>(...) to create ids. Requested external id: {external}");
         });
 
-        let index = type_mapping.get(external).unwrap_or_else(|| {
+        let id = type_ids.mapping.get(external).unwrap_or_else(|| {
             panic!("Could not find id for external id: {external}");
         });
 
-        self.get(*index)
+        Id::new(id.clone())
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        let types = self.types.load();
+        types
+            .values()
+            .map(|type_ids| {
+                type_ids
+                    .ids
+                    .read()
+                    .expect("Id store lock is poisoned.")
+                    .len()
+            })
+            .sum()
+    }
+
+    /// Returns the ids of each type, ordered by type id and, within a type, by internal id.
+    fn sorted_ids(&self) -> Vec<(u64, Vec<Arc<UntypedId>>)> {
+        let types = self.types.load();
+        let mut result: Vec<_> = types
+            .iter()
+            .map(|(type_id, type_ids)| {
+                let ids = type_ids.ids.read().expect("Id store lock is poisoned.");
+                (*type_id, ids.clone())
+            })
+            .collect();
+        result.sort_by_key(|(type_id, _)| *type_id);
+        result
     }
 
     pub(crate) fn to_file(&self, file_path: &Path) {
@@ -295,9 +393,24 @@ impl IdStore {
     }
 
     #[cfg(any(test, feature = "test_util"))]
-    pub fn reset(&self) {
-        self.ids.clear();
-        self.mapping.clear();
+    pub(crate) fn reset(&self) {
+        let _guard = self
+            .types_update
+            .lock()
+            .expect("Id store lock is poisoned.");
+        self.types.store(Arc::new(IntMap::default()));
+    }
+
+    /// Returns the external ids of each type, ordered by their internal id.
+    #[cfg(any(test, feature = "test_util"))]
+    pub(crate) fn snapshot(&self) -> std::collections::BTreeMap<u64, Vec<String>> {
+        self.sorted_ids()
+            .into_iter()
+            .map(|(type_id, ids)| {
+                let externals = ids.iter().map(|id| id.external.to_string());
+                (type_id, externals.collect())
+            })
+            .collect()
     }
 }
 
@@ -308,6 +421,7 @@ mod tests {
     use crate::simulation::id::id_store::{
         IdCompression, IdStore, deserialize, deserialize_from_file, serialize, serialize_to_file,
     };
+    use crate::simulation::id::serializable_type::StableTypeId;
     use crate::simulation::logging::init_std_out_logging_thread_local;
     use crate::simulation::scenario::network::{Link, Network, Node};
     use crate::simulation::scenario::population::InternalPerson;
@@ -334,8 +448,8 @@ mod tests {
         store.create_id::<String>("string-id");
 
         serialize_to_file(&store, &file, IdCompression::LZ4);
-        let result = IdStore::new();
-        deserialize_from_file(&result, &file);
+        let mut result = IdStore::new();
+        deserialize_from_file(&mut result, &file);
 
         println!("{result:?}");
 
@@ -361,8 +475,8 @@ mod tests {
         store.create_id::<String>("string-id");
 
         serialize_to_file(&store, &file, IdCompression::None);
-        let result = IdStore::new();
-        deserialize_from_file(&result, &file);
+        let mut result = IdStore::new();
+        deserialize_from_file(&mut result, &file);
 
         println!("{result:?}");
 
@@ -394,8 +508,8 @@ mod tests {
         println!("{serialized_bytes:?}");
 
         let mut vec_reader = BufReader::new(Cursor::new(serialized_bytes));
-        let result = IdStore::new();
-        deserialize(&result, &mut vec_reader);
+        let mut result = IdStore::new();
+        deserialize(&mut result, &mut vec_reader);
 
         println!("{result:?}");
 
@@ -407,6 +521,72 @@ mod tests {
             store.get_from_ext::<String>("string-id"),
             result.get_from_ext::<String>("string-id")
         );
+    }
+
+    #[test]
+    fn internal_ids_follow_creation_order() {
+        let store = IdStore::new();
+        let externals = ["z", "a", "m", "b", "y"];
+        for external in externals {
+            store.create_id::<String>(external);
+        }
+        // Creating existing ids again must neither change nor add internal ids.
+        for external in externals.iter().rev() {
+            store.create_id::<String>(external);
+        }
+        store.create_id::<Link>("a");
+
+        for (internal, external) in externals.iter().enumerate() {
+            let id = store.get_from_ext::<String>(external);
+            assert_eq!(internal as u64, id.internal());
+            assert_eq!(*external, store.get::<String>(internal as u64).external());
+        }
+        assert_eq!(0, store.get_from_ext::<Link>("a").internal());
+        let snapshot = store.snapshot();
+        assert_eq!(
+            externals.to_vec(),
+            snapshot[&String::stable_type_id()].as_slice()
+        );
+
+        let mut bytes = Vec::new();
+        serialize(&store, &mut bytes, IdCompression::LZ4);
+        let result = IdStore::new();
+        deserialize(&result, &mut BufReader::new(Cursor::new(bytes)));
+        assert_eq!(snapshot, result.snapshot());
+    }
+
+    #[test]
+    fn concurrent_creation_assigns_each_external_id_once() {
+        const NUM_IDS: usize = 10_000;
+        const NUM_THREADS: usize = 8;
+        let store = IdStore::new();
+        let externals: Vec<String> = (0..NUM_IDS).map(|i| format!("id-{i}")).collect();
+
+        thread::scope(|s| {
+            for thread_idx in 0..NUM_THREADS {
+                let store = &store;
+                let externals = &externals;
+                s.spawn(move || {
+                    // Different threads create the ids in different orders.
+                    for i in 0..NUM_IDS {
+                        store.create_id::<()>(&externals[(i * (thread_idx + 1)) % NUM_IDS]);
+                    }
+                    for external in externals {
+                        store.create_id::<()>(external);
+                    }
+                });
+            }
+        });
+
+        let snapshot = store.snapshot();
+        let ids = &snapshot[&<()>::stable_type_id()];
+        assert_eq!(NUM_IDS, ids.len());
+        for (internal, external) in ids.iter().enumerate() {
+            assert_eq!(
+                internal as u64,
+                store.get_from_ext::<()>(external).internal()
+            );
+        }
     }
 
     #[test]
@@ -434,7 +614,7 @@ mod tests {
             "/Users/janek/Documents/rust_qsim/input/rvr.vehicles.xml",
         ));
         let pop = Population::from_file(
-            PathBuf::from("/Users/janek/Documents/rust_qsim/input/rvr-10pct.plans.xml.gz"),
+            &PathBuf::from("/Users/janek/Documents/rust_qsim/input/rvr-10pct.plans.xml.gz"),
             &mut garage,
         );
 
@@ -466,16 +646,16 @@ mod tests {
 
         println!("Starting to read id store uncompressed");
         let start = Instant::now();
-        let result_uncompressed = IdStore::new();
-        deserialize_from_file(&result_uncompressed, &folder.join("ids.raw.pbf"));
+        let mut result_uncompressed = IdStore::new();
+        deserialize_from_file(&mut result_uncompressed, &folder.join("ids.raw.pbf"));
         let end = Instant::now();
         let duration = end.sub(start).as_millis();
         println!("reading uncompressed took: {duration}ms");
 
         println!("Starting to read id store compressed");
         let start = Instant::now();
-        let result_compressed = IdStore::new();
-        deserialize_from_file(&result_compressed, &folder.join("ids.lz4.pbf"));
+        let mut result_compressed = IdStore::new();
+        deserialize_from_file(&mut result_compressed, &folder.join("ids.lz4.pbf"));
         let end = Instant::now();
         let duration = end.sub(start).as_millis();
         println!("reading compressed took: {duration}ms");

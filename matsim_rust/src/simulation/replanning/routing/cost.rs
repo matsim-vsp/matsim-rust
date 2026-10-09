@@ -460,7 +460,7 @@ fn travel_time(length: f64, speed: f64) -> Duration {
 #[cfg(test)]
 mod tests {
     use crate::simulation::InternalAttributes;
-    use crate::simulation::config::{AgentParameter, Config, ModeParameter, Scoring};
+    use crate::simulation::config::{AgentParameter, Config, ModeParameter, Scoring, ScoringMode};
     use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent};
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
@@ -501,6 +501,7 @@ mod tests {
     fn scoring_config() -> Config {
         let mut config = Config::default();
         config.set_scoring(Scoring {
+            mode: ScoringMode::Enabled,
             write_experienced_plans: false,
             activity_params: Vec::new(),
             mode_params: vec![

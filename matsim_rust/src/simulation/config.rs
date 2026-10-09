@@ -1580,6 +1580,7 @@ impl Default for Replanning {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Scoring {
+    pub mode: ScoringMode,
     pub write_experienced_plans: bool,
     pub activity_params: Vec<ActivityParameter>,
     pub mode_params: Vec<ModeParameter>,
@@ -1668,9 +1669,18 @@ impl Scoring {
     }
 }
 
+/// `Disabled` skips backpacking and scoring entirely. Selected plans then receive no score.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+pub enum ScoringMode {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
 impl Default for Scoring {
     fn default() -> Self {
         Self {
+            mode: ScoringMode::Enabled,
             write_experienced_plans: true,
             activity_params: vec![
                 ActivityParameter::default_for_activity_type("home"),
@@ -1693,6 +1703,14 @@ impl Default for Scoring {
 
 register_override!("scoring.write_experienced_plans", |config, value| {
     config.scoring_mut().write_experienced_plans = value.parse().unwrap();
+});
+
+register_override!("scoring.mode", |config, value| {
+    config.scoring_mut().mode = match value.to_lowercase().as_str() {
+        "enabled" => ScoringMode::Enabled,
+        "disabled" => ScoringMode::Disabled,
+        _ => panic!("Invalid scoring mode: {}", value),
+    };
 });
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

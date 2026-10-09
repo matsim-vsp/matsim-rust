@@ -403,6 +403,10 @@ compatibility checks, and statistical assumptions are documented in
 
 ## Create input files
 
+To make runs traceable, the source tree's git state is embedded at compile time and shown by
+`local_qsim --version` and at logging initialization. A `-dirty` suffix means tracked source files
+were modified at build time; `-nogit` means git metadata was unavailable.
+
 The simulator accepts XML and protobuf inputs. To convert XML inputs to protobuf
 for faster loading, run:
 

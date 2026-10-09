@@ -47,6 +47,13 @@ Network links must list their allowed modes explicitly: a link without modes all
 assumes `car` for links without a `modes` attribute, nothing is implied. Loading a network with such links logs a
 warning.
 
+Populations are read in parallel, both from XML and from protobuf. A reader thread splits the input into persons,
+which are parsed and converted by the rayon thread pool. The id store must stay independent of the number of threads:
+for protobuf, all ids except missing subpopulations are only looked up, and these are created in file order afterwards.
+For XML, all ids are created sequentially before the persons are converted, in the order in which converting the
+persons sorted by id one after another would create them (see `for_each_id_of_io_person`). Internal ids are the
+creation index of an id and never depend on hashing.
+
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
 (`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
@@ -101,7 +108,9 @@ module verifies iteration and rank and merges the populations deterministically 
 scores each reconstructed experienced plan and copies the result to exactly the selected original plan. Experienced
 plans receive the same score and are written only when `scoring.write_experienced_plans` and the configured plan
 writing interval allow it. Collection and scoring always run, even when experienced-plan output is disabled, so
-replanning can consume the updated selected-plan scores. Backpacks do not return to an initial or "home" partition.
+replanning can consume the updated selected-plan scores. The only exception is `scoring.mode: Disabled`: the controller
+then registers no backpacking engines, collects no experienced plans, and sets the score of each selected plan to
+`None`. Backpacks do not return to an initial or "home" partition.
 Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.

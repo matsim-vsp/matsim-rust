@@ -169,6 +169,7 @@ pub struct Scenario {
 }
 
 impl Scenario {
+    #[hotpath::measure]
     pub fn load<C: Into<Arc<Config>>>(config: C) -> Self {
         info!("Start loading mod.");
 
@@ -347,6 +348,7 @@ impl From<Scenario> for ControllerScenario {
 }
 
 impl ControllerScenario {
+    #[hotpath::measure]
     pub(crate) fn split_for_mobsim(
         &mut self,
         storage_capacities: &LinkStorageCapacities,
