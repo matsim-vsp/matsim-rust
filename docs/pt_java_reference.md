@@ -132,6 +132,11 @@ The same fixture records `calcTreesObservable` from stop `ra` for the 08:00 depa
 window beginning one second later through 08:10. It compares arrivals at `rb` and `rc`; isolated
 stop `rd` must remain absent from the transit tree. The Rust skim queries those stops at their exact
 coordinates, so the comparison covers the shared transit tree without adding access or egress time.
+
+The two transfer-penalty fixtures below vary only the penalty on this same schedule and request, so
+together they show the penalty deciding between the same two itineraries.
+This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits remain
+outside its coverage.
 The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
 its time-equivalent cost using the pinned PT time weight before comparing the two.
 
@@ -173,6 +178,39 @@ fixture compares passenger modes, arrival times and the outer `pt` routing mode.
 The bike mode is eligible, but its capped search radius contains no eligible stop. MATSim and Rust
 skip that feeder candidate and return the available walking itinerary. A separate Rust unit test
 covers a feeder router that returns `NoPath` for a candidate stop.
+
+### `routing_transfer_penalty_shared_stop`
+
+The same request and schedule as `routing_direct_vs_transfer`, with a transfer penalty of 6 utils
+per transfer instead of the pinned default of one. The transfer saves 25 minutes, which at 12
+utils per hour is worth 5 utils, so the penalty is enough to make both routers reject it and take
+the 08:00 -> 08:50 direct service. `transferPenaltyMaxCost` equals the base cost, so the
+per-travel-time-hour part is clipped away and the penalty is exactly 6 utils however long the
+journey runs; that pins the clipping boundary. MATSim only reads `transferPenaltyBaseCost` once a
+per-travel-time-hour cost is configured, because `RaptorUtils.createParameters` otherwise falls back
+to `-utilityOfLineSwitch`, so both sides configure both.
+
+### `routing_transfer_penalty_mode_to_mode`
+
+The same schedule as `routing_distinct_platform_transfer`, with a 2 utils penalty on the `train` to
+`bus` transport-mode pair. At 08:00 that turns the faster bus transfer at `rb_platform` into the
+more expensive option and the slower rail transfer wins; the direct train service stays available as
+a fallback. The penalty applies to the route's transport mode, not to the mapped passenger mode.
+Configuring any mode pair selects MATSim's `ModeSpecificTransferCostCalculator`, which cannot also be
+given a per-travel-time-hour cost; the Rust config rejects that combination rather than dropping one
+of them silently.
+
+This fixture records a **known deviation in the route cost**. The selected route, its rides and its
+arrival time all match; the recorded `generalized_cost` does not: Java reports 9.0 utils where Rust
+reports 6.0. `ModeSpecificTransferCostCalculator` ignores its `existingTransferCosts` argument and
+returns the whole per-transfer cost, which `SwissRailRaptorCore` then re-adds as it walks the path,
+so the reference's transfer cost depends on how many path elements it visits. The Rust router charges
+one clipped cost per transfer instead, which is the behaviour the calculator's own contract describes.
+Neither one cost per transfer nor a guessed re-adding rule reproduces 9.0, so the gap is pinned in
+`java_reference.rs` rather than papered over; closing it means porting MATSim's incremental transfer
+accounting. `routing_transfer_penalty_shared_stop` demonstrates the costs agreeing exactly where the
+route has no transfers, which shows the utils conversion itself is sound and the deviation is specific
+to mode-specific penalties.
 
 ### `routing_range_boundaries`
 

@@ -587,6 +587,57 @@ pub struct Transit {
     /// seconds per transfer, matching the existing pinned router cost.
     #[serde(default)]
     pub route_selector_settings: Vec<TransitRouteSelectorSettings>,
+    /// Transfer penalties applied to every transfer of a PT itinerary. MATSim's
+    /// `transferPenaltyBaseCost`, `transferPenaltyCostPerTravelTimeHour`,
+    /// `transferPenaltyMinCost` and `transferPenaltyMaxCost`.
+    #[serde(default)]
+    pub transfer_penalty: TransitTransferPenalty,
+}
+
+/// Transfer penalties in utils, mirroring MATSim's `RaptorParameters` transfer costs.
+///
+/// `per_travel_time_hour` follows MATSim's backwards-compatibility switch: while it is zero the
+/// configured base cost is ignored and the pinned default utility of a line switch applies
+/// instead, so a config that sets only `base_cost` behaves like MATSim rather than silently
+/// changing cost. `min_cost` and `max_cost` bound one transfer's penalty; the defaults are
+/// unbounded, as in MATSim.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct TransitTransferPenalty {
+    /// Utility cost of one transfer. MATSim's `transferPenaltyBaseCost`.
+    pub base_cost: f64,
+    /// Utility cost per hour of the journey so far, charged for every transfer. MATSim's
+    /// `transferPenaltyCostPerTravelTimeHour`.
+    pub per_travel_time_hour: f64,
+    /// Lower bound on one transfer's penalty. MATSim's `transferPenaltyMinCost`.
+    pub min_cost: f64,
+    /// Upper bound on one transfer's penalty. MATSim's `transferPenaltyMaxCost`.
+    pub max_cost: f64,
+    /// Additional penalty per transport-mode pair. Setting any of these switches the router to
+    /// MATSim's `ModeSpecificTransferCostCalculator`, which cannot combine them with a
+    /// per-travel-time-hour cost. MATSim's `modeToModeTransferPenalty` parametersets.
+    pub by_transport_mode: Vec<TransitModeToModeTransferPenalty>,
+}
+
+/// MATSim's `modeToModeTransferPenalty` parameterset: an extra penalty for transferring between
+/// two transport modes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TransitModeToModeTransferPenalty {
+    pub from_mode: String,
+    pub to_mode: String,
+    pub transfer_penalty: f64,
+}
+
+impl Default for TransitTransferPenalty {
+    fn default() -> Self {
+        Self {
+            base_cost: 0.0,
+            per_travel_time_hour: 0.0,
+            min_cost: f64::NEG_INFINITY,
+            max_cost: f64::INFINITY,
+            by_transport_mode: Vec::new(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -708,6 +759,7 @@ impl Default for Transit {
             transfer_construction: TransferConstruction::default(),
             range_query_settings: Vec::new(),
             route_selector_settings: Vec::new(),
+            transfer_penalty: TransitTransferPenalty::default(),
         }
     }
 }
@@ -724,7 +776,97 @@ impl Transit {
                 ));
             }
         }
+        self.transfer_penalty.validate()
+    }
+}
+
+impl TransitTransferPenalty {
+    /// The pinned default utility of a line switch, i.e. `-utilityOfLineSwitch` at MATSim's
+    /// default of -1 utils. MATSim applies it instead of the configured base cost while no
+    /// per-travel-time-hour cost is configured.
+    pub const DEFAULT_LINE_SWITCH_COST: f64 = 1.0;
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("base_cost", self.base_cost),
+            ("per_travel_time_hour", self.per_travel_time_hour),
+        ] {
+            if !value.is_finite() {
+                return Err(format!("transit.transfer_penalty.{name} must be finite"));
+            }
+        }
+        // The bounds default to MATSim's unbounded limits, so an infinite bound is a deliberate
+        // "unbounded" and only a NaN is rejected outright.
+        if self.min_cost.is_nan() || self.max_cost.is_nan() {
+            return Err("transit.transfer_penalty bounds must not be NaN".to_string());
+        }
+
+        // A zero-width interval pins every transfer to one value, so an infinite one would make
+        // `clip` return an infinity that then flows into route costs. `min > max` does not catch
+        // it, because `inf > inf` is false. An interval that is only unbounded on one side, which
+        // includes the pinned defaults, is fine.
+        if self.min_cost == self.max_cost && !self.min_cost.is_finite() {
+            return Err(format!(
+                "transit.transfer_penalty bounds pin every transfer to {}, which must be finite",
+                self.min_cost
+            ));
+        }
+        for (index, penalty) in self.by_transport_mode.iter().enumerate() {
+            if !penalty.transfer_penalty.is_finite() {
+                return Err(format!(
+                    "transit.transfer_penalty.by_transport_mode[{index}].transfer_penalty must be \
+                     finite"
+                ));
+            }
+            if penalty.from_mode.is_empty() || penalty.to_mode.is_empty() {
+                return Err(format!(
+                    "transit.transfer_penalty.by_transport_mode[{index}] must name both modes"
+                ));
+            }
+        }
+        if !self.by_transport_mode.is_empty() && self.per_travel_time_hour != 0.0 {
+            // MATSim's ModeSpecificTransferCostCalculator rejects the combination outright, so a
+            // config asking for both fails here instead of silently dropping one.
+            return Err(
+                "transit.transfer_penalty.by_transport_mode cannot be combined with \
+                 per_travel_time_hour"
+                    .to_string(),
+            );
+        }
         Ok(())
+    }
+
+    /// The utility charged for one transfer, before any mode-specific offset. MATSim's
+    /// `RaptorUtils.createParameters`: while no hourly cost is configured the pinned line
+    /// switch utility replaces the configured base cost.
+    pub fn base_cost(&self) -> f64 {
+        if self.per_travel_time_hour == 0.0 {
+            return Self::DEFAULT_LINE_SWITCH_COST;
+        }
+        self.base_cost
+    }
+
+    /// Whether any mode pair carries an extra penalty, which selects MATSim's
+    /// `ModeSpecificTransferCostCalculator`.
+    pub fn is_mode_specific(&self) -> bool {
+        !self.by_transport_mode.is_empty()
+    }
+
+    /// The extra penalty for transferring between two transport modes; zero when unconfigured.
+    pub fn mode_penalty(&self, from_mode: &str, to_mode: &str) -> f64 {
+        self.by_transport_mode
+            .iter()
+            .find(|penalty| penalty.from_mode == from_mode && penalty.to_mode == to_mode)
+            .map_or(0.0, |penalty| penalty.transfer_penalty)
+    }
+
+    /// One transfer's penalty in utils, clipped into the configured bounds. MATSim's
+    /// `calcSingleTransferCost` normalizes the bounds with `Math.min`/`Math.max` before comparing,
+    /// so an inverted pair behaves as a swap rather than being rejected.
+    pub fn clip(&self, cost: f64) -> f64 {
+        let min = self.min_cost.min(self.max_cost);
+        let max = self.min_cost.max(self.max_cost);
+        cost.clamp(min, max)
     }
 }
 
@@ -2313,7 +2455,10 @@ mod tests {
         QSim, Replanning, Routing, Scoring, SignalFilesConfig, StrategySetting, TeleportedParams,
         TravelTimeCalculator, VertexWeight, parse_key_val,
     };
-    use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
+    use crate::simulation::config::{
+        Ids, Network, Population, Transit, TransitModeToModeTransferPenalty,
+        TransitTransferPenalty, Vehicles,
+    };
     use crate::simulation::config::{
         IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection, Logging,
         ModalLinkSelection, RoutingMode,
@@ -3562,5 +3707,222 @@ modules:
             error.contains("subpopulation freight"),
             "unexpected error: {error}"
         );
+    }
+
+    /// MATSim ignores `transferPenaltyBaseCost` until a per-travel-time-hour cost is configured,
+    /// because `RaptorUtils.createParameters` falls back to `-utilityOfLineSwitch` while the
+    /// hourly cost is zero. This is that fallback, not a local choice.
+    #[test]
+    fn zero_hourly_cost_pins_the_line_switch_utility() {
+        let penalty = TransitTransferPenalty {
+            base_cost: 7.5,
+            ..TransitTransferPenalty::default()
+        };
+
+        assert_eq!(penalty.base_cost(), 1.0);
+        assert_eq!(TransitTransferPenalty::default().base_cost(), 1.0);
+
+        let with_hourly = TransitTransferPenalty {
+            per_travel_time_hour: 1.0,
+            ..penalty
+        };
+        assert_eq!(with_hourly.base_cost(), 7.5);
+    }
+
+    /// One transfer's penalty is clipped into the configured bounds at the boundaries themselves,
+    /// which is where an off-by-one would change a route choice.
+    #[test]
+    fn transfer_penalty_clips_at_both_boundaries() {
+        let penalty = TransitTransferPenalty {
+            min_cost: 2.0,
+            max_cost: 6.0,
+            ..TransitTransferPenalty::default()
+        };
+
+        assert_eq!(penalty.clip(2.0), 2.0, "the lower bound is inclusive");
+        assert_eq!(penalty.clip(6.0), 6.0, "the upper bound is inclusive");
+        assert_eq!(penalty.clip(1.999), 2.0);
+        assert_eq!(penalty.clip(6.001), 6.0);
+        assert_eq!(penalty.clip(4.0), 4.0);
+
+        let unbounded = TransitTransferPenalty::default();
+        assert_eq!(unbounded.clip(1e9), 1e9);
+        assert_eq!(unbounded.clip(-1e9), -1e9);
+    }
+
+    /// An hourly penalty grows with elapsed travel time and is bounded at exactly the travel time
+    /// where it reaches the maximum, rather than somewhere after it.
+    #[test]
+    fn transfer_penalty_reaches_its_maximum_at_the_boundary_travel_time() {
+        let penalty = TransitTransferPenalty {
+            base_cost: 0.0,
+            per_travel_time_hour: 6.0,
+            max_cost: 1.0,
+            ..TransitTransferPenalty::default()
+        };
+        // 6 utils per hour is 1 util per 600 s, so the cap binds at exactly 600 s.
+        assert!(penalty.clip(6.0 / 3600.0 * 599.0) < 1.0);
+        assert_eq!(penalty.clip(6.0 / 3600.0 * 600.0), 1.0);
+        assert_eq!(penalty.clip(6.0 / 3600.0 * 601.0), 1.0);
+    }
+
+    /// MATSim normalizes the bounds with `Math.min`/`Math.max`, so an inverted pair is a swap
+    /// rather than an error. Rejecting it would be an invented restriction the reference does not
+    /// have.
+    #[test]
+    fn an_inverted_bound_pair_is_swapped_like_matsim() {
+        let inverted = TransitTransferPenalty {
+            min_cost: 6.0,
+            max_cost: 2.0,
+            ..TransitTransferPenalty::default()
+        };
+        assert_eq!(Ok(()), inverted.validate());
+        assert_eq!(inverted.clip(0.0), 2.0);
+        assert_eq!(inverted.clip(4.0), 4.0);
+        assert_eq!(inverted.clip(9.0), 6.0);
+    }
+
+    /// A mode pair only carries its own penalty; every other pair, including the reverse
+    /// direction, falls back to the base cost.
+    #[test]
+    fn mode_penalty_applies_only_to_the_named_pair() {
+        let penalty = TransitTransferPenalty {
+            by_transport_mode: vec![TransitModeToModeTransferPenalty {
+                from_mode: "train".to_string(),
+                to_mode: "bus".to_string(),
+                transfer_penalty: 4.0,
+            }],
+            ..TransitTransferPenalty::default()
+        };
+
+        assert!(penalty.is_mode_specific());
+        assert_eq!(penalty.mode_penalty("train", "bus"), 4.0);
+        assert_eq!(penalty.mode_penalty("bus", "train"), 0.0);
+        assert_eq!(penalty.mode_penalty("train", "train"), 0.0);
+        assert!(!TransitTransferPenalty::default().is_mode_specific());
+    }
+
+    /// A zero penalty must cost exactly nothing, which is what makes "unconfigured" and
+    /// "configured to zero" the same itinerary. MATSim's default is one utility, so a config that
+    /// wants no penalty has to ask for it explicitly with an hourly cost and a zero base.
+    #[test]
+    fn a_zero_penalty_costs_nothing() {
+        let zero = TransitTransferPenalty {
+            base_cost: 0.0,
+            // A non-zero hourly cost is what makes the zero base cost take effect at all.
+            per_travel_time_hour: 1.0,
+            ..TransitTransferPenalty::default()
+        };
+        assert_eq!(zero.base_cost(), 0.0);
+        assert_eq!(zero.clip(0.0), 0.0);
+        // Clipping to zero still yields a free transfer rather than a negative or NaN cost.
+        let floored = TransitTransferPenalty {
+            base_cost: -5.0,
+            per_travel_time_hour: 1.0,
+            min_cost: 0.0,
+            ..TransitTransferPenalty::default()
+        };
+        assert_eq!(floored.clip(-5.0), 0.0);
+    }
+
+    /// Non-finite and contradictory penalties fail at the configuration boundary, where the
+    /// controller reports them, rather than turning into a NaN or an inverted interval mid-search.
+    #[test]
+    fn transit_rejects_invalid_transfer_penalties() {
+        let cases = [
+            (
+                TransitTransferPenalty {
+                    base_cost: f64::NAN,
+                    ..Default::default()
+                },
+                "transit.transfer_penalty.base_cost must be finite",
+            ),
+            (
+                TransitTransferPenalty {
+                    per_travel_time_hour: f64::INFINITY,
+                    ..Default::default()
+                },
+                "transit.transfer_penalty.per_travel_time_hour must be finite",
+            ),
+            (
+                TransitTransferPenalty {
+                    min_cost: f64::NAN,
+                    ..Default::default()
+                },
+                "transit.transfer_penalty bounds must not be NaN",
+            ),
+            (
+                TransitTransferPenalty {
+                    by_transport_mode: vec![TransitModeToModeTransferPenalty {
+                        from_mode: "train".to_string(),
+                        to_mode: String::new(),
+                        transfer_penalty: 1.0,
+                    }],
+                    ..Default::default()
+                },
+                "transit.transfer_penalty.by_transport_mode[0] must name both modes",
+            ),
+            (
+                TransitTransferPenalty {
+                    per_travel_time_hour: 1.0,
+                    by_transport_mode: vec![TransitModeToModeTransferPenalty {
+                        from_mode: "train".to_string(),
+                        to_mode: "bus".to_string(),
+                        transfer_penalty: 1.0,
+                    }],
+                    ..Default::default()
+                },
+                "transit.transfer_penalty.by_transport_mode cannot be combined with \
+                 per_travel_time_hour",
+            ),
+        ];
+        for (penalty, expected) in cases {
+            let transit = Transit {
+                transfer_penalty: penalty,
+                ..Transit::default()
+            };
+            assert_eq!(Err(expected.to_string()), transit.validate());
+        }
+    }
+
+    /// The pinned defaults are valid, so a config that says nothing about transfer penalties runs.
+    #[test]
+    fn default_transfer_penalty_is_valid() {
+        assert_eq!(Ok(()), Transit::default().validate());
+    }
+
+    /// The unbounded defaults must survive a write/read cycle, since every run writes its resolved
+    /// config. A bound that loses its infinity on the way out would silently become a large finite
+    /// cost later.
+    #[test]
+    fn unbounded_transfer_penalty_survives_a_yaml_round_trip() {
+        let mut config = Config::default();
+        config.set_transit(Transit {
+            transfer_penalty: TransitTransferPenalty {
+                base_cost: 2.5,
+                per_travel_time_hour: 3.5,
+                max_cost: 8.0,
+                by_transport_mode: vec![TransitModeToModeTransferPenalty {
+                    from_mode: "train".to_string(),
+                    to_mode: "bus".to_string(),
+                    transfer_penalty: 6.0,
+                }],
+                ..TransitTransferPenalty::default()
+            },
+            ..Transit::default()
+        });
+
+        let directory = tempfile::tempdir().unwrap();
+        config::write_config(&config, directory.path().to_path_buf());
+        let read = Config::from_args(CommandLineArgs::new_with_path(
+            directory.path().join("output_config.yml").to_str().unwrap(),
+        ));
+
+        assert_eq!(
+            read.transit().transfer_penalty,
+            config.transit().transfer_penalty
+        );
+        assert_eq!(read.transit().transfer_penalty.min_cost, f64::NEG_INFINITY);
+        assert_eq!(read.transit().transfer_penalty.max_cost, 8.0);
     }
 }

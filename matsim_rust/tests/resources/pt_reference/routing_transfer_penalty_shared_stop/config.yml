@@ -1,0 +1,47 @@
+# Rust side of the transfer-penalty reference fixture. See config.xml for the MATSim counterpart and
+# docs/pt_java_reference.md for the fixture contract. Input paths are relative to the crate root.
+#
+# The penalty is 6 utils per transfer: more than the 25 minutes the transfer saves, so both routers
+# must reject the transfer and take the direct service. transferPenaltyMaxCost equals the base cost,
+# so the hourly part is clipped away; MATSim only reads the base cost once a non-zero hourly cost is
+# configured, so both are set here.
+modules:
+  network:
+    type: Network
+    path: ./assets/pt_tutorial/multimodalnetwork.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/pt_tutorial/vehicles.xml
+  transit:
+    type: Transit
+    schedule_path: ./tests/resources/pt_reference/routing_transfer_penalty_shared_stop/transit_schedule.xml
+    transfer_penalty:
+      base_cost: 6.0
+      per_travel_time_hour: 1.0
+      max_cost: 6.0
+  partitioning:
+    type: Partitioning
+    num_parts: 1
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/pt_reference_routing_transfer_penalty_shared_stop
+  routing:
+    type: Routing
+    mode: UsePlans
+    # Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. The competing candidates in the
+    # recorded request are decided by these values.
+    teleported_mode_params:
+      - mode: walk
+        beeline_distance_factor: 1.3
+        teleported_mode_speed: 0.8333333333333334
+  qsim:
+    type: QSim
+    start_time: 0
+    end_time: 86400
+  controller:
+    type: Controller
+    last_iteration: 0

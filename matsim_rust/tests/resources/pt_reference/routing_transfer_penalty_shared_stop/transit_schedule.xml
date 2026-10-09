@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v1.dtd">
+
+<!--
+  Routing-probe reference fixture: a direct service that a faster transfer beats.
+
+  Stops sit on the tutorial network so this fixture reuses it:
+    ra  on link 11, at the coordinates of the tutorial's stop facility 1
+    rb  on link 12, at the coordinates of the tutorial's stop facility 2a, 2138 m from ra
+    rc  on link 33, at the coordinates of the tutorial's stop facility 3, 2681 m from rb
+
+  A request from ra to rc departing 08:00 has three candidates:
+    a_to_b  08:00 -> 08:10 at rb
+    b_to_c  08:15 -> 08:25 at rc   (5 minute transfer, above the reference's 60 s minimum)
+    direct  08:00 -> 08:50 at rc
+
+  Departures without a vehicleRefId keep the fixture runnable with teleported transit only.
+-->
+<transitSchedule>
+	<transitStops>
+		<stopFacility id="ra" x="1050" y="1050" linkRefId="11" />
+		<stopFacility id="rb" x="2050" y="2940" linkRefId="12" />
+		<stopFacility id="rc" x="3950" y="1050" linkRefId="33" />
+	</transitStops>
+
+	<transitLine id="Reference Line">
+		<transitRoute id="a_to_b">
+			<transportMode>train</transportMode>
+			<routeProfile>
+				<stop refId="ra" departureOffset="00:00:00" />
+				<stop refId="rb" arrivalOffset="00:10:00" />
+			</routeProfile>
+			<route>
+				<link refId="11" />
+				<link refId="12" />
+			</route>
+			<departures>
+				<departure id="a_0600" departureTime="06:00:00" />
+				<departure id="a_0610" departureTime="06:10:00" />
+				<departure id="a_0620" departureTime="06:20:00" />
+				<departure id="a_0630" departureTime="06:30:00" />
+				<departure id="a_0640" departureTime="06:40:00" />
+				<departure id="a_0650" departureTime="06:50:00" />
+				<departure id="a_0700" departureTime="07:00:00" />
+				<departure id="a_0710" departureTime="07:10:00" />
+				<departure id="a_0720" departureTime="07:20:00" />
+				<departure id="a_0730" departureTime="07:30:00" />
+				<departure id="a_0740" departureTime="07:40:00" />
+				<departure id="a_0750" departureTime="07:50:00" />
+				<departure id="a_0800" departureTime="08:00:00" />
+				<departure id="a_0810" departureTime="08:10:00" />
+				<departure id="a_0820" departureTime="08:20:00" />
+				<departure id="a_0830" departureTime="08:30:00" />
+				<departure id="a_0840" departureTime="08:40:00" />
+				<departure id="a_0850" departureTime="08:50:00" />
+				<departure id="a_0900" departureTime="09:00:00" />
+			</departures>
+		</transitRoute>
+
+		<transitRoute id="b_to_c">
+			<transportMode>train</transportMode>
+			<routeProfile>
+				<stop refId="rb" departureOffset="00:00:00" />
+				<stop refId="rc" arrivalOffset="00:10:00" />
+			</routeProfile>
+			<route>
+				<link refId="12" />
+				<link refId="23" />
+				<link refId="33" />
+			</route>
+			<departures>
+				<departure id="b_0615" departureTime="06:15:00" />
+				<departure id="b_0625" departureTime="06:25:00" />
+				<departure id="b_0635" departureTime="06:35:00" />
+				<departure id="b_0645" departureTime="06:45:00" />
+				<departure id="b_0655" departureTime="06:55:00" />
+				<departure id="b_0705" departureTime="07:05:00" />
+				<departure id="b_0715" departureTime="07:15:00" />
+				<departure id="b_0725" departureTime="07:25:00" />
+				<departure id="b_0735" departureTime="07:35:00" />
+				<departure id="b_0745" departureTime="07:45:00" />
+				<departure id="b_0755" departureTime="07:55:00" />
+				<departure id="b_0805" departureTime="08:05:00" />
+				<departure id="b_0815" departureTime="08:15:00" />
+				<departure id="b_0825" departureTime="08:25:00" />
+				<departure id="b_0835" departureTime="08:35:00" />
+				<departure id="b_0845" departureTime="08:45:00" />
+				<departure id="b_0855" departureTime="08:55:00" />
+				<departure id="b_0905" departureTime="09:05:00" />
+			</departures>
+		</transitRoute>
+
+		<transitRoute id="direct">
+			<transportMode>train</transportMode>
+			<routeProfile>
+				<stop refId="ra" departureOffset="00:00:00" />
+				<stop refId="rc" arrivalOffset="00:50:00" />
+			</routeProfile>
+			<route>
+				<link refId="11" />
+				<link refId="12" />
+				<link refId="23" />
+				<link refId="33" />
+			</route>
+			<departures>
+				<departure id="d_0600" departureTime="06:00:00" />
+				<departure id="d_0610" departureTime="06:10:00" />
+				<departure id="d_0620" departureTime="06:20:00" />
+				<departure id="d_0630" departureTime="06:30:00" />
+				<departure id="d_0640" departureTime="06:40:00" />
+				<departure id="d_0650" departureTime="06:50:00" />
+				<departure id="d_0700" departureTime="07:00:00" />
+				<departure id="d_0710" departureTime="07:10:00" />
+				<departure id="d_0720" departureTime="07:20:00" />
+				<departure id="d_0730" departureTime="07:30:00" />
+				<departure id="d_0740" departureTime="07:40:00" />
+				<departure id="d_0750" departureTime="07:50:00" />
+				<departure id="d_0800" departureTime="08:00:00" />
+				<departure id="d_0810" departureTime="08:10:00" />
+				<departure id="d_0820" departureTime="08:20:00" />
+				<departure id="d_0830" departureTime="08:30:00" />
+				<departure id="d_0840" departureTime="08:40:00" />
+				<departure id="d_0850" departureTime="08:50:00" />
+				<departure id="d_0900" departureTime="09:00:00" />
+			</departures>
+		</transitRoute>
+	</transitLine>
+</transitSchedule>
