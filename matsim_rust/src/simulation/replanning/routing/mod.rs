@@ -4117,7 +4117,7 @@ mod route_proposal_tests {
         let no_window = TransitRangeQuerySettings::default();
         let params = router.resolve_routing_params("");
         let fixed_time = router
-            .find_best_path(&destination, desired, &access, &egress, &params)
+            .find_best_path_with_feeders(&destination, desired, &access, &egress, &params)
             .unwrap();
         assert_eq!(fixed_time.departure, desired);
 
