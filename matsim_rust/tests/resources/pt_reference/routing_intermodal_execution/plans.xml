@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <person id="generated-intermodal">
+    <plan selected="yes">
+      <activity type="home" link="11" x="1000" y="1050" end_time="08:00:00" />
+      <leg mode="pt" />
+      <activity type="work" link="11" x="1100" y="1050" />
+    </plan>
+  </person>
+</population>

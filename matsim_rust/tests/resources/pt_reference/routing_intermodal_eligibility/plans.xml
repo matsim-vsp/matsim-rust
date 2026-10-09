@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <person id="eligible">
+    <attributes>
+      <attribute name="bikeEligible" class="java.lang.String">true</attribute>
+    </attributes>
+    <plan selected="yes">
+      <activity type="home" link="11" x="1050" y="1050" />
+    </plan>
+  </person>
+  <person id="ineligible">
+    <attributes>
+      <attribute name="bikeEligible" class="java.lang.String">false</attribute>
+    </attributes>
+    <plan selected="yes">
+      <activity type="home" link="11" x="1050" y="1050" />
+    </plan>
+  </person>
+</population>
