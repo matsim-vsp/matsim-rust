@@ -397,7 +397,8 @@ sequence. Rust's `transit.create_link_events_interval` mirrors SBB's
 `createLinkEventsInterval`: 0 disables synthetic link/traffic events; positive values enable them
 when `iteration % interval == 0`. Link transitions are distributed by downstream link length over
 the scheduled interval between stops and are emitted on the first simulation tick at or after each
-scheduled transition.
+scheduled transition. The `timetable_link_events` fixture compares their vehicle identities, links,
+and event times against the pinned SBB engine.
 
 `contribs/railsim` is a third, rail-specific engine and is out of scope.
 

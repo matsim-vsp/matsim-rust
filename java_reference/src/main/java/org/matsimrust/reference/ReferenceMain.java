@@ -96,6 +96,12 @@ public final class ReferenceMain {
         EVENT_ATTRIBUTES.put("PersonLeavesPtVehicle", List.of("person", "vehicle"));
         EVENT_ATTRIBUTES.put("TransitDriverStarts", List.of(
                 "driverId", "vehicleId", "transitLineId", "transitRouteId", "departureId"));
+        EVENT_ATTRIBUTES.put("entered link", List.of("vehicle", "link"));
+        EVENT_ATTRIBUTES.put("left link", List.of("vehicle", "link"));
+        EVENT_ATTRIBUTES.put("vehicle enters traffic", List.of(
+                "person", "link", "vehicle", "networkMode", "relativePosition"));
+        EVENT_ATTRIBUTES.put("vehicle leaves traffic", List.of(
+                "person", "link", "vehicle", "networkMode", "relativePosition"));
         EVENT_ATTRIBUTES.put("VehicleArrivesAtFacility", List.of("vehicle", "facility", "delay"));
         EVENT_ATTRIBUTES.put("VehicleDepartsAtFacility", List.of("vehicle", "facility", "delay"));
         EVENT_ATTRIBUTES.put("waitingForPt", List.of("person", "atStop", "destinationStop"));
@@ -106,7 +112,8 @@ public final class ReferenceMain {
      * Attributes that are numbers, not identifiers. Everything else stays a string so a person or
      * link id is never read back as a number and compared numerically.
      */
-    private static final List<String> NUMERIC_ATTRIBUTES = List.of("time", "distance", "x", "y", "delay");
+    private static final List<String> NUMERIC_ATTRIBUTES =
+            List.of("time", "distance", "x", "y", "delay", "relativePosition");
 
     /**
      * Times are compared at millisecond resolution, which is finer than either simulation clock and
@@ -126,6 +133,10 @@ public final class ReferenceMain {
         Config config = ConfigUtils.loadConfig(configPath.toAbsolutePath().toString());
         boolean useSwissRailRaptor = config.getModules().containsKey(SwissRailRaptorConfigGroup.GROUP);
         boolean useSbbTransit = config.getModules().containsKey(SBBTransitConfigGroup.GROUP_NAME);
+        int linkEventsInterval = useSbbTransit
+                ? ConfigUtils.addOrGetModule(config, SBBTransitConfigGroup.GROUP_NAME, SBBTransitConfigGroup.class)
+                        .getCreateLinkEventsInterval()
+                : 0;
         if (useSwissRailRaptor || useSbbTransit) {
             var groups = new ArrayList<org.matsim.core.config.ConfigGroup>();
             if (useSwissRailRaptor) groups.add(new SwissRailRaptorConfigGroup());
@@ -153,7 +164,7 @@ public final class ReferenceMain {
         root.set("reference", reference(config, configPath, options));
         root.set("itineraries", itineraries(controler, options));
         root.set("trees", trees(controler, options));
-        root.set("events", events(Path.of(config.controller().getOutputDirectory())));
+        root.set("events", events(Path.of(config.controller().getOutputDirectory()), linkEventsInterval > 0));
 
         Files.createDirectories(outputPath.toAbsolutePath().getParent());
         MAPPER.writerWithDefaultPrettyPrinter().writeValue(outputPath.toFile(), root);
@@ -362,7 +373,7 @@ public final class ReferenceMain {
      * journey happened in, and reordering by time or by type would destroy the dependencies that
      * boarding, alighting and service identity rely on.
      */
-    private static ArrayNode events(Path outputDirectory) throws IOException {
+    private static ArrayNode events(Path outputDirectory, boolean includeVehicleLinkEvents) throws IOException {
         ArrayNode events = MAPPER.createArrayNode();
         Path eventFile = eventFile(outputDirectory);
         if (eventFile == null) {
@@ -372,6 +383,9 @@ public final class ReferenceMain {
         Map<String, Integer> skipped = new TreeMap<>();
         List<Json> records = new ArrayList<>();
         for (Map<String, String> event : readEvents(eventFile)) {
+            if (!includeVehicleLinkEvents && isVehicleLinkEvent(event.get("type"))) {
+                continue;
+            }
             List<String> kept = EVENT_ATTRIBUTES.get(event.get("type"));
             if (kept == null) {
                 skipped.merge(event.get("type"), 1, Integer::sum);
@@ -406,6 +420,11 @@ public final class ReferenceMain {
             events.add(record.node());
         }
         return events;
+    }
+
+    private static boolean isVehicleLinkEvent(String type) {
+        return "entered link".equals(type) || "left link".equals(type)
+                || "vehicle enters traffic".equals(type) || "vehicle leaves traffic".equals(type);
     }
 
     /** The controler writes `<iteration>.events.xml` per iteration, optionally gzipped. */
