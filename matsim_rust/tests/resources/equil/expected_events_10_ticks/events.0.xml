@@ -4,10 +4,10 @@
 <event time="21600" type="departure" person="1" link="1" legMode="walk" computationalRoutingMode="car"/>
 <event time="29400" type="travelled" person="1" distance="6500" mode="walk"/>
 <event time="29400" type="arrival" person="1" link="1" legMode="walk"/>
-<event time="29400.1" type="actstart" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
-<event time="29400.1" type="actend" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
-<event time="29400.1" type="departure" person="1" link="1" legMode="car" computationalRoutingMode="car"/>
-<event time="29400.1" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
+<event time="29400" type="actstart" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
+<event time="29400" type="actend" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
+<event time="29400" type="departure" person="1" link="1" legMode="car" computationalRoutingMode="car"/>
+<event time="29400" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
 <event time="29400.1" type="vehicle enters traffic" person="1" link="1" vehicle="1_car" networkMode="car" relativePosition="1"/>
 <event time="29400.2" type="left link" link="1" vehicle="1_car"/>
 <event time="29400.2" type="entered link" link="10" vehicle="1_car"/>
@@ -18,54 +18,54 @@
 <event time="30300.1" type="vehicle leaves traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
 <event time="30300.1" type="PersonLeavesVehicle" person="1" vehicle="1_car"/>
 <event time="30300.1" type="arrival" person="1" link="20" legMode="car"/>
-<event time="30300.2" type="actstart" person="1" link="20" x="3456" y="0" actType="car interaction"/>
-<event time="30300.2" type="actend" person="1" link="20" x="3456" y="0" actType="car interaction"/>
-<event time="30300.2" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
-<event time="36917.8" type="travelled" person="1" distance="5514.6" mode="walk"/>
-<event time="36917.8" type="arrival" person="1" link="20" legMode="walk"/>
-<event time="36917.9" type="actstart" person="1" link="20" x="3456" y="4242" actType="w"/>
-<event time="37517.9" type="actend" person="1" link="20" x="3456" y="4242" actType="w"/>
-<event time="37517.9" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
-<event time="44135.5" type="travelled" person="1" distance="5514.6" mode="walk"/>
-<event time="44135.5" type="arrival" person="1" link="20" legMode="walk"/>
-<event time="44135.6" type="actstart" person="1" link="20" x="3456" y="0" actType="car interaction"/>
-<event time="44135.6" type="actend" person="1" link="20" x="3456" y="0" actType="car interaction"/>
-<event time="44135.6" type="departure" person="1" link="20" legMode="car" computationalRoutingMode="car"/>
-<event time="44135.6" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
-<event time="44135.6" type="vehicle enters traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
-<event time="44135.6" type="vehicle leaves traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
-<event time="44135.6" type="PersonLeavesVehicle" person="1" vehicle="1_car"/>
-<event time="44135.6" type="arrival" person="1" link="20" legMode="car"/>
-<event time="44135.7" type="actstart" person="1" link="20" x="5000" y="0" actType="car interaction"/>
-<event time="44135.7" type="actend" person="1" link="20" x="5000" y="0" actType="car interaction"/>
-<event time="44135.7" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
-<event time="51935.7" type="travelled" person="1" distance="6500" mode="walk"/>
-<event time="51935.7" type="arrival" person="1" link="20" legMode="walk"/>
-<event time="51935.8" type="actstart" person="1" link="20" x="10000" y="0" actType="w"/>
-<event time="64535.8" type="actend" person="1" link="20" x="10000" y="0" actType="w"/>
-<event time="64535.8" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
-<event time="72335.8" type="travelled" person="1" distance="6500" mode="walk"/>
-<event time="72335.8" type="arrival" person="1" link="20" legMode="walk"/>
-<event time="72335.9" type="actstart" person="1" link="20" x="5000" y="0" actType="car interaction"/>
-<event time="72335.9" type="actend" person="1" link="20" x="5000" y="0" actType="car interaction"/>
-<event time="72335.9" type="departure" person="1" link="20" legMode="car" computationalRoutingMode="car"/>
-<event time="72335.9" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
-<event time="72335.9" type="vehicle enters traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
-<event time="72336" type="left link" link="20" vehicle="1_car"/>
-<event time="72336" type="entered link" link="21" vehicle="1_car"/>
-<event time="72696" type="left link" link="21" vehicle="1_car"/>
-<event time="72696" type="entered link" link="22" vehicle="1_car"/>
-<event time="73955.9" type="left link" link="22" vehicle="1_car"/>
-<event time="73955.9" type="entered link" link="23" vehicle="1_car"/>
-<event time="74315.9" type="left link" link="23" vehicle="1_car"/>
-<event time="74315.9" type="entered link" link="1" vehicle="1_car"/>
-<event time="74675.8" type="vehicle leaves traffic" person="1" link="1" vehicle="1_car" networkMode="car" relativePosition="1"/>
-<event time="74675.8" type="PersonLeavesVehicle" person="1" vehicle="1_car"/>
-<event time="74675.8" type="arrival" person="1" link="1" legMode="car"/>
-<event time="74675.9" type="actstart" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
-<event time="74675.9" type="actend" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
-<event time="74675.9" type="departure" person="1" link="1" legMode="walk" computationalRoutingMode="car"/>
-<event time="82475.9" type="travelled" person="1" distance="6500" mode="walk"/>
-<event time="82475.9" type="arrival" person="1" link="1" legMode="walk"/>
-<event time="82476" type="actstart" person="1" link="1" x="-25000" y="0" actType="h"/>
+<event time="30300.1" type="actstart" person="1" link="20" x="3456" y="0" actType="car interaction"/>
+<event time="30300.1" type="actend" person="1" link="20" x="3456" y="0" actType="car interaction"/>
+<event time="30300.1" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
+<event time="36917.7" type="travelled" person="1" distance="5514.6" mode="walk"/>
+<event time="36917.7" type="arrival" person="1" link="20" legMode="walk"/>
+<event time="36917.7" type="actstart" person="1" link="20" x="3456" y="4242" actType="w"/>
+<event time="37517.7" type="actend" person="1" link="20" x="3456" y="4242" actType="w"/>
+<event time="37517.7" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
+<event time="44135.3" type="travelled" person="1" distance="5514.6" mode="walk"/>
+<event time="44135.3" type="arrival" person="1" link="20" legMode="walk"/>
+<event time="44135.3" type="actstart" person="1" link="20" x="3456" y="0" actType="car interaction"/>
+<event time="44135.3" type="actend" person="1" link="20" x="3456" y="0" actType="car interaction"/>
+<event time="44135.3" type="departure" person="1" link="20" legMode="car" computationalRoutingMode="car"/>
+<event time="44135.3" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
+<event time="44135.4" type="vehicle enters traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
+<event time="44135.4" type="vehicle leaves traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
+<event time="44135.4" type="PersonLeavesVehicle" person="1" vehicle="1_car"/>
+<event time="44135.4" type="arrival" person="1" link="20" legMode="car"/>
+<event time="44135.4" type="actstart" person="1" link="20" x="5000" y="0" actType="car interaction"/>
+<event time="44135.4" type="actend" person="1" link="20" x="5000" y="0" actType="car interaction"/>
+<event time="44135.4" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
+<event time="51935.4" type="travelled" person="1" distance="6500" mode="walk"/>
+<event time="51935.4" type="arrival" person="1" link="20" legMode="walk"/>
+<event time="51935.4" type="actstart" person="1" link="20" x="10000" y="0" actType="w"/>
+<event time="64535.4" type="actend" person="1" link="20" x="10000" y="0" actType="w"/>
+<event time="64535.4" type="departure" person="1" link="20" legMode="walk" computationalRoutingMode="car"/>
+<event time="72335.4" type="travelled" person="1" distance="6500" mode="walk"/>
+<event time="72335.4" type="arrival" person="1" link="20" legMode="walk"/>
+<event time="72335.4" type="actstart" person="1" link="20" x="5000" y="0" actType="car interaction"/>
+<event time="72335.4" type="actend" person="1" link="20" x="5000" y="0" actType="car interaction"/>
+<event time="72335.4" type="departure" person="1" link="20" legMode="car" computationalRoutingMode="car"/>
+<event time="72335.4" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
+<event time="72335.5" type="vehicle enters traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
+<event time="72335.6" type="left link" link="20" vehicle="1_car"/>
+<event time="72335.6" type="entered link" link="21" vehicle="1_car"/>
+<event time="72695.6" type="left link" link="21" vehicle="1_car"/>
+<event time="72695.6" type="entered link" link="22" vehicle="1_car"/>
+<event time="73955.5" type="left link" link="22" vehicle="1_car"/>
+<event time="73955.5" type="entered link" link="23" vehicle="1_car"/>
+<event time="74315.5" type="left link" link="23" vehicle="1_car"/>
+<event time="74315.5" type="entered link" link="1" vehicle="1_car"/>
+<event time="74675.4" type="vehicle leaves traffic" person="1" link="1" vehicle="1_car" networkMode="car" relativePosition="1"/>
+<event time="74675.4" type="PersonLeavesVehicle" person="1" vehicle="1_car"/>
+<event time="74675.4" type="arrival" person="1" link="1" legMode="car"/>
+<event time="74675.4" type="actstart" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
+<event time="74675.4" type="actend" person="1" link="1" x="-20000" y="0" actType="car interaction"/>
+<event time="74675.4" type="departure" person="1" link="1" legMode="walk" computationalRoutingMode="car"/>
+<event time="82475.4" type="travelled" person="1" distance="6500" mode="walk"/>
+<event time="82475.4" type="arrival" person="1" link="1" legMode="walk"/>
+<event time="82475.4" type="actstart" person="1" link="1" x="-25000" y="0" actType="h"/>
 </events>

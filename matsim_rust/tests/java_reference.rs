@@ -35,7 +35,7 @@ const REFERENCE_COMMIT: &str = "c7a75ebeddc3ceb62959af046190064bf23770df";
 
 /// The recorded reference carries this, and so must the Rust reader. Bump both when the normalized
 /// shape changes.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Runs the pt tutorial and compares the passenger's observable events against the reference.
 ///

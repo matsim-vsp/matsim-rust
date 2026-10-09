@@ -58,7 +58,7 @@ import java.util.zip.GZIPInputStream;
 public final class ReferenceMain {
 
     /** Bumped whenever the normalized shape changes; the Rust side asserts the same number. */
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -125,6 +125,7 @@ public final class ReferenceMain {
         root.put("schema_version", SCHEMA_VERSION);
         root.set("reference", reference(config, configPath, options));
         root.set("itineraries", itineraries(controler, options));
+        root.putArray("trees");
         root.set("events", events(Path.of(config.controller().getOutputDirectory())));
 
         Files.createDirectories(outputPath.toAbsolutePath().getParent());

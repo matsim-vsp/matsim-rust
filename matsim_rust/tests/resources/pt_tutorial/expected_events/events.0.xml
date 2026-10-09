@@ -1,38 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <events version="1.0">
-    <event time="27126" type="actend" person="102" link="1112" x="938" y="642" actType="h"/>
-    <event time="27126" type="departure" person="102" link="1112" legMode="walk" computationalRoutingMode="pt"/>
-    <event time="27787" type="travelled" person="102" distance="550.0213814025778" mode="walk"/>
-    <event time="27787" type="arrival" person="102" link="11" legMode="walk"/>
-    <event time="27788" type="actstart" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
-    <event time="27788" type="actend" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
-    <event time="27788" type="departure" person="102" link="11" legMode="pt" computationalRoutingMode="pt"/>
-    <event time="28741" type="travelled with pt" person="102" distance="6100" mode="pt" line="Blue Line" route="1to3" boardingTime="28200" accessFacility="1" egressFacility="3"/>
-    <event time="28741" type="arrival" person="102" link="33" legMode="pt"/>
-    <event time="28742" type="actstart" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
-    <event time="28742" type="actend" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
-    <event time="28742" type="departure" person="102" link="33" legMode="walk" computationalRoutingMode="pt"/>
-    <event time="29321" type="travelled" person="102" distance="481.9652477098323" mode="walk"/>
-    <event time="29321" type="arrival" person="102" link="3141" legMode="walk"/>
-    <event time="29322" type="actstart" person="102" link="3141" x="3619" y="1217" actType="w"/>
-    <event time="62844" type="actend" person="102" link="3141" x="3619" y="1217" actType="w"/>
-    <event time="62844" type="departure" person="102" link="3141" legMode="walk" computationalRoutingMode="pt"/>
-    <event time="63189" type="travelled" person="102" distance="287.7232176936717" mode="walk"/>
-    <event time="63189" type="arrival" person="102" link="4142" legMode="walk"/>
-    <event time="63190" type="actstart" person="102" link="4142" x="3840" y="1205" actType="s"/>
-    <event time="66310" type="actend" person="102" link="4142" x="3840" y="1205" actType="s"/>
-    <event time="66310" type="departure" person="102" link="4142" legMode="walk" computationalRoutingMode="pt"/>
-    <event time="66607" type="travelled" person="102" distance="247.08551151372677" mode="walk"/>
-    <event time="66607" type="arrival" person="102" link="33" legMode="walk"/>
-    <event time="66608" type="actstart" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
-    <event time="66608" type="actend" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
-    <event time="66608" type="departure" person="102" link="33" legMode="pt" computationalRoutingMode="pt"/>
-    <event time="67741" type="travelled with pt" person="102" distance="6100" mode="pt" line="Blue Line" route="3to1" boardingTime="67200" accessFacility="3" egressFacility="1"/>
-    <event time="67741" type="arrival" person="102" link="11" legMode="pt"/>
-    <event time="67742" type="actstart" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
-    <event time="67742" type="actend" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
-    <event time="67742" type="departure" person="102" link="11" legMode="walk" computationalRoutingMode="pt"/>
-    <event time="68403" type="travelled" person="102" distance="550.0213814025778" mode="walk"/>
-    <event time="68403" type="arrival" person="102" link="1112" legMode="walk"/>
-    <event time="68404" type="actstart" person="102" link="1112" x="938" y="642" actType="h"/>
+<event time="27126" type="actend" person="102" link="1112" x="938" y="642" actType="h"/>
+<event time="27126" type="departure" person="102" link="1112" legMode="walk" computationalRoutingMode="pt"/>
+<event time="27787" type="travelled" person="102" distance="550.0213814025778" mode="walk"/>
+<event time="27787" type="arrival" person="102" link="11" legMode="walk"/>
+<event time="27787" type="actstart" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="27787" type="actend" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="27787" type="departure" person="102" link="11" legMode="pt" computationalRoutingMode="pt"/>
+<event time="28740" type="travelled with pt" person="102" distance="6100" mode="pt" line="Blue Line" route="1to3" boardingTime="28200" accessFacility="1" egressFacility="3"/>
+<event time="28740" type="arrival" person="102" link="33" legMode="pt"/>
+<event time="28740" type="actstart" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="28740" type="actend" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="28740" type="departure" person="102" link="33" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29319" type="travelled" person="102" distance="481.9652477098323" mode="walk"/>
+<event time="29319" type="arrival" person="102" link="3141" legMode="walk"/>
+<event time="29319" type="actstart" person="102" link="3141" x="3619" y="1217" actType="w"/>
+<event time="62844" type="actend" person="102" link="3141" x="3619" y="1217" actType="w"/>
+<event time="62844" type="departure" person="102" link="3141" legMode="walk" computationalRoutingMode="pt"/>
+<event time="63189" type="travelled" person="102" distance="287.7232176936717" mode="walk"/>
+<event time="63189" type="arrival" person="102" link="4142" legMode="walk"/>
+<event time="63189" type="actstart" person="102" link="4142" x="3840" y="1205" actType="s"/>
+<event time="66310" type="actend" person="102" link="4142" x="3840" y="1205" actType="s"/>
+<event time="66310" type="departure" person="102" link="4142" legMode="walk" computationalRoutingMode="pt"/>
+<event time="66607" type="travelled" person="102" distance="247.08551151372677" mode="walk"/>
+<event time="66607" type="arrival" person="102" link="33" legMode="walk"/>
+<event time="66607" type="actstart" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="66607" type="actend" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="66607" type="departure" person="102" link="33" legMode="pt" computationalRoutingMode="pt"/>
+<event time="67740" type="travelled with pt" person="102" distance="6100" mode="pt" line="Blue Line" route="3to1" boardingTime="67200" accessFacility="3" egressFacility="1"/>
+<event time="67740" type="arrival" person="102" link="11" legMode="pt"/>
+<event time="67740" type="actstart" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="67740" type="actend" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="67740" type="departure" person="102" link="11" legMode="walk" computationalRoutingMode="pt"/>
+<event time="68401" type="travelled" person="102" distance="550.0213814025778" mode="walk"/>
+<event time="68401" type="arrival" person="102" link="1112" legMode="walk"/>
+<event time="68401" type="actstart" person="102" link="1112" x="938" y="642" actType="h"/>
 </events>

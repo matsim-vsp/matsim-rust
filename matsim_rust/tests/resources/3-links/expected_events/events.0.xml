@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <events version="1.0">
-    <event time="32400" type="actend" person="100" link="link1" x="5" y="10" actType="home"/>
-    <event time="32400" type="departure" person="100" link="link1" legMode="walk" computationalRoutingMode="car"/>
-    <event time="32408" type="travelled" person="100" distance="10" mode="walk"/>
-    <event time="32408" type="arrival" person="100" link="link1" legMode="walk"/>
-    <event time="32409" type="actstart" person="100" link="link1" x="5" y="0" actType="car interaction"/>
-    <event time="32409" type="actend" person="100" link="link1" x="5" y="0" actType="car interaction"/>
-    <event time="32409" type="departure" person="100" link="link1" legMode="car" computationalRoutingMode="car"/>
-    <event time="32409" type="PersonEntersVehicle" person="100" vehicle="100_car"/>
-    <event time="32409" type="vehicle enters traffic" person="100" link="link1" vehicle="100_car" networkMode="car" relativePosition="1"/>
-    <event time="32410" type="left link" link="link1" vehicle="100_car"/>
-    <event time="32410" type="entered link" link="link2" vehicle="100_car"/>
-    <event time="32511" type="left link" link="link2" vehicle="100_car"/>
-    <event time="32511" type="entered link" link="link3" vehicle="100_car"/>
-    <event time="32521" type="vehicle leaves traffic" person="100" link="link3" vehicle="100_car" networkMode="car" relativePosition="1"/>
-    <event time="32521" type="PersonLeavesVehicle" person="100" vehicle="100_car"/>
-    <event time="32521" type="arrival" person="100" link="link3" legMode="car"/>
-    <event time="32522" type="actstart" person="100" link="link3" x="1100" y="0" actType="car interaction"/>
-    <event time="32522" type="actend" person="100" link="link3" x="1100" y="0" actType="car interaction"/>
-    <event time="32522" type="departure" person="100" link="link3" legMode="walk" computationalRoutingMode="car"/>
-    <event time="32538" type="travelled" person="100" distance="20" mode="walk"/>
-    <event time="32538" type="arrival" person="100" link="link3" legMode="walk"/>
-    <event time="32539" type="actstart" person="100" link="link3" x="1100" y="20" actType="errands"/>
+<event time="32400" type="actend" person="100" link="link1" x="5" y="10" actType="home"/>
+<event time="32400" type="departure" person="100" link="link1" legMode="walk" computationalRoutingMode="car"/>
+<event time="32408" type="travelled" person="100" distance="10" mode="walk"/>
+<event time="32408" type="arrival" person="100" link="link1" legMode="walk"/>
+<event time="32408" type="actstart" person="100" link="link1" x="5" y="0" actType="car interaction"/>
+<event time="32408" type="actend" person="100" link="link1" x="5" y="0" actType="car interaction"/>
+<event time="32408" type="departure" person="100" link="link1" legMode="car" computationalRoutingMode="car"/>
+<event time="32408" type="PersonEntersVehicle" person="100" vehicle="100_car"/>
+<event time="32409" type="vehicle enters traffic" person="100" link="link1" vehicle="100_car" networkMode="car" relativePosition="1"/>
+<event time="32410" type="left link" link="link1" vehicle="100_car"/>
+<event time="32410" type="entered link" link="link2" vehicle="100_car"/>
+<event time="32511" type="left link" link="link2" vehicle="100_car"/>
+<event time="32511" type="entered link" link="link3" vehicle="100_car"/>
+<event time="32521" type="vehicle leaves traffic" person="100" link="link3" vehicle="100_car" networkMode="car" relativePosition="1"/>
+<event time="32521" type="PersonLeavesVehicle" person="100" vehicle="100_car"/>
+<event time="32521" type="arrival" person="100" link="link3" legMode="car"/>
+<event time="32521" type="actstart" person="100" link="link3" x="1100" y="0" actType="car interaction"/>
+<event time="32521" type="actend" person="100" link="link3" x="1100" y="0" actType="car interaction"/>
+<event time="32521" type="departure" person="100" link="link3" legMode="walk" computationalRoutingMode="car"/>
+<event time="32537" type="travelled" person="100" distance="20" mode="walk"/>
+<event time="32537" type="arrival" person="100" link="link3" legMode="walk"/>
+<event time="32537" type="actstart" person="100" link="link3" x="1100" y="20" actType="errands"/>
 </events>
