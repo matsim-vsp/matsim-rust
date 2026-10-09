@@ -482,7 +482,9 @@ impl InternalActivity {
 
     // i think this should go into the utils module rather than being here. paul, mar'26
     pub fn cmp_end_time(&self, begin: SimTime) -> SimTime {
-        if let Some(end_time) = self.end_time {
+        if self.is_interaction() {
+            begin
+        } else if let Some(end_time) = self.end_time {
             end_time
         } else if let Some(max_dur) = self.max_dur {
             begin.saturating_add(max_dur)
@@ -1160,6 +1162,27 @@ mod tests {
         assert_eq!(
             SimTime::from_nanos(u64::MAX),
             activity.cmp_end_time(SimTime::default())
+        );
+    }
+
+    #[deterministic_id_test]
+    fn interaction_activity_ends_immediately() {
+        let activity = InternalActivity::new(
+            Some(Coordinate::new_2d(0.0, 0.0)),
+            "pt interaction",
+            Id::create("1"),
+            None,
+            Some(SimTime::from_secs(60)),
+            None,
+        );
+
+        assert_eq!(
+            SimTime::default(),
+            activity.cmp_end_time(SimTime::default())
+        );
+        assert_eq!(
+            SimTime::from_secs(120),
+            activity.cmp_end_time(SimTime::from_secs(120))
         );
     }
 

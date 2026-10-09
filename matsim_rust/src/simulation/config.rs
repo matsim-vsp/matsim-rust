@@ -568,6 +568,14 @@ pub struct Transit {
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
     #[serde(default)]
     pub personless_car_fallback: bool,
+    #[serde(default)]
+    pub use_intermodal_access_egress: bool,
+    #[serde(default)]
+    pub intermodal_access_egress: Vec<IntermodalAccessEgress>,
+    #[serde(default)]
+    pub intermodal_access_egress_mode_selection: IntermodalModeSelection,
+    #[serde(default)]
+    pub intermodal_leg_only_handling: IntermodalLegOnlyHandling,
     /// When walking transfer candidates are built for transit routing.
     #[serde(default)]
     pub transfer_construction: TransferConstruction,
@@ -595,6 +603,38 @@ pub enum TransferConstruction {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
+pub struct IntermodalAccessEgress {
+    pub mode: String,
+    pub initial_search_radius: f64,
+    pub max_radius: f64,
+    pub search_extension_radius: f64,
+    pub share_trip_search_radius: f64,
+    pub person_filter_attribute: Option<String>,
+    pub person_filter_value: Option<String>,
+    pub stop_filter_attribute: Option<String>,
+    pub stop_filter_value: Option<String>,
+    pub link_id_attribute: Option<String>,
+}
+
+impl Default for IntermodalAccessEgress {
+    fn default() -> Self {
+        Self {
+            mode: String::new(),
+            initial_search_radius: 1_000.0,
+            max_radius: f64::INFINITY,
+            search_extension_radius: 500.0,
+            share_trip_search_radius: f64::INFINITY,
+            person_filter_attribute: None,
+            person_filter_value: None,
+            stop_filter_attribute: None,
+            stop_filter_value: None,
+            link_id_attribute: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct TransitRangeQuerySettings {
     pub max_earlier_departure_sec: u64,
     pub max_later_departure_sec: u64,
@@ -609,6 +649,23 @@ impl Default for TransitRangeQuerySettings {
             subpopulations: Vec::new(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntermodalModeSelection {
+    #[default]
+    LeastCostPerStop,
+    RandomPerDirection,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntermodalLegOnlyHandling {
+    Allow,
+    Avoid,
+    #[default]
+    Forbid,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -644,6 +701,10 @@ impl Default for Transit {
             use_mode_mapping_for_passengers: false,
             mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
+            use_intermodal_access_egress: false,
+            intermodal_access_egress: Vec::new(),
+            intermodal_access_egress_mode_selection: IntermodalModeSelection::default(),
+            intermodal_leg_only_handling: IntermodalLegOnlyHandling::default(),
             transfer_construction: TransferConstruction::default(),
             range_query_settings: Vec::new(),
             route_selector_settings: Vec::new(),
@@ -734,6 +795,30 @@ register_override!(
 
 register_override!("transit.personless_car_fallback", |config, value| {
     config.transit_mut().personless_car_fallback = value.parse().unwrap();
+});
+
+register_override!("transit.use_intermodal_access_egress", |config, value| {
+    config.transit_mut().use_intermodal_access_egress = value.parse().unwrap();
+});
+
+register_override!(
+    "transit.intermodal_access_egress_mode_selection",
+    |config, value| {
+        config.transit_mut().intermodal_access_egress_mode_selection = match value {
+            "least_cost_per_stop" => IntermodalModeSelection::LeastCostPerStop,
+            "random_per_direction" => IntermodalModeSelection::RandomPerDirection,
+            _ => panic!("Invalid intermodal access/egress mode selection: {value}"),
+        };
+    }
+);
+
+register_override!("transit.intermodal_leg_only_handling", |config, value| {
+    config.transit_mut().intermodal_leg_only_handling = match value {
+        "allow" => IntermodalLegOnlyHandling::Allow,
+        "avoid" => IntermodalLegOnlyHandling::Avoid,
+        "forbid" => IntermodalLegOnlyHandling::Forbid,
+        _ => panic!("Invalid intermodal leg-only handling: {value}"),
+    };
 });
 
 register_override!("facilities.path", |config, value| {
@@ -2229,7 +2314,10 @@ mod tests {
         TravelTimeCalculator, VertexWeight, parse_key_val,
     };
     use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
-    use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
+    use crate::simulation::config::{
+        IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection, Logging,
+        ModalLinkSelection, RoutingMode,
+    };
     use crate::simulation::replanning::{
         KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME,
     };
@@ -2960,6 +3048,54 @@ modules:
         });
         assert!(config.transit().simulate_vehicles);
         assert_eq!(vec!["bus", "rail"], config.transit().transit_modes);
+    }
+
+    #[test]
+    fn intermodal_transit_settings_read_from_yaml() {
+        let yaml = r#"
+modules:
+  transit:
+    type: Transit
+    use_intermodal_access_egress: true
+    intermodal_access_egress_mode_selection: random_per_direction
+    intermodal_leg_only_handling: avoid
+    intermodal_access_egress:
+      - mode: bike
+        initial_search_radius: 750.0
+        max_radius: 4000.0
+        search_extension_radius: 500.0
+        share_trip_search_radius: 0.5
+        person_filter_attribute: ownsBike
+        person_filter_value: true
+        stop_filter_attribute: bikeAccess
+        stop_filter_value: true
+        link_id_attribute: bikeLink
+"#;
+        let parsed: Config = serde_yaml::from_str(yaml).expect("valid intermodal transit config");
+        assert!(parsed.transit().use_intermodal_access_egress);
+        assert_eq!(
+            IntermodalModeSelection::RandomPerDirection,
+            parsed.transit().intermodal_access_egress_mode_selection
+        );
+        assert_eq!(
+            IntermodalLegOnlyHandling::Avoid,
+            parsed.transit().intermodal_leg_only_handling
+        );
+        assert_eq!(
+            vec![IntermodalAccessEgress {
+                mode: "bike".to_owned(),
+                initial_search_radius: 750.0,
+                max_radius: 4000.0,
+                search_extension_radius: 500.0,
+                share_trip_search_radius: 0.5,
+                person_filter_attribute: Some("ownsBike".to_owned()),
+                person_filter_value: Some("true".to_owned()),
+                stop_filter_attribute: Some("bikeAccess".to_owned()),
+                stop_filter_value: Some("true".to_owned()),
+                link_id_attribute: Some("bikeLink".to_owned()),
+            }],
+            parsed.transit().intermodal_access_egress
+        );
     }
 
     #[test]

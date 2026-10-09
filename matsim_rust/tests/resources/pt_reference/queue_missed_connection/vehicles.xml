@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ns0:vehicleDefinitions xmlns:ns0="http://www.matsim.org/files/dtd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+    <ns0:vehicleType id="walk">
+        <ns0:description>This is a pair of shoes</ns0:description>
+        <ns0:length meter="0.5" />
+        <ns0:width meter="1.0" />
+        <ns0:maximumVelocity meterPerSecond="0.85" />
+        <ns0:passengerCarEquivalents pce="0.1" />
+        <ns0:networkMode networkMode="walk" />
+        <ns0:flowEfficiencyFactor factor="10.0" />
+    </ns0:vehicleType>
+
+    <ns0:vehicleType id="pt">
+        <ns0:description>Transit vehicle driven by a simulated transit driver</ns0:description>
+        <ns0:capacity>
+            <ns0:seats persons="1" />
+            <ns0:standingRoom persons="0" />
+        </ns0:capacity>
+        <ns0:length meter="15.0" />
+        <ns0:width meter="2.5" />
+        <ns0:maximumVelocity meterPerSecond="25.0" />
+        <ns0:passengerCarEquivalents pce="5.0" />
+        <ns0:networkMode networkMode="car" />
+    </ns0:vehicleType>
+
+    <ns0:vehicle id="tr_1" type="pt" />
+    <ns0:vehicle id="tr_2" type="pt" />
+    <ns0:vehicle id="bus_1" type="pt" />
+    <ns0:vehicle id="bus_2" type="pt" />
+</ns0:vehicleDefinitions>

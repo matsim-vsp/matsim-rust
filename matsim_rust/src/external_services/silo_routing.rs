@@ -209,9 +209,9 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
                 }
                 // The person exists but its loaded attributes cannot be read, which is this
                 // service's own input data and not something SILO sent.
-                RoutingError::MissingEndTime { .. } | RoutingError::MalformedAttribute { .. } => {
-                    "service_error"
-                }
+                RoutingError::MissingEndTime { .. }
+                | RoutingError::MalformedAttribute { .. }
+                | RoutingError::MalformedTransitStopAttribute { .. } => "service_error",
             };
             return RouteResponse::error(category, error.to_string());
         }
