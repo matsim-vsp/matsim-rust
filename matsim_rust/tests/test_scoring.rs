@@ -10,7 +10,6 @@ use matsim_rust::simulation::scenario::population::{
 use matsim_rust::simulation::scenario::vehicles::Garage;
 use matsim_rust::simulation::scoring::OnlyTravelTimeDependentScoring;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 // This is just a regression test to ensure backpacking produces experienced plans.
 #[deterministic_id_test(matsim_rust)]
@@ -147,11 +146,7 @@ fn check_plan_integrity(plan: &InternalPlan, network: &Network) {
                     .trav_time
                     .unwrap_or_else(|| panic!("Leg at element {index} has no travel time"));
                 assert_eq!(
-                    Some(
-                        departure
-                            .saturating_add(travel_time)
-                            .saturating_add(Duration::from_secs(1))
-                    ),
+                    Some(departure.saturating_add(travel_time)),
                     activity.start_time,
                     "Leg/activity times differ at element {index}"
                 );

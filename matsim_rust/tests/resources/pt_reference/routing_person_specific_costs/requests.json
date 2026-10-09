@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "requests": [
+    {
+      "id": "person_prefers_rail",
+      "mode": "pt",
+      "person": {
+        "id": "person-1",
+        "subpopulation": "person"
+      },
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 1050.0, "y": 1050.0 },
+      "to": { "link": "33", "x": 3950.0, "y": 1050.0 }
+    },
+    {
+      "id": "freight_prefers_bus",
+      "mode": "pt",
+      "person": {
+        "id": "freight-hauler",
+        "subpopulation": "freight"
+      },
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 1050.0, "y": 1050.0 },
+      "to": { "link": "33", "x": 3950.0, "y": 1050.0 }
+    }
+  ]
+}

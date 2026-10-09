@@ -1,11 +1,11 @@
 {
-  "schema_version" : 2,
+  "schema_version" : 3,
   "reference" : {
     "implementation" : "matsim",
     "version" : "2026.0",
     "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
     "config" : "config.xml",
-    "config_sha256" : "9133feff831d6dec51cda00a0b1951441e441cdc9ea6d29c396b2103d5bc20a0",
+    "config_sha256" : "fe25cd7d4ffcc0b4959c6a953f699c517e413ccad65aae734e73f968a3be8a22",
     "seed" : 4711,
     "start_time" : 0.0,
     "end_time" : 86400.0,
@@ -20,8 +20,12 @@
       "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
     }, {
       "role" : "transit_schedule",
-      "path" : "../routing_direct_vs_transfer/transit_schedule.xml",
+      "path" : "transit_schedule.xml",
       "sha256" : "8f119b4ee97b9618c55900a4f46de642220529151a00a8628c3eca817559cbbc"
+    }, {
+      "role" : "routing_requests",
+      "path" : "requests.json",
+      "sha256" : "0a2550cbb05d24c14a1bf800c8d0b4af1eeb3520ce2f29711343417f3f45d5cb"
     } ]
   },
   "itineraries" : [ {
@@ -180,5 +184,6 @@
     } ],
     "arrival_time" : 37284.0
   } ],
+  "trees" : [ ],
   "events" : [ ]
 }

@@ -98,6 +98,7 @@ impl ControllerBuilder {
     pub fn build(mut self) -> Result<Controller, String> {
         self.scenario.config.transit().validate()?;
         self.scenario.config.travel_time_calculator().validate()?;
+        self.scenario.config.scoring().validate()?;
         let transit = self.scenario.config.transit();
         if transit.use_mode_mapping_for_passengers
             || !transit.mode_mapping_for_passengers.is_empty()
@@ -126,69 +127,17 @@ impl ControllerBuilder {
                             "transit.mode_mapping_for_passengers passengerMode {passenger_mode} must be listed in transit.transit_modes"
                         ));
                     }
-                    let Some(params) = self
+                    if !self
                         .scenario
                         .config
                         .scoring()
                         .mode_params
                         .iter()
-                        .find(|params| params.mode == *passenger_mode)
-                    else {
+                        .any(|params| params.mode == *passenger_mode)
+                    {
                         return Err(format!(
                             "transit.mode_mapping_for_passengers passengerMode {passenger_mode} needs scoring mode parameters"
                         ));
-                    };
-                    if let Some((field, _)) = [
-                        (
-                            "marginal_utility_of_traveling",
-                            params.marginal_utility_of_traveling,
-                        ),
-                        (
-                            "marginal_utility_of_distance",
-                            params.marginal_utility_of_distance,
-                        ),
-                        (
-                            "monetary_distance_cost_rate",
-                            params.monetary_distance_cost_rate,
-                        ),
-                        ("daily_money_constant", params.daily_money_constant),
-                        ("daily_utility_constant", params.daily_utility_constant),
-                        ("constant", params.constant),
-                    ]
-                    .into_iter()
-                    .find(|(_, value)| !value.is_finite())
-                    {
-                        return Err(format!(
-                            "scoring mode {passenger_mode} has a non-finite {field}"
-                        ));
-                    }
-                    let performing = self
-                        .scenario
-                        .config
-                        .scoring()
-                        .agent_params
-                        .iter()
-                        .find(|params| params.subpopulation == "person")
-                        .map_or(6.0, |params| params.performing);
-                    let pt_utility = self
-                        .scenario
-                        .config
-                        .scoring()
-                        .mode_params
-                        .iter()
-                        .find(|params| params.mode == "pt")
-                        .map_or(-6.0, |params| params.marginal_utility_of_traveling);
-                    if !performing.is_finite() || !pt_utility.is_finite() {
-                        return Err(
-                            "scoring parameters for mapped transit routing must be finite"
-                                .to_owned(),
-                        );
-                    }
-                    if performing == pt_utility {
-                        return Err(
-                            "scoring parameters for pt must produce a non-zero travel-time cost"
-                                .to_owned(),
-                        );
                     }
                 }
             }
@@ -394,31 +343,80 @@ impl ControllerBuilder {
                 .expect("routing config always includes walk parameters");
             let mode = Id::create("pt");
             let car_fallback = routers.get(&Id::create("car")).cloned();
-            routers.insert(
-                mode,
-                Arc::new(
-                    TransitRoutingModule::new(
-                        controller_scenario.core.transit_schedule.clone(),
-                        walk.teleported_mode_speed,
-                        walk.beeline_distance_factor,
-                        controller_scenario.core.garage.clone(),
-                        car_fallback,
-                    )
-                    .with_personless_fallback(config.transit().personless_car_fallback)
-                    .with_passenger_mode_mapping(
-                        config.transit().use_mode_mapping_for_passengers,
-                        config.transit().mode_mapping_for_passengers.clone(),
-                        &config.scoring().mode_params,
-                        &config.scoring().agent_params,
-                    )
-                    .with_range_queries(
-                        config.transit().range_query_settings.clone(),
-                        config.transit().route_selector_settings.clone(),
-                        config.computational_setup().random_seed,
-                    )
-                    .with_transfer_penalty(config.transit().transfer_penalty.clone()),
-                ),
+            let feeder_routers = routers.clone();
+            let mut transit_router = TransitRoutingModule::new_with_transfer_construction(
+                controller_scenario.core.transit_schedule.clone(),
+                walk.teleported_mode_speed,
+                walk.beeline_distance_factor,
+                controller_scenario.core.garage.clone(),
+                car_fallback,
+                config.transit().transfer_construction,
+            )
+            .with_personless_fallback(config.transit().personless_car_fallback)
+            .with_passenger_mode_mapping(
+                config.transit().use_mode_mapping_for_passengers,
+                config.transit().mode_mapping_for_passengers.clone(),
+                &config.scoring().mode_params,
+                &config.scoring().agent_params,
+            )
+            .with_range_queries(
+                config.transit().range_query_settings.clone(),
+                config.transit().route_selector_settings.clone(),
+                config.computational_setup().random_seed,
             );
+            if config.transit().use_intermodal_access_egress {
+                if config.transit().intermodal_access_egress.is_empty() {
+                    return Err("transit.use_intermodal_access_egress requires at least one transit.intermodal_access_egress entry".to_owned());
+                }
+                for setting in &config.transit().intermodal_access_egress {
+                    if setting.mode.is_empty()
+                        || !setting.initial_search_radius.is_finite()
+                        || setting.initial_search_radius <= 0.0
+                        || setting.max_radius.is_nan()
+                        || setting.max_radius < setting.initial_search_radius
+                        || !setting.search_extension_radius.is_finite()
+                        || setting.search_extension_radius <= 0.0
+                        || setting.share_trip_search_radius.is_nan()
+                        || setting.share_trip_search_radius <= 0.0
+                    {
+                        return Err(format!(
+                            "Invalid transit intermodal access/egress settings for mode '{}': search radii and share_trip_search_radius must be positive, and max_radius must be at least initial_search_radius",
+                            setting.mode
+                        ));
+                    }
+                    if !feeder_routers.contains_key(&Id::create(&setting.mode)) {
+                        return Err(format!(
+                            "No routing module found for configured transit feeder mode '{}'",
+                            setting.mode
+                        ));
+                    }
+                    if setting.person_filter_attribute.is_some()
+                        != setting.person_filter_value.is_some()
+                        || setting.stop_filter_attribute.is_some()
+                            != setting.stop_filter_value.is_some()
+                    {
+                        return Err(format!(
+                            "Transit feeder mode '{}' must configure both each filter attribute and its value",
+                            setting.mode
+                        ));
+                    }
+                }
+                let utilities = config
+                    .scoring()
+                    .mode_params
+                    .iter()
+                    .map(|params| (params.mode.clone(), params.marginal_utility_of_traveling))
+                    .collect::<BTreeMap<_, _>>();
+                transit_router = transit_router.with_intermodal_access_egress(
+                    config.transit().intermodal_access_egress.clone(),
+                    feeder_routers,
+                    utilities,
+                    config.transit().intermodal_access_egress_mode_selection,
+                    config.transit().intermodal_leg_only_handling,
+                    config.computational_setup().random_seed,
+                );
+            }
+            routers.insert(mode, Arc::new(transit_router));
         }
 
         Ok(TripRouter::new(routers))

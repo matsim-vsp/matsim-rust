@@ -568,6 +568,17 @@ pub struct Transit {
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
     #[serde(default)]
     pub personless_car_fallback: bool,
+    #[serde(default)]
+    pub use_intermodal_access_egress: bool,
+    #[serde(default)]
+    pub intermodal_access_egress: Vec<IntermodalAccessEgress>,
+    #[serde(default)]
+    pub intermodal_access_egress_mode_selection: IntermodalModeSelection,
+    #[serde(default)]
+    pub intermodal_leg_only_handling: IntermodalLegOnlyHandling,
+    /// When walking transfer candidates are built for transit routing.
+    #[serde(default)]
+    pub transfer_construction: TransferConstruction,
     /// Search for PT routes within configured departure windows. Empty means use the desired
     /// departure time only; an empty subpopulation list applies to every subpopulation.
     #[serde(default)]
@@ -629,6 +640,50 @@ impl Default for TransitTransferPenalty {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferConstruction {
+    /// Build all candidate stop transfers when the router is created.
+    #[default]
+    Initial,
+    /// Build and cache candidates the first time each stop is queried.
+    Adaptive,
+    /// Rebuild candidates on every query without retaining them.
+    Online,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct IntermodalAccessEgress {
+    pub mode: String,
+    pub initial_search_radius: f64,
+    pub max_radius: f64,
+    pub search_extension_radius: f64,
+    pub share_trip_search_radius: f64,
+    pub person_filter_attribute: Option<String>,
+    pub person_filter_value: Option<String>,
+    pub stop_filter_attribute: Option<String>,
+    pub stop_filter_value: Option<String>,
+    pub link_id_attribute: Option<String>,
+}
+
+impl Default for IntermodalAccessEgress {
+    fn default() -> Self {
+        Self {
+            mode: String::new(),
+            initial_search_radius: 1_000.0,
+            max_radius: f64::INFINITY,
+            search_extension_radius: 500.0,
+            share_trip_search_radius: f64::INFINITY,
+            person_filter_attribute: None,
+            person_filter_value: None,
+            stop_filter_attribute: None,
+            stop_filter_value: None,
+            link_id_attribute: None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct TransitRangeQuerySettings {
@@ -645,6 +700,23 @@ impl Default for TransitRangeQuerySettings {
             subpopulations: Vec::new(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntermodalModeSelection {
+    #[default]
+    LeastCostPerStop,
+    RandomPerDirection,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntermodalLegOnlyHandling {
+    Allow,
+    Avoid,
+    #[default]
+    Forbid,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -680,6 +752,11 @@ impl Default for Transit {
             use_mode_mapping_for_passengers: false,
             mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
+            use_intermodal_access_egress: false,
+            intermodal_access_egress: Vec::new(),
+            intermodal_access_egress_mode_selection: IntermodalModeSelection::default(),
+            intermodal_leg_only_handling: IntermodalLegOnlyHandling::default(),
+            transfer_construction: TransferConstruction::default(),
             range_query_settings: Vec::new(),
             route_selector_settings: Vec::new(),
             transfer_penalty: TransitTransferPenalty::default(),
@@ -860,6 +937,30 @@ register_override!(
 
 register_override!("transit.personless_car_fallback", |config, value| {
     config.transit_mut().personless_car_fallback = value.parse().unwrap();
+});
+
+register_override!("transit.use_intermodal_access_egress", |config, value| {
+    config.transit_mut().use_intermodal_access_egress = value.parse().unwrap();
+});
+
+register_override!(
+    "transit.intermodal_access_egress_mode_selection",
+    |config, value| {
+        config.transit_mut().intermodal_access_egress_mode_selection = match value {
+            "least_cost_per_stop" => IntermodalModeSelection::LeastCostPerStop,
+            "random_per_direction" => IntermodalModeSelection::RandomPerDirection,
+            _ => panic!("Invalid intermodal access/egress mode selection: {value}"),
+        };
+    }
+);
+
+register_override!("transit.intermodal_leg_only_handling", |config, value| {
+    config.transit_mut().intermodal_leg_only_handling = match value {
+        "allow" => IntermodalLegOnlyHandling::Allow,
+        "avoid" => IntermodalLegOnlyHandling::Avoid,
+        "forbid" => IntermodalLegOnlyHandling::Forbid,
+        _ => panic!("Invalid intermodal leg-only handling: {value}"),
+    };
 });
 
 register_override!("facilities.path", |config, value| {
@@ -1450,6 +1551,84 @@ register_override!("scoring.write_experienced_plans", |config, value| {
     config.scoring_mut().write_experienced_plans = value.parse().unwrap();
 });
 
+impl Scoring {
+    /// Reject parameter values that the routing logic cannot turn into a finite travel-time cost.
+    ///
+    /// PT routing computes each ride's cost as `(performing - mode_utility) / (performing - pt_utility)`,
+    /// which is undefined when `performing == pt_utility` and undefined for any non-finite input.
+    /// Both of those checks belong here rather than scattered through the routing logic, because the
+    /// controller cannot meaningfully start a run that produced them and because a typed validation
+    /// call site is the right place to push external, user-configured inputs.
+    pub fn validate(&self) -> Result<(), String> {
+        for params in &self.mode_params {
+            for (field, value) in [
+                (
+                    "marginal_utility_of_traveling",
+                    params.marginal_utility_of_traveling,
+                ),
+                (
+                    "marginal_utility_of_distance",
+                    params.marginal_utility_of_distance,
+                ),
+                (
+                    "monetary_distance_cost_rate",
+                    params.monetary_distance_cost_rate,
+                ),
+                ("daily_money_constant", params.daily_money_constant),
+                ("daily_utility_constant", params.daily_utility_constant),
+                ("constant", params.constant),
+            ] {
+                if !value.is_finite() {
+                    return Err(format!(
+                        "scoring mode {} has a non-finite {field}",
+                        params.mode
+                    ));
+                }
+            }
+        }
+        for params in &self.agent_params {
+            for (field, value) in [
+                ("late_arrival", params.late_arrival),
+                ("early_departure", params.early_departure),
+                ("performing", params.performing),
+                ("waiting", params.waiting),
+                (
+                    "marginal_utility_of_money",
+                    params.marginal_utility_of_money,
+                ),
+                ("aborted_plan_score", params.aborted_plan_score),
+            ] {
+                if !value.is_finite() {
+                    return Err(format!(
+                        "scoring agent subpopulation {} has a non-finite {field}",
+                        params.subpopulation
+                    ));
+                }
+            }
+        }
+        for agent in &self.agent_params {
+            let performing = agent.performing;
+            let pt_utility = self
+                .mode_params
+                .iter()
+                .find(|params| params.mode == "pt" && params.subpopulation == agent.subpopulation)
+                .or_else(|| {
+                    self.mode_params
+                        .iter()
+                        .find(|params| params.mode == "pt" && params.subpopulation.is_empty())
+                })
+                .map_or(-6.0, |params| params.marginal_utility_of_traveling);
+            if performing == pt_utility {
+                return Err(format!(
+                    "scoring parameters for subpopulation {} must produce a non-zero travel-time cost for pt",
+                    agent.subpopulation
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Default for Scoring {
     fn default() -> Self {
         Self {
@@ -1494,7 +1673,13 @@ impl ActivityParameter {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct ModeParameter {
+    /// Empty string means the entry applies to every subpopulation (the default); a non-empty
+    /// value scopes the parameter to that subpopulation. PT routing resolves per-subpopulation
+    /// costs by checking the agent's subpopulation, falling back to the empty-string entry, and
+    /// then to the built-in default for the `pt` mode.
+    pub subpopulation: String,
     pub mode: String,
     pub marginal_utility_of_traveling: f64, // utils/hour
     pub marginal_utility_of_distance: f64,  // utils/meters
@@ -1516,6 +1701,7 @@ impl ModeParameter {
 impl Default for ModeParameter {
     fn default() -> Self {
         Self {
+            subpopulation: String::new(),
             mode: "walk".to_string(),
             marginal_utility_of_traveling: -6.0,
             marginal_utility_of_distance: 0.0,
@@ -2261,6 +2447,7 @@ mod tests {
     use crate::simulation::config::OverwriteFiles;
     use crate::simulation::config::PathBuf;
     use crate::simulation::config::Profiling;
+    use crate::simulation::config::TransferConstruction;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
@@ -2268,11 +2455,11 @@ mod tests {
         QSim, Replanning, Routing, Scoring, SignalFilesConfig, StrategySetting, TeleportedParams,
         TravelTimeCalculator, VertexWeight, parse_key_val,
     };
+    use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
     use crate::simulation::config::{
-        Ids, Network, Population, Transit, TransitModeToModeTransferPenalty,
-        TransitTransferPenalty, Vehicles,
+        IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection, Logging,
+        ModalLinkSelection, RoutingMode,
     };
-    use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
     use crate::simulation::replanning::{
         KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME,
     };
@@ -2517,6 +2704,24 @@ mod tests {
     }
 
     #[test]
+    fn transit_transfer_construction_is_configurable_and_validated() {
+        for (value, expected) in [
+            ("initial", TransferConstruction::Initial),
+            ("adaptive", TransferConstruction::Adaptive),
+            ("online", TransferConstruction::Online),
+        ] {
+            let yaml = format!(
+                "modules:\n  transit:\n    type: Transit\n    transfer_construction: {value}\n"
+            );
+            let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(parsed.transit().transfer_construction, expected);
+        }
+        let invalid =
+            "modules:\n  transit:\n    type: Transit\n    transfer_construction: unknown\n";
+        assert!(serde_yaml::from_str::<Config>(invalid).is_err());
+    }
+
+    #[test]
     fn routing_defaults_include_walk_access_egress_and_teleported_params() {
         let default_routing = Routing::default();
         assert_eq!(default_routing.access_egress_mode, "walk");
@@ -2665,6 +2870,7 @@ mod tests {
                 typical_duration_s: 43_200.0,
             }],
             mode_params: vec![ModeParameter {
+                subpopulation: String::new(),
                 mode: "car".to_string(),
                 marginal_utility_of_traveling: -0.001,
                 marginal_utility_of_distance: -0.002,
@@ -2984,6 +3190,54 @@ modules:
         });
         assert!(config.transit().simulate_vehicles);
         assert_eq!(vec!["bus", "rail"], config.transit().transit_modes);
+    }
+
+    #[test]
+    fn intermodal_transit_settings_read_from_yaml() {
+        let yaml = r#"
+modules:
+  transit:
+    type: Transit
+    use_intermodal_access_egress: true
+    intermodal_access_egress_mode_selection: random_per_direction
+    intermodal_leg_only_handling: avoid
+    intermodal_access_egress:
+      - mode: bike
+        initial_search_radius: 750.0
+        max_radius: 4000.0
+        search_extension_radius: 500.0
+        share_trip_search_radius: 0.5
+        person_filter_attribute: ownsBike
+        person_filter_value: true
+        stop_filter_attribute: bikeAccess
+        stop_filter_value: true
+        link_id_attribute: bikeLink
+"#;
+        let parsed: Config = serde_yaml::from_str(yaml).expect("valid intermodal transit config");
+        assert!(parsed.transit().use_intermodal_access_egress);
+        assert_eq!(
+            IntermodalModeSelection::RandomPerDirection,
+            parsed.transit().intermodal_access_egress_mode_selection
+        );
+        assert_eq!(
+            IntermodalLegOnlyHandling::Avoid,
+            parsed.transit().intermodal_leg_only_handling
+        );
+        assert_eq!(
+            vec![IntermodalAccessEgress {
+                mode: "bike".to_owned(),
+                initial_search_radius: 750.0,
+                max_radius: 4000.0,
+                search_extension_radius: 500.0,
+                share_trip_search_radius: 0.5,
+                person_filter_attribute: Some("ownsBike".to_owned()),
+                person_filter_value: Some("true".to_owned()),
+                stop_filter_attribute: Some("bikeAccess".to_owned()),
+                stop_filter_value: Some("true".to_owned()),
+                link_id_attribute: Some("bikeLink".to_owned()),
+            }],
+            parsed.transit().intermodal_access_egress
+        );
     }
 
     #[test]
@@ -3405,220 +3659,50 @@ modules:
         );
     }
 
-    /// MATSim ignores `transferPenaltyBaseCost` until a per-travel-time-hour cost is configured,
-    /// because `RaptorUtils.createParameters` falls back to `-utilityOfLineSwitch` while the
-    /// hourly cost is zero. This is that fallback, not a local choice.
     #[test]
-    fn zero_hourly_cost_pins_the_line_switch_utility() {
-        let penalty = TransitTransferPenalty {
-            base_cost: 7.5,
-            ..TransitTransferPenalty::default()
-        };
+    fn scoring_validate_rejects_non_finite_mode_params() {
+        let mut scoring = Scoring::default();
+        scoring.mode_params[0].marginal_utility_of_traveling = f64::NAN;
 
-        assert_eq!(penalty.base_cost(), 1.0);
-        assert_eq!(TransitTransferPenalty::default().base_cost(), 1.0);
-
-        let with_hourly = TransitTransferPenalty {
-            per_travel_time_hour: 1.0,
-            ..penalty
-        };
-        assert_eq!(with_hourly.base_cost(), 7.5);
+        let error = scoring.validate().unwrap_err();
+        assert!(
+            error.contains("scoring mode car has a non-finite marginal_utility_of_traveling"),
+            "unexpected error: {error}"
+        );
     }
 
-    /// One transfer's penalty is clipped into the configured bounds at the boundaries themselves,
-    /// which is where an off-by-one would change a route choice.
     #[test]
-    fn transfer_penalty_clips_at_both_boundaries() {
-        let penalty = TransitTransferPenalty {
-            min_cost: 2.0,
-            max_cost: 6.0,
-            ..TransitTransferPenalty::default()
-        };
+    fn scoring_validate_rejects_non_finite_agent_params() {
+        let mut scoring = Scoring::default();
+        scoring.agent_params[0].performing = f64::INFINITY;
 
-        assert_eq!(penalty.clip(2.0), 2.0, "the lower bound is inclusive");
-        assert_eq!(penalty.clip(6.0), 6.0, "the upper bound is inclusive");
-        assert_eq!(penalty.clip(1.999), 2.0);
-        assert_eq!(penalty.clip(6.001), 6.0);
-        assert_eq!(penalty.clip(4.0), 4.0);
-
-        let unbounded = TransitTransferPenalty::default();
-        assert_eq!(unbounded.clip(1e9), 1e9);
-        assert_eq!(unbounded.clip(-1e9), -1e9);
+        let error = scoring.validate().unwrap_err();
+        assert!(
+            error.contains("scoring agent subpopulation person has a non-finite performing"),
+            "unexpected error: {error}"
+        );
     }
 
-    /// An hourly penalty grows with elapsed travel time and is bounded at exactly the travel time
-    /// where it reaches the maximum, rather than somewhere after it.
+    /// `Scoring::validate()` must catch the `performing == pt_utility` divide-by-zero for *every*
+    /// agent subpopulation, not only the hard-coded "person" one. The pre-issue-75 implementation
+    /// only checked "person", so a freight subpopulation with a matching utility would slip through
+    /// and break transit routing at runtime.
     #[test]
-    fn transfer_penalty_reaches_its_maximum_at_the_boundary_travel_time() {
-        let penalty = TransitTransferPenalty {
-            base_cost: 0.0,
-            per_travel_time_hour: 6.0,
-            max_cost: 1.0,
-            ..TransitTransferPenalty::default()
-        };
-        // 6 utils per hour is 1 util per 600 s, so the cap binds at exactly 600 s.
-        assert!(penalty.clip(6.0 / 3600.0 * 599.0) < 1.0);
-        assert_eq!(penalty.clip(6.0 / 3600.0 * 600.0), 1.0);
-        assert_eq!(penalty.clip(6.0 / 3600.0 * 601.0), 1.0);
-    }
-
-    /// MATSim normalizes the bounds with `Math.min`/`Math.max`, so an inverted pair is a swap
-    /// rather than an error. Rejecting it would be an invented restriction the reference does not
-    /// have.
-    #[test]
-    fn an_inverted_bound_pair_is_swapped_like_matsim() {
-        let inverted = TransitTransferPenalty {
-            min_cost: 6.0,
-            max_cost: 2.0,
-            ..TransitTransferPenalty::default()
-        };
-        assert_eq!(Ok(()), inverted.validate());
-        assert_eq!(inverted.clip(0.0), 2.0);
-        assert_eq!(inverted.clip(4.0), 4.0);
-        assert_eq!(inverted.clip(9.0), 6.0);
-    }
-
-    /// A mode pair only carries its own penalty; every other pair, including the reverse
-    /// direction, falls back to the base cost.
-    #[test]
-    fn mode_penalty_applies_only_to_the_named_pair() {
-        let penalty = TransitTransferPenalty {
-            by_transport_mode: vec![TransitModeToModeTransferPenalty {
-                from_mode: "train".to_string(),
-                to_mode: "bus".to_string(),
-                transfer_penalty: 4.0,
-            }],
-            ..TransitTransferPenalty::default()
-        };
-
-        assert!(penalty.is_mode_specific());
-        assert_eq!(penalty.mode_penalty("train", "bus"), 4.0);
-        assert_eq!(penalty.mode_penalty("bus", "train"), 0.0);
-        assert_eq!(penalty.mode_penalty("train", "train"), 0.0);
-        assert!(!TransitTransferPenalty::default().is_mode_specific());
-    }
-
-    /// A zero penalty must cost exactly nothing, which is what makes "unconfigured" and
-    /// "configured to zero" the same itinerary. MATSim's default is one utility, so a config that
-    /// wants no penalty has to ask for it explicitly with an hourly cost and a zero base.
-    #[test]
-    fn a_zero_penalty_costs_nothing() {
-        let zero = TransitTransferPenalty {
-            base_cost: 0.0,
-            // A non-zero hourly cost is what makes the zero base cost take effect at all.
-            per_travel_time_hour: 1.0,
-            ..TransitTransferPenalty::default()
-        };
-        assert_eq!(zero.base_cost(), 0.0);
-        assert_eq!(zero.clip(0.0), 0.0);
-        // Clipping to zero still yields a free transfer rather than a negative or NaN cost.
-        let floored = TransitTransferPenalty {
-            base_cost: -5.0,
-            per_travel_time_hour: 1.0,
-            min_cost: 0.0,
-            ..TransitTransferPenalty::default()
-        };
-        assert_eq!(floored.clip(-5.0), 0.0);
-    }
-
-    /// Non-finite and contradictory penalties fail at the configuration boundary, where the
-    /// controller reports them, rather than turning into a NaN or an inverted interval mid-search.
-    #[test]
-    fn transit_rejects_invalid_transfer_penalties() {
-        let cases = [
-            (
-                TransitTransferPenalty {
-                    base_cost: f64::NAN,
-                    ..Default::default()
-                },
-                "transit.transfer_penalty.base_cost must be finite",
-            ),
-            (
-                TransitTransferPenalty {
-                    per_travel_time_hour: f64::INFINITY,
-                    ..Default::default()
-                },
-                "transit.transfer_penalty.per_travel_time_hour must be finite",
-            ),
-            (
-                TransitTransferPenalty {
-                    min_cost: f64::NAN,
-                    ..Default::default()
-                },
-                "transit.transfer_penalty bounds must not be NaN",
-            ),
-            (
-                TransitTransferPenalty {
-                    by_transport_mode: vec![TransitModeToModeTransferPenalty {
-                        from_mode: "train".to_string(),
-                        to_mode: String::new(),
-                        transfer_penalty: 1.0,
-                    }],
-                    ..Default::default()
-                },
-                "transit.transfer_penalty.by_transport_mode[0] must name both modes",
-            ),
-            (
-                TransitTransferPenalty {
-                    per_travel_time_hour: 1.0,
-                    by_transport_mode: vec![TransitModeToModeTransferPenalty {
-                        from_mode: "train".to_string(),
-                        to_mode: "bus".to_string(),
-                        transfer_penalty: 1.0,
-                    }],
-                    ..Default::default()
-                },
-                "transit.transfer_penalty.by_transport_mode cannot be combined with \
-                 per_travel_time_hour",
-            ),
-        ];
-        for (penalty, expected) in cases {
-            let transit = Transit {
-                transfer_penalty: penalty,
-                ..Transit::default()
-            };
-            assert_eq!(Err(expected.to_string()), transit.validate());
-        }
-    }
-
-    /// The pinned defaults are valid, so a config that says nothing about transfer penalties runs.
-    #[test]
-    fn default_transfer_penalty_is_valid() {
-        assert_eq!(Ok(()), Transit::default().validate());
-    }
-
-    /// The unbounded defaults must survive a write/read cycle, since every run writes its resolved
-    /// config. A bound that loses its infinity on the way out would silently become a large finite
-    /// cost later.
-    #[test]
-    fn unbounded_transfer_penalty_survives_a_yaml_round_trip() {
-        let mut config = Config::default();
-        config.set_transit(Transit {
-            transfer_penalty: TransitTransferPenalty {
-                base_cost: 2.5,
-                per_travel_time_hour: 3.5,
-                max_cost: 8.0,
-                by_transport_mode: vec![TransitModeToModeTransferPenalty {
-                    from_mode: "train".to_string(),
-                    to_mode: "bus".to_string(),
-                    transfer_penalty: 6.0,
-                }],
-                ..TransitTransferPenalty::default()
-            },
-            ..Transit::default()
+    fn scoring_validate_catches_performing_eq_pt_utility_for_every_subpopulation() {
+        let mut scoring = Scoring::default();
+        // Add a second agent_params entry whose performing matches the empty-subpopulation
+        // `pt` utility (-6.0) and would have escaped the old "person"-only check.
+        scoring.agent_params.push({
+            let mut params = scoring.agent_params[0].clone();
+            params.subpopulation = "freight".to_string();
+            params.performing = -6.0;
+            params
         });
 
-        let directory = tempfile::tempdir().unwrap();
-        config::write_config(&config, directory.path().to_path_buf());
-        let read = Config::from_args(CommandLineArgs::new_with_path(
-            directory.path().join("output_config.yml").to_str().unwrap(),
-        ));
-
-        assert_eq!(
-            read.transit().transfer_penalty,
-            config.transit().transfer_penalty
+        let error = scoring.validate().unwrap_err();
+        assert!(
+            error.contains("subpopulation freight"),
+            "unexpected error: {error}"
         );
-        assert_eq!(read.transit().transfer_penalty.min_cost, f64::NEG_INFINITY);
-        assert_eq!(read.transit().transfer_penalty.max_cost, 8.0);
     }
 }

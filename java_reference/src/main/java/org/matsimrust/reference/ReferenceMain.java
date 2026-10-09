@@ -3,6 +3,10 @@ package org.matsimrust.reference;
 import ch.sbb.matsim.config.SwissRailRaptorConfigGroup;
 import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptorModule;
 import ch.sbb.matsim.routing.pt.raptor.RaptorUtils;
+import ch.sbb.matsim.routing.pt.raptor.RaptorParameters;
+import ch.sbb.matsim.routing.pt.raptor.RaptorStaticConfig;
+import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptor;
+import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptorData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -22,6 +26,7 @@ import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.utils.misc.OptionalTime;
 import org.matsim.facilities.ActivityFacility;
 import org.matsim.pt.routes.DefaultTransitPassengerRoute;
+import org.matsim.pt.transitSchedule.api.TransitStopFacility;
 import org.matsim.utils.objectattributes.attributable.AttributesImpl;
 
 import java.io.BufferedReader;
@@ -60,7 +65,7 @@ import java.util.zip.GZIPInputStream;
 public final class ReferenceMain {
 
     /** Bumped whenever the normalized shape changes; the Rust side asserts the same number. */
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -68,9 +73,9 @@ public final class ReferenceMain {
     private static final Pattern EVENT_FILE = Pattern.compile("(\\d+)\\.events\\.xml(\\.gz)?");
 
     /**
-     * Event types that carry passenger meaning, with the attributes kept for each. Everything else
-     * is vehicle- or bookkeeping-level; skipped types are reported on stderr so a fixture change
-     * cannot silently drop a new observable event.
+     * Event types that carry passenger or transit-service meaning, with the attributes kept for
+     * each. Everything else is bookkeeping-level; skipped types are reported on stderr so a
+     * fixture change cannot silently drop a new observable event.
      *
      * <p>This list is derived from the pinned tree: MATSim 2026.0 emits a teleported pt leg as
      * {@code travelled} with mode {@code pt}, not as a separate event type.
@@ -82,13 +87,23 @@ public final class ReferenceMain {
         EVENT_ATTRIBUTES.put("departure", List.of("person", "legMode", "computationalRoutingMode", "link"));
         EVENT_ATTRIBUTES.put("arrival", List.of("person", "legMode", "link"));
         EVENT_ATTRIBUTES.put("travelled", List.of("person", "mode", "distance"));
+        EVENT_ATTRIBUTES.put("PersonEntersVehicle", List.of("person", "vehicle"));
+        EVENT_ATTRIBUTES.put("PersonLeavesVehicle", List.of("person", "vehicle"));
+        EVENT_ATTRIBUTES.put("PersonEntersPtVehicle", List.of("person", "vehicle"));
+        EVENT_ATTRIBUTES.put("PersonLeavesPtVehicle", List.of("person", "vehicle"));
+        EVENT_ATTRIBUTES.put("TransitDriverStarts", List.of(
+                "driverId", "vehicleId", "transitLineId", "transitRouteId", "departureId"));
+        EVENT_ATTRIBUTES.put("VehicleArrivesAtFacility", List.of("vehicle", "facility", "delay"));
+        EVENT_ATTRIBUTES.put("VehicleDepartsAtFacility", List.of("vehicle", "facility", "delay"));
+        EVENT_ATTRIBUTES.put("waitingForPt", List.of("person", "atStop", "destinationStop"));
+        EVENT_ATTRIBUTES.put("stuckAndAbort", List.of("person", "link", "legMode", "reason"));
     }
 
     /**
      * Attributes that are numbers, not identifiers. Everything else stays a string so a person or
      * link id is never read back as a number and compared numerically.
      */
-    private static final List<String> NUMERIC_ATTRIBUTES = List.of("time", "distance", "x", "y");
+    private static final List<String> NUMERIC_ATTRIBUTES = List.of("time", "distance", "x", "y", "delay");
 
     /**
      * Times are compared at millisecond resolution, which is finer than either simulation clock and
@@ -125,6 +140,7 @@ public final class ReferenceMain {
         root.put("schema_version", SCHEMA_VERSION);
         root.set("reference", reference(config, configPath, options));
         root.set("itineraries", itineraries(controler, options));
+        root.set("trees", trees(controler, options));
         root.set("events", events(Path.of(config.controller().getOutputDirectory())));
 
         Files.createDirectories(outputPath.toAbsolutePath().getParent());
@@ -149,6 +165,7 @@ public final class ReferenceMain {
                 new String[] {"network", config.network().getInputFile()},
                 new String[] {"population", config.plans().getInputFile()},
                 new String[] {"vehicles", config.vehicles().getVehiclesFile()},
+                new String[] {"transit_vehicles", config.transit().getVehiclesFile()},
                 new String[] {"transit_schedule", config.transit().getTransitScheduleFile()})) {
             String path = input[1];
             if (path == null || path.isBlank()) {
@@ -157,6 +174,15 @@ public final class ReferenceMain {
             ObjectNode node = inputs.addObject();
             node.put("role", input[0]);
             node.put("path", path);
+            if (Files.isRegularFile(Path.of(path))) {
+                node.put("sha256", sha256(Path.of(path)));
+            }
+        }
+        if (options.containsKey("--requests")) {
+            String path = options.get("--requests");
+            ObjectNode node = inputs.addObject();
+            node.put("role", "routing_requests");
+            node.put("path", Path.of(path).getFileName().toString());
             if (Files.isRegularFile(Path.of(path))) {
                 node.put("sha256", sha256(Path.of(path)));
             }
@@ -183,7 +209,7 @@ public final class ReferenceMain {
             itinerary.put("id", request.string("id"));
             itinerary.set("request", request.node());
 
-            Person person = request.field("person") == null
+            Person person = !request.node().hasNonNull("person")
                     ? null
                     : controler.getScenario().getPopulation().getPersons().get(Id.create(request.string("person"), Person.class));
             Facility from = facility(controler.getScenario(), "probe_from_" + request.string("id"), request.field("from"));
@@ -239,6 +265,74 @@ public final class ReferenceMain {
         }
         return itineraries;
     }
+
+    /** Runs explicit one-to-all trees, recording absent destinations as no-path results. */
+    private static ArrayNode trees(Controler controler, Map<String, String> options) throws IOException {
+        ArrayNode trees = MAPPER.createArrayNode();
+        Path requestsPath = options.containsKey("--requests") ? Path.of(options.get("--requests")) : null;
+        if (requestsPath == null) {
+            return trees;
+        }
+
+        Json requests = Json.read(requestsPath);
+        if (!requests.node().has("trees")) {
+            return trees;
+        }
+        RaptorStaticConfig staticConfig = RaptorUtils.createStaticConfig(controler.getConfig());
+        staticConfig.setOptimization(RaptorStaticConfig.RaptorOptimization.OneToAllRouting);
+        SwissRailRaptorData data = SwissRailRaptorData.create(
+                controler.getScenario().getTransitSchedule(), null, staticConfig,
+                controler.getScenario().getNetwork(), null);
+        SwissRailRaptor raptor = new SwissRailRaptor.Builder(data, controler.getConfig()).build();
+
+        for (Json request : requests.array("trees")) {
+            String id = request.string("id");
+            TransitStopFacility from = controler.getScenario().getTransitSchedule().getFacilities()
+                    .get(Id.create(request.string("from_stop"), TransitStopFacility.class));
+            if (from == null) {
+                throw new IllegalArgumentException("unknown tree origin stop " + request.string("from_stop"));
+            }
+            ObjectNode tree = MAPPER.createObjectNode();
+            tree.put("id", id);
+            tree.put("from_stop", request.string("from_stop"));
+            ArrayNode departures = tree.putArray("departures");
+            Map<Double, Map<String, TreeArrival>> results = new TreeMap<>();
+            RaptorParameters parameters = RaptorUtils.createParameters(controler.getConfig());
+            raptor.calcTreesObservable(from, request.number("earliest_departure_time"),
+                    request.number("latest_start_time"), parameters, null,
+                    new SwissRailRaptor.RaptorObserver() {
+                        @Override
+                        public void arrivedAtStop(double departureTime, TransitStopFacility stopFacility,
+                                double arrivalTime, int transferCount,
+                                java.util.function.Supplier<ch.sbb.matsim.routing.pt.raptor.RaptorRoute> route) {
+                            results.computeIfAbsent(departureTime, ignored -> new LinkedHashMap<>())
+                                    .put(stopFacility.getId().toString(), new TreeArrival(arrivalTime, transferCount));
+                        }
+                    });
+            for (Map.Entry<Double, Map<String, TreeArrival>> result : results.entrySet()) {
+                ObjectNode departure = departures.addObject();
+                departure.put("departure_time", roundTime(result.getKey()));
+                ArrayNode destinations = departure.putArray("destinations");
+                for (Json destination : request.array("destinations")) {
+                    String stop = destination.string("stop");
+                    ObjectNode item = destinations.addObject();
+                    item.put("stop", stop);
+                    TreeArrival info = result.getValue().get(stop);
+                    if (info == null) {
+                        item.put("result", "no_path");
+                    } else {
+                        item.put("result", "found");
+                        item.put("arrival_time", roundTime(info.arrivalTime()));
+                        item.put("transfer_count", info.transferCount);
+                    }
+                }
+            }
+            trees.add(tree);
+        }
+        return trees;
+    }
+
+    private record TreeArrival(double arrivalTime, int transferCount) {}
 
     private static Facility facility(Scenario scenario, String id, Json end) {
         ActivityFacility facility = scenario.getActivityFacilities().getFactory().createActivityFacility(

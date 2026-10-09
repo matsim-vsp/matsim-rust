@@ -72,6 +72,25 @@ impl ActivityEngine {
         self.notify_end_all(now_time, end_after_wake_up, end_from_awake)
     }
 
+    pub(crate) fn complete_legs_same_tick(
+        &mut self,
+        now: Tick,
+        agents: Vec<SimulationAgent>,
+    ) -> Vec<SimulationAgent> {
+        let now_time = self.clock.tick_to_time(now);
+        for mut agent in agents {
+            agent.clear_stuck();
+            agent.advance_plan(now_time);
+            self.receive_agent(now, AsleepSimulationAgent::build(agent, now_time));
+        }
+
+        let mut end_after_wake_up = self.wake_up(now_time);
+        end_after_wake_up.iter_mut().for_each(|agent| {
+            ActivityEngine::notify_wakeup(&mut self.comp_env, agent, now_time, now_time);
+        });
+        self.notify_end_all(now_time, end_after_wake_up, Vec::new())
+    }
+
     #[instrument(
         level = "trace",
         skip(self, end_after_wake_up, end_from_awake),

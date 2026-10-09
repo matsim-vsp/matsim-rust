@@ -206,9 +206,20 @@ impl<C: SimCommunicator> LegEngine<C> {
         self.net_message_broker.send_recv(now)
     }
 
-    fn receive_agents(&mut self, now: Tick, agents: Vec<SimulationAgent>) {
+    pub(crate) fn receive_agents(&mut self, now: Tick, agents: Vec<SimulationAgent>) {
         for agent in agents {
-            self.receive_agent(now, agent);
+            self.receive_agent_at(now, now, agent);
+        }
+    }
+
+    pub(crate) fn receive_agents_at(
+        &mut self,
+        now: Tick,
+        event_time: Tick,
+        agents: Vec<SimulationAgent>,
+    ) {
+        for agent in agents {
+            self.receive_agent_at(now, event_time, agent);
         }
     }
 
@@ -286,16 +297,16 @@ impl<C: SimCommunicator> LegEngine<C> {
         );
     }
 
-    pub(crate) fn receive_agent(&mut self, now: Tick, mut agent: SimulationAgent) {
-        let now_time = self.clock.tick_to_time(now);
-        agent.advance_plan(now_time);
+    fn receive_agent_at(&mut self, now: Tick, event_time: Tick, mut agent: SimulationAgent) {
+        let event_time = self.clock.tick_to_time(event_time);
+        agent.advance_plan(event_time);
 
         let leg = agent.curr_leg();
         let route = leg.route.as_ref().unwrap();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonDepartureEventBuilder::default()
-                .time(now_time)
+                .time(event_time)
                 .person(agent.id().clone())
                 .link(route.start_link().clone())
                 .leg_mode(leg.mode.clone())
@@ -310,10 +321,10 @@ impl<C: SimCommunicator> LegEngine<C> {
         );
 
         match self.find_responsible_engine(&agent) {
-            Leg => self.pass_to_leg(now, agent, true),
-            Teleportation => self.pass_to_teleportation(now, agent),
+            Leg => self.pass_to_leg(now, event_time, agent, true),
+            Teleportation => self.pass_to_teleportation(now, event_time, agent),
             Transit => self.transit_engine.as_mut().unwrap().receive_passenger(
-                now,
+                self.clock.time_to_tick(event_time),
                 agent,
                 &mut self.network_engine.network.transit_stops,
             ),
@@ -343,19 +354,27 @@ impl<C: SimCommunicator> LegEngine<C> {
         }
     }
 
-    fn pass_to_teleportation(&mut self, now: Tick, agent: SimulationAgent) {
-        self.teleportation_engine
-            .receive_agent(now, agent, &mut self.net_message_broker);
+    fn pass_to_teleportation(&mut self, now: Tick, event_time: SimTime, agent: SimulationAgent) {
+        self.teleportation_engine.receive_agent_at(
+            now,
+            event_time,
+            agent,
+            &mut self.net_message_broker,
+        );
     }
 
-    fn pass_to_leg(&mut self, now: Tick, agent: SimulationAgent, route_begin: bool) {
-        let now_time = self.clock.tick_to_time(now);
-
+    fn pass_to_leg(
+        &mut self,
+        now: Tick,
+        event_time: SimTime,
+        agent: SimulationAgent,
+        route_begin: bool,
+    ) {
         let agent_id = agent.id().clone();
 
         let vehicle = self
             .departure_handler
-            .handle_departure(now_time, agent, &self.garage)
+            .handle_departure(event_time, agent, &self.garage)
             .unwrap_or_else(|| panic!("Failed to handle departure for agent {}", agent_id));
 
         self.pass_to_leg_vehicle(now, vehicle, route_begin);

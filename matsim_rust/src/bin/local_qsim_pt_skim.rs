@@ -58,21 +58,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .map(|(_, coordinate)| coordinate.clone())
                 .collect();
-            let times = router.skim_times_from_origin(origin, &destinations, departure);
+            let results = router.skim_results_from_origin(origin, &destinations, departure);
             zones_ref
                 .iter()
-                .zip(times)
+                .zip(results)
                 .filter(move |((destination_id, _), _)| origin_id != destination_id)
-                .map(move |((destination_id, _), time)| {
-                    (origin_id, destination_id, time.as_secs_f64() / 60.0)
+                .map(move |((destination_id, _), result)| {
+                    (
+                        origin_id,
+                        destination_id,
+                        result.outcome.as_str(),
+                        result.travel_time.map(|time| time.as_secs_f64() / 60.0),
+                    )
                 })
         })
         .collect();
 
     let mut writer = csv::Writer::from_path(&args.output)?;
-    writer.write_record(["origin", "destination", "travel_time_minutes"])?;
-    for (origin, destination, minutes) in rows {
-        writer.write_record([origin, destination, &minutes.to_string()])?;
+    writer.write_record(["origin", "destination", "outcome", "travel_time_minutes"])?;
+    for (origin, destination, outcome, minutes) in rows {
+        writer.write_record([
+            origin,
+            destination,
+            outcome,
+            &minutes.map_or_else(String::new, |minutes| minutes.to_string()),
+        ])?;
     }
     writer.flush()?;
     Ok(())

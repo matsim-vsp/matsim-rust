@@ -21,6 +21,7 @@
 		<stopFacility id="ra" x="1050" y="1050" linkRefId="11" />
 		<stopFacility id="rb" x="2050" y="2940" linkRefId="12" />
 		<stopFacility id="rc" x="3950" y="1050" linkRefId="33" />
+		<stopFacility id="rd" x="1051" y="1050" linkRefId="11" />
 	</transitStops>
 
 	<transitLine id="Reference Line">

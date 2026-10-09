@@ -1,7 +1,7 @@
 use crate::simulation::InternalAttributes;
 use crate::simulation::config::{
-    ModalLinkSelection, TransitRangeQuerySettings, TransitRouteSelectorSettings,
-    TransitTransferPenalty,
+    IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection, ModalLinkSelection,
+    TransferConstruction, TransitRangeQuerySettings, TransitRouteSelectorSettings,
 };
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
@@ -21,10 +21,11 @@ use rand::RngExt;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -262,6 +263,12 @@ pub enum RoutingError {
         key: String,
         reason: String,
     },
+    #[error("Transit stop {stop} attribute {key} is malformed: {reason}")]
+    MalformedTransitStopAttribute {
+        stop: String,
+        key: String,
+        reason: String,
+    },
 }
 
 /// Facility is a location that has modal access to the network.
@@ -450,19 +457,47 @@ pub struct TransitRoutingModule {
     walk_distance_factor: f64,
     garage: Arc<Garage>,
     fallback: Option<Arc<dyn RoutingModule>>,
+    transfer_construction: TransferConstruction,
+    transfer_cache: RwLock<HashMap<Id<TransitStopFacility>, Vec<(Id<TransitStopFacility>, f64)>>>,
     /// Let a request that carries no person fall back to the car router. That is the legacy
     /// behaviour SILO's zone-to-zone queries rely on; it is an application policy, not a
     /// passenger one, so it stays off unless a config asks for it. See `with_personless_fallback`.
     personless_fallback: bool,
+    intermodal_access_egress: Vec<IntermodalAccessEgress>,
+    feeder_routers: IntMap<Id<String>, Arc<dyn RoutingModule>>,
+    feeder_mode_utilities: BTreeMap<String, f64>,
+    mode_selection: IntermodalModeSelection,
+    leg_only_handling: IntermodalLegOnlyHandling,
     passenger_modes: std::collections::BTreeMap<String, String>,
     use_passenger_mode_mapping: bool,
-    passenger_mode_travel_utilities: std::collections::BTreeMap<String, f64>,
-    performing_utility_per_hour: f64,
-    default_pt_travel_utility_per_hour: f64,
+    /// Resolved per-subpopulation routing parameters, keyed by subpopulation. An empty string
+    /// entry stores the default that applies to every subpopulation without an explicit override.
+    /// Built once from the configured `mode_params` / `agent_params` so each request resolves
+    /// costs with a single `BTreeMap` lookup.
+    routing_params_by_subpopulation: std::collections::BTreeMap<String, ResolvedRoutingParams>,
     range_query_settings: Vec<TransitRangeQuerySettings>,
     route_selector_settings: Vec<TransitRouteSelectorSettings>,
     transfer_penalty: TransitTransferPenalty,
     random_seed: u64,
+}
+
+/// The three numbers MATSim's travel-time cost formula needs: the agent's performing utility, the
+/// baseline pt utility, and a per-mode utility map that lets bus and rail legs disagree about how
+/// fast time passes. Reference semantics are intentional: the routing module hands the same
+/// resolved struct to every leg-cost call within one request, so a passenger never pays different
+/// costs for two halves of the same trip.
+#[derive(Clone, Debug)]
+pub struct ResolvedRoutingParams {
+    /// `agent_params[person].performing` for the request's subpopulation, or the config default
+    /// (6.0) when no agent parameter overrides it. Always finite: the controller rejects a config
+    /// whose `performing` is non-finite.
+    pub performing_utility_per_hour: f64,
+    /// `mode_params[pt].marginal_utility_of_traveling` for the request's subpopulation, falling
+    /// back to the empty-subpopulation entry, then -6.0. Always finite by the same controller check.
+    pub pt_utility_per_hour: f64,
+    /// Per-mode marginal utilities of traveling (utils/hour) for the request's subpopulation.
+    /// Resolution order: matching subpopulation, then empty subpopulation, then -6.0 for `pt`.
+    pub mode_utilities: std::collections::BTreeMap<String, f64>,
 }
 
 #[derive(Clone)]
@@ -496,11 +531,15 @@ struct Ride {
 /// A door-to-door transit connection.
 #[derive(Clone)]
 struct TransitPath {
+    stop: Id<TransitStopFacility>,
     departure: SimTime,
     arrival: SimTime,
     access_distance: f64,
     egress_distance: f64,
     rides: Vec<Ride>,
+    access_route: Option<Arc<Vec<InternalPlanElement>>>,
+    egress_route: Option<Arc<Vec<InternalPlanElement>>>,
+    access_time: Duration,
 }
 
 #[derive(Clone)]
@@ -510,6 +549,41 @@ struct TransitPathState {
     cost: f64,
     access_distance: f64,
     rides: Vec<Ride>,
+    access_route: Option<Arc<Vec<InternalPlanElement>>>,
+    access_time: Duration,
+}
+
+#[derive(Clone)]
+struct FeederStop {
+    stop: Id<TransitStopFacility>,
+    distance: f64,
+    time: Duration,
+    disutility: f64,
+    route: Option<Arc<Vec<InternalPlanElement>>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransitSkimOutcome {
+    Transit,
+    Walking,
+    /// At least one endpoint has no nearby stop candidate; direct walking may still be possible.
+    NoPath,
+}
+
+impl TransitSkimOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Transit => "pt",
+            Self::Walking => "walk",
+            Self::NoPath => "no_path",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransitSkimResult {
+    pub outcome: TransitSkimOutcome,
+    pub travel_time: Option<Duration>,
 }
 
 trait TransitSubpopulations {
@@ -547,6 +621,59 @@ fn matching_transit_settings<'a, T: TransitSubpopulations>(
         })
 }
 
+/// Build a per-subpopulation map of resolved routing parameters from the configured scoring
+/// inputs. Each entry bundles the performing utility for its subpopulation with the matching mode
+/// utilities; a subpopulation absent from the input gets no entry here, so resolution falls back
+/// to the empty-subpopulation entry (the global default) and finally to the built-in constants.
+///
+/// The output is keyed by `subpopulation` (verbatim from the config); empty string is the global
+/// default entry.
+fn build_routing_params_by_subpopulation(
+    mode_params: &[crate::simulation::config::ModeParameter],
+    agent_params: &[crate::simulation::config::AgentParameter],
+) -> std::collections::BTreeMap<String, ResolvedRoutingParams> {
+    let mut mode_by_subpopulation: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, f64>,
+    > = std::collections::BTreeMap::new();
+    for params in mode_params {
+        mode_by_subpopulation
+            .entry(params.subpopulation.clone())
+            .or_default()
+            .insert(params.mode.clone(), params.marginal_utility_of_traveling);
+    }
+    let mut by_subpopulation: std::collections::BTreeMap<String, ResolvedRoutingParams> =
+        std::collections::BTreeMap::new();
+    let subpopulations: std::collections::BTreeSet<String> = mode_by_subpopulation
+        .keys()
+        .cloned()
+        .chain(agent_params.iter().map(|p| p.subpopulation.clone()))
+        .collect();
+    for subpopulation in subpopulations {
+        let mode_utilities = mode_by_subpopulation
+            .get(&subpopulation)
+            .cloned()
+            .unwrap_or_else(|| mode_by_subpopulation.get("").cloned().unwrap_or_default());
+        let pt_utility = mode_utilities.get("pt").copied().unwrap_or(-6.0);
+        // The performing utility is per-subpopulation; an absent agent_params entry for the
+        // requested subpopulation inherits the global default ("person" subpopulation) at
+        // 6.0 utils/hour — the same fallback MATSim uses when no `person` override is set.
+        let performing = agent_params
+            .iter()
+            .find(|params| params.subpopulation == subpopulation)
+            .map_or(6.0, |params| params.performing);
+        by_subpopulation.insert(
+            subpopulation,
+            ResolvedRoutingParams {
+                performing_utility_per_hour: performing,
+                pt_utility_per_hour: pt_utility,
+                mode_utilities,
+            },
+        );
+    }
+    by_subpopulation
+}
+
 // ponytail: This search cap is fixed at 20 until MATSim's configurable transfer limit is ported.
 const RAPTOR_MAX_TRANSFERS: usize = 20;
 const RAPTOR_MIN_TRANSFER_TIME: Duration = Duration::from_secs(60);
@@ -560,15 +687,61 @@ impl RoutingModule for TransitRoutingModule {
     ) -> Result<Vec<InternalPlanElement>, RoutingError> {
         let from = request.from.coord();
         let to = request.to.coord();
-        let access_stops = self.nearest_stops(from);
-        let egress_stops: HashSet<_> = self
-            .nearest_stops(to)
-            .into_iter()
-            .map(|(stop_id, _)| stop_id)
-            .collect();
+        let (access_stops, egress_stops) = if self.intermodal_access_egress.is_empty() {
+            let access = self
+                .nearest_stops(from)
+                .into_iter()
+                .map(|(stop, distance)| FeederStop {
+                    stop,
+                    distance,
+                    time: self.walk_time(distance),
+                    disutility: 0.0,
+                    route: None,
+                })
+                .collect();
+            let egress = self
+                .nearest_stops(to)
+                .into_iter()
+                .map(|(stop, distance)| FeederStop {
+                    stop,
+                    distance,
+                    time: self.walk_time(distance),
+                    disutility: 0.0,
+                    route: None,
+                })
+                .collect();
+            (access, egress)
+        } else {
+            (
+                self.intermodal_stops(&request, request.from, true)?,
+                self.intermodal_stops(&request, request.to, false)?,
+            )
+        };
+        let direct_walk_distance = Coordinate::euclidean_distance(from, to);
+        let direct_walk_time = self.walk_time(direct_walk_distance);
+        let direct_walk = || {
+            InternalPlanElement::Leg(InternalLeg::new(
+                InternalRoute::Generic(InternalGenericRoute::new(
+                    request.from.link().clone(),
+                    request.to.link().clone(),
+                    Some(direct_walk_time),
+                    Some(direct_walk_distance * self.walk_distance_factor),
+                    None,
+                )),
+                Self::WALK_MODE,
+                self.mode.external(),
+                direct_walk_time,
+                Some(request.departure_time),
+            ))
+        };
         let subpopulation = request
             .person()
             .map_or("", |person| person.subpopulation().external());
+        // Resolve per-subpopulation routing costs once. The TripRouter builds the itinerary
+        // here and downstream scoring picks up the same passenger mode, so they have to agree
+        // on the cost formula. Resolving once and threading the same struct through every
+        // leg-cost call inside this request is what keeps that agreement exact.
+        let routing_params = self.resolve_routing_params(subpopulation);
         let best = if let Some(settings) =
             matching_transit_settings(&self.range_query_settings, subpopulation)
         {
@@ -579,12 +752,25 @@ impl RoutingModule for TransitRoutingModule {
                 &egress_stops,
                 settings,
                 request.person(),
+                &routing_params,
             )
             .or_else(|| {
-                self.find_best_path(to, request.departure_time, &access_stops, &egress_stops)
+                self.find_best_path_with_feeders(
+                    to,
+                    request.departure_time,
+                    &access_stops,
+                    &egress_stops,
+                    &routing_params,
+                )
             })
         } else {
-            self.find_best_path(to, request.departure_time, &access_stops, &egress_stops)
+            self.find_best_path_with_feeders(
+                to,
+                request.departure_time,
+                &access_stops,
+                &egress_stops,
+                &routing_params,
+            )
         };
         let Some(path) = best else {
             // An origin/destination pair that no transit line connects is not an error: SILO
@@ -617,24 +803,10 @@ impl RoutingModule for TransitRoutingModule {
                 mode: self.mode.external().to_string(),
             });
         };
-        let direct_walk_distance = Coordinate::euclidean_distance(from, to);
-        let direct_walk_time = self.walk_time(direct_walk_distance);
         if direct_walk_time.as_secs_f64()
-            < self.path_cost_equivalent_seconds(&path, request.departure_time)
+            < self.path_cost_equivalent_seconds(&path, request.departure_time, &routing_params)
         {
-            return Ok(vec![InternalPlanElement::Leg(InternalLeg::new(
-                InternalRoute::Generic(InternalGenericRoute::new(
-                    request.from.link().clone(),
-                    request.to.link().clone(),
-                    Some(direct_walk_time),
-                    Some(direct_walk_distance * self.walk_distance_factor),
-                    None,
-                )),
-                Self::WALK_MODE,
-                self.mode.external(),
-                direct_walk_time,
-                Some(request.departure_time),
-            ))]);
+            return Ok(vec![direct_walk()]);
         }
         Ok(self.stop_to_stop_trip(&request, &path))
     }
@@ -649,6 +821,195 @@ impl TransitRoutingModule {
     const CANDIDATE_COUNT: usize = 12;
     const WALK_MODE: &'static str = "walk";
     const INTERACTION: &'static str = "pt interaction";
+
+    pub(crate) fn with_intermodal_access_egress(
+        mut self,
+        settings: Vec<IntermodalAccessEgress>,
+        routers: IntMap<Id<String>, Arc<dyn RoutingModule>>,
+        utilities: BTreeMap<String, f64>,
+        selection: IntermodalModeSelection,
+        leg_only_handling: IntermodalLegOnlyHandling,
+        random_seed: u64,
+    ) -> Self {
+        self.intermodal_access_egress = settings;
+        self.feeder_routers = routers;
+        self.feeder_mode_utilities = utilities;
+        self.mode_selection = selection;
+        self.leg_only_handling = leg_only_handling;
+        self.random_seed = random_seed;
+        self
+    }
+
+    fn intermodal_stops(
+        &self,
+        request: &RoutingRequest,
+        endpoint: &Facility<'_>,
+        access: bool,
+    ) -> Result<Vec<FeederStop>, RoutingError> {
+        let mut settings: Vec<_> = self.intermodal_access_egress.iter().collect();
+        if self.mode_selection == IntermodalModeSelection::RandomPerDirection {
+            let person_id = request
+                .person()
+                .map_or("personless", |person| person.id().external());
+            let direction = if access { "access" } else { "egress" };
+            let stream = format!(
+                "{person_id}:{}:{}:{}:{direction}",
+                request.from.link(),
+                request.to.link(),
+                request.departure_time
+            );
+            let mut rng = crate::simulation::random::get_rng(
+                self.random_seed,
+                "routing.pt.intermodal_mode",
+                &stream,
+            );
+            let start = rng.random_range(0..settings.len());
+            settings.rotate_left(start);
+        }
+
+        let trip_radius = Coordinate::euclidean_distance(request.from.coord(), request.to.coord());
+        let mut selected = Vec::new();
+        for setting in settings {
+            if self.mode_selection == IntermodalModeSelection::RandomPerDirection
+                && !selected.is_empty()
+            {
+                break;
+            }
+            if let (Some(attribute), Some(value)) = (
+                setting.person_filter_attribute.as_deref(),
+                setting.person_filter_value.as_deref(),
+            ) && !request.person().is_some_and(|person| {
+                person.attributes().get::<String>(attribute).as_deref() == Some(value)
+            }) {
+                continue;
+            }
+            let Some(router) = self.feeder_routers.get(&Id::create(&setting.mode)) else {
+                continue;
+            };
+            let initial_radius = setting
+                .initial_search_radius
+                .min(setting.max_radius)
+                .min(trip_radius * setting.share_trip_search_radius);
+            let stop_filter = setting
+                .stop_filter_attribute
+                .as_deref()
+                .zip(setting.stop_filter_value.as_deref());
+            let initial_stops =
+                self.stops_within_radius_filtered(endpoint.coord(), initial_radius, stop_filter);
+            let search_radius = if initial_stops.len() < 2 {
+                self.nearest_stops_filtered(endpoint.coord(), stop_filter)
+                    .first()
+                    .map_or(initial_radius, |(_, nearest)| {
+                        (nearest + setting.search_extension_radius).min(setting.max_radius)
+                    })
+            } else {
+                initial_radius
+            };
+
+            let stops = if search_radius == initial_radius {
+                initial_stops
+            } else {
+                self.stops_within_radius_filtered(endpoint.coord(), search_radius, stop_filter)
+            };
+            for (stop_id, distance) in stops {
+                let stop = self.schedule.get_facility(&stop_id);
+                let actual_link = self.stop_link(&stop_id).clone();
+                let feeder_link = setting
+                    .link_id_attribute
+                    .as_deref()
+                    .and_then(|attribute| stop.attributes.get::<String>(attribute))
+                    .map(|link| Id::<Link>::create(&link))
+                    .unwrap_or_else(|| actual_link.clone());
+                let connector_time =
+                    transit_stop_time(stop, if access { "accessTime" } else { "egressTime" })?;
+                let connector_time = Duration::try_from_secs_f64(connector_time).map_err(|_| {
+                    RoutingError::MalformedTransitStopAttribute {
+                        stop: stop.id.external().to_owned(),
+                        key: if access { "accessTime" } else { "egressTime" }.to_owned(),
+                        reason: "seconds exceed the supported duration range".to_owned(),
+                    }
+                })?;
+                let stop_endpoint =
+                    Facility::new_link_wrapper(stop.coord.clone(), feeder_link.clone());
+                let (from, to) = if access {
+                    (endpoint, &stop_endpoint)
+                } else {
+                    (&stop_endpoint, endpoint)
+                };
+                let route_request = RoutingRequestBuilder::default()
+                    .from(from)
+                    .to(to)
+                    .departure_time(request.departure_time)
+                    .person(request.person())
+                    .attributes(request.attributes.clone())
+                    .build()
+                    .expect("required feeder routing request fields are set");
+                let mut route = match router.calc_route(route_request) {
+                    Ok(route) => route,
+                    Err(RoutingError::NoPath { .. }) => continue,
+                    Err(error) => return Err(error),
+                };
+                let feeder_time = plan_travel_time(&route);
+                if feeder_link != actual_link || !connector_time.is_zero() {
+                    let connector = InternalPlanElement::Leg(InternalLeg::new(
+                        InternalRoute::Generic(InternalGenericRoute::new(
+                            if access {
+                                feeder_link.clone()
+                            } else {
+                                actual_link.clone()
+                            },
+                            if access {
+                                actual_link.clone()
+                            } else {
+                                feeder_link.clone()
+                            },
+                            Some(connector_time),
+                            Some(0.0),
+                            None,
+                        )),
+                        Self::WALK_MODE,
+                        self.mode.external(),
+                        connector_time,
+                        access.then(|| request.departure_time.saturating_add(feeder_time)),
+                    ));
+                    if access {
+                        route.push(connector);
+                    } else {
+                        route.insert(0, connector);
+                    }
+                }
+                if !access {
+                    for element in &mut route {
+                        if let InternalPlanElement::Leg(leg) = element {
+                            leg.dep_time = None;
+                        }
+                    }
+                }
+                let time = plan_travel_time(&route);
+                let disutility = route_disutility(&route, &self.feeder_mode_utilities);
+                let candidate = FeederStop {
+                    stop: stop_id,
+                    distance,
+                    time,
+                    disutility,
+                    route: Some(Arc::new(route)),
+                };
+                if self.mode_selection == IntermodalModeSelection::LeastCostPerStop {
+                    if let Some(index) = selected
+                        .iter()
+                        .position(|old: &FeederStop| old.stop == candidate.stop)
+                    {
+                        if candidate.disutility < selected[index].disutility {
+                            selected[index] = candidate;
+                        }
+                        continue;
+                    }
+                }
+                selected.push(candidate);
+            }
+        }
+        Ok(selected)
+    }
 
     /// Lets requests without a person fall back to the car router, the legacy behaviour SILO
     /// relies on. Kept separate from car ownership because a zone-to-zone query is not a
@@ -667,20 +1028,29 @@ impl TransitRoutingModule {
     ) -> Self {
         self.use_passenger_mode_mapping = enabled;
         self.passenger_modes = mappings;
-        self.passenger_mode_travel_utilities = scoring
-            .iter()
-            .map(|params| (params.mode.clone(), params.marginal_utility_of_traveling))
-            .collect();
-        self.performing_utility_per_hour = agent_scoring
-            .iter()
-            .find(|params| params.subpopulation == "person")
-            .map_or(6.0, |params| params.performing);
-        self.default_pt_travel_utility_per_hour = self
-            .passenger_mode_travel_utilities
-            .get("pt")
-            .copied()
-            .unwrap_or(-6.0);
+        self.routing_params_by_subpopulation =
+            build_routing_params_by_subpopulation(scoring, agent_scoring);
         self
+    }
+
+    /// Resolves the routing parameters for a single subpopulation, applying the documented
+    /// precedence: explicit subpopulation match, then the empty-subpopulation entry, then -6.0
+    /// for the `pt` baseline. Reference semantics matter: the returned struct is read-only here
+    /// and the routing module hands it to every leg-cost call inside one request.
+    fn resolve_routing_params(&self, subpopulation: &str) -> ResolvedRoutingParams {
+        if let Some(params) = self.routing_params_by_subpopulation.get(subpopulation) {
+            return params.clone();
+        }
+        if let Some(params) = self.routing_params_by_subpopulation.get("") {
+            return params.clone();
+        }
+        // No subpopulation entry and no empty-subpopulation default — fall back to the built-in
+        // defaults so a request without a configured subpopulation still gets finite costs.
+        ResolvedRoutingParams {
+            performing_utility_per_hour: 6.0,
+            pt_utility_per_hour: -6.0,
+            mode_utilities: std::collections::BTreeMap::new(),
+        }
     }
 
     pub(crate) fn with_range_queries(
@@ -742,6 +1112,36 @@ impl TransitRoutingModule {
         request: &RoutingRequest,
         path: &TransitPath,
     ) -> Vec<InternalPlanElement> {
+        if path.rides.is_empty() {
+            let mut access: Vec<_> = path
+                .access_route
+                .as_deref()
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect();
+            let mut egress = path
+                .egress_route
+                .as_deref()
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>();
+            if let (Some(InternalPlanElement::Leg(leg)), Some(InternalPlanElement::Leg(_))) =
+                (access.last(), egress.first())
+            {
+                access.push(InternalPlanElement::Activity(InternalActivity::new(
+                    Some(self.schedule.get_facility(&path.stop).coord.clone()),
+                    Self::INTERACTION,
+                    leg.route.as_ref().unwrap().end_link().clone(),
+                    None,
+                    None,
+                    Some(Duration::ZERO),
+                )));
+            }
+            access.append(&mut egress);
+            return access;
+        }
         let walk_leg = |from: &Id<Link>,
                         to: &Id<Link>,
                         route_distance: f64,
@@ -774,19 +1174,20 @@ impl TransitRoutingModule {
         };
 
         let first_stop = &path.rides[0].board;
-        let mut elements = vec![
-            walk_leg(
-                request.from.link(),
-                self.stop_link(first_stop),
-                path.access_distance * self.walk_distance_factor,
-                self.walk_time(path.access_distance),
-                path.departure,
-            ),
-            interaction(first_stop),
-        ];
-        let mut time = path
-            .departure
-            .saturating_add(self.walk_time(path.access_distance));
+        let mut elements = path.access_route.as_ref().map_or_else(
+            || {
+                vec![walk_leg(
+                    request.from.link(),
+                    self.stop_link(first_stop),
+                    path.access_distance * self.walk_distance_factor,
+                    self.walk_time(path.access_distance),
+                    path.departure,
+                )]
+            },
+            |route| route.as_ref().clone(),
+        );
+        elements.push(interaction(first_stop));
+        let mut time = path.departure.saturating_add(path.access_time);
         for (ride_index, ride) in path.rides.iter().enumerate() {
             let travel_time = ride.alighting_time.duration_since(time);
             let route = InternalRoute::Pt(InternalPtRoute {
@@ -830,13 +1231,17 @@ impl TransitRoutingModule {
             }
         }
         let last_stop = &path.rides.last().unwrap().alight;
-        elements.push(walk_leg(
-            self.stop_link(last_stop),
-            request.to.link(),
-            path.egress_distance * self.walk_distance_factor,
-            self.walk_time(path.egress_distance),
-            time,
-        ));
+        if let Some(route) = &path.egress_route {
+            elements.extend(route.iter().cloned());
+        } else {
+            elements.push(walk_leg(
+                self.stop_link(last_stop),
+                request.to.link(),
+                path.egress_distance * self.walk_distance_factor,
+                self.walk_time(path.egress_distance),
+                time,
+            ));
+        }
         elements
     }
 
@@ -854,6 +1259,24 @@ impl TransitRoutingModule {
         walk_distance_factor: f64,
         garage: Arc<Garage>,
         fallback: Option<Arc<dyn RoutingModule>>,
+    ) -> Self {
+        Self::new_with_transfer_construction(
+            schedule,
+            walk_speed,
+            walk_distance_factor,
+            garage,
+            fallback,
+            TransferConstruction::default(),
+        )
+    }
+
+    pub(crate) fn new_with_transfer_construction(
+        schedule: Arc<TransitSchedule>,
+        walk_speed: f64,
+        walk_distance_factor: f64,
+        garage: Arc<Garage>,
+        fallback: Option<Arc<dyn RoutingModule>>,
+        transfer_construction: TransferConstruction,
     ) -> Self {
         let mut stops_by_cell: HashMap<(i32, i32), Vec<Id<TransitStopFacility>>> = HashMap::new();
         for facility in schedule.facilities().values() {
@@ -899,7 +1322,7 @@ impl TransitRoutingModule {
         // before any of them route concurrently.
         Id::<String>::create(Self::WALK_MODE);
         Id::<String>::create(Self::INTERACTION);
-        Self {
+        let router = Self {
             mode: Id::create("pt"),
             schedule,
             stops_by_cell,
@@ -909,17 +1332,32 @@ impl TransitRoutingModule {
             walk_distance_factor,
             garage,
             fallback,
+            transfer_construction,
+            transfer_cache: RwLock::new(HashMap::new()),
             personless_fallback: false,
+            intermodal_access_egress: Vec::new(),
+            feeder_routers: IntMap::default(),
+            feeder_mode_utilities: BTreeMap::new(),
+            mode_selection: IntermodalModeSelection::LeastCostPerStop,
+            leg_only_handling: IntermodalLegOnlyHandling::Forbid,
             passenger_modes: std::collections::BTreeMap::new(),
             use_passenger_mode_mapping: false,
-            passenger_mode_travel_utilities: std::collections::BTreeMap::new(),
-            performing_utility_per_hour: 6.0,
-            default_pt_travel_utility_per_hour: -6.0,
+            routing_params_by_subpopulation: std::collections::BTreeMap::new(),
             range_query_settings: Vec::new(),
             route_selector_settings: vec![TransitRouteSelectorSettings::default()],
             transfer_penalty: TransitTransferPenalty::default(),
             random_seed: crate::simulation::config::DEFAULT_RANDOM_SEED,
+        };
+        if transfer_construction == TransferConstruction::Initial {
+            let mut cache = router.transfer_cache.write().unwrap();
+            for stop_id in router.routes_by_stop.keys() {
+                cache.insert(
+                    stop_id.clone(),
+                    router.calculate_nearby_transfer_stops(stop_id),
+                );
+            }
         }
+        router
     }
 
     pub fn new_for_skim(
@@ -951,77 +1389,73 @@ impl TransitRoutingModule {
         destinations: &[Coordinate],
         departure_time: SimTime,
     ) -> Vec<Duration> {
-        let mut arrivals: HashMap<Id<TransitStopFacility>, SimTime> = HashMap::new();
-        let mut queue = BinaryHeap::new();
-        for (stop_id, distance) in self.nearest_stops(origin) {
-            let arrival = departure_time.saturating_add(self.walk_time(distance));
-            if arrivals.get(&stop_id).is_none_or(|old| arrival < *old) {
-                arrivals.insert(stop_id.clone(), arrival);
-                queue.push(Reverse((arrival, stop_id)));
-            }
-        }
+        self.skim_results_from_origin(origin, destinations, departure_time)
+            .into_iter()
+            .zip(destinations)
+            .map(|(result, destination)| {
+                result.travel_time.unwrap_or_else(|| {
+                    self.walk_time(Coordinate::euclidean_distance(origin, destination))
+                })
+            })
+            .collect()
+    }
 
-        while let Some(Reverse((arrival, stop_id))) = queue.pop() {
-            if arrivals.get(&stop_id) != Some(&arrival) {
-                continue;
-            }
-            let Some(route_refs) = self.routes_by_stop.get(&stop_id) else {
-                continue;
-            };
-            for route_ref in route_refs {
-                let line = self.schedule.get_line(&route_ref.line_id);
-                let route = line.routes.get(&route_ref.route_id).unwrap();
-                let board_stop = &route.stops[route_ref.stop_index];
-                if !board_stop.allow_boarding {
-                    continue;
-                }
-                let board_offset = board_stop.departure_offset.unwrap_or_default();
-                for alight_stop in route.stops.iter().skip(route_ref.stop_index + 1) {
-                    if !alight_stop.allow_alighting {
-                        continue;
-                    }
-                    let arrival_offset = alight_stop
-                        .arrival_offset
-                        .or(alight_stop.departure_offset)
-                        .unwrap_or_default();
-                    let next_arrival = route
-                        .departures
-                        .iter()
-                        .filter_map(|departure| {
-                            let boarding = departure.departure_time.saturating_add(board_offset);
-                            let alighting = departure.departure_time.saturating_add(arrival_offset);
-                            (boarding >= arrival && alighting >= boarding).then_some(alighting)
-                        })
-                        .min();
-                    let Some(next_arrival) = next_arrival else {
-                        continue;
-                    };
-                    if arrivals
-                        .get(&alight_stop.facility_id)
-                        .is_none_or(|old| next_arrival < *old)
-                    {
-                        arrivals.insert(alight_stop.facility_id.clone(), next_arrival);
-                        queue.push(Reverse((next_arrival, alight_stop.facility_id.clone())));
-                    }
-                }
-            }
-        }
+    pub fn skim_results_from_origin(
+        &self,
+        origin: &Coordinate,
+        destinations: &[Coordinate],
+        departure_time: SimTime,
+    ) -> Vec<TransitSkimResult> {
+        let access_stops = self.nearest_stops(origin);
+        // Skims have no per-person context — fall back to the empty-subpopulation default so
+        // cost-equivalent travel time still uses passenger-mode utilities when configured.
+        let routing_params = self.resolve_routing_params("");
 
         destinations
             .iter()
             .map(|destination| {
                 let direct_walk =
                     self.walk_time(Coordinate::euclidean_distance(origin, destination));
-                self.nearest_stops(destination)
+                let egress_stops: HashSet<_> = self
+                    .nearest_stops(destination)
                     .into_iter()
-                    .filter_map(|(stop_id, distance)| {
-                        arrivals.get(&stop_id).map(|arrival| {
-                            arrival
-                                .saturating_add(self.walk_time(distance))
-                                .duration_since(departure_time)
-                        })
-                    })
-                    .fold(direct_walk, Duration::min)
+                    .map(|(stop_id, _)| stop_id)
+                    .collect();
+                match self.find_best_path(
+                    destination,
+                    departure_time,
+                    &access_stops,
+                    &egress_stops,
+                    &routing_params,
+                ) {
+                    Some(path)
+                        if direct_walk.as_secs_f64()
+                            >= self.path_cost_equivalent_seconds(
+                                &path,
+                                departure_time,
+                                &routing_params,
+                            ) =>
+                    {
+                        TransitSkimResult {
+                            outcome: TransitSkimOutcome::Transit,
+                            travel_time: Some(path.arrival.duration_since(departure_time)),
+                        }
+                    }
+                    Some(_) => TransitSkimResult {
+                        outcome: TransitSkimOutcome::Walking,
+                        travel_time: Some(direct_walk),
+                    },
+                    None if !access_stops.is_empty() && !egress_stops.is_empty() => {
+                        TransitSkimResult {
+                            outcome: TransitSkimOutcome::Walking,
+                            travel_time: Some(direct_walk),
+                        }
+                    }
+                    None => TransitSkimResult {
+                        outcome: TransitSkimOutcome::NoPath,
+                        travel_time: None,
+                    },
+                }
             })
             .collect()
     }
@@ -1034,23 +1468,33 @@ impl TransitRoutingModule {
     }
 
     fn nearest_stops(&self, coordinate: &Coordinate) -> Vec<(Id<TransitStopFacility>, f64)> {
+        self.nearest_stops_filtered(coordinate, None)
+    }
+
+    fn nearest_stops_filtered(
+        &self,
+        coordinate: &Coordinate,
+        stop_filter: Option<(&str, &str)>,
+    ) -> Vec<(Id<TransitStopFacility>, f64)> {
         let (center_x, center_y) = self.cell(coordinate);
         let mut candidates = Vec::new();
         for radius in 0..=20 {
             if radius == 0 {
-                self.collect_cell(center_x, center_y, coordinate, &mut candidates);
+                self.collect_cell(center_x, center_y, coordinate, stop_filter, &mut candidates);
             } else {
                 for offset in -radius..=radius {
                     self.collect_cell(
                         center_x + offset,
                         center_y - radius,
                         coordinate,
+                        stop_filter,
                         &mut candidates,
                     );
                     self.collect_cell(
                         center_x + offset,
                         center_y + radius,
                         coordinate,
+                        stop_filter,
                         &mut candidates,
                     );
                     if offset != -radius && offset != radius {
@@ -1058,12 +1502,14 @@ impl TransitRoutingModule {
                             center_x - radius,
                             center_y + offset,
                             coordinate,
+                            stop_filter,
                             &mut candidates,
                         );
                         self.collect_cell(
                             center_x + radius,
                             center_y + offset,
                             coordinate,
+                            stop_filter,
                             &mut candidates,
                         );
                     }
@@ -1093,17 +1539,58 @@ impl TransitRoutingModule {
         x: i32,
         y: i32,
         coordinate: &Coordinate,
+        stop_filter: Option<(&str, &str)>,
         candidates: &mut Vec<(Id<TransitStopFacility>, f64)>,
     ) {
         if let Some(stop_ids) = self.stops_by_cell.get(&(x, y)) {
             for stop_id in stop_ids {
                 let facility = self.schedule.get_facility(stop_id);
+                if stop_filter.is_some_and(|(attribute, value)| {
+                    facility.attributes.get::<String>(attribute).as_deref() != Some(value)
+                }) {
+                    continue;
+                }
                 candidates.push((
                     stop_id.clone(),
                     Coordinate::euclidean_distance(coordinate, &facility.coord),
                 ));
             }
         }
+    }
+
+    fn stops_within_radius_filtered(
+        &self,
+        coordinate: &Coordinate,
+        radius: f64,
+        stop_filter: Option<(&str, &str)>,
+    ) -> Vec<(Id<TransitStopFacility>, f64)> {
+        let min_x = ((coordinate.x - radius) / self.cell_size).floor() as i32;
+        let max_x = ((coordinate.x + radius) / self.cell_size).floor() as i32;
+        let min_y = ((coordinate.y - radius) / self.cell_size).floor() as i32;
+        let max_y = ((coordinate.y + radius) / self.cell_size).floor() as i32;
+        let mut stops = Vec::new();
+        for (&(x, y), ids) in &self.stops_by_cell {
+            if x < min_x || x > max_x || y < min_y || y > max_y {
+                continue;
+            }
+            for id in ids {
+                let facility = self.schedule.get_facility(id);
+                if stop_filter.is_some_and(|(attribute, value)| {
+                    facility.attributes.get::<String>(attribute).as_deref() != Some(value)
+                }) {
+                    continue;
+                }
+                let distance = Coordinate::euclidean_distance(coordinate, &facility.coord);
+                if distance <= radius {
+                    stops.push((id.clone(), distance));
+                }
+            }
+        }
+        stops.sort_by(|a, b| {
+            a.1.total_cmp(&b.1)
+                .then_with(|| a.0.external().cmp(b.0.external()))
+        });
+        stops
     }
 
     fn walk_time(&self, distance: f64) -> Duration {
@@ -1136,6 +1623,28 @@ impl TransitRoutingModule {
     }
 
     fn nearby_transfer_stops(
+        &self,
+        stop_id: &Id<TransitStopFacility>,
+    ) -> Vec<(Id<TransitStopFacility>, f64)> {
+        match self.transfer_construction {
+            TransferConstruction::Initial => self.transfer_cache.read().unwrap()[stop_id].clone(),
+            TransferConstruction::Adaptive => {
+                if let Some(candidates) = self.transfer_cache.read().unwrap().get(stop_id) {
+                    return candidates.clone();
+                }
+                let candidates = self.calculate_nearby_transfer_stops(stop_id);
+                self.transfer_cache
+                    .write()
+                    .unwrap()
+                    .entry(stop_id.clone())
+                    .or_insert(candidates)
+                    .clone()
+            }
+            TransferConstruction::Online => self.calculate_nearby_transfer_stops(stop_id),
+        }
+    }
+
+    fn calculate_nearby_transfer_stops(
         &self,
         stop_id: &Id<TransitStopFacility>,
     ) -> Vec<(Id<TransitStopFacility>, f64)> {
@@ -1194,12 +1703,18 @@ impl TransitRoutingModule {
             + Duration::from_secs_f64(self.transfer_penalty_seconds(&path.rides))
     }
 
-    fn path_cost_equivalent_seconds(&self, path: &TransitPath, departure_time: SimTime) -> f64 {
+    fn path_cost_equivalent_seconds(
+        &self,
+        path: &TransitPath,
+        departure_time: SimTime,
+        routing_params: &ResolvedRoutingParams,
+    ) -> f64 {
         self.cost_equivalent_seconds(
             path.arrival,
             path.access_distance,
             &path.rides,
             departure_time,
+            routing_params,
         )
     }
 
@@ -1209,24 +1724,26 @@ impl TransitRoutingModule {
         access_distance: f64,
         rides: &[Ride],
         departure_time: SimTime,
+        routing_params: &ResolvedRoutingParams,
     ) -> f64 {
         let base = arrival.duration_since(departure_time).as_secs_f64()
             + self.transfer_penalty_seconds(rides);
         if !self.use_passenger_mode_mapping {
             return base;
         }
+        let baseline =
+            routing_params.performing_utility_per_hour - routing_params.pt_utility_per_hour;
         base + rides
             .iter()
             .enumerate()
             .map(|(index, ride)| {
-                let utility = self
-                    .passenger_mode_travel_utilities
+                let utility = routing_params
+                    .mode_utilities
                     .get(&ride.passenger_mode)
                     .copied()
-                    .unwrap_or(self.default_pt_travel_utility_per_hour);
-                let baseline =
-                    self.performing_utility_per_hour - self.default_pt_travel_utility_per_hour;
-                let mode_cost_factor = (self.performing_utility_per_hour - utility) / baseline;
+                    .unwrap_or(routing_params.pt_utility_per_hour);
+                let mode_cost_factor =
+                    (routing_params.performing_utility_per_hour - utility) / baseline;
                 let leg_start = if index == 0 {
                     departure_time.saturating_add(self.walk_time(access_distance))
                 } else {
@@ -1305,18 +1822,19 @@ impl TransitRoutingModule {
         &self,
         destination: &Coordinate,
         desired_departure: SimTime,
-        access_stops: &[(Id<TransitStopFacility>, f64)],
-        egress_stops: &HashSet<Id<TransitStopFacility>>,
+        access_stops: &[FeederStop],
+        egress_stops: &[FeederStop],
         window: &TransitRangeQuerySettings,
         person: Option<&InternalPerson>,
+        routing_params: &ResolvedRoutingParams,
     ) -> Option<TransitPath> {
         let earlier = Duration::from_secs(window.max_earlier_departure_sec);
         let later = Duration::from_secs(window.max_later_departure_sec);
         let earliest = desired_departure.saturating_sub(earlier);
         let latest = desired_departure.saturating_add(later);
         let mut query_times = vec![desired_departure, earliest, latest];
-        for (stop_id, distance) in access_stops {
-            if let Some(route_refs) = self.routes_by_stop.get(stop_id) {
+        for feeder in access_stops {
+            if let Some(route_refs) = self.routes_by_stop.get(&feeder.stop) {
                 for route_ref in route_refs {
                     let route =
                         &self.schedule.get_line(&route_ref.line_id).routes[&route_ref.route_id];
@@ -1330,7 +1848,7 @@ impl TransitRoutingModule {
                         let time = departure
                             .departure_time
                             .saturating_add(board_offset)
-                            .saturating_sub(self.walk_time(*distance));
+                            .saturating_sub(feeder.time);
                         (time >= earliest && time <= latest).then_some(time)
                     }));
                 }
@@ -1346,11 +1864,12 @@ impl TransitRoutingModule {
         .unwrap_or_default();
         let mut candidates = Vec::new();
         for departure in query_times {
-            candidates.extend(self.find_range_paths(
+            candidates.extend(self.find_paths_with_feeders(
                 destination,
                 departure,
                 access_stops,
                 egress_stops,
+                routing_params,
             ));
         }
         let score = |path: &TransitPath| {
@@ -1382,15 +1901,15 @@ impl TransitRoutingModule {
             person.map_or("", |p| p.id().external()),
             desired_departure.as_nanos()
         );
-        for (stop, _) in access_stops {
+        for feeder in access_stops {
             stream_id.push(':');
-            stream_id.push_str(stop.external());
+            stream_id.push_str(feeder.stop.external());
         }
-        let mut egress_ids: Vec<_> = egress_stops.iter().map(Id::external).collect();
-        egress_ids.sort_unstable();
+        let mut egress_ids: Vec<_> = egress_stops.iter().map(|feeder| &feeder.stop).collect();
+        egress_ids.sort_by_key(|stop| stop.external());
         for stop in egress_ids {
             stream_id.push(':');
-            stream_id.push_str(stop);
+            stream_id.push_str(stop.external());
         }
         let mut rng = crate::simulation::random::get_rng(
             self.random_seed,
@@ -1400,40 +1919,192 @@ impl TransitRoutingModule {
         Some(best.swap_remove(rng.random_range(0..best.len())))
     }
 
+    /// Plain access/egress pairs as walk feeders, so the range-query tests can call the routing
+    /// entry points without spelling out the feeder struct.
+    #[cfg(test)]
+    fn walk_feeders(&self, stops: &[(Id<TransitStopFacility>, f64)]) -> Vec<FeederStop> {
+        stops
+            .iter()
+            .map(|(stop, distance)| FeederStop {
+                stop: stop.clone(),
+                distance: *distance,
+                time: self.walk_time(*distance),
+                disutility: 0.0,
+                route: None,
+            })
+            .collect()
+    }
+
+    /// Walk egress feeders for a destination, ordered by external stop ID so candidate ordering
+    /// is reproducible.
+    #[cfg(test)]
+    fn walk_egress_feeders(
+        &self,
+        destination: &Coordinate,
+        stops: &HashSet<Id<TransitStopFacility>>,
+    ) -> Vec<FeederStop> {
+        let mut feeders = stops
+            .iter()
+            .map(|stop| {
+                let distance = Coordinate::euclidean_distance(
+                    &self.schedule.get_facility(stop).coord,
+                    destination,
+                );
+                FeederStop {
+                    stop: stop.clone(),
+                    distance,
+                    time: self.walk_time(distance),
+                    disutility: 0.0,
+                    route: None,
+                }
+            })
+            .collect::<Vec<_>>();
+        feeders.sort_by(|a, b| a.stop.external().cmp(b.stop.external()));
+        feeders
+    }
+
+    /// Cheapest path for a plain access/egress request that carries no feeder route. Used by the
+    /// skim helper and the tests; real requests go through `find_best_path_with_feeders`.
     fn find_best_path(
         &self,
         destination: &Coordinate,
         departure_time: SimTime,
         access_stops: &[(Id<TransitStopFacility>, f64)],
         egress_stops: &HashSet<Id<TransitStopFacility>>,
+        routing_params: &ResolvedRoutingParams,
     ) -> Option<TransitPath> {
-        self.find_range_paths(destination, departure_time, access_stops, egress_stops)
-            .into_iter()
-            .min_by(|left, right| {
-                self.path_cost_equivalent_seconds(left, departure_time)
-                    .total_cmp(&self.path_cost_equivalent_seconds(right, departure_time))
-                    .then_with(|| transit_path_tiebreak(left, right))
+        let access = access_stops
+            .iter()
+            .map(|(stop, distance)| FeederStop {
+                stop: stop.clone(),
+                distance: *distance,
+                time: self.walk_time(*distance),
+                disutility: 0.0,
+                route: None,
             })
+            .collect::<Vec<_>>();
+        let mut egress = egress_stops
+            .iter()
+            .map(|stop| {
+                let distance = Coordinate::euclidean_distance(
+                    &self.schedule.get_facility(stop).coord,
+                    destination,
+                );
+                FeederStop {
+                    stop: stop.clone(),
+                    distance,
+                    time: self.walk_time(distance),
+                    disutility: 0.0,
+                    route: None,
+                }
+            })
+            .collect::<Vec<_>>();
+        egress.sort_by(|a, b| a.stop.external().cmp(b.stop.external()));
+        self.find_best_path_with_feeders(
+            destination,
+            departure_time,
+            &access,
+            &egress,
+            routing_params,
+        )
     }
 
-    fn find_range_paths(
+    /// Applies the configured leg-only policy to the paths the search produced. Leg-only paths are
+    /// candidates without any ride, so they are compared separately from real transit itineraries.
+    fn find_best_path_with_feeders(
         &self,
         destination: &Coordinate,
         departure_time: SimTime,
-        access_stops: &[(Id<TransitStopFacility>, f64)],
-        egress_stops: &HashSet<Id<TransitStopFacility>>,
+        access_stops: &[FeederStop],
+        egress_stops: &[FeederStop],
+        routing_params: &ResolvedRoutingParams,
+    ) -> Option<TransitPath> {
+        let candidates = self.find_paths_with_feeders(
+            destination,
+            departure_time,
+            access_stops,
+            egress_stops,
+            routing_params,
+        );
+        let cheapest = |paths: &[&TransitPath]| {
+            paths
+                .iter()
+                .copied()
+                .min_by(|left, right| {
+                    self.path_cost_equivalent_seconds(left, departure_time, routing_params)
+                        .total_cmp(&self.path_cost_equivalent_seconds(
+                            right,
+                            departure_time,
+                            routing_params,
+                        ))
+                        .then_with(|| transit_path_tiebreak(left, right))
+                })
+                .cloned()
+        };
+        let leg_only: Vec<_> = candidates
+            .iter()
+            .filter(|candidate| candidate.rides.is_empty())
+            .collect();
+        let transit: Vec<_> = candidates
+            .iter()
+            .filter(|candidate| !candidate.rides.is_empty())
+            .collect();
+        match self.leg_only_handling {
+            IntermodalLegOnlyHandling::Forbid => cheapest(&transit),
+            IntermodalLegOnlyHandling::Allow => match (cheapest(&transit), cheapest(&leg_only)) {
+                (Some(transit), Some(leg_only))
+                    if self.path_cost_equivalent_seconds(
+                        &leg_only,
+                        departure_time,
+                        routing_params,
+                    ) < self.path_cost_equivalent_seconds(
+                        &transit,
+                        departure_time,
+                        routing_params,
+                    ) =>
+                {
+                    Some(leg_only)
+                }
+                (Some(transit), _) => Some(transit),
+                (None, leg_only) => leg_only,
+            },
+            IntermodalLegOnlyHandling::Avoid => match cheapest(&transit) {
+                Some(transit) => Some(transit),
+                None => cheapest(&leg_only),
+            },
+        }
+    }
+
+    /// Every non-dominated path reachable from the given access and egress feeders. Callers choose
+    /// among them: the plain router takes the cheapest, the range-query selector scores them.
+    fn find_paths_with_feeders(
+        &self,
+        destination: &Coordinate,
+        departure_time: SimTime,
+        access_stops: &[FeederStop],
+        egress_stops: &[FeederStop],
+        routing_params: &ResolvedRoutingParams,
     ) -> Vec<TransitPath> {
         let mut states: HashMap<(Id<TransitStopFacility>, usize), Vec<TransitPathState>> =
             HashMap::new();
         let mut queue = BinaryHeap::new();
         let mut next_state_id = 0;
-        for (stop_id, access_distance) in access_stops {
+        for access in access_stops {
+            let stop_id = &access.stop;
             let state = TransitPathState {
                 state_id: next_state_id,
-                arrival: departure_time.saturating_add(self.walk_time(*access_distance)),
-                cost: self.walk_time(*access_distance).as_secs_f64(),
-                access_distance: *access_distance,
+                arrival: departure_time.saturating_add(access.time),
+                cost: self.cost_equivalent_seconds(
+                    departure_time.saturating_add(access.time),
+                    access.distance,
+                    &[],
+                    departure_time,
+                    routing_params,
+                ),
+                access_distance: access.distance,
                 rides: Vec::new(),
+                access_route: access.route.clone(),
+                access_time: access.time,
             };
             let key = (stop_id.clone(), 0);
             let labels = states.entry(key).or_default();
@@ -1458,17 +2129,24 @@ impl TransitRoutingModule {
                 continue;
             }
 
-            if egress_stops.contains(&stop_id) && !current.rides.is_empty() {
+            if !current.rides.is_empty()
+                || self.leg_only_handling != IntermodalLegOnlyHandling::Forbid
+            {
                 let facility = self.schedule.get_facility(&stop_id);
                 let egress_distance = Coordinate::euclidean_distance(&facility.coord, destination);
-                let candidate = TransitPath {
-                    departure: departure_time,
-                    arrival: arrival.saturating_add(self.walk_time(egress_distance)),
-                    access_distance: current.access_distance,
-                    egress_distance,
-                    rides: current.rides.clone(),
-                };
-                candidates.push(candidate);
+                for egress in egress_stops.iter().filter(|egress| egress.stop == stop_id) {
+                    candidates.push(TransitPath {
+                        stop: stop_id.clone(),
+                        departure: departure_time,
+                        arrival: arrival.saturating_add(egress.time),
+                        access_distance: current.access_distance,
+                        egress_distance,
+                        rides: current.rides.clone(),
+                        access_route: current.access_route.clone(),
+                        egress_route: egress.route.clone(),
+                        access_time: current.access_time,
+                    });
+                }
             }
 
             if rides_used >= RAPTOR_MAX_TRANSFERS + 1 {
@@ -1579,9 +2257,12 @@ impl TransitRoutingModule {
                                     current.access_distance,
                                     &rides,
                                     departure_time,
+                                    routing_params,
                                 ),
                                 access_distance: current.access_distance,
                                 rides,
+                                access_route: current.access_route.clone(),
+                                access_time: current.access_time,
                             };
                             let candidate_cost = candidate_state.cost;
                             let labels = states.entry(key).or_default();
@@ -1629,6 +2310,50 @@ fn transit_path_tiebreak(left: &TransitPath, right: &TransitPath) -> std::cmp::O
                 ride.alight.external(),
             )
         }))
+}
+
+fn plan_travel_time(elements: &[InternalPlanElement]) -> Duration {
+    elements
+        .iter()
+        .map(|element| match element {
+            InternalPlanElement::Leg(leg) => leg.trav_time.unwrap_or_default(),
+            InternalPlanElement::Activity(activity) => activity.max_dur.unwrap_or_default(),
+        })
+        .sum()
+}
+
+fn route_disutility(elements: &[InternalPlanElement], utilities: &BTreeMap<String, f64>) -> f64 {
+    elements
+        .iter()
+        .filter_map(|element| match element {
+            InternalPlanElement::Leg(leg) => Some(
+                leg.trav_time.unwrap_or_default().as_secs_f64()
+                    * -utilities.get(leg.mode.external()).copied().unwrap_or(-6.0)
+                    / 3_600.0,
+            ),
+            InternalPlanElement::Activity(_) => None,
+        })
+        .sum()
+}
+
+fn transit_stop_time(stop: &TransitStopFacility, key: &str) -> Result<f64, RoutingError> {
+    let Some((_, raw)) = stop
+        .attributes
+        .iter()
+        .find(|(name, _)| name.as_str() == key)
+    else {
+        return Ok(0.0);
+    };
+    let value = raw
+        .as_f64()
+        .or_else(|| raw.as_str().and_then(|s| s.parse().ok()))
+        .filter(|value: &f64| value.is_finite() && *value >= 0.0)
+        .ok_or_else(|| RoutingError::MalformedTransitStopAttribute {
+            stop: stop.id.external().to_owned(),
+            key: key.to_owned(),
+            reason: "expected finite non-negative seconds".to_owned(),
+        })?;
+    Ok(value)
 }
 
 impl Debug for dyn RoutingModule {
@@ -1790,14 +2515,16 @@ mod route_proposal_tests {
     use super::{
         Facility, OWNS_CAR, Ride, RouteFrequencyProposalBackend, RouteProposal, RouteProposalKey,
         RouteProposalSeed, RouteProposalTable, RoutingError, RoutingModule, RoutingRequest,
-        RoutingRequestBuilder, TransitRoutingModule, TripRouter, matching_transit_settings,
-        transit_path_tiebreak,
+        RoutingRequestBuilder, TransitRoutingModule, TransitSkimOutcome, TripRouter,
+        matching_transit_settings, transit_path_tiebreak,
     };
     use crate::simulation::InternalAttributes;
     use crate::simulation::config::{
-        TransitRangeQuerySettings, TransitRouteSelectorSettings, TransitTransferPenalty,
+        IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection,
+        TransferConstruction, TransitRangeQuerySettings, TransitRouteSelectorSettings,
     };
     use crate::simulation::id::Id;
+    use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::population::{
@@ -1812,6 +2539,7 @@ mod route_proposal_tests {
     use macros::deterministic_id_test;
     use nohash_hasher::IntMap;
     use serde_json::{Value, json};
+    use std::collections::BTreeMap;
     use std::collections::HashSet;
     use std::path::Path;
     use std::sync::Arc;
@@ -1857,177 +2585,115 @@ mod route_proposal_tests {
         )
     }
 
-    /// The hourly penalty is priced against when riding began, not when the vehicle leaves the
-    /// first stop. MATSim uses `max(agent arrival, vehicle arrival)` (SwissRailRaptorCore:700),
-    /// so a vehicle dwelling 120 s at its first stop starts that clock 120 s earlier and the same
-    /// ride is charged 120 s / 3600 more per transfer. Asserted on one fixed pair of rides so the
-    /// comparison is the origin alone rather than two different journeys.
+    fn transfer_construction_modes() -> [TransferConstruction; 3] {
+        [
+            TransferConstruction::Initial,
+            TransferConstruction::Adaptive,
+            TransferConstruction::Online,
+        ]
+    }
+
+    fn reference_router_with_construction(
+        schedule: TransitSchedule,
+        walk_speed: f64,
+        construction: TransferConstruction,
+    ) -> TransitRoutingModule {
+        TransitRoutingModule::new_with_transfer_construction(
+            Arc::new(schedule),
+            walk_speed,
+            1.3,
+            Arc::new(Garage::default()),
+            None,
+            construction,
+        )
+    }
+
     #[deterministic_id_test]
-    fn an_hourly_penalty_starts_at_the_vehicle_arrival_not_its_departure() {
-        let hourly = TransitTransferPenalty {
-            // A non-zero hourly cost is what makes `base_cost` take effect at all.
-            per_travel_time_hour: 6.0,
-            base_cost: 0.0,
-            ..TransitTransferPenalty::default()
-        };
-        let ride =
-            |boarding: SimTime, vehicle_arrival_at_board: SimTime, alighting: SimTime| Ride {
-                line: Id::create("line"),
-                route: Id::create("route"),
-                board: Id::create("ra"),
-                alight: Id::create("rc"),
-                boarding_time: boarding,
-                vehicle_arrival_at_board,
-                alighting_time: alighting,
-                distance: 0.0,
-                transport_mode: "train".to_string(),
-                passenger_mode: "pt".to_string(),
-                transfer_before: None,
-            };
-        let cost_in_utils = |rides: &[Ride]| {
-            reference_router(reference_schedule(), 0.8333333333333334)
-                .with_transfer_penalty(hourly.clone())
-                .transfer_penalty_seconds(rides)
-                / 300.0
-        };
-
-        // Two rides. The first dwells 120 s at its boarding stop: the vehicle reaches the stop at
-        // 08:00 but departs at 08:02, so every later stop is reached 120 s later too. Pricing the
-        // penalty from boarding instead of arrival would cancel that 120 s out entirely.
-        let dwelling = [
-            ride(
-                SimTime::from_secs(8 * 3600 + 120),
-                SimTime::from_secs(8 * 3600),
-                SimTime::from_secs(8 * 3600 + 720),
-            ),
-            ride(
-                SimTime::from_secs(8 * 3600 + 1020),
-                SimTime::from_secs(8 * 3600 + 1020),
-                SimTime::from_secs(8 * 3600 + 1620),
-            ),
-        ];
-        let no_dwell = [
-            ride(
-                SimTime::from_secs(8 * 3600),
-                SimTime::from_secs(8 * 3600),
-                SimTime::from_secs(8 * 3600 + 600),
-            ),
-            ride(
-                SimTime::from_secs(8 * 3600 + 900),
-                SimTime::from_secs(8 * 3600 + 900),
-                SimTime::from_secs(8 * 3600 + 1500),
-            ),
+    fn one_to_all_skim_matches_passenger_cost_and_keeps_no_path_observable() {
+        let router = reference_router(reference_schedule(), 0.8333333333333334);
+        let origin = Coordinate::new_2d(1050.0, 1050.0);
+        let destinations = [
+            Coordinate::new_2d(3950.0, 1050.0),
+            Coordinate::new_2d(50_000.0, 50_000.0),
         ];
 
-        let expected = 120.0 / 3600.0 * hourly.per_travel_time_hour;
-        assert!(
-            (cost_in_utils(&dwelling) - cost_in_utils(&no_dwell) - expected).abs() < 1e-9,
-            "boarding 120 s after the vehicle arrived should cost {expected} utils more per \
-             transfer, but the penalty moved by {}",
-            cost_in_utils(&dwelling) - cost_in_utils(&no_dwell)
+        let results =
+            router.skim_results_from_origin(&origin, &destinations, SimTime::from_secs(8 * 3600));
+
+        assert_eq!(results[0].outcome, TransitSkimOutcome::Transit);
+        let reference: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/resources/pt_reference/java/routing_direct_vs_transfer.json"
+        ))
+        .unwrap();
+        let reference_travel_time = reference["itineraries"][0]["arrival_time"]
+            .as_f64()
+            .unwrap()
+            - (8 * 3600) as f64;
+        assert_eq!(
+            results[0].travel_time,
+            Some(Duration::from_secs_f64(reference_travel_time))
+        );
+        assert_eq!(results[1].outcome, TransitSkimOutcome::NoPath);
+        assert_eq!(results[1].travel_time, None);
+        assert_eq!(
+            router.skim_times_from_origin(
+                &origin,
+                &destinations[1..],
+                SimTime::from_secs(8 * 3600)
+            ),
+            [router.walk_time(Coordinate::euclidean_distance(&origin, &destinations[1]))]
         );
     }
 
     #[deterministic_id_test]
-    fn a_penalty_worth_more_than_the_time_it_saves_rejects_the_transfer() {
-        let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
-        let departure = SimTime::from_secs(8 * 3600);
-        let chosen = |router: &TransitRoutingModule| {
-            router
-                .find_best_path(&destination, departure, &access, &egress)
-                .unwrap()
-                .rides
-                .iter()
-                .map(|ride| ride.route.external().to_owned())
-                .collect::<Vec<_>>()
-        };
+    fn one_to_all_skim_reports_walking_when_it_beats_a_late_transit_departure() {
+        let mut schedule = reference_schedule();
+        let line = schedule
+            .lines_mut()
+            .get_mut(&Id::<TransitLine>::create("Reference Line"))
+            .unwrap();
+        for route in line.routes.values_mut() {
+            route.departures.clear();
+        }
+        line.routes
+            .get_mut(&Id::<TransitRoute>::create("a_to_b"))
+            .unwrap()
+            .departures = vec![TransitDeparture {
+            id: Id::create("late"),
+            departure_time: SimTime::from_secs(9 * 3600),
+            vehicle_ref_id: None,
+            attributes: InternalAttributes::default(),
+        }];
+        let router = reference_router(schedule, 0.8333333333333334);
+        let results = router.skim_results_from_origin(
+            &Coordinate::new_2d(1050.0, 2940.0),
+            &[Coordinate::new_2d(2050.0, 2940.0)],
+            SimTime::from_secs(8 * 3600),
+        );
 
-        let default = reference_router(reference_schedule(), 0.8333333333333334);
-        assert_eq!(chosen(&default), ["a_to_b", "b_to_c"]);
-
-        // 25 utils is 7500 equivalent seconds, more than the 1500 s the transfer saves, so the
-        // direct service wins. 20 utils would not: the boundary is checked below, not asserted.
-        let penalized = reference_router(reference_schedule(), 0.8333333333333334)
-            .with_transfer_penalty(TransitTransferPenalty {
-                base_cost: 25.0,
-                per_travel_time_hour: 1.0,
-                ..TransitTransferPenalty::default()
-            });
-        assert_eq!(chosen(&penalized), ["direct"]);
+        assert_eq!(results[0].outcome, TransitSkimOutcome::Walking);
+        assert_eq!(results[0].travel_time, Some(Duration::from_secs(1200)));
     }
 
-    /// The mode-to-mode penalty is keyed on the route's transport mode, not on the mapped
-    /// passenger mode: penalizing train -> bus leaves the reverse direction free.
     #[deterministic_id_test]
-    fn a_mode_to_mode_penalty_only_costs_its_own_direction() {
-        let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
-        let departure = SimTime::from_secs(8 * 3600);
-        let schedule = || {
-            let mut schedule = reference_schedule();
-            schedule
-                .lines_mut()
-                .get_mut(&Id::<TransitLine>::create("Reference Line"))
-                .unwrap()
-                .routes
-                .get_mut(&Id::<TransitRoute>::create("b_to_c"))
-                .unwrap()
-                .transport_mode = Id::create("bus");
-            schedule
-        };
-        let chosen = |router: &TransitRoutingModule| {
-            router
-                .find_best_path(&destination, departure, &access, &egress)
-                .unwrap()
-                .rides
-                .iter()
-                .map(|ride| ride.route.external().to_owned())
-                .collect::<Vec<_>>()
-        };
+    fn one_to_all_skim_reports_walking_when_stops_have_no_departures() {
+        let mut schedule = reference_schedule();
+        for route in schedule
+            .lines_mut()
+            .values_mut()
+            .flat_map(|line| line.routes.values_mut())
+        {
+            route.departures.clear();
+        }
+        let router = reference_router(schedule, 0.8333333333333334);
+        let results = router.skim_results_from_origin(
+            &Coordinate::new_2d(1050.0, 1050.0),
+            &[Coordinate::new_2d(3950.0, 1050.0)],
+            SimTime::from_secs(8 * 3600),
+        );
 
-        let penalty = TransitTransferPenalty {
-            by_transport_mode: vec![
-                crate::simulation::config::TransitModeToModeTransferPenalty {
-                    from_mode: "train".to_string(),
-                    to_mode: "bus".to_string(),
-                    transfer_penalty: 25.0,
-                },
-            ],
-            ..TransitTransferPenalty::default()
-        };
-
-        assert_eq!(
-            chosen(&reference_router(schedule(), 0.8333333333333334)),
-            ["a_to_b", "b_to_c"]
-        );
-        assert_eq!(
-            chosen(
-                &reference_router(schedule(), 0.8333333333333334)
-                    .with_transfer_penalty(penalty.clone())
-            ),
-            ["direct"]
-        );
-        // The same 25 utils on the unconfigured direction changes nothing, which shows the penalty
-        // was applied by mode pair rather than as an untargeted cost per transfer.
-        let reverse = TransitTransferPenalty {
-            by_transport_mode: vec![
-                crate::simulation::config::TransitModeToModeTransferPenalty {
-                    from_mode: "bus".to_string(),
-                    to_mode: "train".to_string(),
-                    transfer_penalty: 25.0,
-                },
-            ],
-            ..penalty
-        };
-        assert_eq!(
-            chosen(
-                &reference_router(schedule(), 0.8333333333333334).with_transfer_penalty(reverse)
-            ),
-            ["a_to_b", "b_to_c"]
-        );
+        assert_eq!(results[0].outcome, TransitSkimOutcome::Walking);
+        assert_eq!(results[0].travel_time, Some(Duration::from_secs(58 * 60)));
     }
 
     #[deterministic_id_test]
@@ -2066,8 +2732,15 @@ mod route_proposal_tests {
         let destination = Coordinate::new_2d(3950.0, 1050.0);
         let access = [(Id::create("ra"), 0.0)];
         let egress = HashSet::from([Id::create("rc")]);
+        let params = router.resolve_routing_params("");
         let path = router
-            .find_best_path(&destination, SimTime::from_secs(8 * 3600), &access, &egress)
+            .find_best_path(
+                &destination,
+                SimTime::from_secs(8 * 3600),
+                &access,
+                &egress,
+                &params,
+            )
             .unwrap();
 
         assert_eq!("direct", path.rides[0].route.external());
@@ -2099,6 +2772,170 @@ mod route_proposal_tests {
     }
 
     #[deterministic_id_test]
+    fn person_specific_routing_costs_let_two_passengers_choose_different_services() {
+        // Reuse the reference schedule and relabel the routes so the two-leg option (bus) and
+        // the direct option (rail) are visibly distinct services. With the same travel times and
+        // a flat per-mode utility the direct route wins; biasing each passenger's per-mode
+        // utility flips the answer for one but not the other.
+        let mut schedule = reference_schedule();
+        let line = schedule
+            .lines_mut()
+            .get_mut(&Id::<TransitLine>::create("Reference Line"))
+            .unwrap();
+        line.routes
+            .get_mut(&Id::<TransitRoute>::create("b_to_c"))
+            .unwrap()
+            .transport_mode = Id::create("bus");
+        line.routes
+            .get_mut(&Id::<TransitRoute>::create("direct"))
+            .unwrap()
+            .transport_mode = Id::create("rail");
+
+        // Both passengers share one router; the per-subpopulation `mode_params` are what differ.
+        // The `person` subpopulation keeps the rail-friendly utilities; the `freight` subpopulation
+        // ships rail-averse utilities that prefer the bus transfer.
+        let scoring = vec![
+            crate::simulation::config::ModeParameter {
+                subpopulation: "person".to_owned(),
+                mode: "rail".to_owned(),
+                marginal_utility_of_traveling: -1.0,
+                ..Default::default()
+            },
+            crate::simulation::config::ModeParameter {
+                subpopulation: "person".to_owned(),
+                mode: "road".to_owned(),
+                marginal_utility_of_traveling: -24.0,
+                ..Default::default()
+            },
+            crate::simulation::config::ModeParameter {
+                subpopulation: "freight".to_owned(),
+                mode: "rail".to_owned(),
+                marginal_utility_of_traveling: -24.0,
+                ..Default::default()
+            },
+            crate::simulation::config::ModeParameter {
+                subpopulation: "freight".to_owned(),
+                mode: "road".to_owned(),
+                marginal_utility_of_traveling: -1.0,
+                ..Default::default()
+            },
+        ];
+        let agent_scoring = vec![
+            crate::simulation::config::AgentParameter::default(),
+            crate::simulation::config::AgentParameter {
+                subpopulation: "freight".to_owned(),
+                performing: 6.0,
+                ..Default::default()
+            },
+        ];
+        let router = reference_router(schedule, 0.8333333333333334).with_passenger_mode_mapping(
+            true,
+            [
+                ("bus".to_owned(), "road".to_owned()),
+                ("rail".to_owned(), "rail".to_owned()),
+            ]
+            .into(),
+            &scoring,
+            &agent_scoring,
+        );
+
+        let departure = SimTime::from_secs(8 * 3600);
+
+        let passenger = InternalPerson::new(
+            Id::create("passenger"),
+            InternalPlan {
+                score: None,
+                selected: true,
+                elements: Vec::new(),
+                attributes: InternalAttributes::default(),
+            },
+        );
+        let freight = InternalPerson::new(
+            Id::create("freight-hauler"),
+            InternalPlan {
+                score: None,
+                selected: true,
+                elements: Vec::new(),
+                attributes: InternalAttributes::default(),
+            },
+        )
+        .with_subpopulation("freight");
+
+        let from = Facility::new_link_wrapper(
+            Coordinate::new_2d(1050.0, 1050.0),
+            Id::<Link>::create("11"),
+        );
+        let to = Facility::new_link_wrapper(
+            Coordinate::new_2d(3950.0, 1050.0),
+            Id::<Link>::create("33"),
+        );
+
+        let passenger_path = router
+            .calc_route(
+                RoutingRequestBuilder::default()
+                    .from(&from)
+                    .to(&to)
+                    .departure_time(departure)
+                    .person(Some(&passenger))
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        let freight_path = router
+            .calc_route(
+                RoutingRequestBuilder::default()
+                    .from(&from)
+                    .to(&to)
+                    .departure_time(departure)
+                    .person(Some(&freight))
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        // Inspect the pt legs only: the walks wrap them, so filter out the walk legs and read
+        // the route id from the embedded PT description. The route id identifies the service the
+        // passenger picked.
+        let pt_route = |elements: &[InternalPlanElement]| -> String {
+            elements
+                .iter()
+                .find_map(|element| {
+                    let leg = element.as_leg()?;
+                    leg.route
+                        .as_ref()?
+                        .as_pt()
+                        .map(|pt| pt.description.transit_route_id.clone())
+                })
+                .expect("the passenger picks a transit service")
+        };
+        let passenger_route = pt_route(&passenger_path);
+        let freight_route = pt_route(&freight_path);
+
+        // The passenger subpopulation prefers rail; freight prefers road. The competing
+        // candidates are the direct rail service and the bus transfer (a_to_b -> b_to_c), so the
+        // passengers must end up on different services. The freight itinerary contains two rides,
+        // which is enough to disambiguate it from the single-ride rail itinerary.
+        assert_eq!(passenger_route, "direct");
+        assert_eq!(freight_route, "a_to_b");
+        assert_ne!(passenger_route, freight_route);
+
+        // Repeating the request for the same passenger is deterministic: the same cost resolves
+        // to the same service.
+        let passenger_again = router
+            .calc_route(
+                RoutingRequestBuilder::default()
+                    .from(&from)
+                    .to(&to)
+                    .departure_time(departure)
+                    .person(Some(&passenger))
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(pt_route(&passenger_again), passenger_route);
+    }
+
+    #[deterministic_id_test]
     fn shared_stop_bus_rail_transfer_is_considered_with_rail_rail() {
         let mut schedule = reference_schedule();
         let line = schedule
@@ -2111,14 +2948,17 @@ mod route_proposal_tests {
             .transport_mode = Id::create("bus");
         let router = reference_router(schedule, 0.8333333333333334);
         let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = access_stops;
+        let egress = egress_stops;
         let departure = SimTime::from_secs(8 * 3600);
+        let params = router.resolve_routing_params("");
         let path = router
-            .find_best_path(&destination, departure, &access, &egress)
+            .find_best_path(&destination, departure, &access, &egress, &params)
             .unwrap();
         let repeated = router
-            .find_best_path(&destination, departure, &access, &egress)
+            .find_best_path(&destination, departure, &access, &egress, &params)
             .unwrap();
 
         assert_eq!(
@@ -2149,8 +2989,10 @@ mod route_proposal_tests {
     fn transfer_respects_minimum_time_at_just_catch_and_just_miss_boundaries() {
         let departure = SimTime::from_secs(8 * 3600);
         let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = access_stops;
+        let egress = egress_stops;
         let mut schedule = reference_schedule();
         let line = schedule
             .lines_mut()
@@ -2172,22 +3014,23 @@ mod route_proposal_tests {
             vehicle_ref_id: None,
             attributes: InternalAttributes::default(),
         }];
-        let router = TransitRoutingModule::new(
-            Arc::new(schedule.clone()),
-            0.8333333333333334,
-            1.3,
-            Arc::new(Garage::default()),
-            None,
-        );
-        assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
-        assert_eq!(
-            router.transfer_time(&Id::create("rb"), &Id::create("rb"), 0.0),
-            Duration::from_secs(60)
-        );
-        let just_catches = router
-            .find_best_path(&destination, departure, &access, &egress)
-            .unwrap();
-        assert_eq!(just_catches.rides.len(), 2);
+        for construction in transfer_construction_modes() {
+            let router = reference_router_with_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                construction,
+            );
+            assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
+            assert_eq!(
+                router.transfer_time(&Id::create("rb"), &Id::create("rb"), 0.0),
+                Duration::from_secs(60)
+            );
+            let params = router.resolve_routing_params("");
+            let just_catches = router
+                .find_best_path(&destination, departure, &access, &egress, &params)
+                .unwrap();
+            assert_eq!(just_catches.rides.len(), 2);
+        }
 
         schedule
             .lines_mut()
@@ -2198,12 +3041,19 @@ mod route_proposal_tests {
             .unwrap()
             .departures[0]
             .departure_time = SimTime::from_secs(8 * 3600 + 11 * 60 - 1);
-        let router = reference_router(schedule, 0.8333333333333334);
-        assert!(
-            router
-                .find_best_path(&destination, departure, &access, &egress)
-                .is_none()
-        );
+        for construction in transfer_construction_modes() {
+            let router = reference_router_with_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                construction,
+            );
+            let params = router.resolve_routing_params("");
+            assert!(
+                router
+                    .find_best_path(&destination, departure, &access, &egress, &params)
+                    .is_none()
+            );
+        }
     }
 
     #[deterministic_id_test]
@@ -2218,30 +3068,96 @@ mod route_proposal_tests {
             .unwrap()
             .departures
             .clear();
-        let router = reference_router(schedule, 0.8333333333333334);
         let departure = SimTime::from_secs(8 * 3600);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = access_stops;
+        let egress = egress_stops;
+        for construction in transfer_construction_modes() {
+            let router = reference_router_with_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                construction,
+            );
+            let params = router.resolve_routing_params("");
+            assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
+            assert!(
+                router
+                    .find_best_path(
+                        &Coordinate::new_2d(3950.0, 1050.0),
+                        departure,
+                        &access,
+                        &egress,
+                        &params,
+                    )
+                    .is_none()
+            );
+        }
+    }
 
-        assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
-        assert!(
-            router
-                .find_best_path(
-                    &Coordinate::new_2d(3950.0, 1050.0),
-                    departure,
-                    &access,
-                    &egress,
-                )
-                .is_none()
-        );
+    #[deterministic_id_test]
+    fn transfer_construction_modes_select_the_same_unique_itinerary_on_repeated_queries() {
+        let schedule = Arc::new(separate_platform_schedule(2150));
+        let departure = SimTime::from_secs(8 * 3600);
+        let destination = Coordinate::new_2d(3950.0, 1050.0);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = access_stops;
+        let egress = egress_stops;
+        let expected = vec![
+            ("a_to_b".to_string(), "ra".to_string(), "rb".to_string()),
+            (
+                "b_to_c".to_string(),
+                "rb_platform".to_string(),
+                "rc".to_string(),
+            ),
+        ];
+        let mut expected_arrival = None;
+
+        for construction in transfer_construction_modes() {
+            let router = TransitRoutingModule::new_with_transfer_construction(
+                schedule.clone(),
+                0.8333333333333334,
+                1.0,
+                Arc::new(Garage::default()),
+                None,
+                construction,
+            );
+            let params = router.resolve_routing_params("");
+            let path = router
+                .find_best_path(&destination, departure, &access, &egress, &params)
+                .unwrap();
+            assert_eq!(*expected_arrival.get_or_insert(path.arrival), path.arrival);
+            let itinerary = path
+                .rides
+                .iter()
+                .map(|ride| {
+                    (
+                        ride.route.external().to_string(),
+                        ride.board.external().to_string(),
+                        ride.alight.external().to_string(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(itinerary, expected);
+            assert_eq!(
+                router
+                    .find_best_path(&destination, departure, &access, &egress, &params)
+                    .unwrap()
+                    .arrival,
+                path.arrival
+            );
+        }
     }
 
     #[deterministic_id_test]
     fn distinct_platform_transfer_emits_walk_leg_with_java_margin() {
         let departure = SimTime::from_secs(8 * 3600);
         let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = access_stops;
+        let egress = egress_stops;
         let mut schedule = separate_platform_schedule(2150);
         let line = schedule
             .lines_mut()
@@ -2269,8 +3185,9 @@ mod route_proposal_tests {
             Arc::new(Garage::default()),
             None,
         );
+        let params = router.resolve_routing_params("");
         let path = router
-            .find_best_path(&destination, departure, &access, &egress)
+            .find_best_path(&destination, departure, &access, &egress, &params)
             .unwrap();
         assert_eq!(path.rides[1].board.external(), "rb_platform");
         assert_eq!(
@@ -2396,9 +3313,10 @@ mod route_proposal_tests {
             Arc::new(Garage::default()),
             None,
         );
+        let params = router.resolve_routing_params("");
         assert!(
             router
-                .find_best_path(&destination, departure, &access, &egress)
+                .find_best_path(&destination, departure, &access, &egress, &params)
                 .is_none()
         );
     }
@@ -2406,12 +3324,21 @@ mod route_proposal_tests {
     #[deterministic_id_test]
     fn final_departure_is_available_but_schedule_does_not_repeat_after_24_hours() {
         let router = reference_router(reference_schedule(), 0.8333333333333334);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = access_stops;
+        let egress = egress_stops;
         let destination = Coordinate::new_2d(3950.0, 1050.0);
 
+        let params = router.resolve_routing_params("");
         let final_departure = router
-            .find_best_path(&destination, SimTime::from_secs(9 * 3600), &access, &egress)
+            .find_best_path(
+                &destination,
+                SimTime::from_secs(9 * 3600),
+                &access,
+                &egress,
+                &params,
+            )
             .unwrap();
         assert_eq!(final_departure.rides[0].route.external(), "direct");
         assert_eq!(
@@ -2426,6 +3353,7 @@ mod route_proposal_tests {
                     SimTime::from_secs(24 * 3600),
                     &access,
                     &egress,
+                    &params,
                 )
                 .is_none()
         );
@@ -2443,12 +3371,14 @@ mod route_proposal_tests {
             .unwrap()
             .departure_time = SimTime::from_secs(25 * 3600);
         let extended_router = reference_router(extended_schedule, 0.8333333333333334);
+        let extended_params = extended_router.resolve_routing_params("");
         let after_midnight = extended_router
             .find_best_path(
                 &destination,
                 SimTime::from_secs(25 * 3600),
                 &access,
                 &egress,
+                &extended_params,
             )
             .unwrap();
         assert_eq!(after_midnight.rides[0].route.external(), "direct");
@@ -2662,6 +3592,319 @@ mod route_proposal_tests {
             .person(person)
             .build()
             .expect("all required routing request fields are set")
+    }
+
+    #[deterministic_id_test]
+    fn intermodal_modes_choose_lowest_cost_per_stop_and_obey_person_filters() {
+        let make_setting = |mode: &str, person_filter_attribute| IntermodalAccessEgress {
+            mode: mode.to_owned(),
+            initial_search_radius: 1_000.0,
+            max_radius: 1_000.0,
+            search_extension_radius: 500.0,
+            share_trip_search_radius: f64::INFINITY,
+            person_filter_attribute,
+            person_filter_value: Some("true".to_owned()),
+            ..IntermodalAccessEgress::default()
+        };
+        let mut routers = IntMap::default();
+        routers.insert(
+            Id::create("walk"),
+            Arc::new(TeleportationRoutingModule::new(
+                Id::create("walk"),
+                1.0,
+                1.0,
+            )) as Arc<dyn RoutingModule>,
+        );
+        routers.insert(
+            Id::create("bike"),
+            Arc::new(TeleportationRoutingModule::new(
+                Id::create("bike"),
+                1.0,
+                10.0,
+            )),
+        );
+        let mut utilities = BTreeMap::new();
+        utilities.insert("walk".to_owned(), -6.0);
+        utilities.insert("bike".to_owned(), -6.0);
+        let module = TransitRoutingModule::new(
+            Arc::new(reference_schedule()),
+            1.0,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        )
+        .with_intermodal_access_egress(
+            vec![
+                make_setting("walk", None),
+                make_setting("bike", Some("hasBike".to_owned())),
+            ],
+            routers,
+            utilities,
+            IntermodalModeSelection::LeastCostPerStop,
+            IntermodalLegOnlyHandling::Forbid,
+            4711,
+        );
+        let (mut person, _) = person_with_owns_car("feeder", Some(json!(true)));
+        person.attributes_mut().insert("hasBike", "true");
+        let from = Facility::new_link_wrapper(Coordinate::new_2d(1051.0, 1050.0), Id::create("11"));
+        let to = Facility::new_link_wrapper(Coordinate::new_2d(3950.0, 1050.0), Id::create("33"));
+        let eligible_request = request(&from, &to, Some(&person));
+
+        let stops = module
+            .intermodal_stops(&eligible_request, eligible_request.from, true)
+            .unwrap();
+        let ra = stops
+            .iter()
+            .find(|candidate| candidate.stop.external() == "ra")
+            .unwrap();
+        let route = ra.route.as_ref().unwrap();
+        let InternalPlanElement::Leg(leg) = &route[0] else {
+            panic!("feeder router should return a leg");
+        };
+        assert_eq!("bike", leg.mode.external());
+
+        let (ineligible_person, _) = person_with_owns_car("no_bike", None);
+        let ineligible_request = request(&from, &to, Some(&ineligible_person));
+        let stops = module
+            .intermodal_stops(&ineligible_request, ineligible_request.from, true)
+            .unwrap();
+        let ra = stops
+            .iter()
+            .find(|candidate| candidate.stop.external() == "ra")
+            .unwrap();
+        let InternalPlanElement::Leg(leg) = &ra.route.as_ref().unwrap()[0] else {
+            panic!("feeder router should return a leg");
+        };
+        assert_eq!("walk", leg.mode.external());
+
+        let random_module = TransitRoutingModule::new(
+            Arc::new(reference_schedule()),
+            1.0,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        )
+        .with_intermodal_access_egress(
+            module.intermodal_access_egress.clone(),
+            module.feeder_routers.clone(),
+            module.feeder_mode_utilities.clone(),
+            IntermodalModeSelection::RandomPerDirection,
+            IntermodalLegOnlyHandling::Forbid,
+            4711,
+        );
+        let selected_modes = |stops: Vec<super::FeederStop>| {
+            stops
+                .iter()
+                .map(|stop| {
+                    let InternalPlanElement::Leg(leg) = &stop.route.as_ref().unwrap()[0] else {
+                        panic!("feeder router should return a leg");
+                    };
+                    (stop.stop.clone(), leg.mode.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+        let selected_mode = |request: &RoutingRequest, endpoint, access| {
+            selected_modes(
+                random_module
+                    .intermodal_stops(request, endpoint, access)
+                    .unwrap(),
+            )[0]
+            .1
+            .external()
+            .to_owned()
+        };
+        let selected = selected_mode(&eligible_request, eligible_request.from, true);
+        assert_eq!(
+            selected,
+            selected_mode(&eligible_request, eligible_request.from, true)
+        );
+        assert_ne!(
+            selected,
+            selected_mode(&eligible_request, eligible_request.to, false)
+        );
+    }
+
+    #[deterministic_id_test]
+    fn stop_filter_applies_before_nearest_stop_candidate_limit() {
+        let fixture = std::fs::read_to_string(
+            "./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml",
+        )
+        .unwrap();
+        let unfiltered_stops = (0..TransitRoutingModule::CANDIDATE_COUNT + 1)
+            .map(|index| {
+                format!(
+                    "<stopFacility id=\"near-{index}\" x=\"1049.5\" y=\"1050\" linkRefId=\"11\" />"
+                )
+            })
+            .collect::<String>();
+        let fixture = fixture
+            .replace(
+                "<stopFacility id=\"ra\" x=\"1050\" y=\"1050\" linkRefId=\"11\" />",
+                "<stopFacility id=\"ra\" x=\"1050\" y=\"1050\" linkRefId=\"11\"><attributes><attribute name=\"bikeAccess\" class=\"java.lang.String\">true</attribute><attribute name=\"bikeLink\" class=\"java.lang.String\">12</attribute></attributes></stopFacility>",
+            )
+            .replace("</transitStops>", &format!("{unfiltered_stops}</transitStops>"));
+        let directory = tempfile::tempdir().unwrap();
+        let xml_path = directory.path().join("schedule.xml");
+        std::fs::write(&xml_path, fixture).unwrap();
+        let xml_schedule = TransitSchedule::from_file(&xml_path);
+        let proto_path = directory.path().join("schedule.binpb");
+        xml_schedule.to_file(&proto_path);
+        let proto_schedule = TransitSchedule::from_file(&proto_path);
+        let make_module = |schedule| {
+            TransitRoutingModule::new(
+                Arc::new(schedule),
+                1.0,
+                1.0,
+                Arc::new(Garage::default()),
+                None,
+            )
+            .with_intermodal_access_egress(
+                vec![IntermodalAccessEgress {
+                    mode: "bike".to_owned(),
+                    initial_search_radius: 0.1,
+                    max_radius: 2.0,
+                    search_extension_radius: 1.0,
+                    share_trip_search_radius: f64::INFINITY,
+                    stop_filter_attribute: Some("bikeAccess".to_owned()),
+                    stop_filter_value: Some("true".to_owned()),
+                    link_id_attribute: Some("bikeLink".to_owned()),
+                    ..IntermodalAccessEgress::default()
+                }],
+                IntMap::from_iter([(
+                    Id::create("bike"),
+                    Arc::new(TeleportationRoutingModule::new(
+                        Id::create("bike"),
+                        1.0,
+                        10.0,
+                    )) as Arc<dyn RoutingModule>,
+                )]),
+                BTreeMap::new(),
+                IntermodalModeSelection::LeastCostPerStop,
+                IntermodalLegOnlyHandling::Forbid,
+                4711,
+            )
+        };
+        let xml_module = make_module(xml_schedule);
+        let proto_module = make_module(proto_schedule);
+        let from = Facility::new_link_wrapper(Coordinate::new_2d(1049.5, 1050.0), Id::create("11"));
+        let to = Facility::new_link_wrapper(Coordinate::new_2d(3950.0, 1050.0), Id::create("33"));
+        let request = request(&from, &to, None);
+
+        let xml_stops = xml_module
+            .intermodal_stops(&request, request.from, true)
+            .unwrap();
+        let proto_stops = proto_module
+            .intermodal_stops(&request, request.from, true)
+            .unwrap();
+
+        let selected = |stops: &[super::FeederStop]| {
+            stops
+                .iter()
+                .map(|stop| stop.stop.external().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(selected(&xml_stops), ["ra"]);
+        assert_eq!(selected(&proto_stops), selected(&xml_stops));
+        assert_eq!(xml_stops[0].route, proto_stops[0].route);
+    }
+
+    #[deterministic_id_test]
+    fn unavailable_feeder_routes_are_skipped() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mode = Id::create("bike");
+        let mut routers = IntMap::default();
+        routers.insert(
+            mode.clone(),
+            Arc::new(FallbackSpy {
+                mode,
+                calls: calls.clone(),
+                error: Some(RoutingError::NoPath {
+                    mode: "bike".to_owned(),
+                    from: "11".to_owned(),
+                    to: "12".to_owned(),
+                }),
+            }) as Arc<dyn RoutingModule>,
+        );
+        let module = TransitRoutingModule::new(
+            Arc::new(reference_schedule()),
+            1.0,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        )
+        .with_intermodal_access_egress(
+            vec![IntermodalAccessEgress {
+                mode: "bike".to_owned(),
+                initial_search_radius: 1_000.0,
+                max_radius: 1_000.0,
+                search_extension_radius: 500.0,
+                share_trip_search_radius: f64::INFINITY,
+                ..IntermodalAccessEgress::default()
+            }],
+            routers,
+            BTreeMap::new(),
+            IntermodalModeSelection::LeastCostPerStop,
+            IntermodalLegOnlyHandling::Allow,
+            4711,
+        );
+        let from = Facility::new_link_wrapper(Coordinate::new_2d(1050.0, 1050.0), Id::create("11"));
+        let to = Facility::new_link_wrapper(Coordinate::new_2d(3950.0, 1050.0), Id::create("33"));
+        let request = request(&from, &to, None);
+
+        assert!(
+            module
+                .intermodal_stops(&request, request.from, true)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(calls.load(Ordering::SeqCst) > 0);
+    }
+
+    #[deterministic_id_test]
+    fn feeder_errors_other_than_no_path_are_propagated() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mode = Id::create("bike");
+        let mut routers = IntMap::default();
+        routers.insert(
+            mode.clone(),
+            Arc::new(FallbackSpy {
+                mode,
+                calls,
+                error: Some(RoutingError::MissingEndTime {
+                    mode: "bike".to_owned(),
+                }),
+            }) as Arc<dyn RoutingModule>,
+        );
+        let module = TransitRoutingModule::new(
+            Arc::new(reference_schedule()),
+            1.0,
+            1.0,
+            Arc::new(Garage::default()),
+            None,
+        )
+        .with_intermodal_access_egress(
+            vec![IntermodalAccessEgress {
+                mode: "bike".to_owned(),
+                initial_search_radius: 1_000.0,
+                max_radius: 1_000.0,
+                search_extension_radius: 500.0,
+                share_trip_search_radius: f64::INFINITY,
+                ..IntermodalAccessEgress::default()
+            }],
+            routers,
+            BTreeMap::new(),
+            IntermodalModeSelection::LeastCostPerStop,
+            IntermodalLegOnlyHandling::Allow,
+            4711,
+        );
+        let from = Facility::new_link_wrapper(Coordinate::new_2d(1050.0, 1050.0), Id::create("11"));
+        let to = Facility::new_link_wrapper(Coordinate::new_2d(3950.0, 1050.0), Id::create("33"));
+        let request = request(&from, &to, None);
+
+        assert!(matches!(
+            module.intermodal_stops(&request, request.from, true),
+            Err(RoutingError::MissingEndTime { mode }) if mode == "bike"
+        ));
     }
 
     /// The no-path outcome is what an agent without a permitted fallback receives.
@@ -2903,8 +4146,10 @@ mod route_proposal_tests {
     fn range_query_includes_window_boundaries_and_repeats_the_same_choice() {
         let router = reference_router(reference_schedule(), 0.8333333333333334);
         let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = router.walk_feeders(&access_stops);
+        let egress = router.walk_egress_feeders(&destination, &egress_stops);
         let desired = SimTime::from_secs(8 * 3600);
         let settings = TransitRangeQuerySettings {
             max_earlier_departure_sec: 60,
@@ -2913,10 +4158,26 @@ mod route_proposal_tests {
         };
 
         let chosen = router
-            .select_range_query_path(&destination, desired, &access, &egress, &settings, None)
+            .select_range_query_path(
+                &destination,
+                desired,
+                &access,
+                &egress,
+                &settings,
+                None,
+                &router.resolve_routing_params(""),
+            )
             .unwrap();
         let repeated = router
-            .select_range_query_path(&destination, desired, &access, &egress, &settings, None)
+            .select_range_query_path(
+                &destination,
+                desired,
+                &access,
+                &egress,
+                &settings,
+                None,
+                &router.resolve_routing_params(""),
+            )
             .unwrap();
 
         assert!(chosen.departure >= desired.saturating_sub(Duration::from_secs(60)));
@@ -2928,8 +4189,9 @@ mod route_proposal_tests {
         );
 
         let no_window = TransitRangeQuerySettings::default();
+        let params = router.resolve_routing_params("");
         let fixed_time = router
-            .find_best_path(&destination, desired, &access, &egress)
+            .find_best_path_with_feeders(&destination, desired, &access, &egress, &params)
             .unwrap();
         assert_eq!(fixed_time.departure, desired);
 
@@ -2943,8 +4205,18 @@ mod route_proposal_tests {
                     subpopulations: Vec::new(),
                 }],
                 42,
+            );
+        let transfer_averse_params = transfer_averse.resolve_routing_params("");
+        let transfer_averse = transfer_averse
+            .select_range_query_path(
+                &destination,
+                desired,
+                &access,
+                &egress,
+                &no_window,
+                None,
+                &transfer_averse_params,
             )
-            .select_range_query_path(&destination, desired, &access, &egress, &no_window, None)
             .unwrap();
         assert_eq!("direct", transfer_averse.rides[0].route.external());
 
@@ -2958,6 +4230,7 @@ mod route_proposal_tests {
                     &egress,
                     &no_window,
                     None,
+                    &params,
                 )
                 .is_none()
         );
@@ -2977,8 +4250,10 @@ mod route_proposal_tests {
             42,
         );
         let destination = Coordinate::new_2d(3950.0, 1050.0);
-        let access = [(Id::create("ra"), 0.0)];
-        let egress = HashSet::from([Id::create("rc")]);
+        let access_stops = [(Id::create("ra"), 0.0)];
+        let egress_stops = HashSet::from([Id::create("rc")]);
+        let access = router.walk_feeders(&access_stops);
+        let egress = router.walk_egress_feeders(&destination, &egress_stops);
         let desired = SimTime::from_secs(8 * 3600);
         let settings = TransitRangeQuerySettings::default();
         let person = |id| {
@@ -2994,6 +4269,7 @@ mod route_proposal_tests {
         };
         let first = person("stream-person-1");
         let second = person("stream-person-2");
+        let params = router.resolve_routing_params("");
         let choose = |person: &InternalPerson| {
             router
                 .select_range_query_path(
@@ -3003,6 +4279,7 @@ mod route_proposal_tests {
                     &egress,
                     &settings,
                     Some(person),
+                    &params,
                 )
                 .unwrap()
         };

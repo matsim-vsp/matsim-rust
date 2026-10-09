@@ -12,7 +12,7 @@
 		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
 	</module>
 	<module name="transit">
-		<param name="transitScheduleFile" value="../routing_direct_vs_transfer/transit_schedule.xml" />
+		<param name="transitScheduleFile" value="transit_schedule.xml" />
 		<param name="useTransit" value="true" />
 		<param name="usingTransitInMobsim" value="false" />
 	</module>

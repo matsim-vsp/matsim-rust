@@ -7,10 +7,12 @@ recording at the two boundaries where behavior is observable: `TripRouter` for i
 simulation integration runner for execution events.
 
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
-difference that a fixture exercises, and the fixture corpus is currently three scenarios wide. Every
+difference that a fixture exercises, and the fixture corpus is still small and focused. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
-The skims and external routing service entry points remain unchanged and are not covered here; their
-reference semantics belong to ticket 11.
+The external routing service boundary is covered through the same trip router. The one-to-all skim
+uses one per-origin routing tree; its reachable and unreachable stop results, including a missed
+departure boundary, are compared with MATSim's `calcTreesObservable`. The skim's explicit `pt`,
+`walk`, and `no_path` outcomes and external result classifications are tested separately.
 
 ## The pinned reference
 
@@ -45,7 +47,7 @@ A fixture is a directory under `matsim_rust/tests/resources/pt_reference/`:
 | File | Role |
 |---|---|
 | `config.xml` | MATSim's own configuration. Input paths are relative to this file. |
-| `requests.json` | Routing requests issued through `TripRouter` after the run. Optional. |
+| `requests.json` | Routing requests issued through `TripRouter` and one-to-all tree queries after the run. Optional. |
 | `*.yml` | The Rust configuration for the same scenario, where one is needed. |
 | shared inputs | Reused from `matsim_rust/assets/` rather than duplicated. |
 | `../java/<fixture>.json` | The recorded reference. Regenerate; never hand-edit. |
@@ -63,6 +65,54 @@ The PT tutorial scenario — network, schedule, plans and vehicle types from
 It claims only that Rust *executes* a supplied plan the way the reference does. It says nothing about
 routing: the plan is given, so the router is never consulted.
 
+### queue_execution
+
+The same supplied plans, network and transit schedule, with transit vehicles driven on both sides.
+Java reads the tutorial's MATSim transit-vehicle file; Rust uses the equivalent vehicle types with
+the two scheduled vehicles added. The comparison follows each passenger's event sequence and each
+vehicle's stop sequence, so simultaneous events from unrelated vehicles may appear in either order
+while boarding, alighting and stop dependencies remain ordered.
+
+The fixture gives two simultaneous passengers one seat. The first boards the 07:50 service and the
+other boards the next eligible service; passenger waiting, boarding and alighting events match MATSim
+exactly. Cross-stream assertions require vehicle arrival before boarding and departure, and vehicle
+arrival before alighting. The comparison runs with one and two network partitions. Vehicle stop events
+may be one clock step early in Rust because the link queue and node transition occur in different
+phases; schedule delay must move by the same amount. Larger differences fail.
+The vehicle type uses MATSim's default serial door mode. The separate `queue_doors_*` fixtures
+compare serial and parallel doors while one passenger alights as another boards.
+
+`queue_stranded` ends at 07:45, while both passengers are waiting for service. Rust and MATSim emit
+the same waiting and `stuckAndAbort` events for each passenger, also with two network partitions.
+The one-seat case covers a passenger missing a service because capacity is full and boarding the next
+eligible departure.
+
+### `queue_missed_connection`
+
+A supplied plan rides the 08:00 train to `rb`, walks 151 seconds to `rb_platform`, and requests the
+08:05:30 bus. It reaches the second platform at 08:05:56, misses `bus_1`, and boards `bus_2` at
+08:15. Passenger boarding, alighting and waiting events match the pinned reference within two
+seconds; the outcome is checked with one and two network partitions.
+
+### `queue_road_baseline` and `queue_road_congestion`
+
+Both fixtures run the same supplied passenger plans and road bus. The congestion case adds one car
+that shares road link `1213` with the bus; the baseline omits only that car. The pinned Java bus
+arrives at the downstream stop 62 seconds later with the car. Rust measures a 64-second delay, within
+two seconds of the reference, and checks passenger and vehicle event dependencies with one and two
+network partitions. This demonstrates the shared-road effect for the pinned link capacity and
+vehicle types, not general traffic-congestion parity.
+
+### `queue_doors_serial` and `queue_doors_parallel`
+
+Two supplied passengers share one run and meet at stop `2a`: one alights while the other boards.
+The vehicle has two seats so capacity does not prevent overlapping door operations. The serial
+reference completes alighting before boarding; the parallel reference records both in the same
+second. Rust is compared against both references with one and two network partitions. Passenger
+event order and timing relative to the shared stop are checked, as is dwell duration at each stop.
+Absolute arrival times downstream can differ by a few link-phase seconds, so the door comparison
+isolates stop dwell from route travel time.
+
 ### `routing_direct_vs_transfer`
 
 A request from stop `ra` to stop `rc` at 08:00 where three candidates exist:
@@ -76,10 +126,12 @@ A request from stop `ra` to stop `rc` at 08:00 where three candidates exist:
 The population is empty; the itinerary comes from the recorded request, so the assertion is about the
 router alone. The direct service remains in the schedule so this fixture proves that routes compete
 under the pinned default costs instead of a direct-service preference.
-The two transfer-penalty fixtures below vary only the penalty on this same schedule and request, so
-together they show the penalty deciding between the same two itineraries.
-This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits remain
-outside its coverage.
+This slice uses those fixed costs and a 20-transfer search cap; configurable transfer limits and
+non-default scoring remain outside its coverage.
+The same fixture records `calcTreesObservable` from stop `ra` for the 08:00 departure and for the
+window beginning one second later through 08:10. It compares arrivals at `rb` and `rc`; isolated
+stop `rd` must remain absent from the transit tree. The Rust skim queries those stops at their exact
+coordinates, so the comparison covers the shared transit tree without adding access or egress time.
 The fixture records MATSim's `totalRouteCost` attribute in utility units. The Rust assertion converts
 its time-equivalent cost using the pinned PT time weight before comparing the two.
 
@@ -103,38 +155,24 @@ distance, and the pinned five-second transfer-walk margin. A separate Rust runne
 a person plan so the generated access, transfer and egress legs execute in QSim; the routing test
 also round-trips that itinerary through XML and protobuf population files.
 
-### `routing_transfer_penalty_shared_stop`
+### `routing_intermodal_access_egress`
 
-The same request and schedule as `routing_direct_vs_transfer`, with a transfer penalty of 6 utils
-per transfer instead of the pinned default of one. The transfer saves 25 minutes, which at 12
-utils per hour is worth 5 utils, so the penalty is enough to make both routers reject it and take
-the 08:00 -> 08:50 direct service. `transferPenaltyMaxCost` equals the base cost, so the
-per-travel-time-hour part is clipped away and the penalty is exactly 6 utils however long the
-journey runs; that pins the clipping boundary. MATSim only reads `transferPenaltyBaseCost` once a
-per-travel-time-hour cost is configured, because `RaptorUtils.createParameters` otherwise falls back
-to `-utilityOfLineSwitch`, so both sides configure both.
+The endpoints are near one stop and no transit ride is useful. `avoid` returns the feeder-only
+itinerary, selecting bike over walking by cost. This pins the no-PT policy and the walk/bike
+alternative.
 
-### `routing_transfer_penalty_mode_to_mode`
+### `routing_intermodal_eligibility`
 
-The same schedule as `routing_distinct_platform_transfer`, with a 2 utils penalty on the `train` to
-`bus` transport-mode pair. At 08:00 that turns the faster bus transfer at `rb_platform` into the
-more expensive option and the slower rail transfer wins; the direct train service stays available as
-a fallback. The penalty applies to the route's transport mode, not to the mapped passenger mode.
-Configuring any mode pair selects MATSim's `ModeSpecificTransferCostCalculator`, which cannot also be
-given a per-travel-time-hour cost; the Rust config rejects that combination rather than dropping one
-of them silently.
+Three requests cover an eligible person at a bike-enabled stop, an ineligible person, and an
+eligible person at a stop that disallows bike access. The enabled stop maps the bike feeder to a
+different link, so the returned plan also includes MATSim's zero-time walk connectors. The Rust
+fixture compares passenger modes, arrival times and the outer `pt` routing mode.
 
-This fixture records a **known deviation in the route cost**. The selected route, its rides and its
-arrival time all match; the recorded `generalized_cost` does not: Java reports 9.0 utils where Rust
-reports 6.0. `ModeSpecificTransferCostCalculator` ignores its `existingTransferCosts` argument and
-returns the whole per-transfer cost, which `SwissRailRaptorCore` then re-adds as it walks the path,
-so the reference's transfer cost depends on how many path elements it visits. The Rust router charges
-one clipped cost per transfer instead, which is the behaviour the calculator's own contract describes.
-Neither one cost per transfer nor a guessed re-adding rule reproduces 9.0, so the gap is pinned in
-`java_reference.rs` rather than papered over; closing it means porting MATSim's incremental transfer
-accounting. `routing_transfer_penalty_shared_stop` demonstrates the costs agreeing exactly where the
-route has no transfers, which shows the utils conversion itself is sound and the deviation is specific
-to mode-specific penalties.
+### `routing_intermodal_unavailable_feeder`
+
+The bike mode is eligible, but its capped search radius contains no eligible stop. MATSim and Rust
+skip that feeder candidate and return the available walking itinerary. A separate Rust unit test
+covers a feeder router that returns `NoPath` for a candidate stop.
 
 ### `routing_range_boundaries`
 
@@ -146,6 +184,39 @@ repeats the schedule on the next day. MATSim's top-level `TripRouter` falls back
 when no PT route exists; the Rust PT routing module reports no path. The comparison pins the absence
 of a PT service in both results while preserving that existing wrapper difference.
 
+This fixture keeps its own copy of the transit schedule instead of reading
+`../routing_direct_vs_transfer/transit_schedule.xml`. That schedule now carries stop `rd`, which the
+one-to-all fixture added, and a reference is only comparable against the inputs it was recorded
+with: an extra stop beside the access point changes the candidate stops and therefore the selected
+departure.
+
+### Transfer construction
+
+`transit.transfer_construction` accepts `initial` (default), `adaptive`, and `online`. Initial builds
+and retains candidates for every used stop at router creation. Adaptive builds candidates on first
+use and retains them in a synchronized cache. Online rebuilds candidates on each query. The three
+modes use the same candidate ordering and transfer rules, so repeated requests select the same
+itinerary; the choice changes when candidate construction and retained memory occur. Initial trades
+up-front work and memory for reuse, Adaptive spreads that work across encountered stops, and Online
+avoids retaining candidate lists.
+
+The pinned MATSim 2026.0 `RaptorTransferCalculation` exposes Initial and Adaptive. Online is a
+Rust extension and has no direct mode-level reference comparison; its route choices are covered by
+the same fixture assertions against the other two modes.
+
+### `routing_person_specific_costs`
+
+This fixture exercises the reference's per-subpopulation scoring: two passengers with different
+mode utilities disagree on which service is cheapest. The schedule mirrors `routing_direct_vs_transfer`
+(a 10-min `bus` and a 50-min `rail`), and `config.yml` declares two `mode_params` blocks that share
+the `mode = "rail"` field while scoping the marginal utility to a single subpopulation. A "person"
+passenger keeps the global `rail` utility, a "freight" passenger uses the subpopulation-specific
+override, and the two requests therefore pick different services. The fixture exercises acceptance
+criterion 2 of the parent (`Params… agree with scoring of the resulting passenger modes`) at the
+subpopulation boundary rather than the global one. The Java differential reference for this fixture
+has not yet been recorded against the reference runner; the routing assertion is Rust self-consistent
+for now and will be promoted to a pinned comparison when the runner is updated.
+
 ## Comparison rules
 
 The reference is recorded once and compared many times, so the rules are fixed and stated here
@@ -154,32 +225,30 @@ everything, and a single global tolerance would hide exactly the differences wor
 
 | Metric | Rule | Rationale |
 |---|---|---|
-| Event order | Exact, positional | Both streams are in simulation order. The order carries meaning: boarding, alighting and service identity depend on it. Only genuinely independent events could be reordered, and reordering them would break the alignment. |
+| Event order | Exact within each passenger and vehicle | Passenger boarding/alighting and each vehicle's stop sequence carry dependencies. Events from independent vehicles are compared in separate streams because their simultaneous order is not meaningful. |
 | Agent, mode, activity type, leg mode, link | Exact | A difference is a different journey, never a rounding difference. |
 | `distance` | Exact, full precision | Both implementations compute it from the same link lengths. A rounded form would hide a genuine difference. |
 | Generalized route cost | Exact after converting Rust's time-equivalent cost to utility units | MATSim records RAPTOR's `totalRouteCost`; Rust uses the pinned 12 utils/hour PT time weight and 1 utility per transfer. |
 | `boardingTime` | Exact | A schedule time, not a computed duration. |
 | Service identity (line, route, board/alight stop) | Exact | A different service is a different journey. |
-| Event and leg times | `0 ≤ rust − reference ≤ legs_completed × 1 s` | See below. A tolerance would let a real regression hide inside it. |
+| supplied_plan event and leg times | Exact | The same-tick engine handoff now starts the next activity at the leg's arrival time. |
+| queue_execution passenger event times | Exact | Boarding, alighting and activity transitions match the pinned run. |
+| queue_execution vehicle stop times | Absolute difference no more than one clock step; delay changes by the same amount | The per-link queue and node phases differ by at most one tick at intermediate stops. This is bounded by the configured clock, not an event-count-dependent allowance. |
+| queue_missed_connection passenger events | Absolute difference no more than two seconds | The supplied transfer misses the same service and boards the same later departure; stop and activity phases shift the walk handoff by one step. |
+| queue_road_* bus delay from the no-car baseline | Absolute difference no more than two seconds | The baseline and congested queue phases each contribute at most a one-second shift to the compared delay. |
+| queue_doors_* passenger events | Exact journey and event order; relative event time within one second of the stop arrival | Door handling is measured from the vehicle's stop arrival, independent of upstream link-phase differences. |
+| queue_doors_* stop dwell | Absolute difference no more than one second at each stop | Dwell is departure time minus arrival time, isolating door operations from link travel time. |
 | Arrival time, itineraries | Exact | The metric the routing fixture exists to compare. |
 
-Times are compared against a **derived bound**, not an arbitrary tolerance. MATSim hands an agent
-from the leg engine to the activity engine within the same time step; this port does it one step
-later (`Simulation::do_sim_step` documents the handoff). Each completed leg can therefore add one
-second of lag, and the bound follows from the number of legs the agent has completed. The tutorial
-agent completes 7 legs and the worst observed lag is 3 s, which is *within* the 7 s bound — the lag
-does not accumulate on every leg, and the test pins the observed worst case at 3 s so the bound
-cannot be widened silently to accommodate a new one.
+supplied_plan has no event-time tolerance: the activity and leg engines exchange completed agents
+within the same tick. Queue stop events use one clock step because MATSim and Rust check a vehicle
+at different phases of link/node processing; the same measured difference must appear in the stop's
+schedule delay.
 
 ## Known divergences
 
-Both are recorded facts, not accepted outcomes. Each names the ticket that owns the fix.
-
-**1. One-step-per-leg handoff lag** — `supplied_plan`. Rust's activity following a leg starts up to
-one clock step later than the reference, giving the tutorial agent's later events a 1–3 s lag.
-Owner: [#81](https://github.com/titipakorn-th/matsim-rust/issues/81) (queue-based passenger
-execution). When it is fixed, the `worst_lag` assertion in `tests/java_reference.rs` will fail and
-should be updated to `0.0` rather than removed.
+supplied_plan's one-step-per-leg handoff lag was fixed in [#81](https://github.com/titipakorn-th/matsim-rust/issues/81).
+The test now pins the worst lag to zero.
 
 The routing fixture's former direct-service divergence was fixed by
 [#72](https://github.com/titipakorn-th/matsim-rust/issues/72). It now compares the complete selected
