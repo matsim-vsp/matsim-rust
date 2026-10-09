@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+  <vehicleType id="door_test">
+    <attributes><attribute name="doorOperationMode" class="java.lang.String">parallel</attribute></attributes>
+    <capacity seats="2" standingRoomInPersons="0" />
+    <length meter="12" /><maximumVelocity meterPerSecond="12" /><passengerCarEquivalents pce="1" />
+  </vehicleType>
+  <vehicle id="door_bus" type="door_test" />
+</vehicleDefinitions>

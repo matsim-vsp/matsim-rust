@@ -1,0 +1,193 @@
+{
+  "schema_version" : 2,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "274fa1a7b797335111b840568088cb7469f78ad2f42f27c7888014873aee5ef3",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "../queue_doors_common/plans.xml",
+      "sha256" : "604a7fedf9deff9051bb6cdfbe2ea48d9fa8e0b6057b3a75716b1928e24091a4"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_vehicles",
+      "path" : "transitVehicles.xml",
+      "sha256" : "5d5cb4dbb50c97e9ae4eefaa385501cbf0e5723ed60b0c9a1516bc609e0f1583"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "../queue_doors_common/transitSchedule.xml",
+      "sha256" : "6ff6062f82a73ad5a4e714f9d6aae662655f40992593a6d0e9d68911f13e477e"
+    } ]
+  },
+  "itineraries" : [ ],
+  "events" : [ {
+    "time" : 28140.0,
+    "type" : "actend",
+    "person" : "alighting-passenger",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28140.0,
+    "type" : "departure",
+    "person" : "alighting-passenger",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 28140.0,
+    "type" : "waitingForPt",
+    "person" : "alighting-passenger",
+    "atStop" : "1",
+    "destinationStop" : "2a"
+  }, {
+    "time" : 28200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_door_bus_door_test",
+    "vehicleId" : "door_bus",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "door_departure"
+  }, {
+    "time" : 28200.0,
+    "type" : "departure",
+    "person" : "pt_door_bus_door_test",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_door_bus_door_test",
+    "vehicle" : "door_bus"
+  }, {
+    "time" : 28200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "door_bus",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28201.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "alighting-passenger",
+    "vehicle" : "door_bus"
+  }, {
+    "time" : 28203.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "door_bus",
+    "facility" : "1",
+    "delay" : 3.0
+  }, {
+    "time" : 28380.0,
+    "type" : "actend",
+    "person" : "boarding-passenger",
+    "actType" : "h",
+    "link" : "12",
+    "x" : 2050.0,
+    "y" : 2940.0
+  }, {
+    "time" : 28380.0,
+    "type" : "departure",
+    "person" : "boarding-passenger",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "12"
+  }, {
+    "time" : 28380.0,
+    "type" : "waitingForPt",
+    "person" : "boarding-passenger",
+    "atStop" : "2a",
+    "destinationStop" : "3"
+  }, {
+    "time" : 28404.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "door_bus",
+    "facility" : "2a",
+    "delay" : 4.0
+  }, {
+    "time" : 28405.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "alighting-passenger",
+    "vehicle" : "door_bus"
+  }, {
+    "time" : 28405.0,
+    "type" : "arrival",
+    "person" : "alighting-passenger",
+    "legMode" : "pt",
+    "link" : "12"
+  }, {
+    "time" : 28405.0,
+    "type" : "actstart",
+    "person" : "alighting-passenger",
+    "actType" : "w",
+    "link" : "12",
+    "x" : 2050.0,
+    "y" : 2940.0
+  }, {
+    "time" : 28406.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "boarding-passenger",
+    "vehicle" : "door_bus"
+  }, {
+    "time" : 28408.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "door_bus",
+    "facility" : "2a",
+    "delay" : 8.0
+  }, {
+    "time" : 28718.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "door_bus",
+    "facility" : "3",
+    "delay" : 18.0
+  }, {
+    "time" : 28719.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "boarding-passenger",
+    "vehicle" : "door_bus"
+  }, {
+    "time" : 28719.0,
+    "type" : "arrival",
+    "person" : "boarding-passenger",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 28719.0,
+    "type" : "actstart",
+    "person" : "boarding-passenger",
+    "actType" : "w",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28721.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "door_bus",
+    "facility" : "3",
+    "delay" : 21.0
+  }, {
+    "time" : 28721.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_door_bus_door_test",
+    "vehicle" : "door_bus"
+  }, {
+    "time" : 28721.0,
+    "type" : "arrival",
+    "person" : "pt_door_bus_door_test",
+    "legMode" : "car",
+    "link" : "33"
+  } ]
+}

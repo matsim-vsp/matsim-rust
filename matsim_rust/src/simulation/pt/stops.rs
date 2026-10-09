@@ -52,12 +52,14 @@ pub(crate) struct TransitStops {
 
 impl TransitStops {
     /// Queues a passenger behind everyone who arrived earlier. Passengers arriving in the same
-    /// instant are ordered by person id, because the order in which engines hand them over
-    /// depends on how the scenario is partitioned.
+    /// instant use descending person ID, matching MATSim's same-time boarding order independently
+    /// of how engines hand them over across partitions.
     pub(crate) fn add(&mut self, stop: Id<TransitStopFacility>, passenger: WaitingPassenger) {
         let queue = self.waiting.entry(stop).or_default();
         let key = (passenger.since, passenger.agent.id().internal());
-        let position = queue.partition_point(|p| (p.since, p.agent.id().internal()) <= key);
+        let position = queue.partition_point(|p| {
+            p.since < key.0 || (p.since == key.0 && p.agent.id().internal() >= key.1)
+        });
         queue.insert(position, passenger);
     }
 

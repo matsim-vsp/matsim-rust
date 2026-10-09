@@ -11,10 +11,12 @@
 use macros::deterministic_id_test;
 use matsim_rust::simulation::config::{CommandLineArgs, Config};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
-use matsim_rust::simulation::events::utils::read_events;
+use matsim_rust::simulation::events::utils::{read_events, read_partitioned_events};
 use matsim_rust::simulation::events::{
-    ActivityEndEvent, ActivityStartEvent, EventTrait, EventsManager, PersonArrivalEvent,
-    PersonDepartureEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
+    ActivityEndEvent, ActivityStartEvent, AgentWaitingForPtEvent, EventTrait, EventsManager,
+    PersonArrivalEvent, PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
+    PersonStuckEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
+    TransitDriverStartsEvent, VehicleArrivesAtFacilityEvent, VehicleDepartsAtFacilityEvent,
 };
 use matsim_rust::simulation::id::Id;
 use matsim_rust::simulation::replanning::routing::{Facility, RoutingRequestBuilder, TripRouter};
@@ -113,11 +115,584 @@ fn supplied_plan_execution_matches_the_pinned_reference() {
     // The lag is a real deviation, not a rule that grew to fit whatever the run produced: pin it, so
     // a change is a decision rather than a silent widening.
     assert_eq!(
-        worst_lag,
-        3.0 * clock_step,
-        "the worst handoff lag changed; docs/pt_java_reference.md records the known deviation and \
-         this bound, so update both rather than widening the rule"
+        worst_lag, 0.0,
+        "the same-tick engine handoff should keep activity and leg events aligned"
     );
+}
+
+/// Compares queue-based passenger execution against MATSim using the same supplied plans.
+#[deterministic_id_test(matsim_rust)]
+fn queue_execution_matches_the_pinned_reference() {
+    assert_queue_execution_matches(1);
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn queue_execution_matches_the_pinned_reference_across_partitions() {
+    assert_queue_execution_matches(2);
+}
+
+fn assert_queue_execution_matches(num_parts: u32) {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/queue_execution.yml",
+    ));
+    config.partitioning_mut().num_parts = num_parts;
+    let output_dir = config.output().output_dir.clone();
+    let reference = read_reference("queue_execution");
+    verify_same_conditions(&reference, &config);
+    let clock_step = reference.clock_step();
+
+    run(config);
+
+    let rust = normalize_partitioned_events(&output_dir.join("events"), num_parts);
+    assert_passenger_vehicle_dependencies(&reference.events);
+    assert_passenger_vehicle_dependencies(&rust);
+    let passengers: Vec<_> = reference
+        .events
+        .iter()
+        .filter(|event| event["type"] == "waitingForPt")
+        .map(|event| event["person"].as_str().unwrap())
+        .collect();
+    for person in passengers {
+        let expected: Vec<_> = reference
+            .events
+            .iter()
+            .filter(|event| {
+                event["person"] == person
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("waitingForPt" | "PersonEntersPtVehicle" | "PersonLeavesPtVehicle")
+                    )
+            })
+            .collect();
+        let actual: Vec<_> = rust
+            .iter()
+            .filter(|event| {
+                event["person"] == person
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("waitingForPt" | "PersonEntersPtVehicle" | "PersonLeavesPtVehicle")
+                    )
+            })
+            .collect();
+        assert_eq!(
+            expected.len(),
+            actual.len(),
+            "passenger {person} event count differs: reference {:?}; Rust {:?}",
+            expected
+                .iter()
+                .map(|e| (&e["type"], &e["time"]))
+                .collect::<Vec<_>>(),
+            actual
+                .iter()
+                .map(|e| (&e["type"], &e["time"]))
+                .collect::<Vec<_>>(),
+        );
+        for (index, (expected, actual)) in expected.iter().zip(&actual).enumerate() {
+            assert_eq!(expected, actual, "passenger {person} event {index} differs");
+        }
+    }
+    for vehicle in ["tr_1", "tr_2"] {
+        let expected: Vec<_> = reference
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event["type"].as_str(),
+                    Some("VehicleArrivesAtFacility" | "VehicleDepartsAtFacility")
+                ) && event["vehicle"] == vehicle
+            })
+            .collect();
+        let actual: Vec<_> = rust
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event["type"].as_str(),
+                    Some("VehicleArrivesAtFacility" | "VehicleDepartsAtFacility")
+                ) && event["vehicle"] == vehicle
+            })
+            .collect();
+        assert_eq!(
+            expected.len(),
+            actual.len(),
+            "vehicle {vehicle} stop event count differs"
+        );
+        for (index, (expected, actual)) in expected.iter().zip(&actual).enumerate() {
+            let mut expected = expected.as_object().unwrap().clone();
+            let mut actual = actual.as_object().unwrap().clone();
+            let expected_time = expected.remove("time").unwrap().as_f64().unwrap();
+            let actual_time = actual.remove("time").unwrap().as_f64().unwrap();
+            let expected_delay = expected.remove("delay").unwrap().as_f64().unwrap();
+            let actual_delay = actual.remove("delay").unwrap().as_f64().unwrap();
+            let time_delta = actual_time - expected_time;
+            assert!(
+                time_delta.abs() <= clock_step,
+                "vehicle {vehicle} stop event {index} differs by {time_delta}s"
+            );
+            assert_eq!(
+                actual_delay - expected_delay,
+                time_delta,
+                "vehicle {vehicle} stop event {index} delay does not match its time difference"
+            );
+            assert_eq!(
+                expected, actual,
+                "vehicle {vehicle} stop event {index} differs"
+            );
+        }
+    }
+}
+
+/// Checks queue dependencies across passenger and vehicle event streams.
+fn assert_passenger_vehicle_dependencies(events: &[Value]) {
+    for (index, event) in events.iter().enumerate() {
+        let Some(event_type) = event["type"].as_str() else {
+            continue;
+        };
+        let vehicle = event["vehicle"].as_str();
+        match event_type {
+            "PersonEntersPtVehicle" => {
+                let person = event["person"].as_str().unwrap();
+                let Some(wait_index) = events[..index].iter().rposition(|candidate| {
+                    candidate["person"] == person && candidate["type"] == "waitingForPt"
+                }) else {
+                    continue;
+                };
+                let facility = events[wait_index]["atStop"].as_str().unwrap();
+                let arrival_index = events[..index]
+                    .iter()
+                    .rposition(|candidate| {
+                        candidate["type"] == "VehicleArrivesAtFacility"
+                            && candidate["vehicle"].as_str() == vehicle
+                            && candidate["facility"] == facility
+                    })
+                    .expect("boarding must follow this vehicle's arrival at the access stop");
+                let departure_index = events[index + 1..]
+                    .iter()
+                    .position(|candidate| {
+                        candidate["type"] == "VehicleDepartsAtFacility"
+                            && candidate["vehicle"].as_str() == vehicle
+                            && candidate["facility"] == facility
+                    })
+                    .map(|offset| index + 1 + offset)
+                    .expect("boarding must precede this vehicle's departure from the access stop");
+                assert!(arrival_index < index && index < departure_index);
+            }
+            "PersonLeavesPtVehicle" => {
+                let person = event["person"].as_str().unwrap();
+                if !events.iter().any(|candidate| {
+                    candidate["type"] == "VehicleArrivesAtFacility"
+                        && candidate["vehicle"].as_str() == vehicle
+                }) {
+                    continue;
+                }
+                let board_index = events[..index]
+                    .iter()
+                    .rposition(|candidate| {
+                        candidate["type"] == "PersonEntersPtVehicle"
+                            && candidate["person"] == person
+                            && candidate["vehicle"].as_str() == vehicle
+                    })
+                    .expect("alighting must follow boarding the same vehicle");
+                assert!(
+                    events[board_index + 1..index].iter().any(|candidate| {
+                        candidate["type"] == "VehicleArrivesAtFacility"
+                            && candidate["vehicle"].as_str() == vehicle
+                    }),
+                    "passenger {person} must alight from {vehicle:?} after its arrival at a stop"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Compares the end-of-simulation outcome for passengers who never reach a scheduled vehicle.
+#[deterministic_id_test(matsim_rust)]
+fn queue_stranding_matches_the_pinned_reference() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/queue_stranded.yml",
+    ));
+    config.qsim_mut().end_time = 27_900;
+    config.partitioning_mut().num_parts = 2;
+    let output_dir = config.output().output_dir.clone();
+    let reference = read_reference("queue_stranded");
+    verify_same_conditions(&reference, &config);
+
+    run(config);
+
+    let rust = normalize_partitioned_events(&output_dir.join("events"), 2);
+    for person in ["102", "103"] {
+        let expected: Vec<_> = reference
+            .events
+            .iter()
+            .filter(|event| {
+                event["person"] == person
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("waitingForPt" | "stuckAndAbort")
+                    )
+            })
+            .collect();
+        let actual: Vec<_> = rust
+            .iter()
+            .filter(|event| {
+                event["person"] == person
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("waitingForPt" | "stuckAndAbort")
+                    )
+            })
+            .collect();
+        assert_eq!(expected, actual, "passenger {person} stranding differs");
+    }
+}
+
+/// A supplied transfer that reaches its second platform after the planned bus boards the next run.
+#[deterministic_id_test(matsim_rust)]
+fn queue_missed_connection_boards_the_next_service_like_the_reference() {
+    let reference = read_reference("queue_missed_connection");
+
+    for num_parts in [1, 2] {
+        let mut config = Config::from_args(CommandLineArgs::new_with_path(
+            "./tests/resources/pt_simulated/missed_connection.yml",
+        ));
+        config.partitioning_mut().num_parts = num_parts;
+        let output_dir = config.output().output_dir.clone();
+        verify_same_conditions(&reference, &config);
+
+        run(config);
+
+        let events = normalize_partitioned_events(&output_dir.join("events"), num_parts);
+        assert_passenger_vehicle_dependencies(&reference.events);
+        assert_passenger_vehicle_dependencies(&events);
+        let passenger_events: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event["person"] == "transfer-person"
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("waitingForPt" | "PersonEntersPtVehicle" | "PersonLeavesPtVehicle")
+                    )
+            })
+            .collect();
+        let reference_events: Vec<_> = reference
+            .events
+            .iter()
+            .filter(|event| {
+                event["person"] == "transfer-person"
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("waitingForPt" | "PersonEntersPtVehicle" | "PersonLeavesPtVehicle")
+                    )
+            })
+            .collect();
+        assert_eq!(
+            reference_events.len(),
+            passenger_events.len(),
+            "passenger transfer event count differs with {num_parts} partitions"
+        );
+        assert_eq!(
+            passenger_events
+                .iter()
+                .map(|event| {
+                    (
+                        &event["type"],
+                        &event["vehicle"],
+                        &event["atStop"],
+                        &event["destinationStop"],
+                    )
+                })
+                .collect::<Vec<_>>(),
+            reference_events
+                .iter()
+                .map(|event| {
+                    (
+                        &event["type"],
+                        &event["vehicle"],
+                        &event["atStop"],
+                        &event["destinationStop"],
+                    )
+                })
+                .collect::<Vec<_>>(),
+            "passenger must miss bus_1 and board bus_2 with {num_parts} partitions"
+        );
+        for (index, (actual, expected)) in
+            passenger_events.iter().zip(&reference_events).enumerate()
+        {
+            let time_delta = actual["time"].as_f64().unwrap() - expected["time"].as_f64().unwrap();
+            assert!(
+                time_delta.abs() <= 2.0,
+                "passenger transfer event {index} differs by {time_delta}s with {num_parts} partitions"
+            );
+        }
+        assert!(
+            passenger_events.iter().any(
+                |event| event["type"] == "PersonEntersPtVehicle" && event["vehicle"] == "bus_2"
+            )
+        );
+        assert!(!passenger_events.iter().any(|event| {
+            event["type"] == "PersonEntersPtVehicle" && event["vehicle"] == "bus_1"
+        }));
+    }
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn queue_serial_doors_match_the_pinned_reference() {
+    assert_queue_doors_match("serial", 1);
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn queue_serial_doors_match_the_pinned_reference_across_partitions() {
+    assert_queue_doors_match("serial", 2);
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn queue_parallel_doors_match_the_pinned_reference() {
+    assert_queue_doors_match("parallel", 1);
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn queue_parallel_doors_match_the_pinned_reference_across_partitions() {
+    assert_queue_doors_match("parallel", 2);
+}
+
+fn assert_queue_doors_match(mode: &str, num_parts: u32) {
+    let fixture = format!("queue_doors_{mode}");
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(format!(
+        "./tests/resources/pt_simulated/{fixture}.yml"
+    )));
+    config.partitioning_mut().num_parts = num_parts;
+    let output_dir = config.output().output_dir.clone();
+    let reference = read_reference(&fixture);
+    verify_same_conditions(&reference, &config);
+
+    run(config);
+
+    let rust = normalize_partitioned_events(&output_dir.join("events"), num_parts);
+    let passenger_types = [
+        "waitingForPt",
+        "PersonEntersPtVehicle",
+        "PersonLeavesPtVehicle",
+    ];
+    for person in ["alighting-passenger", "boarding-passenger"] {
+        let expected: Vec<_> = reference
+            .events
+            .iter()
+            .filter(|event| {
+                event["person"] == person
+                    && passenger_types.contains(&event["type"].as_str().unwrap_or_default())
+            })
+            .collect();
+        let actual: Vec<_> = rust
+            .iter()
+            .filter(|event| {
+                event["person"] == person
+                    && passenger_types.contains(&event["type"].as_str().unwrap_or_default())
+            })
+            .collect();
+        assert_eq!(
+            expected.len(),
+            actual.len(),
+            "passenger {person} event count differs: reference {:?}, Rust {:?}",
+            expected
+                .iter()
+                .map(|event| (&event["type"], &event["time"]))
+                .collect::<Vec<_>>(),
+            actual
+                .iter()
+                .map(|event| (&event["type"], &event["time"]))
+                .collect::<Vec<_>>()
+        );
+        for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
+            for field in ["type", "person", "vehicle", "atStop", "destinationStop"] {
+                assert_eq!(
+                    expected.get(field),
+                    actual.get(field),
+                    "passenger {person} event {index} differs in {field}"
+                );
+            }
+            let stop = match (person, expected["type"].as_str()) {
+                ("alighting-passenger", Some("PersonLeavesPtVehicle"))
+                | ("boarding-passenger", Some("PersonEntersPtVehicle")) => Some("2a"),
+                ("boarding-passenger", Some("PersonLeavesPtVehicle")) => Some("3"),
+                _ => None,
+            };
+            let time = |events: &[Value], stop: &str| {
+                events
+                    .iter()
+                    .find(|event| {
+                        event["type"] == "VehicleArrivesAtFacility" && event["facility"] == stop
+                    })
+                    .unwrap()["time"]
+                    .as_f64()
+                    .unwrap()
+            };
+            let delta = match stop {
+                Some(stop) => {
+                    (actual["time"].as_f64().unwrap() - time(&rust, stop))
+                        - (expected["time"].as_f64().unwrap() - time(&reference.events, stop))
+                }
+                None => actual["time"].as_f64().unwrap() - expected["time"].as_f64().unwrap(),
+            };
+            assert!(
+                delta.abs() <= 1.0,
+                "passenger {person} event {index} differs by {delta}s relative to its stop"
+            );
+        }
+    }
+
+    let expected: Vec<_> = reference
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event["type"].as_str(),
+                Some("VehicleArrivesAtFacility" | "VehicleDepartsAtFacility")
+            )
+        })
+        .collect();
+    let actual: Vec<_> = rust
+        .iter()
+        .filter(|event| {
+            matches!(
+                event["type"].as_str(),
+                Some("VehicleArrivesAtFacility" | "VehicleDepartsAtFacility")
+            )
+        })
+        .collect();
+    assert_eq!(
+        expected.len(),
+        actual.len(),
+        "vehicle stop event count differs"
+    );
+    for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
+        let time_delta = actual["time"].as_f64().unwrap() - expected["time"].as_f64().unwrap();
+        let delay_delta = actual["delay"].as_f64().unwrap() - expected["delay"].as_f64().unwrap();
+        assert_eq!(
+            delay_delta, time_delta,
+            "vehicle stop event {index} delay differs from its time shift"
+        );
+        for field in ["type", "vehicle", "facility"] {
+            assert_eq!(
+                expected.get(field),
+                actual.get(field),
+                "vehicle stop event {index} differs in {field}"
+            );
+        }
+    }
+
+    for facility in ["1", "2a", "3"] {
+        let dwell = |events: &[Value]| {
+            let arrival = events
+                .iter()
+                .find(|event| {
+                    event["type"] == "VehicleArrivesAtFacility" && event["facility"] == facility
+                })
+                .unwrap()["time"]
+                .as_f64()
+                .unwrap();
+            let departure = events
+                .iter()
+                .find(|event| {
+                    event["type"] == "VehicleDepartsAtFacility" && event["facility"] == facility
+                })
+                .unwrap()["time"]
+                .as_f64()
+                .unwrap();
+            departure - arrival
+        };
+        let delta = dwell(&rust) - dwell(&reference.events);
+        assert!(
+            delta.abs() <= 1.0,
+            "dwell at {facility} differs by {delta}s"
+        );
+    }
+
+    let alight_time = reference
+        .events
+        .iter()
+        .find(|event| {
+            event["type"] == "PersonLeavesPtVehicle" && event["person"] == "alighting-passenger"
+        })
+        .unwrap()["time"]
+        .as_f64()
+        .unwrap();
+    let board_time = reference
+        .events
+        .iter()
+        .find(|event| {
+            event["type"] == "PersonEntersPtVehicle" && event["person"] == "boarding-passenger"
+        })
+        .unwrap()["time"]
+        .as_f64()
+        .unwrap();
+    match mode {
+        "serial" => assert!(
+            alight_time < board_time,
+            "serial doors must finish alighting before boarding"
+        ),
+        "parallel" => assert_eq!(
+            alight_time, board_time,
+            "parallel doors must board and alight in the same second"
+        ),
+        _ => unreachable!(),
+    }
+}
+
+/// A car sharing the bus's road link delays the bus in both the pinned reference and QSim.
+#[deterministic_id_test(matsim_rust)]
+fn queue_road_congestion_delays_the_bus_against_a_no_car_baseline() {
+    let baseline_reference = read_reference("queue_road_baseline");
+    let congestion_reference = read_reference("queue_road_congestion");
+    let baseline_config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/queue_road_baseline.yml",
+    ));
+    verify_same_conditions(&baseline_reference, &baseline_config);
+    let baseline_output = baseline_config.output().output_dir.clone();
+
+    run(baseline_config);
+    let baseline_events = normalize_partitioned_events(&baseline_output.join("events"), 1);
+    let baseline_bus_arrival = vehicle_stop_time(&baseline_events, "road_bus", "road_b");
+
+    let java_baseline_arrival = vehicle_stop_time(&baseline_reference.events, "road_bus", "road_b");
+    let java_congestion_arrival =
+        vehicle_stop_time(&congestion_reference.events, "road_bus", "road_b");
+    let expected_delay = java_congestion_arrival - java_baseline_arrival;
+    assert!(expected_delay > 0.0, "the pinned car must delay the bus");
+
+    for num_parts in [1, 2] {
+        let mut config = Config::from_args(CommandLineArgs::new_with_path(
+            "./tests/resources/pt_simulated/queue_road_congestion.yml",
+        ));
+        config.partitioning_mut().num_parts = num_parts;
+        verify_same_conditions(&congestion_reference, &config);
+        let output_dir = config.output().output_dir.clone();
+        run(config);
+        let events = normalize_partitioned_events(&output_dir.join("events"), num_parts);
+        assert_passenger_vehicle_dependencies(&events);
+        let actual_arrival = vehicle_stop_time(&events, "road_bus", "road_b");
+        let actual_delay = actual_arrival - baseline_bus_arrival;
+        assert!(
+            actual_delay > 0.0,
+            "the shared-road car must delay the bus: baseline {baseline_bus_arrival}, congested {actual_arrival}"
+        );
+        assert!(
+            (actual_delay - expected_delay).abs() <= 2.0,
+            "bus delay differs from MATSim: expected {expected_delay}s, got {actual_delay}s"
+        );
+    }
+}
+
+fn vehicle_stop_time(events: &[Value], vehicle: &str, facility: &str) -> f64 {
+    events
+        .iter()
+        .find(|event| {
+            event["type"] == "VehicleArrivesAtFacility"
+                && event["vehicle"] == vehicle
+                && event["facility"] == facility
+        })
+        .unwrap_or_else(|| panic!("missing arrival for {vehicle} at {facility}"))["time"]
+        .as_f64()
+        .unwrap()
 }
 
 /// Fields that name an agent, a service, a mode or a place. These are compared exactly.
@@ -456,6 +1031,19 @@ impl Reference {
 ///
 /// Only the passenger-relevant types are kept, so a vehicle event or an extra field cannot make the
 /// comparison pass or fail for the wrong reason.
+fn normalize_partitioned_events(folder: &Path, num_parts: u32) -> Vec<Value> {
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&events);
+    let mut manager = EventsManager::new();
+    manager.on_any(move |event: &dyn EventTrait| {
+        if let Some(record) = normalize_event(event) {
+            sink.borrow_mut().push(record);
+        }
+    });
+    read_partitioned_events(&mut manager, folder, "events", num_parts, "binpb").unwrap();
+    events.borrow().clone()
+}
+
 fn normalize_events(path: &Path) -> Vec<Value> {
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&events);
@@ -546,6 +1134,58 @@ fn normalize_event(event: &dyn EventTrait) -> Option<Value> {
         record.insert("person".into(), json!(event.person.external()));
         record.insert("mode".into(), json!(event.mode.external()));
         record.insert("distance".into(), json!(event.distance));
+    } else if let Some(event) = any.downcast_ref::<PersonEntersVehicleEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!("PersonEntersPtVehicle"));
+        record.insert("person".into(), json!(event.person.external()));
+        record.insert("vehicle".into(), json!(event.vehicle.external()));
+    } else if let Some(event) = any.downcast_ref::<PersonLeavesVehicleEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!("PersonLeavesPtVehicle"));
+        record.insert("person".into(), json!(event.person.external()));
+        record.insert("vehicle".into(), json!(event.vehicle.external()));
+    } else if let Some(event) = any.downcast_ref::<TransitDriverStartsEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!(TransitDriverStartsEvent::TYPE));
+        record.insert("driverId".into(), json!(event.driver.external()));
+        record.insert("vehicleId".into(), json!(event.vehicle.external()));
+        record.insert("transitLineId".into(), json!(event.line.external()));
+        record.insert("transitRouteId".into(), json!(event.route.external()));
+        record.insert("departureId".into(), json!(event.departure.external()));
+    } else if let Some(event) = any.downcast_ref::<VehicleArrivesAtFacilityEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!(VehicleArrivesAtFacilityEvent::TYPE));
+        record.insert("vehicle".into(), json!(event.vehicle.external()));
+        record.insert("facility".into(), json!(event.facility.external()));
+        record.insert("delay".into(), json!(event.delay));
+    } else if let Some(event) = any.downcast_ref::<VehicleDepartsAtFacilityEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!(VehicleDepartsAtFacilityEvent::TYPE));
+        record.insert("vehicle".into(), json!(event.vehicle.external()));
+        record.insert("facility".into(), json!(event.facility.external()));
+        record.insert("delay".into(), json!(event.delay));
+    } else if let Some(event) = any.downcast_ref::<AgentWaitingForPtEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!(AgentWaitingForPtEvent::TYPE));
+        record.insert("person".into(), json!(event.person.external()));
+        record.insert("atStop".into(), json!(event.at_stop.external()));
+        record.insert(
+            "destinationStop".into(),
+            json!(event.destination_stop.external()),
+        );
+    } else if let Some(event) = any.downcast_ref::<PersonStuckEvent>() {
+        record.insert("time".into(), json!(millis(seconds(event.time))));
+        record.insert("type".into(), json!(PersonStuckEvent::TYPE));
+        record.insert("person".into(), json!(event.person.external()));
+        if let Some(link) = &event.link {
+            record.insert("link".into(), json!(link.external()));
+        }
+        if let Some(mode) = &event.leg_mode {
+            record.insert("legMode".into(), json!(mode.external()));
+        }
+        if let Some(reason) = &event.reason {
+            record.insert("reason".into(), json!(reason));
+        }
     } else {
         return None;
     }

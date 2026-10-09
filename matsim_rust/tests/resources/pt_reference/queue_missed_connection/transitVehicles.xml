@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ns0:vehicleDefinitions xmlns:ns0="http://www.matsim.org/files/dtd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v1.0.xsd">
+	<ns0:vehicleType id="1">
+		<ns0:description>Small Train</ns0:description>
+		<ns0:capacity>
+			<ns0:seats persons="1" />
+			<ns0:standingRoom persons="0" />
+		</ns0:capacity>
+		<ns0:length meter="50.0" />
+	</ns0:vehicleType>
+	<ns0:vehicle id="tr_1" type="1" />
+	<ns0:vehicle id="tr_2" type="1" />
+	<ns0:vehicle id="bus_1" type="1" />
+	<ns0:vehicle id="bus_2" type="1" />
+</ns0:vehicleDefinitions>

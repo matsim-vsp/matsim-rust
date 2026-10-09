@@ -328,12 +328,15 @@ impl LocalLink {
 
     fn push_veh_to_queue(&mut self, vehicle: SimulationVehicle, now: Tick) {
         let speed = self.free_speed.min(vehicle.max_v());
-        // Requiring one queue-travel tick prevents a local zero-tick link from advancing one phase
-        // earlier than the same link split across partitions.
-        let duration = self
-            .clock
-            .secs_to_ticks_floor(self.length / speed)
-            .max(Tick::new(1));
+        // Transit vehicles are checked at a stop in the queue phase, then move across the node
+        // in the next tick. Account for that phase in their link time so each link does not add a
+        // tick of schedule delay; keep one queue tick to preserve partition-independent movement.
+        let duration = self.clock.secs_to_ticks_floor(self.length / speed);
+        let duration = if vehicle.driver().transit_driver().is_some() {
+            duration.saturating_sub(Tick::new(1)).max(Tick::new(1))
+        } else {
+            duration.max(Tick::new(1))
+        };
         let earliest_exit_time = now.saturating_add(duration);
 
         // update state
