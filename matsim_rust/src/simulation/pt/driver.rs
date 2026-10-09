@@ -125,6 +125,10 @@ impl TransitDriver {
         self.next_stop
     }
 
+    pub(crate) fn curr_link_position(&self) -> usize {
+        self.curr_link
+    }
+
     pub(crate) fn next_stop_link(&self) -> &Id<Link> {
         match self.run_leg() {
             RunLeg::Service { route, .. } => &route.stops[self.next_stop].link,

@@ -135,7 +135,13 @@ impl<C: SimCommunicator> LegEngine<C> {
         let timetable_completed = self
             .timetable_transit_engine
             .as_mut()
-            .map(|engine| engine.do_step(now, &mut self.network_engine.network.transit_stops))
+            .map(|engine| {
+                engine.do_step(
+                    now,
+                    &mut self.network_engine.network.transit_stops,
+                    &mut self.net_message_broker,
+                )
+            })
             .unwrap_or_default();
         if let Some(transit) = &mut self.transit_engine {
             for vehicle in transit.depart_drivers(now) {
@@ -175,7 +181,18 @@ impl<C: SimCommunicator> LegEngine<C> {
                     from,
                     self.clock.tick_to_time(now),
                 );
-                self.pass_to_leg_vehicle(now, veh, false);
+                if self
+                    .timetable_transit_engine
+                    .as_ref()
+                    .is_some_and(|engine| engine.owns_vehicle(&veh))
+                {
+                    self.timetable_transit_engine
+                        .as_mut()
+                        .unwrap()
+                        .receive_vehicle(now, veh);
+                } else {
+                    self.pass_to_leg_vehicle(now, veh, false);
+                }
             }
 
             for mut teleportation in msg.take_teleportations() {

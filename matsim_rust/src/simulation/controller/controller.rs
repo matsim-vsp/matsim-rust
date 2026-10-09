@@ -106,13 +106,6 @@ impl ControllerBuilder {
                     .to_owned(),
             );
         }
-        if !transit.deterministic_service_modes.is_empty()
-            && self.scenario.config.partitioning().num_parts != 1
-        {
-            return Err(
-                "transit.deterministic_service_modes currently requires one partition".to_owned(),
-            );
-        }
         for mode in &transit.deterministic_service_modes {
             if self.scenario.config.qsim().main_modes.contains(mode) {
                 return Err(format!(

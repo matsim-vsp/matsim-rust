@@ -1,3 +1,6 @@
+#[path = "../common.rs"]
+mod common;
+
 use macros::deterministic_id_test;
 use matsim_rust::external_services::routing::RoutingServiceAdapterFactory;
 use matsim_rust::external_services::{AdapterHandleBuilder, AsyncExecutor, ExternalServiceType};
@@ -107,6 +110,31 @@ fn simulated_transit_vehicles_reach_the_same_state_in_one_and_two_partitions() {
             );
         }
     }
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn timetable_transit_results_match_with_cross_partition_route() {
+    let run = |num_parts, output_dir: &str| {
+        let mut config = Config::from_args(CommandLineArgs::new_with_path(
+            "./tests/resources/pt_simulated/timetable_mixed.yml",
+        ));
+        config.partitioning_mut().num_parts = num_parts;
+        config.output_mut().output_dir = output_dir.into();
+        let output_dir = config.output().output_dir.clone();
+        let mut scenario = Scenario::load(config);
+        if num_parts > 1 {
+            common::force_train_boundary(&mut scenario);
+        }
+        ControllerBuilder::default_with_scenario(scenario)
+            .build()
+            .unwrap()
+            .run();
+        output_dir
+    };
+
+    let one_part = run(1, "./test_output/simulation/pt_timetable_mixed_one_part");
+    let two_parts = run(2, "./test_output/simulation/pt_timetable_mixed_two_parts");
+    compare_event_folder(one_part.join("events"), two_parts.join("events")).unwrap();
 }
 
 #[deterministic_id_test(matsim_rust)]

@@ -8,6 +8,8 @@
 //! test suite uses: the controller writes the events, and the router the controller built answers
 //! routing requests.
 
+mod common;
+
 use macros::deterministic_id_test;
 use matsim_rust::simulation::InternalAttributes;
 use matsim_rust::simulation::config::{CommandLineArgs, Config};
@@ -144,16 +146,37 @@ fn queue_execution_matches_the_pinned_reference_across_partitions() {
 
 #[deterministic_id_test(matsim_rust)]
 fn timetable_train_and_queue_bus_match_the_pinned_reference() {
-    let config = Config::from_args(CommandLineArgs::new_with_path(
+    assert_timetable_train_and_queue_bus_matches_reference(1);
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn timetable_train_and_queue_bus_match_the_pinned_reference_across_partitions() {
+    assert_timetable_train_and_queue_bus_matches_reference(2);
+}
+
+fn assert_timetable_train_and_queue_bus_matches_reference(num_parts: u32) {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
         "./tests/resources/pt_simulated/timetable_mixed.yml",
     ));
+    config.partitioning_mut().num_parts = num_parts;
+    config.output_mut().output_dir =
+        Path::new("./test_output/simulation").join(format!("pt_timetable_mixed_{num_parts}_parts"));
     let output_dir = config.output().output_dir.clone();
     let reference = read_reference("timetable_mixed");
     verify_same_conditions(&reference, &config);
 
-    run(config);
+    if num_parts == 1 {
+        run(config);
+    } else {
+        let mut scenario = Scenario::load(config);
+        common::force_train_boundary(&mut scenario);
+        ControllerBuilder::default_with_scenario(scenario)
+            .build()
+            .unwrap()
+            .run();
+    }
 
-    let rust = normalize_partitioned_events(&output_dir.join("events"), 1);
+    let rust = normalize_partitioned_events(&output_dir.join("events"), num_parts);
     let relevant = |event: &&Value| {
         !event
             .get("person")

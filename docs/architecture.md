@@ -68,11 +68,11 @@ Transit vehicles are simulated when `transit.simulate_vehicles` is set, and tele
 a `ControllerScenario` then expands the schedule into per-departure vehicle runs once, before the Mobsim threads start, and
 every partition shares them. Routes whose service mode is listed in
 `transit.deterministic_service_modes` run stop-to-stop at timetable offsets; other services use the queue network engine.
-The timetable engine currently requires one partition. Queue vehicles are owned by the partition of their start link and
-drive through the network engine: they occupy links and compete for capacity like every other vehicle. A
-passenger waits on the partition that owns its access stop's link, which is the same partition as every vehicle serving that
-stop, so the waiting lists never cross partitions. A passenger that rides past a partition boundary travels inside the
-vehicle's backpack, and the partition where it alights resumes the agent.
+Timetable vehicles start on the partition of their first route link. Their scheduled link transitions hand the vehicle,
+driver, and riders to the next link's owner through the normal vehicle migration message. This keeps boarding queues on
+the partition that owns each stop link, and the worker that handles an alighting stop resumes the passenger there. Queue
+vehicles use the network engine and occupy links and compete for capacity like every other vehicle; timetable vehicles
+follow their scheduled stop times and do not consume network link capacity.
 
 Each worker owns a thread-local travel-time collector shared between its event buses without a cross-thread lock.
 The collector associates vehicles with the network mode of their current leg and records link observations separately

@@ -131,7 +131,7 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn send(&mut self, entity: PartitionChangeEntity<'_>) -> BackpackingAttachment {
-        let person_ids = Self::person_ids(entity);
+        let person_ids = self.person_ids(entity);
         if let PartitionChangeEntity::Vehicle(vehicle) = entity {
             self.vehicle_id2person_ids.remove(vehicle.id());
         }
@@ -157,7 +157,7 @@ impl BackpackingDataCollector {
         entity: PartitionChangeEntity<'_>,
         attachment: BackpackingAttachment,
     ) {
-        let expected_person_ids = Self::person_ids(entity);
+        let expected_person_ids = self.person_ids(entity);
         assert_eq!(
             attachment.backpacks.len(),
             expected_person_ids.len(),
@@ -193,13 +193,20 @@ impl BackpackingDataCollector {
         }
     }
 
-    fn person_ids(entity: PartitionChangeEntity<'_>) -> Vec<Id<InternalPerson>> {
+    fn person_ids(&self, entity: PartitionChangeEntity<'_>) -> Vec<Id<InternalPerson>> {
         match entity {
             PartitionChangeEntity::Vehicle(vehicle) => std::iter::once(vehicle.driver().id())
                 .chain(vehicle.passengers().iter().map(Identifiable::id))
+                .filter(|person| !self.transit_runs.is_driver(person))
                 .cloned()
                 .collect(),
-            PartitionChangeEntity::TeleportationAgent(agent) => vec![agent.id().clone()],
+            PartitionChangeEntity::TeleportationAgent(agent) => {
+                if self.transit_runs.is_driver(agent.id()) {
+                    Vec::new()
+                } else {
+                    vec![agent.id().clone()]
+                }
+            }
         }
     }
 
