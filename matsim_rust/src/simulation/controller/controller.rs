@@ -415,7 +415,8 @@ impl ControllerBuilder {
                         config.transit().range_query_settings.clone(),
                         config.transit().route_selector_settings.clone(),
                         config.computational_setup().random_seed,
-                    ),
+                    )
+                    .with_transfer_penalty(config.transit().transfer_penalty.clone()),
                 ),
             );
         }

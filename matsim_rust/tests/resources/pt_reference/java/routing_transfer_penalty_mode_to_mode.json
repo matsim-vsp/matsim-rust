@@ -1,0 +1,93 @@
+{
+  "schema_version" : 2,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "ea20bc2e08bca6192e2b99956b1b2f3aee81debe118ceac4d142f36ede5c300a",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "transit_schedule.xml",
+      "sha256" : "b39857c2fffb2a5377a869a7d34988deb5c8d484d7cda312479564efa9551bf4"
+    } ]
+  },
+  "itineraries" : [ {
+    "id" : "penalized_train_to_bus",
+    "request" : {
+      "id" : "penalized_train_to_bus",
+      "mode" : "pt",
+      "person" : null,
+      "departure_time" : 28800.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 28800.0,
+      "arrival_time" : 28800.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 28800.0,
+      "arrival_time" : 29400.0,
+      "distance" : 2400.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "a_to_b",
+        "boarding_time" : 28800.0,
+        "access_stop" : "ra",
+        "egress_stop" : "rb"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 29400.0,
+      "arrival_time" : 29551.0,
+      "distance" : 130.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 29556.0,
+      "arrival_time" : 30300.0,
+      "distance" : 100.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "b_to_c",
+        "boarding_time" : 29700.0,
+        "access_stop" : "rb_platform",
+        "egress_stop" : "rc"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 30300.0,
+      "arrival_time" : 30300.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 9.0,
+    "arrival_time" : 30300.0
+  } ],
+  "events" : [ ]
+}

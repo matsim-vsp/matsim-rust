@@ -1,0 +1,49 @@
+# Rust side of the mode-to-mode transfer-penalty reference fixture. See config.xml for the MATSim
+# counterpart and docs/pt_java_reference.md for the fixture contract. Input paths are relative to the
+# crate root.
+#
+# A 2 utils penalty on train -> bus makes the faster bus transfer at rb_platform more expensive than
+# the 1.5 utils its 8 extra minutes of travel cost, so the slower rail transfer wins. The default
+# line-switch utility still applies on top, because MATSim's mode-specific calculator ignores
+# base_cost without a configured hourly cost.
+modules:
+  network:
+    type: Network
+    path: ./assets/pt_tutorial/multimodalnetwork.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/pt_tutorial/vehicles.xml
+  transit:
+    type: Transit
+    schedule_path: ./tests/resources/pt_reference/routing_transfer_penalty_mode_to_mode/transit_schedule.xml
+    transfer_penalty:
+      by_transport_mode:
+        - from_mode: train
+          to_mode: bus
+          transfer_penalty: 2.0
+  partitioning:
+    type: Partitioning
+    num_parts: 1
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/pt_reference_routing_transfer_penalty_mode_to_mode
+  routing:
+    type: Routing
+    mode: UsePlans
+    # Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. The competing candidates in the
+    # recorded request are decided by these values.
+    teleported_mode_params:
+      - mode: walk
+        beeline_distance_factor: 1.3
+        teleported_mode_speed: 0.8333333333333334
+  qsim:
+    type: QSim
+    start_time: 0
+    end_time: 86400
+  controller:
+    type: Controller
+    last_iteration: 0
