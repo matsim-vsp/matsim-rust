@@ -2,6 +2,7 @@ use crate::simulation::InternalAttributes;
 use crate::simulation::config::{
     IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection, ModalLinkSelection,
     TransferConstruction, TransitRangeQuerySettings, TransitRouteSelectorSettings,
+    TransitTransferPenalty,
 };
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
@@ -1699,8 +1700,9 @@ impl TransitRoutingModule {
 
     #[cfg(test)]
     fn path_cost(&self, path: &TransitPath, departure_time: SimTime) -> Duration {
+        let routing_params = self.resolve_routing_params("");
         path.arrival.duration_since(departure_time)
-            + Duration::from_secs_f64(self.transfer_penalty_seconds(&path.rides))
+            + Duration::from_secs_f64(self.transfer_penalty_seconds(&path.rides, &routing_params))
     }
 
     fn path_cost_equivalent_seconds(
@@ -1727,7 +1729,7 @@ impl TransitRoutingModule {
         routing_params: &ResolvedRoutingParams,
     ) -> f64 {
         let base = arrival.duration_since(departure_time).as_secs_f64()
-            + self.transfer_penalty_seconds(rides);
+            + self.transfer_penalty_seconds(rides, routing_params);
         if !self.use_passenger_mode_mapping {
             return base;
         }
@@ -1774,7 +1776,11 @@ impl TransitRoutingModule {
     /// MATSim's `newArrivalTime - firstDepartureTime`. `ModeSpecificTransferCostCalculator` instead
     /// adds the configured transport-mode offset per transfer and ignores travel time entirely; it
     /// is selected by configuring any mode pair, and configuration rejects combining the two.
-    fn transfer_penalty_seconds(&self, rides: &[Ride]) -> f64 {
+    fn transfer_penalty_seconds(
+        &self,
+        rides: &[Ride],
+        routing_params: &ResolvedRoutingParams,
+    ) -> f64 {
         let penalty = &self.transfer_penalty;
         if rides.len() < 2 {
             return 0.0;
@@ -1784,8 +1790,8 @@ impl TransitRoutingModule {
         // mode factors below already use, so a config that changes the pt time weight reprices the
         // penalty consistently instead of leaving it stale. At MATSim's pinned defaults this is
         // 3600 / 12 = 300 seconds per utility.
-        let seconds_per_utility =
-            3600.0 / (self.performing_utility_per_hour - self.default_pt_travel_utility_per_hour);
+        let seconds_per_utility = 3600.0
+            / (routing_params.performing_utility_per_hour - routing_params.pt_utility_per_hour);
         let utils = if penalty.is_mode_specific() {
             // The first ride has no transfer before it, so each following ride contributes the
             // cost of switching from the mode it arrived on.
@@ -2522,6 +2528,7 @@ mod route_proposal_tests {
     use crate::simulation::config::{
         IntermodalAccessEgress, IntermodalLegOnlyHandling, IntermodalModeSelection,
         TransferConstruction, TransitRangeQuerySettings, TransitRouteSelectorSettings,
+        TransitTransferPenalty,
     };
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
@@ -2694,6 +2701,179 @@ mod route_proposal_tests {
 
         assert_eq!(results[0].outcome, TransitSkimOutcome::Walking);
         assert_eq!(results[0].travel_time, Some(Duration::from_secs(58 * 60)));
+    }
+
+    /// The hourly penalty is priced against when riding began, not when the vehicle leaves the
+    /// first stop. MATSim uses `max(agent arrival, vehicle arrival)` (SwissRailRaptorCore:700),
+    /// so a vehicle dwelling 120 s at its first stop starts that clock 120 s earlier and the same
+    /// ride is charged 120 s / 3600 more per transfer. Asserted on one fixed pair of rides so the
+    /// comparison is the origin alone rather than two different journeys.
+    #[deterministic_id_test]
+    fn an_hourly_penalty_starts_at_the_vehicle_arrival_not_its_departure() {
+        let hourly = TransitTransferPenalty {
+            // A non-zero hourly cost is what makes `base_cost` take effect at all.
+            per_travel_time_hour: 6.0,
+            base_cost: 0.0,
+            ..TransitTransferPenalty::default()
+        };
+        let ride =
+            |boarding: SimTime, vehicle_arrival_at_board: SimTime, alighting: SimTime| Ride {
+                line: Id::create("line"),
+                route: Id::create("route"),
+                board: Id::create("ra"),
+                alight: Id::create("rc"),
+                boarding_time: boarding,
+                vehicle_arrival_at_board,
+                alighting_time: alighting,
+                distance: 0.0,
+                transport_mode: "train".to_string(),
+                passenger_mode: "pt".to_string(),
+                transfer_before: None,
+            };
+        let cost_in_utils = |rides: &[Ride]| {
+            let router = reference_router(reference_schedule(), 0.8333333333333334)
+                .with_transfer_penalty(hourly.clone());
+            let params = router.resolve_routing_params("");
+            router.transfer_penalty_seconds(rides, &params) / 300.0
+        };
+
+        // Two rides. The first dwells 120 s at its boarding stop: the vehicle reaches the stop at
+        // 08:00 but departs at 08:02, so every later stop is reached 120 s later too. Pricing the
+        // penalty from boarding instead of arrival would cancel that 120 s out entirely.
+        let dwelling = [
+            ride(
+                SimTime::from_secs(8 * 3600 + 120),
+                SimTime::from_secs(8 * 3600),
+                SimTime::from_secs(8 * 3600 + 720),
+            ),
+            ride(
+                SimTime::from_secs(8 * 3600 + 1020),
+                SimTime::from_secs(8 * 3600 + 1020),
+                SimTime::from_secs(8 * 3600 + 1620),
+            ),
+        ];
+        let no_dwell = [
+            ride(
+                SimTime::from_secs(8 * 3600),
+                SimTime::from_secs(8 * 3600),
+                SimTime::from_secs(8 * 3600 + 600),
+            ),
+            ride(
+                SimTime::from_secs(8 * 3600 + 900),
+                SimTime::from_secs(8 * 3600 + 900),
+                SimTime::from_secs(8 * 3600 + 1500),
+            ),
+        ];
+
+        let expected = 120.0 / 3600.0 * hourly.per_travel_time_hour;
+        assert!(
+            (cost_in_utils(&dwelling) - cost_in_utils(&no_dwell) - expected).abs() < 1e-9,
+            "boarding 120 s after the vehicle arrived should cost {expected} utils more per \
+             transfer, but the penalty moved by {}",
+            cost_in_utils(&dwelling) - cost_in_utils(&no_dwell)
+        );
+    }
+
+    #[deterministic_id_test]
+    fn a_penalty_worth_more_than_the_time_it_saves_rejects_the_transfer() {
+        let destination = Coordinate::new_2d(3950.0, 1050.0);
+        let access = [(Id::create("ra"), 0.0)];
+        let egress = HashSet::from([Id::create("rc")]);
+        let departure = SimTime::from_secs(8 * 3600);
+        let chosen = |router: &TransitRoutingModule| {
+            router
+                .find_best_path(&destination, departure, &access, &egress)
+                .unwrap()
+                .rides
+                .iter()
+                .map(|ride| ride.route.external().to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        let default = reference_router(reference_schedule(), 0.8333333333333334);
+        assert_eq!(chosen(&default), ["a_to_b", "b_to_c"]);
+
+        // 25 utils is 7500 equivalent seconds, more than the 1500 s the transfer saves, so the
+        // direct service wins. 20 utils would not: the boundary is checked below, not asserted.
+        let penalized = reference_router(reference_schedule(), 0.8333333333333334)
+            .with_transfer_penalty(TransitTransferPenalty {
+                base_cost: 25.0,
+                per_travel_time_hour: 1.0,
+                ..TransitTransferPenalty::default()
+            });
+        assert_eq!(chosen(&penalized), ["direct"]);
+    }
+
+    /// The mode-to-mode penalty is keyed on the route's transport mode, not on the mapped
+    /// passenger mode: penalizing train -> bus leaves the reverse direction free.
+    #[deterministic_id_test]
+    fn a_mode_to_mode_penalty_only_costs_its_own_direction() {
+        let destination = Coordinate::new_2d(3950.0, 1050.0);
+        let access = [(Id::create("ra"), 0.0)];
+        let egress = HashSet::from([Id::create("rc")]);
+        let departure = SimTime::from_secs(8 * 3600);
+        let schedule = || {
+            let mut schedule = reference_schedule();
+            schedule
+                .lines_mut()
+                .get_mut(&Id::<TransitLine>::create("Reference Line"))
+                .unwrap()
+                .routes
+                .get_mut(&Id::<TransitRoute>::create("b_to_c"))
+                .unwrap()
+                .transport_mode = Id::create("bus");
+            schedule
+        };
+        let chosen = |router: &TransitRoutingModule| {
+            router
+                .find_best_path(&destination, departure, &access, &egress)
+                .unwrap()
+                .rides
+                .iter()
+                .map(|ride| ride.route.external().to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        let penalty = TransitTransferPenalty {
+            by_transport_mode: vec![
+                crate::simulation::config::TransitModeToModeTransferPenalty {
+                    from_mode: "train".to_string(),
+                    to_mode: "bus".to_string(),
+                    transfer_penalty: 25.0,
+                },
+            ],
+            ..TransitTransferPenalty::default()
+        };
+
+        assert_eq!(
+            chosen(&reference_router(schedule(), 0.8333333333333334)),
+            ["a_to_b", "b_to_c"]
+        );
+        assert_eq!(
+            chosen(
+                &reference_router(schedule(), 0.8333333333333334)
+                    .with_transfer_penalty(penalty.clone())
+            ),
+            ["direct"]
+        );
+        // The same 25 utils on the unconfigured direction changes nothing, which shows the penalty
+        // was applied by mode pair rather than as an untargeted cost per transfer.
+        let reverse = TransitTransferPenalty {
+            by_transport_mode: vec![
+                crate::simulation::config::TransitModeToModeTransferPenalty {
+                    from_mode: "bus".to_string(),
+                    to_mode: "train".to_string(),
+                    transfer_penalty: 25.0,
+                },
+            ],
+            ..penalty
+        };
+        assert_eq!(
+            chosen(
+                &reference_router(schedule(), 0.8333333333333334).with_transfer_penalty(reverse)
+            ),
+            ["a_to_b", "b_to_c"]
+        );
     }
 
     #[deterministic_id_test]

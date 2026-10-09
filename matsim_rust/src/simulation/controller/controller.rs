@@ -363,7 +363,8 @@ impl ControllerBuilder {
                 config.transit().range_query_settings.clone(),
                 config.transit().route_selector_settings.clone(),
                 config.computational_setup().random_seed,
-            );
+            )
+            .with_transfer_penalty(config.transit().transfer_penalty.clone());
             if config.transit().use_intermodal_access_egress {
                 if config.transit().intermodal_access_egress.is_empty() {
                     return Err("transit.use_intermodal_access_egress requires at least one transit.intermodal_access_egress entry".to_owned());

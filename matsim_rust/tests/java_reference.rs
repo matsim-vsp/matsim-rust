@@ -851,6 +851,115 @@ fn intermodal_feeder_only_routes_match_the_pinned_reference() {
 }
 
 /// Person and stop filters choose different feeder modes for otherwise identical requests.
+
+/// A transfer penalty large enough to outweigh the travel time it saves makes both routers reject
+/// the faster transfer and take the direct service. The same schedule and request take the transfer
+/// under the pinned default penalty, which `routing_direct_vs_transfer` already records, so the two
+/// fixtures together show the penalty deciding between the same two itineraries.
+#[deterministic_id_test(matsim_rust)]
+fn a_penalized_transfer_loses_to_the_direct_service() {
+    let request = load_request("routing_transfer_penalty_shared_stop");
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_transfer_penalty_shared_stop/config.yml",
+    ));
+    let reference = read_reference("routing_transfer_penalty_shared_stop");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+    let rust = calc_pt_route(&request, &router);
+
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == request["id"])
+        .expect("the request is recorded in the reference");
+
+    // The direct service arrives 25 minutes later than the transfer this fixture penalizes away.
+    assert_eq!(rides(expected), vec![ride("direct", "ra", "rc", 28800.0)]);
+    assert_eq!(arrival_time(expected), 31_800.0);
+
+    assert_eq!(
+        rides(&rust),
+        rides(expected),
+        "Rust's penalized route differs from the pinned Java itinerary"
+    );
+    assert_eq!(arrival_time(&rust), arrival_time(expected));
+    // The direct route has no transfer, so this pins that the penalty is not charged on a journey
+    // that never transfers, and that Rust's total cost converts to Java's utility units exactly.
+    assert_eq!(rides(&rust).len(), 1);
+    assert_eq!(
+        expected["generalized_cost"].as_f64(),
+        Some(rust_cost_utils(&rust, &request)),
+        "Rust's generalized cost differs from MATSim's selected-route cost"
+    );
+}
+
+/// A penalty on one transport-mode pair changes which service a mixed-mode journey takes: the
+/// faster bus transfer loses to the slower rail transfer, while the direct service stays available.
+#[deterministic_id_test(matsim_rust)]
+fn a_mode_to_mode_penalty_replaces_the_bus_transfer_with_the_rail_transfer() {
+    let request = load_request("routing_transfer_penalty_mode_to_mode");
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_transfer_penalty_mode_to_mode/config.yml",
+    ));
+    let reference = read_reference("routing_transfer_penalty_mode_to_mode");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+    let rust = calc_pt_route(&request, &router);
+
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == request["id"])
+        .expect("the request is recorded in the reference");
+
+    assert_eq!(
+        rides(expected),
+        vec![
+            ride("a_to_b", "ra", "rb", 28800.0),
+            ride("b_to_c", "rb_platform", "rc", 29700.0),
+        ],
+        "the reference no longer switches from the bus to the rail transfer"
+    );
+    assert_eq!(arrival_time(expected), 30_300.0);
+
+    assert_eq!(
+        rides(&rust),
+        rides(expected),
+        "Rust's penalized route differs from the pinned Java itinerary"
+    );
+    assert_eq!(arrival_time(&rust), arrival_time(expected));
+    assert!(
+        !rides(&rust)
+            .iter()
+            .any(|ride| ride["route"] == "b_to_c_bus"),
+        "Rust still takes the penalized bus transfer"
+    );
+
+    // KNOWN DEVIATION: the selected route, its rides and its arrival all match, but the recorded
+    // route cost does not. MATSim's ModeSpecificTransferCostCalculator ignores its
+    // `existingTransferCosts` argument and returns the whole per-transfer cost, which
+    // SwissRailRaptorCore then re-adds while walking the path; this router charges one cost per
+    // transfer. The two numbers are pinned so the gap stays visible and cannot drift silently.
+    // `routing_transfer_penalty_shared_stop` shows the costs agreeing exactly where the route has
+    // no transfers, so the conversion itself is sound and this is specific to mode-specific
+    // penalties. Closing the gap means porting MATSim's incremental transfer accounting; see
+    // docs/pt_java_reference.md.
+    assert_eq!(
+        expected["generalized_cost"].as_f64(),
+        Some(9.0),
+        "the reference's recorded route cost changed"
+    );
+    assert_eq!(
+        rust_cost_utils(&rust, &request),
+        6.0,
+        "Rust's route cost changed; if this moved, re-check the known deviation above before \
+         changing the reference"
+    );
+}
+
+/// The range profile includes both inclusive window boundaries and never repeats yesterday's
+/// schedule after the final service. The pinned Java router falls back to walking when no PT route
+/// exists; Rust reports no PT path at that boundary.
 #[deterministic_id_test(matsim_rust)]
 fn intermodal_person_and_stop_eligibility_match_the_pinned_reference() {
     let config = Config::from_args(CommandLineArgs::new_with_path(
