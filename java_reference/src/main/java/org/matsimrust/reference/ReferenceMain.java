@@ -173,7 +173,7 @@ public final class ReferenceMain {
             itinerary.put("id", request.string("id"));
             itinerary.set("request", request.node());
 
-            Person person = request.field("person") == null
+            Person person = !request.node().hasNonNull("person")
                     ? null
                     : controler.getScenario().getPopulation().getPersons().get(Id.create(request.string("person"), Person.class));
             Facility from = facility(controler.getScenario(), "probe_from_" + request.string("id"), request.field("from"));

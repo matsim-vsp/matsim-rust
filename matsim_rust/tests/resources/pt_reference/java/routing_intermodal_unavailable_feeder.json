@@ -1,0 +1,67 @@
+{
+  "schema_version" : 2,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "bd04efb1f57747b1d7748849e7e992c1987b7bf89742b0b3376e0d8325d69906",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "plans.xml",
+      "sha256" : "8df14af00677c4a3eb87aa1fa489f0184a459c72fb19e189c7a4e5e381d647eb"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "transit_schedule.xml",
+      "sha256" : "93a46aa3c6ecdbb4a83ad521bbcd85eeb29cc2cf57b21642970fc118d14cc774"
+    } ]
+  },
+  "itineraries" : [ {
+    "id" : "unavailable_bike_feeder",
+    "request" : {
+      "id" : "unavailable_bike_feeder",
+      "mode" : "pt",
+      "person" : "eligible",
+      "departure_time" : 28800.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1000.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "11",
+        "x" : 1100.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 28800.0,
+      "arrival_time" : 28878.0,
+      "distance" : 65.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 28878.0,
+      "arrival_time" : 28956.0,
+      "distance" : 65.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 0.52,
+    "arrival_time" : 28956.0
+  } ],
+  "events" : [ ]
+}

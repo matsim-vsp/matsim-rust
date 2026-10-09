@@ -19,7 +19,8 @@ use matsim_rust::simulation::events::{
 use matsim_rust::simulation::id::Id;
 use matsim_rust::simulation::replanning::routing::{Facility, RoutingRequestBuilder, TripRouter};
 use matsim_rust::simulation::scenario::network::Link;
-use matsim_rust::simulation::scenario::population::InternalPerson;
+use matsim_rust::simulation::scenario::population::Population;
+use matsim_rust::simulation::scenario::population::{InternalPerson, InternalPlanElement};
 use matsim_rust::simulation::scenario::{Coordinate, Scenario};
 use matsim_rust::simulation::time::SimTime;
 use serde_json::{Map, Value, json};
@@ -175,7 +176,7 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
     let reference = read_reference("routing_direct_vs_transfer");
     verify_same_conditions(&reference, &config);
     let router = run(config);
-    let rust = calc_pt_route(&request, &router);
+    let rust = calc_pt_route(&request, &router, None);
 
     let expected = reference
         .itineraries
@@ -232,6 +233,178 @@ fn a_faster_shared_stop_transfer_beats_a_direct_service() {
     );
 }
 
+/// With no PT ride between the endpoints, `avoid` returns the cheapest feeder-only itinerary.
+#[deterministic_id_test(matsim_rust)]
+fn intermodal_feeder_only_routes_match_the_pinned_reference() {
+    let request = load_request("routing_intermodal_access_egress");
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_intermodal_access_egress/config.yml",
+    ));
+    let reference = read_reference("routing_intermodal_access_egress");
+    verify_same_conditions(&reference, &config);
+    let router = run(config);
+    let rust = calc_pt_route(&request, &router, None);
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == request["id"])
+        .expect("the request is recorded in the reference");
+    let modes = |itinerary: &Value| {
+        itinerary["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(modes(&expected), vec!["bike", "bike"]);
+    assert_eq!(
+        modes(&rust),
+        modes(&expected),
+        "Rust's feeder-only modes differ from MATSim"
+    );
+    assert_eq!(rust["arrival_time"], expected["arrival_time"]);
+}
+
+/// Person and stop filters choose different feeder modes for otherwise identical requests.
+#[deterministic_id_test(matsim_rust)]
+fn intermodal_person_and_stop_eligibility_match_the_pinned_reference() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_intermodal_eligibility/config.yml",
+    ));
+    let reference = read_reference("routing_intermodal_eligibility");
+    verify_same_conditions(&reference, &config);
+    let (router, population) = run_with_population(config);
+
+    for (index, expected_modes) in [
+        (0, vec!["bike", "walk", "walk", "bike"]),
+        (1, vec!["walk", "walk"]),
+        (2, vec!["walk", "walk"]),
+    ] {
+        let request = load_request_at("routing_intermodal_eligibility", index);
+        let person_id = Id::<InternalPerson>::create(request["person"].as_str().unwrap());
+        let person = population
+            .persons
+            .get(&person_id)
+            .expect("the request's person is loaded from the fixture");
+        let rust = calc_pt_route(&request, &router, Some(person));
+        let expected = reference
+            .itineraries
+            .iter()
+            .find(|itinerary| itinerary["id"] == request["id"])
+            .expect("the request is recorded in the reference");
+        let modes = |itinerary: &Value| {
+            itinerary["legs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|leg| leg["mode"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(modes(expected), expected_modes);
+        assert_eq!(modes(&rust), modes(expected), "request {}", request["id"]);
+        assert!(
+            rust["legs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|leg| { leg["routing_mode"] == "pt" })
+        );
+        assert_eq!(rust["arrival_time"], expected["arrival_time"]);
+    }
+}
+
+/// A feeder mode with no stop in its configured search radius is ignored in favor of walking.
+#[deterministic_id_test(matsim_rust)]
+fn unavailable_feeder_route_matches_the_pinned_reference() {
+    let request = load_request("routing_intermodal_unavailable_feeder");
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_intermodal_unavailable_feeder/config.yml",
+    ));
+    let reference = read_reference("routing_intermodal_unavailable_feeder");
+    verify_same_conditions(&reference, &config);
+    let (router, population) = run_with_population(config);
+    let person_id = Id::<InternalPerson>::create(request["person"].as_str().unwrap());
+    let person = population.persons.get(&person_id).unwrap();
+    let rust = calc_pt_route(&request, &router, Some(person));
+    let expected = reference
+        .itineraries
+        .iter()
+        .find(|itinerary| itinerary["id"] == request["id"])
+        .expect("the request is recorded in the reference");
+
+    assert_eq!(
+        rust["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["walk", "walk"]
+    );
+    assert_eq!(
+        rust["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|leg| leg["mode"].as_str().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        rust["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|leg| { leg["routing_mode"] == "pt" })
+    );
+    assert_eq!(rust["arrival_time"], expected["arrival_time"]);
+}
+
+/// Plan preparation routes a pt trip through feeder modes, QSim executes those modes, and scoring
+/// uses their travel times while the routing mode remains pt.
+#[deterministic_id_test(matsim_rust)]
+fn generated_intermodal_plan_executes_and_scores_its_feeder_legs() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_intermodal_execution/config.yml",
+    ));
+    let (_router, population) = run_with_population(config);
+    let person = population
+        .persons
+        .get(&Id::create("generated-intermodal"))
+        .expect("the fixture person is retained after simulation");
+    let plan = person.selected_plan().expect("the plan remains selected");
+    let legs = plan
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            InternalPlanElement::Leg(leg) => Some(leg),
+            InternalPlanElement::Activity(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        legs.iter()
+            .map(|leg| leg.mode.external())
+            .collect::<Vec<_>>(),
+        ["bike", "bike"]
+    );
+    assert!(legs.iter().all(|leg| {
+        leg.routing_mode
+            .as_ref()
+            .is_some_and(|mode| mode.external() == "pt")
+    }));
+    assert!(legs.iter().all(|leg| leg.trav_time.is_some()));
+    assert_eq!(plan.score, Some(-10.0));
+}
+
 /// A transfer between separate platforms retains the walk leg and its five-second safety margin.
 #[deterministic_id_test(matsim_rust)]
 fn a_distinct_platform_transfer_matches_the_pinned_reference() {
@@ -273,7 +446,7 @@ fn a_distinct_platform_transfer_matches_the_pinned_reference() {
         ),
     ] {
         let request = load_request_at("routing_distinct_platform_transfer", index);
-        let rust = calc_pt_route(&request, &router);
+        let rust = calc_pt_route(&request, &router, None);
         let expected = reference
             .itineraries
             .iter()
@@ -362,12 +535,15 @@ fn a_distinct_platform_transfer_executes_through_the_simulation_runner() {
 /// controller or the scenario loader shows up in the fixtures rather than hiding behind a
 /// fixture-specific setup.
 fn run(config: Config) -> TripRouter {
+    run_with_population(config).0
+}
+
+fn run_with_population(config: Config) -> (TripRouter, Population) {
     let scenario = Scenario::load(config);
     let controller = ControllerBuilder::default_with_scenario(scenario)
         .build()
         .unwrap();
-    let (router, _population) = controller.run();
-    router
+    controller.run()
 }
 
 fn load_request(fixture: &str) -> Value {
@@ -577,7 +753,7 @@ fn millis(value: f64) -> f64 {
     (value * 1_000.0).round() / 1_000.0
 }
 
-fn calc_pt_route(request: &Value, router: &TripRouter) -> Value {
+fn calc_pt_route(request: &Value, router: &TripRouter, person: Option<&InternalPerson>) -> Value {
     let facility = |end: &str| {
         let end = &request[end];
         Facility::new_link_wrapper(
@@ -596,6 +772,7 @@ fn calc_pt_route(request: &Value, router: &TripRouter) -> Value {
                 .departure_time(SimTime::from_secs(
                     request["departure_time"].as_f64().unwrap() as u64,
                 ))
+                .person(person)
                 .build()
                 .unwrap(),
         )
@@ -625,6 +802,7 @@ fn calc_pt_route(request: &Value, router: &TripRouter) -> Value {
         }
         legs.push(json!({
             "mode": leg.mode.external(),
+            "routing_mode": leg.routing_mode.as_ref().map(|mode| mode.external()),
             "departure_time": departure,
             "arrival_time": millis(departure + travel_time),
             "distance": leg.route.as_ref().and_then(|route| route.as_generic().distance()),

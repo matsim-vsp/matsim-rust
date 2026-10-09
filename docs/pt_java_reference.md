@@ -7,7 +7,7 @@ recording at the two boundaries where behavior is observable: `TripRouter` for i
 simulation integration runner for execution events.
 
 It is deliberately a *harness*, not a compatibility claim. A differential test can only detect a
-difference that a fixture exercises, and the fixture corpus is currently three scenarios wide. Every
+difference that a fixture exercises, and the fixture corpus is still small and focused. Every
 divergence it reports is a fact about those scenarios, not a measure of overall parity.
 The skims and external routing service entry points remain unchanged and are not covered here; their
 reference semantics belong to ticket 11.
@@ -91,6 +91,25 @@ route-cost objective. Their itineraries include the transfer walk, its 130 m bee
 distance, and the pinned five-second transfer-walk margin. A separate Rust runner config supplies
 a person plan so the generated access, transfer and egress legs execute in QSim; the routing test
 also round-trips that itinerary through XML and protobuf population files.
+
+### `routing_intermodal_access_egress`
+
+The endpoints are near one stop and no transit ride is useful. `avoid` returns the feeder-only
+itinerary, selecting bike over walking by cost. This pins the no-PT policy and the walk/bike
+alternative.
+
+### `routing_intermodal_eligibility`
+
+Three requests cover an eligible person at a bike-enabled stop, an ineligible person, and an
+eligible person at a stop that disallows bike access. The enabled stop maps the bike feeder to a
+different link, so the returned plan also includes MATSim's zero-time walk connectors. The Rust
+fixture compares passenger modes, arrival times and the outer `pt` routing mode.
+
+### `routing_intermodal_unavailable_feeder`
+
+The bike mode is eligible, but its capped search radius contains no eligible stop. MATSim and Rust
+skip that feeder candidate and return the available walking itinerary. A separate Rust unit test
+covers a feeder router that returns `NoPath` for a candidate stop.
 
 ## Comparison rules
 
