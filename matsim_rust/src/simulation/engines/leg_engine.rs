@@ -4,9 +4,12 @@ use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
 use crate::simulation::config::QSim;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
-use crate::simulation::engines::leg_engine::ResponsibleEngine::{Leg, Teleportation, Transit};
+use crate::simulation::engines::leg_engine::ResponsibleEngine::{
+    Leg, Teleportation, TimetableTransit, Transit,
+};
 use crate::simulation::engines::network_engine::NetworkEngine;
 use crate::simulation::engines::teleportation_engine::TeleportationEngine;
+use crate::simulation::engines::timetable_transit_engine::TimetableTransitEngine;
 use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::{
     PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
@@ -32,6 +35,7 @@ enum ResponsibleEngine {
     Leg,
     Teleportation,
     Transit,
+    TimetableTransit,
 }
 
 pub struct LegEngine<C: SimCommunicator> {
@@ -39,6 +43,7 @@ pub struct LegEngine<C: SimCommunicator> {
     network_engine: NetworkEngine,
     /// Present when transit vehicles are simulated instead of teleporting PT legs.
     transit_engine: Option<TransitEngine>,
+    timetable_transit_engine: Option<TimetableTransitEngine>,
     garage: Arc<Garage>,
     net_message_broker: NetMessageBroker<C>,
     departure_handler: VehicularDepartureHandler,
@@ -55,6 +60,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         config: &QSim,
         comp_env: ThreadLocalComputationalEnvironment,
         transit_engine: Option<TransitEngine>,
+        timetable_transit_engine: Option<TimetableTransitEngine>,
     ) -> Self {
         let clock = SimClock::new(config.ticks_per_second);
         let main_modes: IntSet<Id<String>> = config
@@ -72,6 +78,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             teleportation_engine: TeleportationEngine::new(comp_env.clone(), clock),
             network_engine: NetworkEngine::new(network, comp_env.clone(), clock),
             transit_engine,
+            timetable_transit_engine,
             garage,
             net_message_broker,
             departure_handler,
@@ -90,6 +97,11 @@ impl<C: SimCommunicator> LegEngine<C> {
                 self.transit_engine
                     .iter_mut()
                     .flat_map(TransitEngine::drain),
+            )
+            .chain(
+                self.timetable_transit_engine
+                    .iter_mut()
+                    .flat_map(TimetableTransitEngine::drain),
             )
             .collect()
     }
@@ -120,6 +132,11 @@ impl<C: SimCommunicator> LegEngine<C> {
         agents: Vec<SimulationAgent>,
     ) -> Vec<SimulationAgent> {
         self.receive_agents(now, agents);
+        let timetable_completed = self
+            .timetable_transit_engine
+            .as_mut()
+            .map(|engine| engine.do_step(now, &mut self.network_engine.network.transit_stops))
+            .unwrap_or_default();
         if let Some(transit) = &mut self.transit_engine {
             for vehicle in transit.depart_drivers(now) {
                 self.network_engine.receive_vehicle(now, vehicle, true);
@@ -178,6 +195,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         let teleported_vehicles = self.teleportation_engine.do_step(now);
 
         let mut agents = alighted_passengers;
+        agents.extend(timetable_completed);
         for agent in self.publish_vehicular_end_events(now, network_vehicles) {
             match &mut self.transit_engine {
                 Some(transit) if agent.transit_driver().is_some() => {
@@ -323,7 +341,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         match self.find_responsible_engine(&agent) {
             Leg => self.pass_to_leg(now, event_time, agent, true),
             Teleportation => self.pass_to_teleportation(now, event_time, agent),
-            Transit => self.transit_engine.as_mut().unwrap().receive_passenger(
+            Transit | TimetableTransit => self.transit_engine.as_mut().unwrap().receive_passenger(
                 self.clock.time_to_tick(event_time),
                 agent,
                 &mut self.network_engine.network.transit_stops,
@@ -333,6 +351,14 @@ impl<C: SimCommunicator> LegEngine<C> {
 
     fn find_responsible_engine(&self, agent: &SimulationAgent) -> ResponsibleEngine {
         let leg = agent.curr_leg();
+
+        if self
+            .timetable_transit_engine
+            .as_ref()
+            .is_some_and(|transit| transit.serves(agent))
+        {
+            return TimetableTransit;
+        }
 
         if self
             .transit_engine

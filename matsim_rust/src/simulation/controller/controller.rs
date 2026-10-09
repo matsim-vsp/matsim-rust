@@ -100,6 +100,35 @@ impl ControllerBuilder {
         self.scenario.config.travel_time_calculator().validate()?;
         self.scenario.config.scoring().validate()?;
         let transit = self.scenario.config.transit();
+        if !transit.deterministic_service_modes.is_empty() && !transit.simulate_vehicles {
+            return Err(
+                "transit.deterministic_service_modes requires transit.simulate_vehicles: true"
+                    .to_owned(),
+            );
+        }
+        if !transit.deterministic_service_modes.is_empty()
+            && self.scenario.config.partitioning().num_parts != 1
+        {
+            return Err(
+                "transit.deterministic_service_modes currently requires one partition".to_owned(),
+            );
+        }
+        for mode in &transit.deterministic_service_modes {
+            if self.scenario.config.qsim().main_modes.contains(mode) {
+                return Err(format!(
+                    "Transit service mode {mode} cannot also be a qsim main mode"
+                ));
+            }
+            if !self.scenario.transit_schedule.lines().values().any(|line| {
+                line.routes.values().any(|route| {
+                    route.transport_mode.external() == mode && !route.departures.is_empty()
+                })
+            }) {
+                return Err(format!(
+                    "transit.deterministic_service_modes contains {mode}, but the schedule has no departures for that service mode"
+                ));
+            }
+        }
         if transit.use_mode_mapping_for_passengers
             || !transit.mode_mapping_for_passengers.is_empty()
         {

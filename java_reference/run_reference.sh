@@ -47,11 +47,16 @@ if [ "$ACTUAL_COMMIT" != "$REFERENCE_COMMIT" ]; then
   exit 1
 fi
 
-# 2. Build the reference into a local Maven repository. org.matsim:matsim is the only artifact the
-#    harness needs; `-am` also builds matsim-examples, which matsim depends on.
+# 2. Build the reference and SBB transit extension into a local Maven repository.
 if [ ! -f "$MAVEN_REPOSITORY/org/matsim/matsim/$REFERENCE_TAG/matsim-$REFERENCE_TAG.jar" ]; then
   echo "building MATSim $REFERENCE_TAG"
   mvn -B -f "$MATSIM_DIR/pom.xml" -pl matsim -am \
+    -Dmaven.test.skip=true -Dcheckstyle.skip=true -Denforcer.skip=true \
+    -Dmaven.repo.local="$MAVEN_REPOSITORY" install
+fi
+if [ ! -f "$MAVEN_REPOSITORY/org/matsim/contrib/sbb-extensions/$REFERENCE_TAG/sbb-extensions-$REFERENCE_TAG.jar" ]; then
+  echo "building MATSim SBB transit extension $REFERENCE_TAG"
+  mvn -B -f "$MATSIM_DIR/pom.xml" -pl contribs/sbb-extensions -am \
     -Dmaven.test.skip=true -Dcheckstyle.skip=true -Denforcer.skip=true \
     -Dmaven.repo.local="$MAVEN_REPOSITORY" install
 fi

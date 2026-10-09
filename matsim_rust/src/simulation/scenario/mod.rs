@@ -325,6 +325,7 @@ impl From<Scenario> for ControllerScenario {
                 &scenario.transit_schedule,
                 &scenario.garage,
                 &scenario.network,
+                &scenario.config.transit().deterministic_service_modes,
             )
             .unwrap_or_else(|error| panic!("Cannot simulate transit vehicles: {error}"))
         } else {

@@ -426,6 +426,7 @@ impl LocalLink {
                     self.clock.tick_to_time(now),
                     transit,
                     &mut comp_env.events_manager_borrow_mut(),
+                    false,
                 )
             } else {
                 StopOutcome::NoStop
@@ -601,6 +602,7 @@ impl LocalLink {
                 self.clock.tick_to_time(now),
                 transit,
                 &mut comp_env.events_manager_borrow_mut(),
+                false,
             ) {
                 StopOutcome::NoStop => return Some(vehicle),
                 StopOutcome::Departed => {}

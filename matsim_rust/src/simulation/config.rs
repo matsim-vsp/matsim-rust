@@ -557,6 +557,9 @@ pub struct Transit {
     /// Leg modes served by simulated transit vehicles. MATSim's `transit.transitModes`.
     #[serde(default = "default_transit_modes")]
     pub transit_modes: Vec<String>,
+    /// Transit route modes driven by the timetable engine rather than the queue network engine.
+    #[serde(default)]
+    pub deterministic_service_modes: Vec<String>,
     /// Use service-to-passenger mode mappings for transit routing, scoring, and returned ride legs.
     #[serde(default)]
     pub use_mode_mapping_for_passengers: bool,
@@ -749,6 +752,7 @@ impl Default for Transit {
             schedule_path: None,
             simulate_vehicles: false,
             transit_modes: default_transit_modes(),
+            deterministic_service_modes: Vec::new(),
             use_mode_mapping_for_passengers: false,
             mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
@@ -766,6 +770,24 @@ impl Default for Transit {
 
 impl Transit {
     pub fn validate(&self) -> Result<(), String> {
+        let mut deterministic_modes = std::collections::BTreeSet::new();
+        for (index, mode) in self.deterministic_service_modes.iter().enumerate() {
+            if mode.trim().is_empty() {
+                return Err(format!(
+                    "transit.deterministic_service_modes[{index}] must not be empty"
+                ));
+            }
+            if !deterministic_modes.insert(mode) {
+                return Err(format!(
+                    "transit.deterministic_service_modes contains duplicate mode {mode}"
+                ));
+            }
+            if self.transit_modes.contains(mode) {
+                return Err(format!(
+                    "Transit service mode {mode} cannot also be a transit passenger mode"
+                ));
+            }
+        }
         for (index, selector) in self.route_selector_settings.iter().enumerate() {
             if !selector.beta_travel_time.is_finite()
                 || !selector.beta_departure_time.is_finite()
@@ -921,6 +943,15 @@ register_override!("transit.simulate_vehicles", |config, value| {
 
 register_override!("transit.transit_modes", |config, value| {
     config.transit_mut().transit_modes = value
+        .split(',')
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .map(ToString::to_string)
+        .collect();
+});
+
+register_override!("transit.deterministic_service_modes", |config, value| {
+    config.transit_mut().deterministic_service_modes = value
         .split(',')
         .map(str::trim)
         .filter(|mode| !mode.is_empty())
@@ -3178,10 +3209,12 @@ modules:
   transit:
     type: Transit
     schedule_path: schedule.xml
+    deterministic_service_modes: [train]
 "#;
         let parsed: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         assert!(!parsed.transit().simulate_vehicles);
         assert_eq!(vec!["pt"], parsed.transit().transit_modes);
+        assert_eq!(vec!["train"], parsed.transit().deterministic_service_modes);
 
         let file = write_temp_config(yaml);
         let config = Config::from_args(CommandLineArgs {
@@ -3189,10 +3222,15 @@ modules:
             overrides: vec![
                 ("transit.simulate_vehicles".to_string(), "true".to_string()),
                 ("transit.transit_modes".to_string(), "bus, rail".to_string()),
+                (
+                    "transit.deterministic_service_modes".to_string(),
+                    "train".to_string(),
+                ),
             ],
         });
         assert!(config.transit().simulate_vehicles);
         assert_eq!(vec!["bus", "rail"], config.transit().transit_modes);
+        assert_eq!(vec!["train"], config.transit().deterministic_service_modes);
     }
 
     #[test]

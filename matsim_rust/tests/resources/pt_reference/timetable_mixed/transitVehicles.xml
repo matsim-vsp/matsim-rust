@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ns0:vehicleDefinitions xmlns:ns0="http://www.matsim.org/files/dtd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v1.0.xsd">
+  <ns0:vehicleType id="pt">
+    <ns0:capacity><ns0:seats persons="1" /><ns0:standingRoom persons="0" /></ns0:capacity>
+    <ns0:length meter="50" />
+  </ns0:vehicleType>
+  <ns0:vehicle id="train-0730" type="pt" />
+  <ns0:vehicle id="train-0750" type="pt" />
+  <ns0:vehicle id="train-0800" type="pt" />
+  <ns0:vehicle id="bus-0740" type="pt" />
+</ns0:vehicleDefinitions>

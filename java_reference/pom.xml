@@ -30,6 +30,11 @@
             <artifactId>matsim</artifactId>
             <version>${matsim.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.matsim.contrib</groupId>
+            <artifactId>sbb-extensions</artifactId>
+            <version>${matsim.version}</version>
+        </dependency>
         <!-- Compile-scope dependency of org.matsim:matsim; declared here so the harness does not
              rely on a transitive dependency staying compile-scope. -->
         <dependency>

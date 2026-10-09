@@ -396,3 +396,11 @@ event set from the queue engine — `PersonEntersVehicle`, `PersonLeavesVehicle`
 sequence.
 
 `contribs/railsim` is a third, rail-specific engine and is out of scope.
+
+The `timetable_mixed` fixture runs the supplied plans with `train` services on the SBB timetable
+engine and `pt` services on the queue network engine. Rust selects SBB-style runs with
+`transit.deterministic_service_modes`; those runs keep their event state on the single worker and
+use the scheduled stop offsets while reusing the queue engine's passenger capacity and stop queues.
+This path currently requires one partition. Cross-partition timetable service is tracked separately.
+The fixture compares train and passenger event times within one second; the queue bus's final stop
+allows two seconds for accumulated link/node phases, as the bus remains road-driven.
