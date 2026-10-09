@@ -15,9 +15,11 @@ use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::events::utils::{read_events, read_partitioned_events};
 use matsim_rust::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, AgentWaitingForPtEvent, EventTrait, EventsManager,
-    PersonArrivalEvent, PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent,
-    PersonStuckEvent, PtTeleportationArrivalEvent, TeleportationArrivalEvent,
-    TransitDriverStartsEvent, VehicleArrivesAtFacilityEvent, VehicleDepartsAtFacilityEvent,
+    LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
+    PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
+    PtTeleportationArrivalEvent, TeleportationArrivalEvent, TransitDriverStartsEvent,
+    VehicleArrivesAtFacilityEvent, VehicleDepartsAtFacilityEvent, VehicleEntersTrafficEvent,
+    VehicleLeavesTrafficEvent,
 };
 use matsim_rust::simulation::id::Id;
 use matsim_rust::simulation::replanning::routing::{
@@ -267,6 +269,112 @@ fn timetable_train_and_queue_bus_match_the_pinned_reference() {
         rust.iter()
             .any(|event| event["type"] == "stuckAndAbort" && event["person"] == "stranded-at-end")
     );
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn timetable_link_events_follow_sbb_iteration_interval_without_changing_passengers() {
+    let output = |name: &str| Path::new("./test_output/simulation").join(name);
+    let mut baseline = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/timetable_mixed.yml",
+    ));
+    baseline.controller_mut().last_iteration = 2;
+    baseline.controller_mut().write_events_interval = 1;
+    baseline.output_mut().output_dir = output("pt_link_events_disabled");
+    let baseline_dir = baseline.output().output_dir.clone();
+    run(baseline);
+
+    let mut enabled = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/timetable_mixed.yml",
+    ));
+    enabled.controller_mut().last_iteration = 2;
+    enabled.controller_mut().write_events_interval = 1;
+    enabled.transit_mut().create_link_events_interval = 2;
+    enabled.output_mut().output_dir = output("pt_link_events_interval");
+    let enabled_dir = enabled.output().output_dir.clone();
+    run(enabled);
+
+    for iteration in 0..=2 {
+        let baseline_events = normalize_events(&iteration_events_file(&baseline_dir, iteration));
+        let enabled_path = iteration_events_file(&enabled_dir, iteration);
+        assert_eq!(
+            baseline_events,
+            normalize_events(&enabled_path),
+            "synthetic link events changed passenger outcomes in iteration {iteration}"
+        );
+        let links = count_link_events(&enabled_path);
+        if iteration.is_multiple_of(2) {
+            assert!(
+                links.0 >= 9,
+                "expected multi-link output in iteration {iteration}: {links:?}"
+            );
+            assert_eq!(
+                links.0, links.1,
+                "unpaired synthetic link events in iteration {iteration}"
+            );
+        } else {
+            assert_eq!(
+                links,
+                (0, 0),
+                "link output enabled in iteration {iteration}"
+            );
+        }
+        let traffic = count_train_traffic_events(&enabled_path);
+        assert_eq!(
+            traffic,
+            if iteration.is_multiple_of(2) {
+                (3, 3)
+            } else {
+                (0, 0)
+            },
+            "traffic event output does not follow the interval in iteration {iteration}"
+        );
+    }
+}
+
+fn iteration_events_file(output_dir: &Path, iteration: u32) -> std::path::PathBuf {
+    output_dir
+        .join("ITERS")
+        .join(format!("it.{iteration}"))
+        .join("events")
+        .join("events.0.binpb")
+}
+
+fn count_link_events(path: &Path) -> (usize, usize) {
+    let counts = Rc::new(RefCell::new((0, 0)));
+    let sink = Rc::clone(&counts);
+    let mut manager = EventsManager::new();
+    manager.on::<LinkEnterEvent, _>(move |event| {
+        if event.vehicle.external().starts_with("train-") {
+            sink.borrow_mut().0 += 1;
+        }
+    });
+    let sink = Rc::clone(&counts);
+    manager.on::<LinkLeaveEvent, _>(move |event| {
+        if event.vehicle.external().starts_with("train-") {
+            sink.borrow_mut().1 += 1;
+        }
+    });
+    read_events(&mut manager, path).unwrap();
+    *counts.borrow()
+}
+
+fn count_train_traffic_events(path: &Path) -> (usize, usize) {
+    let counts = Rc::new(RefCell::new((0, 0)));
+    let sink = Rc::clone(&counts);
+    let mut manager = EventsManager::new();
+    manager.on::<VehicleEntersTrafficEvent, _>(move |event| {
+        if event.vehicle.external().starts_with("train-") {
+            sink.borrow_mut().0 += 1;
+        }
+    });
+    let sink = Rc::clone(&counts);
+    manager.on::<VehicleLeavesTrafficEvent, _>(move |event| {
+        if event.vehicle.external().starts_with("train-") {
+            sink.borrow_mut().1 += 1;
+        }
+    });
+    read_events(&mut manager, path).unwrap();
+    *counts.borrow()
 }
 
 fn assert_queue_execution_matches(num_parts: u32) {

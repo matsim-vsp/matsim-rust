@@ -393,7 +393,11 @@ The timetable-driven engine is in `contribs/sbb-extensions`: `SBBTransitQSimEngi
 event set from the queue engine — `PersonEntersVehicle`, `PersonLeavesVehicle`,
 `VehicleEntersTraffic`, `VehicleLeavesTraffic`, optionally link events — and
 `SBBTransitQSimEngineTest.testEvents_withoutPassengers_withoutLinks` is a usable golden event
-sequence.
+sequence. Rust's `transit.create_link_events_interval` mirrors SBB's
+`createLinkEventsInterval`: 0 disables synthetic link/traffic events; positive values enable them
+when `iteration % interval == 0`. Link transitions are distributed by downstream link length over
+the scheduled interval between stops and are emitted on the first simulation tick at or after each
+scheduled transition.
 
 `contribs/railsim` is a third, rail-specific engine and is out of scope.
 

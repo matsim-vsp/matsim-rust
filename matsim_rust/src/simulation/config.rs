@@ -560,6 +560,9 @@ pub struct Transit {
     /// Transit route modes driven by the timetable engine rather than the queue network engine.
     #[serde(default)]
     pub deterministic_service_modes: Vec<String>,
+    /// Emit synthetic link and traffic events for timetable-driven vehicles every N iterations; 0 disables them.
+    #[serde(default)]
+    pub create_link_events_interval: u32,
     /// Use service-to-passenger mode mappings for transit routing, scoring, and returned ride legs.
     #[serde(default)]
     pub use_mode_mapping_for_passengers: bool,
@@ -753,6 +756,7 @@ impl Default for Transit {
             simulate_vehicles: false,
             transit_modes: default_transit_modes(),
             deterministic_service_modes: Vec::new(),
+            create_link_events_interval: 0,
             use_mode_mapping_for_passengers: false,
             mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
@@ -957,6 +961,10 @@ register_override!("transit.deterministic_service_modes", |config, value| {
         .filter(|mode| !mode.is_empty())
         .map(ToString::to_string)
         .collect();
+});
+
+register_override!("transit.create_link_events_interval", |config, value| {
+    config.transit_mut().create_link_events_interval = value.parse().unwrap();
 });
 
 register_override!(
@@ -3210,11 +3218,13 @@ modules:
     type: Transit
     schedule_path: schedule.xml
     deterministic_service_modes: [train]
+    create_link_events_interval: 3
 "#;
         let parsed: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         assert!(!parsed.transit().simulate_vehicles);
         assert_eq!(vec!["pt"], parsed.transit().transit_modes);
         assert_eq!(vec!["train"], parsed.transit().deterministic_service_modes);
+        assert_eq!(3, parsed.transit().create_link_events_interval);
 
         let file = write_temp_config(yaml);
         let config = Config::from_args(CommandLineArgs {
@@ -3226,11 +3236,16 @@ modules:
                     "transit.deterministic_service_modes".to_string(),
                     "train".to_string(),
                 ),
+                (
+                    "transit.create_link_events_interval".to_string(),
+                    "5".to_string(),
+                ),
             ],
         });
         assert!(config.transit().simulate_vehicles);
         assert_eq!(vec!["bus", "rail"], config.transit().transit_modes);
         assert_eq!(vec!["train"], config.transit().deterministic_service_modes);
+        assert_eq!(5, config.transit().create_link_events_interval);
     }
 
     #[test]

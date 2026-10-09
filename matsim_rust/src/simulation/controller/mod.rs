@@ -510,6 +510,7 @@ impl MobsimWorker {
             net_message_broker,
             self.comp_env.clone(),
             self.agent_source.clone(),
+            iteration,
         )
         .build();
 

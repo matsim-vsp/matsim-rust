@@ -7,17 +7,19 @@ use crate::simulation::agents::{
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{
-    PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
-    PersonLeavesVehicleEventBuilder,
+    LinkEnterEventBuilder, LinkLeaveEventBuilder, PersonArrivalEventBuilder,
+    PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder, PersonLeavesVehicleEventBuilder,
+    VehicleEntersTrafficEventBuilder, VehicleLeavesTrafficEventBuilder,
 };
 use crate::simulation::id::Id;
 use crate::simulation::pt::driver::{StopOutcome, TransitDriver, serve_stop};
 use crate::simulation::pt::runs::RunLeg;
 use crate::simulation::pt::stops::TransitStops;
 use crate::simulation::scenario::ScenarioCore;
+use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitSchedule};
-use crate::simulation::scenario::vehicles::Garage;
+use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::SimulationVehicle;
@@ -31,6 +33,19 @@ struct StopEvent {
     time: SimTime,
 }
 
+struct LinkEvent {
+    time: SimTime,
+    from: Id<Link>,
+    to: Id<Link>,
+    vehicle: Id<InternalVehicle>,
+}
+
+impl EndTime for LinkEvent {
+    fn end_time(&self, _now: SimTime) -> SimTime {
+        self.time
+    }
+}
+
 impl EndTime for StopEvent {
     fn end_time(&self, _now: SimTime) -> SimTime {
         self.time
@@ -40,12 +55,16 @@ impl EndTime for StopEvent {
 pub(crate) struct TimetableTransitEngine {
     waiting_drivers: TimeQueue<SimulationAgent, InternalPerson>,
     stop_events: TimeQueue<StopEvent, InternalPerson>,
+    link_events: TimeQueue<LinkEvent, InternalVehicle>,
     active: IntMap<Id<InternalPerson>, SimulationVehicle>,
+    route_link_positions: IntMap<Id<InternalPerson>, usize>,
+    network: Arc<Network>,
     schedule: Arc<TransitSchedule>,
     deterministic_modes: IntSet<Id<String>>,
     garage: Arc<Garage>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
+    create_link_events: bool,
 }
 
 impl TimetableTransitEngine {
@@ -55,11 +74,15 @@ impl TimetableTransitEngine {
         comp_env: ThreadLocalComputationalEnvironment,
         clock: SimClock,
         start: SimTime,
+        iteration: u32,
     ) -> Self {
         let mut engine = Self {
             waiting_drivers: TimeQueue::new(),
             stop_events: TimeQueue::new(),
+            link_events: TimeQueue::new(),
             active: IntMap::default(),
+            route_link_positions: IntMap::default(),
+            network: scenario.network.clone(),
             schedule: scenario.transit_schedule.clone(),
             deterministic_modes: scenario
                 .config
@@ -71,6 +94,8 @@ impl TimetableTransitEngine {
             garage: scenario.garage.clone(),
             comp_env,
             clock,
+            create_link_events: scenario.config.transit().create_link_events_interval > 0
+                && iteration.is_multiple_of(scenario.config.transit().create_link_events_interval),
         };
         for run in scenario.transit_runs.runs().iter().filter(|run| {
             run.is_deterministic() && scenario.network.get_link(run.start_link()).partition == rank
@@ -130,6 +155,25 @@ impl TimetableTransitEngine {
     pub(crate) fn do_step(&mut self, now: Tick, stops: &mut TransitStops) -> Vec<SimulationAgent> {
         let now = self.clock.tick_to_time(now);
         let mut completed = Vec::new();
+        for event in self.link_events.pop(now) {
+            let mut events = self.comp_env.events_manager_borrow_mut();
+            events.process_event(
+                &LinkLeaveEventBuilder::default()
+                    .time(now)
+                    .link(event.from)
+                    .vehicle(event.vehicle.clone())
+                    .build()
+                    .unwrap(),
+            );
+            events.process_event(
+                &LinkEnterEventBuilder::default()
+                    .time(now)
+                    .link(event.to)
+                    .vehicle(event.vehicle)
+                    .build()
+                    .unwrap(),
+            );
+        }
         for mut driver in self.waiting_drivers.pop(now) {
             driver.advance_plan(now);
             let vehicle_id = driver.transit_driver().unwrap().run().vehicle.clone();
@@ -158,9 +202,41 @@ impl TimetableTransitEngine {
                         .build()
                         .unwrap(),
                 );
+                if self.create_link_events {
+                    let route = driver.transit_driver().unwrap().run().legs.last().unwrap();
+                    let RunLeg::Service { route, .. } = route else {
+                        unreachable!()
+                    };
+                    events.process_event(
+                        &VehicleEntersTrafficEventBuilder::default()
+                            .time(now)
+                            .person(driver.id().clone())
+                            .vehicle(vehicle_id.clone())
+                            .link(driver.curr_link_id().unwrap().clone())
+                            .network_mode(route.transport_mode.clone())
+                            .build()
+                            .unwrap(),
+                    );
+                }
             }
             let key = driver.id().clone();
+            let route_position = driver
+                .transit_driver()
+                .unwrap()
+                .run()
+                .legs
+                .last()
+                .and_then(|leg| match leg {
+                    RunLeg::Service { route, .. } => route
+                        .links
+                        .iter()
+                        .position(|link| link == driver.transit_driver().unwrap().next_stop_link()),
+                    RunLeg::Deadhead { .. } => None,
+                })
+                .unwrap_or(0);
             let vehicle = self.garage.unpark_veh(driver, vehicle_id);
+            self.route_link_positions
+                .insert(key.clone(), route_position);
             self.schedule_stop(&vehicle, key.clone(), now, true);
             self.active.insert(key, vehicle);
         }
@@ -181,6 +257,7 @@ impl TimetableTransitEngine {
                     vehicle.peek_next_route_element().is_some(),
                     "Transit route ends before its next scheduled stop on link {stop_link}."
                 );
+                *self.route_link_positions.get_mut(&event.driver).unwrap() += 1;
                 vehicle.notify_event(&mut AgentEvent::LeftLink(), event_time);
             }
             let outcome = {
@@ -195,10 +272,36 @@ impl TimetableTransitEngine {
                     self.active.insert(event.driver, vehicle);
                 }
                 StopOutcome::Departed => {
-                    let driver = vehicle.driver_mut().transit_driver_mut().unwrap();
+                    let driver = vehicle.driver().transit_driver().unwrap();
                     if driver.is_finished() {
+                        self.route_link_positions.remove(&event.driver);
                         self.finish_vehicle(event_time, vehicle, &mut completed);
                     } else {
+                        let service_ended = match driver.run().legs.last().unwrap() {
+                            RunLeg::Service { route, .. } => {
+                                driver.next_stop_index() >= route.stops.len()
+                            }
+                            RunLeg::Deadhead { .. } => false,
+                        };
+                        if self.create_link_events && service_ended {
+                            let RunLeg::Service { route, .. } = driver.run().legs.last().unwrap()
+                            else {
+                                unreachable!()
+                            };
+                            self.comp_env.events_manager_borrow_mut().process_event(
+                                &VehicleLeavesTrafficEventBuilder::default()
+                                    .time(event_time)
+                                    .person(vehicle.driver().id().clone())
+                                    .vehicle(vehicle.id().clone())
+                                    .link(vehicle.curr_link_id().unwrap().clone())
+                                    .network_mode(route.transport_mode.clone())
+                                    .build()
+                                    .unwrap(),
+                            );
+                        }
+                        if !service_ended && self.create_link_events {
+                            self.schedule_synthetic_links(&vehicle, &event.driver, event_time);
+                        }
                         self.schedule_stop(&vehicle, event.driver.clone(), event_time, false);
                         self.active.insert(event.driver, vehicle);
                     }
@@ -258,6 +361,22 @@ impl TimetableTransitEngine {
         completed: &mut Vec<SimulationAgent>,
     ) {
         let mut events = self.comp_env.events_manager_borrow_mut();
+        if self.create_link_events {
+            let driver = vehicle.driver().transit_driver().unwrap();
+            let RunLeg::Service { route, .. } = driver.run().legs.last().unwrap() else {
+                unreachable!()
+            };
+            events.process_event(
+                &VehicleLeavesTrafficEventBuilder::default()
+                    .time(now)
+                    .person(vehicle.driver().id().clone())
+                    .vehicle(vehicle.id().clone())
+                    .link(vehicle.curr_link_id().unwrap().clone())
+                    .network_mode(route.transport_mode.clone())
+                    .build()
+                    .unwrap(),
+            );
+        }
         events.process_event(
             &PersonLeavesVehicleEventBuilder::default()
                 .time(now)
@@ -277,5 +396,73 @@ impl TimetableTransitEngine {
         );
         vehicle.driver_mut().advance_plan(now);
         completed.extend(vehicle.into_agents());
+    }
+
+    fn schedule_synthetic_links(
+        &mut self,
+        vehicle: &SimulationVehicle,
+        driver_id: &Id<InternalPerson>,
+        departure_time: SimTime,
+    ) {
+        let driver = vehicle.driver().transit_driver().unwrap();
+        let RunLeg::Service {
+            route,
+            departure_time: scheduled,
+            ..
+        } = driver.run().legs.last().unwrap()
+        else {
+            unreachable!()
+        };
+        let position = self.route_link_positions[driver_id];
+        let Some(next_stop) = route.stops.get(driver.next_stop_index()) else {
+            return;
+        };
+        if route.links[position] == next_stop.link {
+            return;
+        }
+        let Some(end) = route
+            .links
+            .iter()
+            .enumerate()
+            .skip(position + 1)
+            .find_map(|(index, link)| (link == &next_stop.link).then_some(index))
+        else {
+            return;
+        };
+        let links = &route.links[position..=end];
+        if links.len() < 2 {
+            return;
+        }
+        let arrival_offset = next_stop
+            .arrival_offset
+            .or(next_stop.departure_offset)
+            .unwrap_or_default();
+        let arrival_time = departure_time.max(scheduled.saturating_add(arrival_offset));
+        let travel_time = arrival_time.duration_since(departure_time).as_secs_f64();
+        let total_length: f64 = links
+            .iter()
+            .skip(1)
+            .map(|link| self.network.get_link(link).length)
+            .sum();
+        let seconds_per_meter = if total_length > 0.0 {
+            travel_time / total_length
+        } else {
+            0.0
+        };
+        let mut travelled = 0.0;
+        for pair in links.windows(2) {
+            let at = departure_time
+                .saturating_add(Duration::from_secs_f64(travelled * seconds_per_meter));
+            self.link_events.add(
+                LinkEvent {
+                    time: at,
+                    from: pair[0].clone(),
+                    to: pair[1].clone(),
+                    vehicle: vehicle.id().clone(),
+                },
+                at,
+            );
+            travelled += self.network.get_link(&pair[1]).length;
+        }
     }
 }

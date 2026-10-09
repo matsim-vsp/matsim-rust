@@ -167,6 +167,7 @@ pub struct SimulationBuilder<C: SimCommunicator> {
     net_message_broker: NetMessageBroker<C>,
     comp_env: ThreadLocalComputationalEnvironment,
     agent_source: DynAgentSource,
+    iteration: u32,
 }
 
 impl<C: SimCommunicator> SimulationBuilder<C> {
@@ -175,12 +176,14 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         net_message_broker: NetMessageBroker<C>,
         comp_env: ThreadLocalComputationalEnvironment,
         agent_source: DynAgentSource,
+        iteration: u32,
     ) -> Self {
         SimulationBuilder {
             input,
             net_message_broker,
             comp_env,
             agent_source,
+            iteration,
         }
     }
 
@@ -221,6 +224,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
                 self.comp_env.clone(),
                 clock,
                 clock.tick_to_time(start_tick),
+                self.iteration,
             )
         });
 
