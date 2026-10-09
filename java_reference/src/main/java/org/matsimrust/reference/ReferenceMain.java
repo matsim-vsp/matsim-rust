@@ -1,5 +1,8 @@
 package org.matsimrust.reference;
 
+import ch.sbb.matsim.config.SBBTransitConfigGroup;
+import ch.sbb.matsim.mobsim.qsim.SBBTransitModule;
+import ch.sbb.matsim.mobsim.qsim.pt.SBBTransitEngineQSimModule;
 import ch.sbb.matsim.config.SwissRailRaptorConfigGroup;
 import ch.sbb.matsim.routing.pt.raptor.SwissRailRaptorModule;
 import ch.sbb.matsim.routing.pt.raptor.RaptorUtils;
@@ -122,9 +125,13 @@ public final class ReferenceMain {
 
         Config config = ConfigUtils.loadConfig(configPath.toAbsolutePath().toString());
         boolean useSwissRailRaptor = config.getModules().containsKey(SwissRailRaptorConfigGroup.GROUP);
-        if (useSwissRailRaptor) {
-            config = ConfigUtils.loadConfig(
-                    configPath.toAbsolutePath().toString(), new SwissRailRaptorConfigGroup());
+        boolean useSbbTransit = config.getModules().containsKey(SBBTransitConfigGroup.GROUP_NAME);
+        if (useSwissRailRaptor || useSbbTransit) {
+            var groups = new ArrayList<org.matsim.core.config.ConfigGroup>();
+            if (useSwissRailRaptor) groups.add(new SwissRailRaptorConfigGroup());
+            if (useSbbTransit) groups.add(new SBBTransitConfigGroup());
+            config = ConfigUtils.loadConfig(configPath.toAbsolutePath().toString(),
+                    groups.toArray(org.matsim.core.config.ConfigGroup[]::new));
         }
         // loadScenario reads the input files named in the config; createScenario alone leaves the
         // scenario empty. `Controler` (one l) is the concrete implementation; `ControlerUtils` is
@@ -133,6 +140,11 @@ public final class ReferenceMain {
         Controler controler = new Controler(scenario);
         if (useSwissRailRaptor) {
             controler.addOverridingModule(new SwissRailRaptorModule());
+        }
+        if (useSbbTransit) {
+            controler.addOverridingModule(new SBBTransitModule());
+            controler.configureQSimComponents(components ->
+                    new SBBTransitEngineQSimModule().configure(components));
         }
         controler.run();
 

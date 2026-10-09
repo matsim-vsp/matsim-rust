@@ -121,6 +121,17 @@ impl TransitDriver {
         &self.run
     }
 
+    pub(crate) fn next_stop_index(&self) -> usize {
+        self.next_stop
+    }
+
+    pub(crate) fn next_stop_link(&self) -> &Id<Link> {
+        match self.run_leg() {
+            RunLeg::Service { route, .. } => &route.stops[self.next_stop].link,
+            RunLeg::Deadhead { .. } => unreachable!("timetable services have no deadheads"),
+        }
+    }
+
     /// The driver has driven its last leg and stays parked for the rest of the day.
     pub(crate) fn is_finished(&self) -> bool {
         self.curr_element + 1 == self.elements.len()
@@ -212,6 +223,7 @@ pub(crate) fn serve_stop(
     now: SimTime,
     stops: &mut TransitStops,
     events: &mut EventsManager,
+    timetable: bool,
 ) -> StopOutcome {
     let Some((driver, passengers, vehicle_id)) = vehicle.transit_parts_mut() else {
         return StopOutcome::NoStop;
@@ -254,13 +266,16 @@ pub(crate) fn serve_stop(
         .riders
         .iter()
         .enumerate()
-        .filter(|(_, rider)| rider.egress == stop.facility)
+        .filter(|(_, rider)| stop.allow_alighting && rider.egress == stop.facility)
         .map(|(position, _)| position)
         .collect();
     let mut free = driver.capacity - passengers.len() + leaving.len();
     let mut entering = Vec::new();
     for (position, waiting) in stops.waiting_at(&stop.facility).iter().enumerate() {
         if free == 0 {
+            break;
+        }
+        if !stop.allow_boarding {
             break;
         }
         let stops_to_come = route.stops[driver.next_stop + 1..]
@@ -326,7 +341,12 @@ pub(crate) fn serve_stop(
 
     let mut stop_time = step.stop_time;
     if stop_time == 0.0 {
-        stop_time = driver.wait_for_schedule(stop.departure_offset, stop.await_departure, now);
+        let offset = if timetable {
+            stop.departure_offset.or(stop.arrival_offset)
+        } else {
+            stop.departure_offset
+        };
+        stop_time = driver.wait_for_schedule(offset, timetable || stop.await_departure, now);
     }
 
     if stop_time == 0.0 {
@@ -490,7 +510,7 @@ mod tests {
         let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
         let network =
             Network::from_file_as_is(&PathBuf::from("./assets/pt_tutorial/multimodalnetwork.xml"));
-        let runs = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap();
+        let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
         TransitDriver::new(runs.runs()[0].clone(), &garage)
     }
 

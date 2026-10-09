@@ -137,6 +137,135 @@ fn queue_execution_matches_the_pinned_reference_across_partitions() {
     assert_queue_execution_matches(2);
 }
 
+#[deterministic_id_test(matsim_rust)]
+fn timetable_train_and_queue_bus_match_the_pinned_reference() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_simulated/timetable_mixed.yml",
+    ));
+    let output_dir = config.output().output_dir.clone();
+    let reference = read_reference("timetable_mixed");
+    verify_same_conditions(&reference, &config);
+
+    run(config);
+
+    let rust = normalize_partitioned_events(&output_dir.join("events"), 1);
+    let relevant = |event: &&Value| {
+        !event
+            .get("person")
+            .and_then(Value::as_str)
+            .is_some_and(|person| person.starts_with("pt_"))
+            && matches!(
+                event["type"].as_str(),
+                Some(
+                    "waitingForPt"
+                        | "PersonEntersVehicle"
+                        | "PersonLeavesVehicle"
+                        | "PersonEntersPtVehicle"
+                        | "PersonLeavesPtVehicle"
+                        | "VehicleArrivesAtFacility"
+                        | "VehicleDepartsAtFacility"
+                        | "stuckAndAbort"
+                )
+            )
+    };
+    let mut expected_by_entity = std::collections::BTreeMap::<String, Vec<&Value>>::new();
+    let mut actual_by_entity = std::collections::BTreeMap::<String, Vec<&Value>>::new();
+    for event in reference.events.iter().filter(relevant) {
+        let entity = event
+            .get("person")
+            .or_else(|| event.get("vehicle"))
+            .and_then(Value::as_str)
+            .unwrap();
+        expected_by_entity
+            .entry(entity.to_owned())
+            .or_default()
+            .push(event);
+    }
+    for event in rust.iter().filter(relevant) {
+        let entity = event
+            .get("person")
+            .or_else(|| event.get("vehicle"))
+            .and_then(Value::as_str)
+            .unwrap();
+        actual_by_entity
+            .entry(entity.to_owned())
+            .or_default()
+            .push(event);
+    }
+    assert_eq!(
+        expected_by_entity.keys().collect::<Vec<_>>(),
+        actual_by_entity.keys().collect::<Vec<_>>()
+    );
+    for (entity, expected) in expected_by_entity {
+        let actual = &actual_by_entity[&entity];
+        assert_eq!(
+            expected.len(),
+            actual.len(),
+            "transit event count differs for {entity}"
+        );
+        for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
+            let expected_type = match expected["type"].as_str() {
+                Some("PersonEntersVehicle") => "PersonEntersPtVehicle",
+                Some("PersonLeavesVehicle") => "PersonLeavesPtVehicle",
+                Some(kind) => kind,
+                None => unreachable!(),
+            };
+            assert_eq!(
+                expected_type, actual["type"],
+                "{entity} event {index} type differs"
+            );
+            for field in ["person", "vehicle", "facility", "atStop", "destinationStop"] {
+                assert_eq!(
+                    expected.get(field),
+                    actual.get(field),
+                    "{entity} event {index} differs in {field}"
+                );
+            }
+            let time_delta = actual["time"].as_f64().unwrap() - expected["time"].as_f64().unwrap();
+            let time_tolerance = if entity == "bus-0740" || expected["vehicle"] == "bus-0740" {
+                2.0
+            } else {
+                1.0
+            };
+            assert!(
+                time_delta.abs() <= time_tolerance,
+                "{entity} event {index} differs by {time_delta}s (limit {time_tolerance}s): expected {expected}, got {actual}"
+            );
+        }
+    }
+    assert!(
+        rust.iter()
+            .any(|event| event["type"] == "VehicleArrivesAtFacility"
+                && event["vehicle"] == "train-0750"
+                && event["facility"] == "2a")
+    );
+    assert!(
+        rust.iter()
+            .any(|event| event["type"] == "VehicleArrivesAtFacility"
+                && event["vehicle"] == "bus-0740"
+                && event["facility"] == "2b")
+    );
+    for (person, vehicle) in [
+        ("capacity-a", "train-0800"),
+        ("capacity-b", "train-0750"),
+        ("train-to-bus-transfer", "train-0730"),
+        ("train-to-bus-transfer", "bus-0740"),
+    ] {
+        assert!(
+            rust.iter().any(|event| {
+                event["type"] == "PersonEntersPtVehicle"
+                    && event["person"] == person
+                    && event["vehicle"] == vehicle
+            }),
+            "{person} should board {vehicle}"
+        );
+    }
+    assert!(
+        rust.iter()
+            .any(|event| event["type"] == "stuckAndAbort" && event["person"] == "stranded-at-end")
+    );
+}
+
 fn assert_queue_execution_matches(num_parts: u32) {
     let mut config = Config::from_args(CommandLineArgs::new_with_path(
         "./tests/resources/pt_simulated/queue_execution.yml",

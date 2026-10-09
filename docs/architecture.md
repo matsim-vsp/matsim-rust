@@ -66,9 +66,10 @@ these inputs per iteration and return agents, which the controller materializes 
 
 Transit vehicles are simulated when `transit.simulate_vehicles` is set, and teleported otherwise. Turning a `Scenario` into
 a `ControllerScenario` then expands the schedule into per-departure vehicle runs once, before the Mobsim threads start, and
-every partition shares them. A link belongs to the partition of its to-node, so a partition's transit engine owns exactly
-the runs whose start link it owns and drives those drivers through the network engine: transit vehicles occupy links and
-compete for capacity like every other vehicle. A
+every partition shares them. Routes whose service mode is listed in
+`transit.deterministic_service_modes` run stop-to-stop at timetable offsets; other services use the queue network engine.
+The timetable engine currently requires one partition. Queue vehicles are owned by the partition of their start link and
+drive through the network engine: they occupy links and compete for capacity like every other vehicle. A
 passenger waits on the partition that owns its access stop's link, which is the same partition as every vehicle serving that
 stop, so the waiting lists never cross partitions. A passenger that rides past a partition boundary travels inside the
 vehicle's backpack, and the partition where it alights resumes the agent.
