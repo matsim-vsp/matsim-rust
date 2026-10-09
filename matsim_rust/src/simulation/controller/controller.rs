@@ -96,7 +96,103 @@ impl ControllerBuilder {
 
     // Implementing a custom build function in order to set the barrier if not set by the user.
     pub fn build(mut self) -> Result<Controller, String> {
+        self.scenario.config.transit().validate()?;
         self.scenario.config.travel_time_calculator().validate()?;
+        let transit = self.scenario.config.transit();
+        if transit.use_mode_mapping_for_passengers
+            || !transit.mode_mapping_for_passengers.is_empty()
+        {
+            if transit.use_mode_mapping_for_passengers
+                && transit.mode_mapping_for_passengers.is_empty()
+            {
+                return Err("transit.mode_mapping_for_passengers must not be empty when passenger mode mapping is enabled".to_owned());
+            }
+            for (route_mode, passenger_mode) in &transit.mode_mapping_for_passengers {
+                if route_mode.trim().is_empty() || passenger_mode.trim().is_empty() {
+                    return Err("transit.mode_mapping_for_passengers routeMode and passengerMode must not be empty".to_owned());
+                }
+                if !self.scenario.transit_schedule.lines().values().any(|line| {
+                    line.routes
+                        .values()
+                        .any(|route| route.transport_mode.external() == route_mode)
+                }) {
+                    return Err(format!(
+                        "transit.mode_mapping_for_passengers routeMode {route_mode} is not present in the transit schedule"
+                    ));
+                }
+                if transit.use_mode_mapping_for_passengers {
+                    if !transit.transit_modes.contains(passenger_mode) {
+                        return Err(format!(
+                            "transit.mode_mapping_for_passengers passengerMode {passenger_mode} must be listed in transit.transit_modes"
+                        ));
+                    }
+                    let Some(params) = self
+                        .scenario
+                        .config
+                        .scoring()
+                        .mode_params
+                        .iter()
+                        .find(|params| params.mode == *passenger_mode)
+                    else {
+                        return Err(format!(
+                            "transit.mode_mapping_for_passengers passengerMode {passenger_mode} needs scoring mode parameters"
+                        ));
+                    };
+                    if let Some((field, _)) = [
+                        (
+                            "marginal_utility_of_traveling",
+                            params.marginal_utility_of_traveling,
+                        ),
+                        (
+                            "marginal_utility_of_distance",
+                            params.marginal_utility_of_distance,
+                        ),
+                        (
+                            "monetary_distance_cost_rate",
+                            params.monetary_distance_cost_rate,
+                        ),
+                        ("daily_money_constant", params.daily_money_constant),
+                        ("daily_utility_constant", params.daily_utility_constant),
+                        ("constant", params.constant),
+                    ]
+                    .into_iter()
+                    .find(|(_, value)| !value.is_finite())
+                    {
+                        return Err(format!(
+                            "scoring mode {passenger_mode} has a non-finite {field}"
+                        ));
+                    }
+                    let performing = self
+                        .scenario
+                        .config
+                        .scoring()
+                        .agent_params
+                        .iter()
+                        .find(|params| params.subpopulation == "person")
+                        .map_or(6.0, |params| params.performing);
+                    let pt_utility = self
+                        .scenario
+                        .config
+                        .scoring()
+                        .mode_params
+                        .iter()
+                        .find(|params| params.mode == "pt")
+                        .map_or(-6.0, |params| params.marginal_utility_of_traveling);
+                    if !performing.is_finite() || !pt_utility.is_finite() {
+                        return Err(
+                            "scoring parameters for mapped transit routing must be finite"
+                                .to_owned(),
+                        );
+                    }
+                    if performing == pt_utility {
+                        return Err(
+                            "scoring parameters for pt must produce a non-zero travel-time cost"
+                                .to_owned(),
+                        );
+                    }
+                }
+            }
+        }
         let num_parts = self.scenario.config.partitioning().num_parts;
         let bin_size = self.scenario.config.travel_time_calculator().bin_size;
         let end_time = self.scenario.config.qsim().end_time;
@@ -299,12 +395,25 @@ impl ControllerBuilder {
             let mode = Id::create("pt");
             let car_fallback = routers.get(&Id::create("car")).cloned();
             let feeder_routers = routers.clone();
-            let mut transit_router = TransitRoutingModule::new(
+            let mut transit_router = TransitRoutingModule::new_with_transfer_construction(
                 controller_scenario.core.transit_schedule.clone(),
                 walk.teleported_mode_speed,
                 walk.beeline_distance_factor,
                 controller_scenario.core.garage.clone(),
                 car_fallback,
+                config.transit().transfer_construction,
+            )
+            .with_personless_fallback(config.transit().personless_car_fallback)
+            .with_passenger_mode_mapping(
+                config.transit().use_mode_mapping_for_passengers,
+                config.transit().mode_mapping_for_passengers.clone(),
+                &config.scoring().mode_params,
+                &config.scoring().agent_params,
+            )
+            .with_range_queries(
+                config.transit().range_query_settings.clone(),
+                config.transit().route_selector_settings.clone(),
+                config.computational_setup().random_seed,
             );
             if config.transit().use_intermodal_access_egress {
                 if config.transit().intermodal_access_egress.is_empty() {
@@ -358,13 +467,7 @@ impl ControllerBuilder {
                     config.computational_setup().random_seed,
                 );
             }
-            routers.insert(
-                mode,
-                Arc::new(
-                    transit_router
-                        .with_personless_fallback(config.transit().personless_car_fallback),
-                ),
-            );
+            routers.insert(mode, Arc::new(transit_router));
         }
 
         Ok(TripRouter::new(routers))

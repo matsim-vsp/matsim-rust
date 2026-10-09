@@ -9,6 +9,7 @@ use dyn_clone::DynClone;
 use reqwest::Url;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
@@ -556,6 +557,12 @@ pub struct Transit {
     /// Leg modes served by simulated transit vehicles. MATSim's `transit.transitModes`.
     #[serde(default = "default_transit_modes")]
     pub transit_modes: Vec<String>,
+    /// Use service-to-passenger mode mappings for transit routing, scoring, and returned ride legs.
+    #[serde(default)]
+    pub use_mode_mapping_for_passengers: bool,
+    /// Map schedule route modes to the passenger leg modes used by MATSim's SwissRailRaptor.
+    #[serde(default)]
+    pub mode_mapping_for_passengers: BTreeMap<String, String>,
     /// Let `pt` requests that carry no person fall back to the car router. This is the legacy
     /// behaviour SILO's zone-to-zone queries rely on; passengers never need it, since a
     /// passenger's car fallback is gated on that agent's `ownsCar` attribute.
@@ -569,6 +576,29 @@ pub struct Transit {
     pub intermodal_access_egress_mode_selection: IntermodalModeSelection,
     #[serde(default)]
     pub intermodal_leg_only_handling: IntermodalLegOnlyHandling,
+    /// When walking transfer candidates are built for transit routing.
+    #[serde(default)]
+    pub transfer_construction: TransferConstruction,
+    /// Search for PT routes within configured departure windows. Empty means use the desired
+    /// departure time only; an empty subpopulation list applies to every subpopulation.
+    #[serde(default)]
+    pub range_query_settings: Vec<TransitRangeQuerySettings>,
+    /// Route choice weights for window searches. The default score is travel time plus 300
+    /// seconds per transfer, matching the existing pinned router cost.
+    #[serde(default)]
+    pub route_selector_settings: Vec<TransitRouteSelectorSettings>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferConstruction {
+    /// Build all candidate stop transfers when the router is created.
+    #[default]
+    Initial,
+    /// Build and cache candidates the first time each stop is queried.
+    Adaptive,
+    /// Rebuild candidates on every query without retaining them.
+    Online,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -603,6 +633,24 @@ impl Default for IntermodalAccessEgress {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct TransitRangeQuerySettings {
+    pub max_earlier_departure_sec: u64,
+    pub max_later_departure_sec: u64,
+    pub subpopulations: Vec<String>,
+}
+
+impl Default for TransitRangeQuerySettings {
+    fn default() -> Self {
+        Self {
+            max_earlier_departure_sec: 0,
+            max_later_departure_sec: 0,
+            subpopulations: Vec::new(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IntermodalModeSelection {
@@ -620,6 +668,26 @@ pub enum IntermodalLegOnlyHandling {
     Forbid,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct TransitRouteSelectorSettings {
+    pub beta_travel_time: f64,
+    pub beta_departure_time: f64,
+    pub beta_transfer_count: f64,
+    pub subpopulations: Vec<String>,
+}
+
+impl Default for TransitRouteSelectorSettings {
+    fn default() -> Self {
+        Self {
+            beta_travel_time: 1.0,
+            beta_departure_time: 0.0,
+            beta_transfer_count: 300.0,
+            subpopulations: Vec::new(),
+        }
+    }
+}
+
 fn default_transit_modes() -> Vec<String> {
     vec!["pt".to_string()]
 }
@@ -630,12 +698,33 @@ impl Default for Transit {
             schedule_path: None,
             simulate_vehicles: false,
             transit_modes: default_transit_modes(),
+            use_mode_mapping_for_passengers: false,
+            mode_mapping_for_passengers: BTreeMap::new(),
             personless_car_fallback: false,
             use_intermodal_access_egress: false,
             intermodal_access_egress: Vec::new(),
             intermodal_access_egress_mode_selection: IntermodalModeSelection::default(),
             intermodal_leg_only_handling: IntermodalLegOnlyHandling::default(),
+            transfer_construction: TransferConstruction::default(),
+            range_query_settings: Vec::new(),
+            route_selector_settings: Vec::new(),
         }
+    }
+}
+
+impl Transit {
+    pub fn validate(&self) -> Result<(), String> {
+        for (index, selector) in self.route_selector_settings.iter().enumerate() {
+            if !selector.beta_travel_time.is_finite()
+                || !selector.beta_departure_time.is_finite()
+                || !selector.beta_transfer_count.is_finite()
+            {
+                return Err(format!(
+                    "transit.route_selector_settings[{index}] weights must be finite"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -696,6 +785,13 @@ register_override!("transit.transit_modes", |config, value| {
         .map(ToString::to_string)
         .collect();
 });
+
+register_override!(
+    "transit.use_mode_mapping_for_passengers",
+    |config, value| {
+        config.transit_mut().use_mode_mapping_for_passengers = value.parse().unwrap();
+    }
+);
 
 register_override!("transit.personless_car_fallback", |config, value| {
     config.transit_mut().personless_car_fallback = value.parse().unwrap();
@@ -2124,6 +2220,7 @@ mod tests {
     use crate::simulation::config::OverwriteFiles;
     use crate::simulation::config::PathBuf;
     use crate::simulation::config::Profiling;
+    use crate::simulation::config::TransferConstruction;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
@@ -2377,6 +2474,24 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn transit_transfer_construction_is_configurable_and_validated() {
+        for (value, expected) in [
+            ("initial", TransferConstruction::Initial),
+            ("adaptive", TransferConstruction::Adaptive),
+            ("online", TransferConstruction::Online),
+        ] {
+            let yaml = format!(
+                "modules:\n  transit:\n    type: Transit\n    transfer_construction: {value}\n"
+            );
+            let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(parsed.transit().transfer_construction, expected);
+        }
+        let invalid =
+            "modules:\n  transit:\n    type: Transit\n    transfer_construction: unknown\n";
+        assert!(serde_yaml::from_str::<Config>(invalid).is_err());
     }
 
     #[test]
@@ -2758,7 +2873,48 @@ modules:
         assert_eq!(None, config.transit().schedule_path);
         assert!(!config.transit().simulate_vehicles);
         assert_eq!(vec!["pt"], config.transit().transit_modes);
+        assert!(!config.transit().use_mode_mapping_for_passengers);
+        assert!(config.transit().mode_mapping_for_passengers.is_empty());
         assert!(!config.transit().personless_car_fallback);
+        assert!(config.transit().range_query_settings.is_empty());
+        assert!(config.transit().route_selector_settings.is_empty());
+    }
+
+    #[test]
+    fn transit_range_query_and_selector_settings_load_from_yaml() {
+        let file = write_temp_config(
+            r#"
+modules:
+  transit:
+    type: Transit
+    range_query_settings:
+      - max_earlier_departure_sec: 300
+        max_later_departure_sec: 600
+        subpopulations: [freight]
+    route_selector_settings:
+      - beta_travel_time: 1.0
+        beta_departure_time: 0.5
+        beta_transfer_count: 300.0
+        subpopulations: [freight]
+"#,
+        );
+        let config = Config::from_args(CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![],
+        });
+
+        assert_eq!(
+            300,
+            config.transit().range_query_settings[0].max_earlier_departure_sec
+        );
+        assert_eq!(
+            600,
+            config.transit().range_query_settings[0].max_later_departure_sec
+        );
+        assert_eq!(
+            "freight",
+            config.transit().route_selector_settings[0].subpopulations[0]
+        );
     }
 
     /// The legacy fallback for queries without a person is off unless a config asks for it, and
@@ -2854,6 +3010,30 @@ modules:
             }],
             parsed.transit().intermodal_access_egress
         );
+    }
+
+    #[test]
+    fn transit_passenger_mode_mappings_read_from_yaml() {
+        let config: Config = serde_yaml::from_str(
+            r#"
+modules:
+  transit:
+    type: Transit
+    use_mode_mapping_for_passengers: true
+    transit_modes: [rail, road]
+    mode_mapping_for_passengers:
+      train: rail
+      bus: road
+"#,
+        )
+        .expect("failed to parse passenger mode mappings");
+
+        assert!(config.transit().use_mode_mapping_for_passengers);
+        assert_eq!(
+            "rail",
+            config.transit().mode_mapping_for_passengers["train"]
+        );
+        assert_eq!("road", config.transit().mode_mapping_for_passengers["bus"]);
     }
 
     #[test]
