@@ -458,12 +458,33 @@ pub struct TransitRoutingModule {
     personless_fallback: bool,
     passenger_modes: std::collections::BTreeMap<String, String>,
     use_passenger_mode_mapping: bool,
-    passenger_mode_travel_utilities: std::collections::BTreeMap<String, f64>,
-    performing_utility_per_hour: f64,
-    default_pt_travel_utility_per_hour: f64,
+    /// Resolved per-subpopulation routing parameters, keyed by subpopulation. An empty string
+    /// entry stores the default that applies to every subpopulation without an explicit override.
+    /// Built once from the configured `mode_params` / `agent_params` so each request resolves
+    /// costs with a single `BTreeMap` lookup.
+    routing_params_by_subpopulation: std::collections::BTreeMap<String, ResolvedRoutingParams>,
     range_query_settings: Vec<TransitRangeQuerySettings>,
     route_selector_settings: Vec<TransitRouteSelectorSettings>,
     random_seed: u64,
+}
+
+/// The three numbers MATSim's travel-time cost formula needs: the agent's performing utility, the
+/// baseline pt utility, and a per-mode utility map that lets bus and rail legs disagree about how
+/// fast time passes. Reference semantics are intentional: the routing module hands the same
+/// resolved struct to every leg-cost call within one request, so a passenger never pays different
+/// costs for two halves of the same trip.
+#[derive(Clone, Debug)]
+pub struct ResolvedRoutingParams {
+    /// `agent_params[person].performing` for the request's subpopulation, or the config default
+    /// (6.0) when no agent parameter overrides it. Always finite: the controller rejects a config
+    /// whose `performing` is non-finite.
+    pub performing_utility_per_hour: f64,
+    /// `mode_params[pt].marginal_utility_of_traveling` for the request's subpopulation, falling
+    /// back to the empty-subpopulation entry, then -6.0. Always finite by the same controller check.
+    pub pt_utility_per_hour: f64,
+    /// Per-mode marginal utilities of traveling (utils/hour) for the request's subpopulation.
+    /// Resolution order: matching subpopulation, then empty subpopulation, then -6.0 for `pt`.
+    pub mode_utilities: std::collections::BTreeMap<String, f64>,
 }
 
 #[derive(Clone)]
@@ -565,6 +586,59 @@ fn matching_transit_settings<'a, T: TransitSubpopulations>(
         })
 }
 
+/// Build a per-subpopulation map of resolved routing parameters from the configured scoring
+/// inputs. Each entry bundles the performing utility for its subpopulation with the matching mode
+/// utilities; a subpopulation absent from the input gets no entry here, so resolution falls back
+/// to the empty-subpopulation entry (the global default) and finally to the built-in constants.
+///
+/// The output is keyed by `subpopulation` (verbatim from the config); empty string is the global
+/// default entry.
+fn build_routing_params_by_subpopulation(
+    mode_params: &[crate::simulation::config::ModeParameter],
+    agent_params: &[crate::simulation::config::AgentParameter],
+) -> std::collections::BTreeMap<String, ResolvedRoutingParams> {
+    let mut mode_by_subpopulation: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, f64>,
+    > = std::collections::BTreeMap::new();
+    for params in mode_params {
+        mode_by_subpopulation
+            .entry(params.subpopulation.clone())
+            .or_default()
+            .insert(params.mode.clone(), params.marginal_utility_of_traveling);
+    }
+    let mut by_subpopulation: std::collections::BTreeMap<String, ResolvedRoutingParams> =
+        std::collections::BTreeMap::new();
+    let subpopulations: std::collections::BTreeSet<String> = mode_by_subpopulation
+        .keys()
+        .cloned()
+        .chain(agent_params.iter().map(|p| p.subpopulation.clone()))
+        .collect();
+    for subpopulation in subpopulations {
+        let mode_utilities = mode_by_subpopulation
+            .get(&subpopulation)
+            .cloned()
+            .unwrap_or_else(|| mode_by_subpopulation.get("").cloned().unwrap_or_default());
+        let pt_utility = mode_utilities.get("pt").copied().unwrap_or(-6.0);
+        // The performing utility is per-subpopulation; an absent agent_params entry for the
+        // requested subpopulation inherits the global default ("person" subpopulation) at
+        // 6.0 utils/hour — the same fallback MATSim uses when no `person` override is set.
+        let performing = agent_params
+            .iter()
+            .find(|params| params.subpopulation == subpopulation)
+            .map_or(6.0, |params| params.performing);
+        by_subpopulation.insert(
+            subpopulation,
+            ResolvedRoutingParams {
+                performing_utility_per_hour: performing,
+                pt_utility_per_hour: pt_utility,
+                mode_utilities,
+            },
+        );
+    }
+    by_subpopulation
+}
+
 // ponytail: This search cap is fixed at 20 until MATSim's configurable transfer limit is ported.
 const RAPTOR_MAX_TRANSFERS: usize = 20;
 const RAPTOR_MIN_TRANSFER_TIME: Duration = Duration::from_secs(60);
@@ -608,6 +682,11 @@ impl RoutingModule for TransitRoutingModule {
         let subpopulation = request
             .person()
             .map_or("", |person| person.subpopulation().external());
+        // Resolve per-subpopulation routing costs once. The TripRouter builds the itinerary
+        // here and downstream scoring picks up the same passenger mode, so they have to agree
+        // on the cost formula. Resolving once and threading the same struct through every
+        // leg-cost call inside this request is what keeps that agreement exact.
+        let routing_params = self.resolve_routing_params(subpopulation);
         let best = if let Some(settings) =
             matching_transit_settings(&self.range_query_settings, subpopulation)
         {
@@ -618,12 +697,25 @@ impl RoutingModule for TransitRoutingModule {
                 &egress_stops,
                 settings,
                 request.person(),
+                &routing_params,
             )
             .or_else(|| {
-                self.find_best_path(to, request.departure_time, &access_stops, &egress_stops)
+                self.find_best_path(
+                    to,
+                    request.departure_time,
+                    &access_stops,
+                    &egress_stops,
+                    &routing_params,
+                )
             })
         } else {
-            self.find_best_path(to, request.departure_time, &access_stops, &egress_stops)
+            self.find_best_path(
+                to,
+                request.departure_time,
+                &access_stops,
+                &egress_stops,
+                &routing_params,
+            )
         };
         let Some(path) = best else {
             // An origin/destination pair that no transit line connects is not an error: SILO
@@ -657,7 +749,7 @@ impl RoutingModule for TransitRoutingModule {
             });
         };
         if direct_walk_time.as_secs_f64()
-            < self.path_cost_equivalent_seconds(&path, request.departure_time)
+            < self.path_cost_equivalent_seconds(&path, request.departure_time, &routing_params)
         {
             return Ok(vec![direct_walk()]);
         }
@@ -692,20 +784,29 @@ impl TransitRoutingModule {
     ) -> Self {
         self.use_passenger_mode_mapping = enabled;
         self.passenger_modes = mappings;
-        self.passenger_mode_travel_utilities = scoring
-            .iter()
-            .map(|params| (params.mode.clone(), params.marginal_utility_of_traveling))
-            .collect();
-        self.performing_utility_per_hour = agent_scoring
-            .iter()
-            .find(|params| params.subpopulation == "person")
-            .map_or(6.0, |params| params.performing);
-        self.default_pt_travel_utility_per_hour = self
-            .passenger_mode_travel_utilities
-            .get("pt")
-            .copied()
-            .unwrap_or(-6.0);
+        self.routing_params_by_subpopulation =
+            build_routing_params_by_subpopulation(scoring, agent_scoring);
         self
+    }
+
+    /// Resolves the routing parameters for a single subpopulation, applying the documented
+    /// precedence: explicit subpopulation match, then the empty-subpopulation entry, then -6.0
+    /// for the `pt` baseline. Reference semantics matter: the returned struct is read-only here
+    /// and the routing module hands it to every leg-cost call inside one request.
+    fn resolve_routing_params(&self, subpopulation: &str) -> ResolvedRoutingParams {
+        if let Some(params) = self.routing_params_by_subpopulation.get(subpopulation) {
+            return params.clone();
+        }
+        if let Some(params) = self.routing_params_by_subpopulation.get("") {
+            return params.clone();
+        }
+        // No subpopulation entry and no empty-subpopulation default — fall back to the built-in
+        // defaults so a request without a configured subpopulation still gets finite costs.
+        ResolvedRoutingParams {
+            performing_utility_per_hour: 6.0,
+            pt_utility_per_hour: -6.0,
+            mode_utilities: std::collections::BTreeMap::new(),
+        }
     }
 
     pub(crate) fn with_range_queries(
@@ -947,9 +1048,7 @@ impl TransitRoutingModule {
             personless_fallback: false,
             passenger_modes: std::collections::BTreeMap::new(),
             use_passenger_mode_mapping: false,
-            passenger_mode_travel_utilities: std::collections::BTreeMap::new(),
-            performing_utility_per_hour: 6.0,
-            default_pt_travel_utility_per_hour: -6.0,
+            routing_params_by_subpopulation: std::collections::BTreeMap::new(),
             range_query_settings: Vec::new(),
             route_selector_settings: vec![TransitRouteSelectorSettings::default()],
             random_seed: crate::simulation::config::DEFAULT_RANDOM_SEED,
@@ -1013,6 +1112,9 @@ impl TransitRoutingModule {
         departure_time: SimTime,
     ) -> Vec<TransitSkimResult> {
         let access_stops = self.nearest_stops(origin);
+        // Skims have no per-person context — fall back to the empty-subpopulation default so
+        // cost-equivalent travel time still uses passenger-mode utilities when configured.
+        let routing_params = self.resolve_routing_params("");
 
         destinations
             .iter()
@@ -1024,11 +1126,20 @@ impl TransitRoutingModule {
                     .into_iter()
                     .map(|(stop_id, _)| stop_id)
                     .collect();
-                match self.find_best_path(destination, departure_time, &access_stops, &egress_stops)
-                {
+                match self.find_best_path(
+                    destination,
+                    departure_time,
+                    &access_stops,
+                    &egress_stops,
+                    &routing_params,
+                ) {
                     Some(path)
                         if direct_walk.as_secs_f64()
-                            >= self.path_cost_equivalent_seconds(&path, departure_time) =>
+                            >= self.path_cost_equivalent_seconds(
+                                &path,
+                                departure_time,
+                                &routing_params,
+                            ) =>
                     {
                         TransitSkimResult {
                             outcome: TransitSkimOutcome::Transit,
@@ -1246,12 +1357,18 @@ impl TransitRoutingModule {
             .saturating_add(RAPTOR_TRANSFER_COST.saturating_mul(transfer_count))
     }
 
-    fn path_cost_equivalent_seconds(&self, path: &TransitPath, departure_time: SimTime) -> f64 {
+    fn path_cost_equivalent_seconds(
+        &self,
+        path: &TransitPath,
+        departure_time: SimTime,
+        routing_params: &ResolvedRoutingParams,
+    ) -> f64 {
         self.cost_equivalent_seconds(
             path.arrival,
             path.access_distance,
             &path.rides,
             departure_time,
+            routing_params,
         )
     }
 
@@ -1261,6 +1378,7 @@ impl TransitRoutingModule {
         access_distance: f64,
         rides: &[Ride],
         departure_time: SimTime,
+        routing_params: &ResolvedRoutingParams,
     ) -> f64 {
         let transfer_count = rides.len().saturating_sub(1) as u32;
         let base = arrival
@@ -1270,18 +1388,19 @@ impl TransitRoutingModule {
         if !self.use_passenger_mode_mapping {
             return base;
         }
+        let baseline =
+            routing_params.performing_utility_per_hour - routing_params.pt_utility_per_hour;
         base + rides
             .iter()
             .enumerate()
             .map(|(index, ride)| {
-                let utility = self
-                    .passenger_mode_travel_utilities
+                let utility = routing_params
+                    .mode_utilities
                     .get(&ride.passenger_mode)
                     .copied()
-                    .unwrap_or(self.default_pt_travel_utility_per_hour);
-                let baseline =
-                    self.performing_utility_per_hour - self.default_pt_travel_utility_per_hour;
-                let mode_cost_factor = (self.performing_utility_per_hour - utility) / baseline;
+                    .unwrap_or(routing_params.pt_utility_per_hour);
+                let mode_cost_factor =
+                    (routing_params.performing_utility_per_hour - utility) / baseline;
                 let leg_start = if index == 0 {
                     departure_time.saturating_add(self.walk_time(access_distance))
                 } else {
@@ -1308,6 +1427,7 @@ impl TransitRoutingModule {
         egress_stops: &HashSet<Id<TransitStopFacility>>,
         window: &TransitRangeQuerySettings,
         person: Option<&InternalPerson>,
+        routing_params: &ResolvedRoutingParams,
     ) -> Option<TransitPath> {
         let earlier = Duration::from_secs(window.max_earlier_departure_sec);
         let later = Duration::from_secs(window.max_later_departure_sec);
@@ -1350,6 +1470,7 @@ impl TransitRoutingModule {
                 departure,
                 access_stops,
                 egress_stops,
+                routing_params,
             ));
         }
         let score = |path: &TransitPath| {
@@ -1405,14 +1526,25 @@ impl TransitRoutingModule {
         departure_time: SimTime,
         access_stops: &[(Id<TransitStopFacility>, f64)],
         egress_stops: &HashSet<Id<TransitStopFacility>>,
+        routing_params: &ResolvedRoutingParams,
     ) -> Option<TransitPath> {
-        self.find_range_paths(destination, departure_time, access_stops, egress_stops)
-            .into_iter()
-            .min_by(|left, right| {
-                self.path_cost_equivalent_seconds(left, departure_time)
-                    .total_cmp(&self.path_cost_equivalent_seconds(right, departure_time))
-                    .then_with(|| transit_path_tiebreak(left, right))
-            })
+        self.find_range_paths(
+            destination,
+            departure_time,
+            access_stops,
+            egress_stops,
+            routing_params,
+        )
+        .into_iter()
+        .min_by(|left, right| {
+            self.path_cost_equivalent_seconds(left, departure_time, routing_params)
+                .total_cmp(&self.path_cost_equivalent_seconds(
+                    right,
+                    departure_time,
+                    routing_params,
+                ))
+                .then_with(|| transit_path_tiebreak(left, right))
+        })
     }
 
     fn find_range_paths(
@@ -1421,6 +1553,7 @@ impl TransitRoutingModule {
         departure_time: SimTime,
         access_stops: &[(Id<TransitStopFacility>, f64)],
         egress_stops: &HashSet<Id<TransitStopFacility>>,
+        routing_params: &ResolvedRoutingParams,
     ) -> Vec<TransitPath> {
         let mut states: HashMap<(Id<TransitStopFacility>, usize), Vec<TransitPathState>> =
             HashMap::new();
@@ -1570,6 +1703,7 @@ impl TransitRoutingModule {
                                     current.access_distance,
                                     &rides,
                                     departure_time,
+                                    routing_params,
                                 ),
                                 access_distance: current.access_distance,
                                 rides,
@@ -1994,8 +2128,15 @@ mod route_proposal_tests {
         let destination = Coordinate::new_2d(3950.0, 1050.0);
         let access = [(Id::create("ra"), 0.0)];
         let egress = HashSet::from([Id::create("rc")]);
+        let params = router.resolve_routing_params("");
         let path = router
-            .find_best_path(&destination, SimTime::from_secs(8 * 3600), &access, &egress)
+            .find_best_path(
+                &destination,
+                SimTime::from_secs(8 * 3600),
+                &access,
+                &egress,
+                &params,
+            )
             .unwrap();
 
         assert_eq!("direct", path.rides[0].route.external());
@@ -2027,6 +2168,170 @@ mod route_proposal_tests {
     }
 
     #[deterministic_id_test]
+    fn person_specific_routing_costs_let_two_passengers_choose_different_services() {
+        // Reuse the reference schedule and relabel the routes so the two-leg option (bus) and
+        // the direct option (rail) are visibly distinct services. With the same travel times and
+        // a flat per-mode utility the direct route wins; biasing each passenger's per-mode
+        // utility flips the answer for one but not the other.
+        let mut schedule = reference_schedule();
+        let line = schedule
+            .lines_mut()
+            .get_mut(&Id::<TransitLine>::create("Reference Line"))
+            .unwrap();
+        line.routes
+            .get_mut(&Id::<TransitRoute>::create("b_to_c"))
+            .unwrap()
+            .transport_mode = Id::create("bus");
+        line.routes
+            .get_mut(&Id::<TransitRoute>::create("direct"))
+            .unwrap()
+            .transport_mode = Id::create("rail");
+
+        // Both passengers share one router; the per-subpopulation `mode_params` are what differ.
+        // The `person` subpopulation keeps the rail-friendly utilities; the `freight` subpopulation
+        // ships rail-averse utilities that prefer the bus transfer.
+        let scoring = vec![
+            crate::simulation::config::ModeParameter {
+                subpopulation: "person".to_owned(),
+                mode: "rail".to_owned(),
+                marginal_utility_of_traveling: -1.0,
+                ..Default::default()
+            },
+            crate::simulation::config::ModeParameter {
+                subpopulation: "person".to_owned(),
+                mode: "road".to_owned(),
+                marginal_utility_of_traveling: -24.0,
+                ..Default::default()
+            },
+            crate::simulation::config::ModeParameter {
+                subpopulation: "freight".to_owned(),
+                mode: "rail".to_owned(),
+                marginal_utility_of_traveling: -24.0,
+                ..Default::default()
+            },
+            crate::simulation::config::ModeParameter {
+                subpopulation: "freight".to_owned(),
+                mode: "road".to_owned(),
+                marginal_utility_of_traveling: -1.0,
+                ..Default::default()
+            },
+        ];
+        let agent_scoring = vec![
+            crate::simulation::config::AgentParameter::default(),
+            crate::simulation::config::AgentParameter {
+                subpopulation: "freight".to_owned(),
+                performing: 6.0,
+                ..Default::default()
+            },
+        ];
+        let router = reference_router(schedule, 0.8333333333333334).with_passenger_mode_mapping(
+            true,
+            [
+                ("bus".to_owned(), "road".to_owned()),
+                ("rail".to_owned(), "rail".to_owned()),
+            ]
+            .into(),
+            &scoring,
+            &agent_scoring,
+        );
+
+        let departure = SimTime::from_secs(8 * 3600);
+
+        let passenger = InternalPerson::new(
+            Id::create("passenger"),
+            InternalPlan {
+                score: None,
+                selected: true,
+                elements: Vec::new(),
+                attributes: InternalAttributes::default(),
+            },
+        );
+        let freight = InternalPerson::new(
+            Id::create("freight-hauler"),
+            InternalPlan {
+                score: None,
+                selected: true,
+                elements: Vec::new(),
+                attributes: InternalAttributes::default(),
+            },
+        )
+        .with_subpopulation("freight");
+
+        let from = Facility::new_link_wrapper(
+            Coordinate::new_2d(1050.0, 1050.0),
+            Id::<Link>::create("11"),
+        );
+        let to = Facility::new_link_wrapper(
+            Coordinate::new_2d(3950.0, 1050.0),
+            Id::<Link>::create("33"),
+        );
+
+        let passenger_path = router
+            .calc_route(
+                RoutingRequestBuilder::default()
+                    .from(&from)
+                    .to(&to)
+                    .departure_time(departure)
+                    .person(Some(&passenger))
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        let freight_path = router
+            .calc_route(
+                RoutingRequestBuilder::default()
+                    .from(&from)
+                    .to(&to)
+                    .departure_time(departure)
+                    .person(Some(&freight))
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        // Inspect the pt legs only: the walks wrap them, so filter out the walk legs and read
+        // the route id from the embedded PT description. The route id identifies the service the
+        // passenger picked.
+        let pt_route = |elements: &[InternalPlanElement]| -> String {
+            elements
+                .iter()
+                .find_map(|element| {
+                    let leg = element.as_leg()?;
+                    leg.route
+                        .as_ref()?
+                        .as_pt()
+                        .map(|pt| pt.description.transit_route_id.clone())
+                })
+                .expect("the passenger picks a transit service")
+        };
+        let passenger_route = pt_route(&passenger_path);
+        let freight_route = pt_route(&freight_path);
+
+        // The passenger subpopulation prefers rail; freight prefers road. The competing
+        // candidates are the direct rail service and the bus transfer (a_to_b -> b_to_c), so the
+        // passengers must end up on different services. The freight itinerary contains two rides,
+        // which is enough to disambiguate it from the single-ride rail itinerary.
+        assert_eq!(passenger_route, "direct");
+        assert_eq!(freight_route, "a_to_b");
+        assert_ne!(passenger_route, freight_route);
+
+        // Repeating the request for the same passenger is deterministic: the same cost resolves
+        // to the same service.
+        let passenger_again = router
+            .calc_route(
+                RoutingRequestBuilder::default()
+                    .from(&from)
+                    .to(&to)
+                    .departure_time(departure)
+                    .person(Some(&passenger))
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(pt_route(&passenger_again), passenger_route);
+    }
+
+    #[deterministic_id_test]
     fn shared_stop_bus_rail_transfer_is_considered_with_rail_rail() {
         let mut schedule = reference_schedule();
         let line = schedule
@@ -2042,11 +2347,12 @@ mod route_proposal_tests {
         let access = [(Id::create("ra"), 0.0)];
         let egress = HashSet::from([Id::create("rc")]);
         let departure = SimTime::from_secs(8 * 3600);
+        let params = router.resolve_routing_params("");
         let path = router
-            .find_best_path(&destination, departure, &access, &egress)
+            .find_best_path(&destination, departure, &access, &egress, &params)
             .unwrap();
         let repeated = router
-            .find_best_path(&destination, departure, &access, &egress)
+            .find_best_path(&destination, departure, &access, &egress, &params)
             .unwrap();
 
         assert_eq!(
@@ -2111,8 +2417,9 @@ mod route_proposal_tests {
                 router.transfer_time(&Id::create("rb"), &Id::create("rb"), 0.0),
                 Duration::from_secs(60)
             );
+            let params = router.resolve_routing_params("");
             let just_catches = router
-                .find_best_path(&destination, departure, &access, &egress)
+                .find_best_path(&destination, departure, &access, &egress, &params)
                 .unwrap();
             assert_eq!(just_catches.rides.len(), 2);
         }
@@ -2132,9 +2439,10 @@ mod route_proposal_tests {
                 0.8333333333333334,
                 construction,
             );
+            let params = router.resolve_routing_params("");
             assert!(
                 router
-                    .find_best_path(&destination, departure, &access, &egress)
+                    .find_best_path(&destination, departure, &access, &egress, &params)
                     .is_none()
             );
         }
@@ -2161,6 +2469,7 @@ mod route_proposal_tests {
                 0.8333333333333334,
                 construction,
             );
+            let params = router.resolve_routing_params("");
             assert!(router.nearby_transfer_stops(&Id::create("rb")).is_empty());
             assert!(
                 router
@@ -2169,6 +2478,7 @@ mod route_proposal_tests {
                         departure,
                         &access,
                         &egress,
+                        &params,
                     )
                     .is_none()
             );
@@ -2201,8 +2511,9 @@ mod route_proposal_tests {
                 None,
                 construction,
             );
+            let params = router.resolve_routing_params("");
             let path = router
-                .find_best_path(&destination, departure, &access, &egress)
+                .find_best_path(&destination, departure, &access, &egress, &params)
                 .unwrap();
             assert_eq!(*expected_arrival.get_or_insert(path.arrival), path.arrival);
             let itinerary = path
@@ -2219,7 +2530,7 @@ mod route_proposal_tests {
             assert_eq!(itinerary, expected);
             assert_eq!(
                 router
-                    .find_best_path(&destination, departure, &access, &egress)
+                    .find_best_path(&destination, departure, &access, &egress, &params)
                     .unwrap()
                     .arrival,
                 path.arrival
@@ -2260,8 +2571,9 @@ mod route_proposal_tests {
             Arc::new(Garage::default()),
             None,
         );
+        let params = router.resolve_routing_params("");
         let path = router
-            .find_best_path(&destination, departure, &access, &egress)
+            .find_best_path(&destination, departure, &access, &egress, &params)
             .unwrap();
         assert_eq!(path.rides[1].board.external(), "rb_platform");
         assert_eq!(
@@ -2387,9 +2699,10 @@ mod route_proposal_tests {
             Arc::new(Garage::default()),
             None,
         );
+        let params = router.resolve_routing_params("");
         assert!(
             router
-                .find_best_path(&destination, departure, &access, &egress)
+                .find_best_path(&destination, departure, &access, &egress, &params)
                 .is_none()
         );
     }
@@ -2401,8 +2714,15 @@ mod route_proposal_tests {
         let egress = HashSet::from([Id::create("rc")]);
         let destination = Coordinate::new_2d(3950.0, 1050.0);
 
+        let params = router.resolve_routing_params("");
         let final_departure = router
-            .find_best_path(&destination, SimTime::from_secs(9 * 3600), &access, &egress)
+            .find_best_path(
+                &destination,
+                SimTime::from_secs(9 * 3600),
+                &access,
+                &egress,
+                &params,
+            )
             .unwrap();
         assert_eq!(final_departure.rides[0].route.external(), "direct");
         assert_eq!(
@@ -2417,6 +2737,7 @@ mod route_proposal_tests {
                     SimTime::from_secs(24 * 3600),
                     &access,
                     &egress,
+                    &params,
                 )
                 .is_none()
         );
@@ -2434,12 +2755,14 @@ mod route_proposal_tests {
             .unwrap()
             .departure_time = SimTime::from_secs(25 * 3600);
         let extended_router = reference_router(extended_schedule, 0.8333333333333334);
+        let extended_params = extended_router.resolve_routing_params("");
         let after_midnight = extended_router
             .find_best_path(
                 &destination,
                 SimTime::from_secs(25 * 3600),
                 &access,
                 &egress,
+                &extended_params,
             )
             .unwrap();
         assert_eq!(after_midnight.rides[0].route.external(), "direct");
@@ -2904,10 +3227,26 @@ mod route_proposal_tests {
         };
 
         let chosen = router
-            .select_range_query_path(&destination, desired, &access, &egress, &settings, None)
+            .select_range_query_path(
+                &destination,
+                desired,
+                &access,
+                &egress,
+                &settings,
+                None,
+                &router.resolve_routing_params(""),
+            )
             .unwrap();
         let repeated = router
-            .select_range_query_path(&destination, desired, &access, &egress, &settings, None)
+            .select_range_query_path(
+                &destination,
+                desired,
+                &access,
+                &egress,
+                &settings,
+                None,
+                &router.resolve_routing_params(""),
+            )
             .unwrap();
 
         assert!(chosen.departure >= desired.saturating_sub(Duration::from_secs(60)));
@@ -2919,8 +3258,9 @@ mod route_proposal_tests {
         );
 
         let no_window = TransitRangeQuerySettings::default();
+        let params = router.resolve_routing_params("");
         let fixed_time = router
-            .find_best_path(&destination, desired, &access, &egress)
+            .find_best_path(&destination, desired, &access, &egress, &params)
             .unwrap();
         assert_eq!(fixed_time.departure, desired);
 
@@ -2934,8 +3274,18 @@ mod route_proposal_tests {
                     subpopulations: Vec::new(),
                 }],
                 42,
+            );
+        let transfer_averse_params = transfer_averse.resolve_routing_params("");
+        let transfer_averse = transfer_averse
+            .select_range_query_path(
+                &destination,
+                desired,
+                &access,
+                &egress,
+                &no_window,
+                None,
+                &transfer_averse_params,
             )
-            .select_range_query_path(&destination, desired, &access, &egress, &no_window, None)
             .unwrap();
         assert_eq!("direct", transfer_averse.rides[0].route.external());
 
@@ -2949,6 +3299,7 @@ mod route_proposal_tests {
                     &egress,
                     &no_window,
                     None,
+                    &params,
                 )
                 .is_none()
         );
@@ -2985,6 +3336,7 @@ mod route_proposal_tests {
         };
         let first = person("stream-person-1");
         let second = person("stream-person-2");
+        let params = router.resolve_routing_params("");
         let choose = |person: &InternalPerson| {
             router
                 .select_range_query_path(
@@ -2994,6 +3346,7 @@ mod route_proposal_tests {
                     &egress,
                     &settings,
                     Some(person),
+                    &params,
                 )
                 .unwrap()
         };

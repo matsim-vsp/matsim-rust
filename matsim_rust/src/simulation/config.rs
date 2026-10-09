@@ -1324,6 +1324,85 @@ register_override!("scoring.write_experienced_plans", |config, value| {
     config.scoring_mut().write_experienced_plans = value.parse().unwrap();
 });
 
+impl Scoring {
+    /// Reject parameter values that the routing logic cannot turn into a finite travel-time cost.
+    ///
+    /// PT routing computes each ride's cost as `(performing - mode_utility) / (performing - pt_utility)`,
+    /// which is undefined when `performing == pt_utility` and undefined for any non-finite input.
+    /// Both of those checks belong here rather than scattered through the routing logic, because the
+    /// controller cannot meaningfully start a run that produced them and because a typed validation
+    /// call site is the right place to push external, user-configured inputs.
+    pub fn validate(&self) -> Result<(), String> {
+        for params in &self.mode_params {
+            for (field, value) in [
+                (
+                    "marginal_utility_of_traveling",
+                    params.marginal_utility_of_traveling,
+                ),
+                (
+                    "marginal_utility_of_distance",
+                    params.marginal_utility_of_distance,
+                ),
+                (
+                    "monetary_distance_cost_rate",
+                    params.monetary_distance_cost_rate,
+                ),
+                ("daily_money_constant", params.daily_money_constant),
+                ("daily_utility_constant", params.daily_utility_constant),
+                ("constant", params.constant),
+            ] {
+                if !value.is_finite() {
+                    return Err(format!(
+                        "scoring mode {} has a non-finite {field}",
+                        params.mode
+                    ));
+                }
+            }
+        }
+        for params in &self.agent_params {
+            for (field, value) in [
+                ("late_arrival", params.late_arrival),
+                ("early_departure", params.early_departure),
+                ("performing", params.performing),
+                ("waiting", params.waiting),
+                (
+                    "marginal_utility_of_money",
+                    params.marginal_utility_of_money,
+                ),
+                ("aborted_plan_score", params.aborted_plan_score),
+            ] {
+                if !value.is_finite() {
+                    return Err(format!(
+                        "scoring agent subpopulation {} has a non-finite {field}",
+                        params.subpopulation
+                    ));
+                }
+            }
+        }
+        if self
+            .agent_params
+            .iter()
+            .any(|params| params.subpopulation == "person")
+            && let Some(performing) = self
+                .agent_params
+                .iter()
+                .find(|params| params.subpopulation == "person")
+                .map(|params| params.performing)
+            && let Some(pt_utility) = self
+                .mode_params
+                .iter()
+                .find(|params| params.mode == "pt")
+                .map(|params| params.marginal_utility_of_traveling)
+            && performing == pt_utility
+        {
+            return Err(
+                "scoring parameters for pt must produce a non-zero travel-time cost".to_owned(),
+            );
+        }
+        Ok(())
+    }
+}
+
 impl Default for Scoring {
     fn default() -> Self {
         Self {
@@ -1368,7 +1447,13 @@ impl ActivityParameter {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct ModeParameter {
+    /// Empty string means the entry applies to every subpopulation (the default); a non-empty
+    /// value scopes the parameter to that subpopulation. PT routing resolves per-subpopulation
+    /// costs by checking the agent's subpopulation, falling back to the empty-string entry, and
+    /// then to the built-in default for the `pt` mode.
+    pub subpopulation: String,
     pub mode: String,
     pub marginal_utility_of_traveling: f64, // utils/hour
     pub marginal_utility_of_distance: f64,  // utils/meters
@@ -1390,6 +1475,7 @@ impl ModeParameter {
 impl Default for ModeParameter {
     fn default() -> Self {
         Self {
+            subpopulation: String::new(),
             mode: "walk".to_string(),
             marginal_utility_of_traveling: -6.0,
             marginal_utility_of_distance: 0.0,
@@ -2555,6 +2641,7 @@ mod tests {
                 typical_duration_s: 43_200.0,
             }],
             mode_params: vec![ModeParameter {
+                subpopulation: String::new(),
                 mode: "car".to_string(),
                 marginal_utility_of_traveling: -0.001,
                 marginal_utility_of_distance: -0.002,
@@ -3292,6 +3379,30 @@ modules:
         assert_eq!(
             Err("travel_time_calculator.bin_size must be greater than 0".to_string()),
             calculator.validate()
+        );
+    }
+
+    #[test]
+    fn scoring_validate_rejects_non_finite_mode_params() {
+        let mut scoring = Scoring::default();
+        scoring.mode_params[0].marginal_utility_of_traveling = f64::NAN;
+
+        let error = scoring.validate().unwrap_err();
+        assert!(
+            error.contains("scoring mode car has a non-finite marginal_utility_of_traveling"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn scoring_validate_rejects_non_finite_agent_params() {
+        let mut scoring = Scoring::default();
+        scoring.agent_params[0].performing = f64::INFINITY;
+
+        let error = scoring.validate().unwrap_err();
+        assert!(
+            error.contains("scoring agent subpopulation person has a non-finite performing"),
+            "unexpected error: {error}"
         );
     }
 }

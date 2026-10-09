@@ -366,6 +366,40 @@ fn mapped_passenger_modes_match_the_pinned_java_itinerary() {
     );
 }
 
+/// Per-subpopulation scoring costs let two passengers on the same plan pick different services.
+/// The fixture mirrors `routing_mapped_modes` but adds two requests: one for the default
+/// `person` subpopulation (rail-loyal) and one for `freight` (bus-loyal).
+#[deterministic_id_test(matsim_rust)]
+fn person_specific_routing_costs_let_two_passengers_choose_different_services() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_person_specific_costs/config.yml",
+    ));
+    let router = run(config);
+
+    let person_request = load_request_at("routing_person_specific_costs", 0);
+    let freight_request = load_request_at("routing_person_specific_costs", 1);
+    let person_route = calc_pt_route(&person_request, &router);
+    let freight_route = calc_pt_route(&freight_request, &router);
+
+    // The person subpopulation prefers rail: the single-ride direct service beats the bus
+    // transfer by cost. The freight subpopulation inverts those utilities and prefers the bus
+    // transfer. Asserting on the chosen route id makes the divergence unambiguous.
+    assert_eq!(
+        rides(&person_route),
+        vec![ride("direct", "ra", "rc", 28800.0)],
+        "the default subpopulation keeps the rail-loyal choice"
+    );
+    assert_eq!(
+        rides(&freight_route),
+        vec![
+            ride("a_to_b", "ra", "rb", 28800.0),
+            ride("b_to_c", "rb", "rc", 29700.0)
+        ],
+        "the freight subpopulation inverts the per-mode utility and picks the bus transfer"
+    );
+    assert_ne!(rides(&person_route), rides(&freight_route));
+}
+
 /// The range profile includes both inclusive window boundaries and never repeats yesterday's
 /// schedule after the final service. The pinned Java router falls back to walking when no PT route
 /// exists; Rust reports no PT path at that boundary.
@@ -790,16 +824,41 @@ fn calc_pt_route_result(request: &Value, router: &TripRouter) -> Value {
     };
     let from = facility("from");
     let to = facility("to");
+    let person = request.get("person").and_then(|value| {
+        if value.is_null() {
+            None
+        } else {
+            let id = value["id"].as_str().expect("person request carries an id");
+            let mut person = InternalPerson::new(
+                Id::create(id),
+                matsim_rust::simulation::scenario::population::InternalPlan {
+                    score: None,
+                    selected: true,
+                    elements: Vec::new(),
+                    attributes: matsim_rust::simulation::InternalAttributes::default(),
+                },
+            );
+            if let Some(subpopulation) = value.get("subpopulation").and_then(Value::as_str) {
+                person = person.with_subpopulation(subpopulation);
+            }
+            Some(person)
+        }
+    });
+    let base_builder = RoutingRequestBuilder::default();
+    let builder = base_builder
+        .from(&from)
+        .to(&to)
+        .departure_time(SimTime::from_secs(
+            request["departure_time"].as_f64().unwrap() as u64,
+        ));
+    let builder = match person.as_ref() {
+        Some(person) => builder.person(Some(person)),
+        None => builder,
+    };
+    let routing_request = builder.build().unwrap();
     let elements = match router.calc_route(
         &Id::create(request["mode"].as_str().unwrap()),
-        RoutingRequestBuilder::default()
-            .from(&from)
-            .to(&to)
-            .departure_time(SimTime::from_secs(
-                request["departure_time"].as_f64().unwrap() as u64,
-            ))
-            .build()
-            .unwrap(),
+        routing_request,
     ) {
         Ok(elements) => elements,
         Err(RoutingError::NoPath { .. }) => return json!({"result": "no_path"}),

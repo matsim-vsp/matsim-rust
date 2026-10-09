@@ -870,6 +870,7 @@ mod tests {
         constant: f64,
     ) -> ModeParameter {
         ModeParameter {
+            subpopulation: String::new(),
             mode: mode.to_string(),
             marginal_utility_of_traveling: traveling,
             marginal_utility_of_distance: distance,

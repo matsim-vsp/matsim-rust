@@ -1,0 +1,61 @@
+# Rust side of the routing-probe reference fixture. See config.xml for the MATSim counterpart and
+# docs/pt_java_reference.md for the fixture contract. Input paths are relative to the crate root.
+modules:
+  network:
+    type: Network
+    path: ./assets/pt_tutorial/multimodalnetwork.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/pt_tutorial/vehicles.xml
+  transit:
+    type: Transit
+    schedule_path: ./tests/resources/pt_reference/routing_person_specific_costs/transit_schedule.xml
+    transit_modes: [pt, rail, road]
+    use_mode_mapping_for_passengers: true
+    mode_mapping_for_passengers:
+      train: rail
+      bus: road
+  partitioning:
+    type: Partitioning
+    num_parts: 1
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/pt_reference_routing_person_specific_costs
+  routing:
+    type: Routing
+    mode: UsePlans
+    teleported_mode_params:
+      - mode: walk
+        beeline_distance_factor: 1.3
+        teleported_mode_speed: 0.8333333333333334
+  qsim:
+    type: QSim
+    start_time: 0
+    end_time: 86400
+  controller:
+    type: Controller
+    last_iteration: 0
+  scoring:
+    type: Scoring
+    # Empty `subpopulation` keys make the entries the global default; per-subpopulation keys
+    # below override that default for the named passenger population.
+    mode_params:
+      - mode: rail
+        marginal_utility_of_traveling: -1.0
+      - mode: road
+        marginal_utility_of_traveling: -24.0
+      - subpopulation: freight
+        mode: rail
+        marginal_utility_of_traveling: -24.0
+      - subpopulation: freight
+        mode: road
+        marginal_utility_of_traveling: -1.0
+    agent_params:
+      - subpopulation: person
+        performing: 6.0
+      - subpopulation: freight
+        performing: 6.0
