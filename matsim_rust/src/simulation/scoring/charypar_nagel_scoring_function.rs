@@ -397,7 +397,8 @@ impl PlanScorer for CharyparNagelScoringFunction {
         let aborted = is_aborted(experienced_plan);
         let activity_score =
             self.score_activities(person_id, experienced_plan, aborted, agent_params)?;
-        let trip_score = self.score_trips(person_id, subpopulation, experienced_plan, agent_params)?;
+        let trip_score =
+            self.score_trips(person_id, subpopulation, experienced_plan, agent_params)?;
         let abort_score = if aborted {
             require_finite(
                 person_id,
@@ -509,11 +510,7 @@ fn mode_params_for<'a>(
     mode_params
         .get(subpopulation)
         .and_then(|by_mode| by_mode.get(mode))
-        .or_else(|| {
-            mode_params
-                .get("")
-                .and_then(|by_mode| by_mode.get(mode))
-        })
+        .or_else(|| mode_params.get("").and_then(|by_mode| by_mode.get(mode)))
 }
 
 /// Scores the duration of one activity like MATSim's `ActivityUtilityParameters` with priority 1:
