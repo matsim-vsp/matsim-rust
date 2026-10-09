@@ -865,7 +865,7 @@ fn a_penalized_transfer_loses_to_the_direct_service() {
     let reference = read_reference("routing_transfer_penalty_shared_stop");
     verify_same_conditions(&reference, &config);
     let router = run(config);
-    let rust = calc_pt_route(&request, &router);
+    let rust = calc_pt_route(&request, &router, None);
 
     let expected = reference
         .itineraries
@@ -904,7 +904,7 @@ fn a_mode_to_mode_penalty_replaces_the_bus_transfer_with_the_rail_transfer() {
     let reference = read_reference("routing_transfer_penalty_mode_to_mode");
     verify_same_conditions(&reference, &config);
     let router = run(config);
-    let rust = calc_pt_route(&request, &router);
+    let rust = calc_pt_route(&request, &router, None);
 
     let expected = reference
         .itineraries

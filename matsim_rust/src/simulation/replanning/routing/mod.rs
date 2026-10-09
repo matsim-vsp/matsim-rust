@@ -2781,8 +2781,9 @@ mod route_proposal_tests {
         let egress = HashSet::from([Id::create("rc")]);
         let departure = SimTime::from_secs(8 * 3600);
         let chosen = |router: &TransitRoutingModule| {
+            let params = router.resolve_routing_params("");
             router
-                .find_best_path(&destination, departure, &access, &egress)
+                .find_best_path(&destination, departure, &access, &egress, &params)
                 .unwrap()
                 .rides
                 .iter()
@@ -2825,8 +2826,9 @@ mod route_proposal_tests {
             schedule
         };
         let chosen = |router: &TransitRoutingModule| {
+            let params = router.resolve_routing_params("");
             router
-                .find_best_path(&destination, departure, &access, &egress)
+                .find_best_path(&destination, departure, &access, &egress, &params)
                 .unwrap()
                 .rides
                 .iter()
