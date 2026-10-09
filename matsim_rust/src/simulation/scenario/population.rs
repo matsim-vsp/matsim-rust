@@ -311,6 +311,15 @@ impl InternalPerson {
         &self.subpopulation
     }
 
+    /// Set the agent's subpopulation after construction. Tests that drive PT routing with
+    /// person-specific scoring rely on this: scoring parameters are keyed by subpopulation, and
+    /// the routing module resolves per-subpopulation costs from the request's person. Production
+    /// code reads the subpopulation from XML attributes and never needs this setter.
+    pub fn with_subpopulation(mut self, subpopulation: &str) -> Self {
+        self.subpopulation = Id::create(subpopulation);
+        self
+    }
+
     pub fn plan_element_at(&self, index: usize) -> Option<&InternalPlanElement> {
         self.selected_plan().unwrap().elements.get(index)
     }

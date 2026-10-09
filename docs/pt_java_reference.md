@@ -204,6 +204,19 @@ The pinned MATSim 2026.0 `RaptorTransferCalculation` exposes Initial and Adaptiv
 Rust extension and has no direct mode-level reference comparison; its route choices are covered by
 the same fixture assertions against the other two modes.
 
+### `routing_person_specific_costs`
+
+This fixture exercises the reference's per-subpopulation scoring: two passengers with different
+mode utilities disagree on which service is cheapest. The schedule mirrors `routing_direct_vs_transfer`
+(a 10-min `bus` and a 50-min `rail`), and `config.yml` declares two `mode_params` blocks that share
+the `mode = "rail"` field while scoping the marginal utility to a single subpopulation. A "person"
+passenger keeps the global `rail` utility, a "freight" passenger uses the subpopulation-specific
+override, and the two requests therefore pick different services. The fixture exercises acceptance
+criterion 2 of the parent (`Params… agree with scoring of the resulting passenger modes`) at the
+subpopulation boundary rather than the global one. The Java differential reference for this fixture
+has not yet been recorded against the reference runner; the routing assertion is Rust self-consistent
+for now and will be promoted to a pinned comparison when the runner is updated.
+
 ## Comparison rules
 
 The reference is recorded once and compared many times, so the rules are fixed and stated here

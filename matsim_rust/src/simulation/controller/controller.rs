@@ -98,6 +98,7 @@ impl ControllerBuilder {
     pub fn build(mut self) -> Result<Controller, String> {
         self.scenario.config.transit().validate()?;
         self.scenario.config.travel_time_calculator().validate()?;
+        self.scenario.config.scoring().validate()?;
         let transit = self.scenario.config.transit();
         if transit.use_mode_mapping_for_passengers
             || !transit.mode_mapping_for_passengers.is_empty()
@@ -126,69 +127,17 @@ impl ControllerBuilder {
                             "transit.mode_mapping_for_passengers passengerMode {passenger_mode} must be listed in transit.transit_modes"
                         ));
                     }
-                    let Some(params) = self
+                    if !self
                         .scenario
                         .config
                         .scoring()
                         .mode_params
                         .iter()
-                        .find(|params| params.mode == *passenger_mode)
-                    else {
+                        .any(|params| params.mode == *passenger_mode)
+                    {
                         return Err(format!(
                             "transit.mode_mapping_for_passengers passengerMode {passenger_mode} needs scoring mode parameters"
                         ));
-                    };
-                    if let Some((field, _)) = [
-                        (
-                            "marginal_utility_of_traveling",
-                            params.marginal_utility_of_traveling,
-                        ),
-                        (
-                            "marginal_utility_of_distance",
-                            params.marginal_utility_of_distance,
-                        ),
-                        (
-                            "monetary_distance_cost_rate",
-                            params.monetary_distance_cost_rate,
-                        ),
-                        ("daily_money_constant", params.daily_money_constant),
-                        ("daily_utility_constant", params.daily_utility_constant),
-                        ("constant", params.constant),
-                    ]
-                    .into_iter()
-                    .find(|(_, value)| !value.is_finite())
-                    {
-                        return Err(format!(
-                            "scoring mode {passenger_mode} has a non-finite {field}"
-                        ));
-                    }
-                    let performing = self
-                        .scenario
-                        .config
-                        .scoring()
-                        .agent_params
-                        .iter()
-                        .find(|params| params.subpopulation == "person")
-                        .map_or(6.0, |params| params.performing);
-                    let pt_utility = self
-                        .scenario
-                        .config
-                        .scoring()
-                        .mode_params
-                        .iter()
-                        .find(|params| params.mode == "pt")
-                        .map_or(-6.0, |params| params.marginal_utility_of_traveling);
-                    if !performing.is_finite() || !pt_utility.is_finite() {
-                        return Err(
-                            "scoring parameters for mapped transit routing must be finite"
-                                .to_owned(),
-                        );
-                    }
-                    if performing == pt_utility {
-                        return Err(
-                            "scoring parameters for pt must produce a non-zero travel-time cost"
-                                .to_owned(),
-                        );
                     }
                 }
             }

@@ -9,6 +9,7 @@
 //! routing requests.
 
 use macros::deterministic_id_test;
+use matsim_rust::simulation::InternalAttributes;
 use matsim_rust::simulation::config::{CommandLineArgs, Config};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::events::utils::{read_events, read_partitioned_events};
@@ -25,7 +26,9 @@ use matsim_rust::simulation::replanning::routing::{
 };
 use matsim_rust::simulation::scenario::network::Link;
 use matsim_rust::simulation::scenario::population::Population;
-use matsim_rust::simulation::scenario::population::{InternalPerson, InternalPlanElement};
+use matsim_rust::simulation::scenario::population::{
+    InternalPerson, InternalPlan, InternalPlanElement,
+};
 use matsim_rust::simulation::scenario::transit::TransitStopFacility;
 use matsim_rust::simulation::scenario::{Coordinate, Scenario};
 use matsim_rust::simulation::time::SimTime;
@@ -1660,6 +1663,58 @@ fn mapped_passenger_modes_match_the_pinned_java_itinerary() {
     );
 }
 
+/// Per-subpopulation scoring costs let two passengers on the same plan pick different services.
+/// The fixture mirrors `routing_mapped_modes` but adds two requests: one for the default
+/// `person` subpopulation (rail-loyal) and one for `freight` (bus-loyal).
+#[deterministic_id_test(matsim_rust)]
+fn person_specific_routing_costs_let_two_passengers_choose_different_services() {
+    let config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_reference/routing_person_specific_costs/config.yml",
+    ));
+    let router = run(config);
+
+    let person_request = load_request_at("routing_person_specific_costs", 0);
+    let freight_request = load_request_at("routing_person_specific_costs", 1);
+    let internal_person = |request: &Value| {
+        let person = &request["person"];
+        InternalPerson::new(
+            Id::create(person["id"].as_str().unwrap()),
+            InternalPlan {
+                score: None,
+                selected: true,
+                elements: Vec::new(),
+                attributes: InternalAttributes::default(),
+            },
+        )
+        .with_subpopulation(person["subpopulation"].as_str().unwrap())
+    };
+    let person = internal_person(&person_request);
+    let freight = internal_person(&freight_request);
+    let person_route = calc_pt_route(&person_request, &router, Some(&person));
+    let freight_route = calc_pt_route(&freight_request, &router, Some(&freight));
+
+    // The person subpopulation prefers rail: the single-ride direct service beats the bus
+    // transfer by cost. The freight subpopulation inverts those utilities and prefers the bus
+    // transfer. Asserting on the chosen route id makes the divergence unambiguous.
+    assert_eq!(
+        rides(&person_route),
+        vec![ride("direct", "ra", "rc", 28800.0)],
+        "the default subpopulation keeps the rail-loyal choice"
+    );
+    assert_eq!(
+        rides(&freight_route),
+        vec![
+            ride("a_to_b", "ra", "rb", 28800.0),
+            ride("b_to_c", "rb", "rc", 29700.0)
+        ],
+        "the freight subpopulation inverts the per-mode utility and picks the bus transfer"
+    );
+    assert_ne!(rides(&person_route), rides(&freight_route));
+}
+
+/// The range profile includes both inclusive window boundaries and never repeats yesterday's
+/// schedule after the final service. The pinned Java router falls back to walking when no PT route
+/// exists; Rust reports no PT path at that boundary.
 #[deterministic_id_test(matsim_rust)]
 fn range_query_matches_java_at_both_window_boundaries_and_after_final_service() {
     let config = Config::from_args(CommandLineArgs::new_with_path(
