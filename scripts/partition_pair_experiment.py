@@ -59,8 +59,8 @@ def summarize_runs(runs: list[dict]) -> dict:
         summary[f"workers-{workers}/{variant}/diagnostics-{str(diagnostics).lower()}"] = {
             "completed_runs": len(samples),
             "median_elapsed_seconds": statistics.median(run["elapsed_seconds"] for run in samples),
-            "median_sampled_cpu_seconds": statistics.median(run["cpu_seconds_sampled"] for run in samples),
-            "median_sampled_peak_rss_kib": statistics.median(run["peak_rss_kib_sampled"] for run in samples),
+            "median_cpu_seconds": statistics.median(run["cpu_seconds"] for run in samples),
+            "median_peak_rss_kib": statistics.median(run["peak_rss_kib"] for run in samples),
         }
     return summary
 
@@ -198,13 +198,18 @@ def main() -> int:
                         if left["elapsed_seconds"] else None
                     )
                     comparison["candidate_to_baseline_cpu_ratio"] = (
-                        round(right["cpu_seconds_sampled"] / left["cpu_seconds_sampled"], 6)
-                        if left["cpu_seconds_sampled"] else None
+                        round(right["cpu_seconds"] / left["cpu_seconds"], 6)
+                        if left["cpu_seconds"] else None
                     )
                     baseline_output = Path(left["output_dir"])
                     candidate_output = Path(right["output_dir"])
                     event_comparison = subprocess.run(
-                        [sys.executable, str(compare_script), str(baseline_output), str(candidate_output)],
+                        [
+                            sys.executable,
+                            str(compare_script),
+                            str(baseline_output / "events"),
+                            str(candidate_output / "events"),
+                        ],
                         capture_output=True,
                         text=True,
                         check=False,
@@ -236,6 +241,12 @@ def main() -> int:
             "elapsed_ratio_on_vs_off": round(
                 enabled["median_elapsed_seconds"] / disabled["median_elapsed_seconds"], 6
             ) if enabled and disabled and disabled["median_elapsed_seconds"] else None,
+            "cpu_ratio_on_vs_off": round(
+                enabled["median_cpu_seconds"] / disabled["median_cpu_seconds"], 6
+            ) if enabled and disabled and disabled["median_cpu_seconds"] else None,
+            "peak_rss_ratio_on_vs_off": round(
+                enabled["median_peak_rss_kib"] / disabled["median_peak_rss_kib"], 6
+            ) if enabled and disabled and disabled["median_peak_rss_kib"] else None,
         }
     report = {
         "schema_version": 1,
@@ -277,7 +288,7 @@ def main() -> int:
             "logical_cpus": os.cpu_count(),
             "hostname": platform.node(),
         },
-        "resource_sampling": "Linux /proc sampled every 100ms; short peaks may be missed",
+        "resource_sampling": "elapsed time measured directly; final child CPU and peak RSS from wait4; /proc sampled every 100ms for live resource limits",
         "runs": run_records,
         "comparisons": comparisons,
         "summary": run_summary,

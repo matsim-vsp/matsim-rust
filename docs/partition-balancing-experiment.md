@@ -37,7 +37,7 @@ responses for matched runs before making a compatibility claim.
 
 Run matched repeated release sweeps with `scripts/partition_pair_experiment.py`. Supply one baseline and candidate
 network for each worker count, the same scenario config and complete input bundle, and choose at least one warm-up and
-three measured repetitions. The runner alternates baseline/candidate order, records sampled elapsed/CPU/RSS and host
+three measured repetitions. The runner alternates baseline/candidate order, records elapsed/CPU/peak RSS and host
 provenance, retains failed runs, compares event summaries and canonicalized final-plan state, and repeats each pair
 with diagnostics disabled and enabled to expose instrumentation cost. Enabled runs also record controller phase
 timings. These measurements describe only the supplied workload; they do not establish population-scale behavior.
@@ -56,3 +56,22 @@ python3 scripts/partition_pair_experiment.py \
   --population-size 12345 --simulated-duration-seconds 86400 \
   --warmups 1 --runs 3 --max-seconds 600
 ```
+
+## Sample release run
+
+The implementation was exercised on `assets/equil` (100 people, 15 nodes, 23 links, 24 simulated hours), with seed
+4711, one replanning thread, one warm-up and three measured pairs at one and two QSim workers. The host was Linux on an
+AMD Ryzen Threadripper PRO 3955WX with 32 logical CPUs; the binary used Rust 1.94.0 in release mode.
+
+| Workers | Coarse regions | Selection | Preparation | Solver | Process wall | Mobsim phase | Process CPU | Peak RSS |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 4 | Baseline: no estimated-work improvement | 0.278 ms | 0.008 ms | 101 ms | 42 ms | 92 ms | 25,560 KiB |
+| 2 | 6 | Baseline: weighted edge cut worsened | 0.455 ms | 0.052 ms | 602 ms | 562 ms | 628 ms | 25,560 KiB |
+
+Preparation and solver values describe the rejected candidate attempt. Since both attempts selected the corrected
+weighted-METIS baseline, this run does not measure reassignment speedup. All 16 measured worker/layout/instrumentation
+pairs completed; final plan state matched and the event summary reported zero link-volume delta. At two workers,
+diagnostics counted 400 migrations and 172,802 received inter-partition messages across 24 hours. Summed worker wait
+time can exceed wall time because it adds concurrent workers. Diagnostics-on CPU varied from 0.99 to 1.14 times the
+off runs; elapsed time was effectively unchanged at the process timer's resolution. These fixture results do not support
+population-scale claims.

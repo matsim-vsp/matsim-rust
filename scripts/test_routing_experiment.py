@@ -6,12 +6,26 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from routing_experiment import hash_input, routing_profile_summary
+from routing_experiment import hash_input, routing_profile_summary, run_one
 
 SCRIPT = Path(__file__).with_name("routing_experiment.py")
 
 
 class RoutingExperimentTests(unittest.TestCase):
+    def test_short_run_keeps_child_resource_usage_after_exit(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            result = run_one(
+                [sys.executable, "-c", "pass"],
+                root / "run.log",
+                5,
+                None,
+            )
+
+            self.assertEqual(result["exit_code"], 0)
+            self.assertGreater(result["peak_rss_kib"], 0)
+            self.assertGreaterEqual(result["cpu_seconds"], 0)
+
     def test_directory_hash_includes_file_boundaries(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
