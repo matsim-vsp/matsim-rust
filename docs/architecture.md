@@ -71,6 +71,12 @@ For mobsim, the controller splits the population into `MobsimInput`s. Each input
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive
 these inputs per iteration and return agents, which the controller materializes back into the next full population.
 
+Offline network preparation builds METIS's undirected graph from directed links: each non-self link contributes its
+weight to the unordered endpoint pair, and parallel or reverse-direction links combine into one symmetric adjacency
+weight. Precomputed computational demand is the checked sum of routed-link occurrences arriving at a node; nodes
+without observed demand retain weight 1. These corrected inputs can produce different partitions than older prepared
+networks.
+
 Transit vehicles are simulated when `transit.simulate_vehicles` is set, and teleported otherwise. Turning a `Scenario` into
 a `ControllerScenario` then expands the schedule into per-departure vehicle runs once, before the Mobsim threads start, and
 every partition shares them. Routes whose service mode is listed in

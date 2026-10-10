@@ -92,7 +92,11 @@ fn compute_computational_weights(pop: &Population) -> IntMap<Id<Link>, u32> {
         .flat_map(|n| n.route().iter())
         .fold(IntMap::new(), |mut map, link_id| {
             map.entry(link_id.clone())
-                .and_modify(|counter| *counter += 1)
+                .and_modify(|counter: &mut u32| {
+                    *counter = counter
+                        .checked_add(1)
+                        .expect("computational link demand exceeds u32::MAX");
+                })
                 .or_insert(1u32);
             map
         });
@@ -101,9 +105,74 @@ fn compute_computational_weights(pop: &Population) -> IntMap<Id<Link>, u32> {
 }
 
 fn assign_computational_weights(net: &mut Network, cmp_weights: IntMap<Id<Link>, u32>) {
+    let nodes = net
+        .nodes()
+        .into_iter()
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    for node_id in nodes {
+        net.get_node_mut(&node_id).cmp_weight = 1;
+    }
+    let mut node_weights = IntMap::new();
     for (link_id, weight) in cmp_weights {
         let link = net.get_link(&link_id);
-        let node = net.get_node_mut(&link.to.clone());
-        node.cmp_weight = weight;
+        let total = node_weights.entry(link.to.clone()).or_insert(0u32);
+        *total = total
+            .checked_add(weight)
+            .expect("computational node demand exceeds u32::MAX");
+    }
+    for (node_id, weight) in node_weights {
+        net.get_node_mut(&node_id).cmp_weight = weight;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::assign_computational_weights;
+    use crate::simulation::id::Id;
+    use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::network::{Link, Network, Node};
+    use ahash::HashMapExt;
+    use macros::deterministic_id_test;
+    use nohash_hasher::IntMap;
+
+    #[deterministic_id_test]
+    fn incoming_link_demands_accumulate_and_unobserved_nodes_keep_nonzero_fallback() {
+        let mut network = Network::new();
+        let first_source = Id::create("first-source");
+        let second_source = Id::create("second-source");
+        let downstream = Id::create("downstream");
+        let unused = Id::create("unused");
+        for (index, id) in [
+            first_source.clone(),
+            second_source.clone(),
+            downstream.clone(),
+            unused.clone(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            network.add_node(Node::new(id, Coordinate::new_2d(index as f64, 0.), 0, 99));
+        }
+        let first_link = Id::create("first-link");
+        let second_link = Id::create("second-link");
+        network.add_link(Link::new_with_default(
+            first_link.clone(),
+            network.get_node(&first_source),
+            network.get_node(&downstream),
+        ));
+        network.add_link(Link::new_with_default(
+            second_link.clone(),
+            network.get_node(&second_source),
+            network.get_node(&downstream),
+        ));
+        let mut demand = IntMap::new();
+        demand.insert(first_link, 3);
+        demand.insert(second_link, 4);
+
+        assign_computational_weights(&mut network, demand);
+
+        assert_eq!(7, network.get_node(&downstream).cmp_weight);
+        assert_eq!(1, network.get_node(&unused).cmp_weight);
     }
 }
