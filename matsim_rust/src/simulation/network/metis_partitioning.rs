@@ -23,7 +23,7 @@ pub fn partition(
 
     let mut vwgt: Vec<Idx> = Vec::new();
     let mut nodes = network.nodes();
-    nodes.sort_by_key(|node| node.id.internal());
+    nodes.sort_by_key(|node| node.id.external().to_string());
     let mut metis_result: Vec<Idx> = vec![0x00; nodes.len()];
 
     let mut pos_by_node_id = IntMap::default();
@@ -78,9 +78,12 @@ fn build_adjacency(
     nodes: &[&Node],
     pos_by_node_id: &IntMap<u64, usize>,
 ) -> (Vec<Idx>, Vec<Idx>, Vec<Idx>) {
-    let mut edge_weights = BTreeMap::<(u64, u64), Idx>::new();
+    let mut edge_weights = BTreeMap::<(usize, usize), Idx>::new();
     for link in network.links() {
-        let (from, to) = (link.from.internal(), link.to.internal());
+        let (from, to) = (
+            *pos_by_node_id.get(&link.from.internal()).unwrap(),
+            *pos_by_node_id.get(&link.to.internal()).unwrap(),
+        );
         if from == to {
             continue;
         }
@@ -93,8 +96,8 @@ fn build_adjacency(
 
     let mut neighbors = vec![Vec::<(Idx, Idx)>::new(); nodes.len()];
     for ((from, to), weight) in edge_weights {
-        let from_pos = *pos_by_node_id.get(&from).unwrap() as Idx;
-        let to_pos = *pos_by_node_id.get(&to).unwrap() as Idx;
+        let from_pos = from as Idx;
+        let to_pos = to as Idx;
         neighbors[from_pos as usize].push((to_pos, weight));
         neighbors[to_pos as usize].push((from_pos, weight));
     }
@@ -175,7 +178,7 @@ mod tests {
         ));
 
         let mut nodes = net.nodes();
-        nodes.sort_by_key(|node| node.id.internal());
+        nodes.sort_by_key(|node| node.id.external().to_string());
         let positions = nodes
             .iter()
             .enumerate()
@@ -215,7 +218,7 @@ mod tests {
         ));
 
         let mut nodes = net.nodes();
-        nodes.sort_by_key(|node| node.id.internal());
+        nodes.sort_by_key(|node| node.id.external().to_string());
         let positions = nodes
             .iter()
             .enumerate()

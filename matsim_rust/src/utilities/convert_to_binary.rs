@@ -167,12 +167,29 @@ mod tests {
             network.get_node(&downstream),
         ));
         let mut demand = IntMap::new();
-        demand.insert(first_link, 3);
-        demand.insert(second_link, 4);
+        demand.insert(first_link.clone(), 3);
+        demand.insert(second_link.clone(), 4);
+        let mut reordered_demand = IntMap::new();
+        reordered_demand.insert(second_link.clone(), 4);
+        reordered_demand.insert(first_link.clone(), 3);
+        let mut reordered_network = network.clone();
 
         assign_computational_weights(&mut network, demand);
+        assign_computational_weights(&mut reordered_network, reordered_demand);
 
         assert_eq!(7, network.get_node(&downstream).cmp_weight);
         assert_eq!(1, network.get_node(&unused).cmp_weight);
+        assert_eq!(
+            network.get_node(&downstream).cmp_weight,
+            reordered_network.get_node(&downstream).cmp_weight
+        );
+
+        let mut overflowing_demand = IntMap::new();
+        overflowing_demand.insert(first_link, u32::MAX);
+        overflowing_demand.insert(second_link, 1);
+        let overflow_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assign_computational_weights(&mut network, overflowing_demand);
+        }));
+        assert!(overflow_result.is_err());
     }
 }

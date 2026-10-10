@@ -1400,6 +1400,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-assign"
+version = "0.1.0"
+source = "git+https://github.com/katopz/katgpt-rs?rev=b72a2c03383ed0c055df15e56b6a2d4c55cd1474#b72a2c03383ed0c055df15e56b6a2d4c55cd1474"
+
+[[package]]
 name = "keyed_priority_queue"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1533,6 +1538,7 @@ dependencies = [
  "hotpath",
  "inventory",
  "itertools 0.15.0",
+ "katgpt-assign",
  "keyed_priority_queue",
  "lz4",
  "lz4_flex",

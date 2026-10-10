@@ -77,6 +77,10 @@ weight. Precomputed computational demand is the checked sum of routed-link occur
 without observed demand retain weight 1. These corrected inputs can produce different partitions than older prepared
 networks.
 
+`partition_network --coarse-regions` opts into offline coarse-region assignment. See
+[`partition-balancing-experiment.md`](partition-balancing-experiment.md) for its workload estimates, validation rules,
+and limits.
+
 Transit vehicles are simulated when `transit.simulate_vehicles` is set, and teleported otherwise. Turning a `Scenario` into
 a `ControllerScenario` then expands the schedule into per-departure vehicle runs once, before the Mobsim threads start, and
 every partition shares them. Routes whose service mode is listed in

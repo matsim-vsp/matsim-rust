@@ -44,11 +44,39 @@ fn main() {
         args.num_parts
     );
 
-    let net1 = Network::from_file_path(
-        &args.net_path,
-        args.num_parts,
-        &PartitionMethod::Metis(MetisOptions::default()),
-    );
+    let mut net1 = if args.coarse_regions.is_some() {
+        Network::from_file_path(&args.net_path, 1, &PartitionMethod::None)
+    } else {
+        Network::from_file_path(
+            &args.net_path,
+            args.num_parts,
+            &PartitionMethod::Metis(MetisOptions::default()),
+        )
+    };
+    let experiment_metadata = args.coarse_regions.map(|regions| {
+        let experiment = matsim_rust::simulation::network::partition_experiment::prepare(
+            &net1,
+            &args.net_path.display().to_string(),
+            args.num_parts,
+            regions,
+            args.seed,
+            &MetisOptions::default(),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!("Partition experiment rejected its inputs: {error}");
+            std::process::exit(2);
+        });
+        net1.apply_partition_ownership(&experiment.node_owners, args.num_parts)
+            .unwrap_or_else(|error| {
+                eprintln!("Partition experiment ownership failed validation: {error}");
+                std::process::exit(2);
+            });
+        info!(
+            "Selected {} layout for offline partition experiment; reasons: {:?}",
+            experiment.metadata.selected_layout, experiment.metadata.rejection_reasons
+        );
+        experiment.metadata
+    });
     info!(
         "Network is loaded with {} links and {} nodes.",
         net1.links().len(),
@@ -56,6 +84,15 @@ fn main() {
     );
 
     net1.to_file(&out_path);
+    if let Some(metadata) = experiment_metadata {
+        let metadata_path = out_path.with_extension("experiment.json");
+        std::fs::write(
+            &metadata_path,
+            serde_json::to_vec_pretty(&metadata).expect("experiment metadata must serialize"),
+        )
+        .expect("experiment metadata must be written");
+        info!("Wrote partition experiment metadata to {:?}", metadata_path);
+    }
 
     info!(
         "Finished partitioning Network. Written file to {:?}",
@@ -71,4 +108,10 @@ struct InputArgs {
     pub id_path: Option<PathBuf>,
     #[arg(long)]
     pub num_parts: u32,
+    /// Opt in to coarse-region assignment. Must exceed --num-parts.
+    #[arg(long)]
+    pub coarse_regions: Option<u32>,
+    /// Reproducible assignment-solver seed.
+    #[arg(long, default_value_t = matsim_rust::simulation::config::DEFAULT_RANDOM_SEED)]
+    pub seed: u64,
 }

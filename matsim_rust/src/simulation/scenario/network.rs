@@ -267,18 +267,80 @@ impl Network {
         match partition_method {
             PartitionMethod::Metis(options) => {
                 let partitions = metis_partitioning::partition(network, num_parts, options);
-                for (id, node) in network.nodes.iter_mut() {
-                    let partition = partitions.get(id).unwrap();
-                    node.partition = *partition as u32;
-
-                    for link_id in &node.in_links {
-                        let link = network.links.get_mut(link_id).unwrap();
-                        link.partition = *partition as u32;
-                    }
-                }
+                let owners = partitions
+                    .into_iter()
+                    .map(|(node, part)| {
+                        (
+                            node,
+                            u32::try_from(part).expect("METIS part IDs are nonnegative"),
+                        )
+                    })
+                    .collect();
+                network
+                    .apply_partition_ownership(&owners, num_parts)
+                    .expect("METIS must return complete in-range node ownership");
             }
             PartitionMethod::None => {}
         }
+    }
+
+    pub fn apply_partition_ownership(
+        &mut self,
+        owners: &IntMap<Id<Node>, u32>,
+        num_parts: u32,
+    ) -> Result<(), String> {
+        if num_parts == 0 {
+            return Err("worker count must be positive".to_string());
+        }
+        if owners.len() != self.nodes.len() {
+            return Err(format!(
+                "node ownership covers {} of {} nodes",
+                owners.len(),
+                self.nodes.len()
+            ));
+        }
+        for node_id in self.nodes.keys() {
+            let Some(partition) = owners.get(node_id) else {
+                return Err(format!("node {node_id} has no partition owner"));
+            };
+            if *partition >= num_parts {
+                return Err(format!(
+                    "node {node_id} has out-of-range partition {partition}"
+                ));
+            }
+        }
+        let mut owned_links = IntSet::default();
+        for node in self.nodes.values() {
+            for link_id in &node.in_links {
+                if !self.links.contains_key(link_id) {
+                    return Err(format!("node references missing incoming link {link_id}"));
+                }
+                if !owned_links.insert(link_id.clone()) {
+                    return Err(format!("link {link_id} has multiple destination nodes"));
+                }
+            }
+        }
+        if owned_links.len() != self.links.len()
+            || self
+                .links
+                .keys()
+                .any(|link_id| !owned_links.contains(link_id))
+        {
+            return Err(format!(
+                "incoming-link ownership covers {} of {} links",
+                owned_links.len(),
+                self.links.len()
+            ));
+        }
+
+        for (node_id, node) in &mut self.nodes {
+            let partition = owners[node_id];
+            node.partition = partition;
+            for link_id in &node.in_links {
+                self.links.get_mut(link_id).unwrap().partition = partition;
+            }
+        }
+        Ok(())
     }
 
     pub fn get_all_nodes_sorted(&self) -> Vec<&Node> {
@@ -582,11 +644,70 @@ mod tests {
     use crate::simulation::io::xml::network::{IOLink, IONode};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node, add_io_link, add_io_node};
+    use ahash::HashMapExt;
     use macros::deterministic_id_test;
-    use nohash_hasher::IntSet;
+    use nohash_hasher::{IntMap, IntSet};
 
     fn coord(x: f64, y: f64) -> Coordinate {
         Coordinate::new_2d(x, y)
+    }
+
+    #[deterministic_id_test]
+    fn partition_ownership_is_validated_and_serialized() {
+        let mut network = Network::new();
+        let from = Id::create("ownership-from");
+        let to = Id::create("ownership-to");
+        network.add_node(Node::new(from.clone(), coord(0., 0.), 4, 1));
+        network.add_node(Node::new(to.clone(), coord(1., 0.), 5, 1));
+        let link_id = Id::create("ownership-link");
+        network.add_link(Link::new_with_default(
+            link_id.clone(),
+            network.get_node(&from),
+            network.get_node(&to),
+        ));
+        let original_link_partition = network.get_link(&link_id).partition;
+        let mut incomplete = IntMap::new();
+        incomplete.insert(from.clone(), 0);
+
+        assert!(network.apply_partition_ownership(&incomplete, 2).is_err());
+        assert_eq!(4, network.get_node(&from).partition);
+        assert_eq!(5, network.get_node(&to).partition);
+        assert_eq!(
+            original_link_partition,
+            network.get_link(&link_id).partition
+        );
+
+        let mut owners = IntMap::new();
+        owners.insert(from.clone(), 0);
+        owners.insert(to, 1);
+        network.apply_partition_ownership(&owners, 2).unwrap();
+        assert_eq!(0, network.get_node(&from).partition);
+        assert_eq!(1, network.get_link(&link_id).partition);
+
+        let output = tempfile::tempdir().unwrap();
+        let network_path = output.path().join("partitioned.binpb");
+        network.to_file(&network_path);
+        let round_trip = Network::from_file_path(&network_path, 1, &PartitionMethod::None);
+        assert_eq!(0, round_trip.get_node(&from).partition);
+        assert_eq!(
+            1,
+            round_trip
+                .get_node(&Id::get_from_ext("ownership-to"))
+                .partition
+        );
+        assert_eq!(1, round_trip.get_link(&link_id).partition);
+
+        let xml_path = output.path().join("partitioned.xml");
+        network.to_file(&xml_path);
+        let round_trip = Network::from_file_path(&xml_path, 1, &PartitionMethod::None);
+        assert_eq!(0, round_trip.get_node(&from).partition);
+        assert_eq!(
+            1,
+            round_trip
+                .get_node(&Id::get_from_ext("ownership-to"))
+                .partition
+        );
+        assert_eq!(1, round_trip.get_link(&link_id).partition);
     }
 
     #[deterministic_id_test]
