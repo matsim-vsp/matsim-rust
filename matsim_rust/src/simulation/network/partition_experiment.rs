@@ -8,7 +8,7 @@ use fnv::FnvHasher;
 use katgpt_assign::{Limits, Problem, Seed, Spec, solve};
 use nohash_hasher::IntMap;
 use rand::RngExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::simulation::build_info::GIT_VERSION;
 use crate::simulation::config::{EdgeWeight, MetisOptions, VertexWeight};
@@ -19,6 +19,7 @@ use crate::simulation::scenario::network::{Network, Node};
 
 const ASSIGNMENT_REVISION: &str = "b72a2c03383ed0c055df15e56b6a2d4c55cd1474";
 const MEMORY_ESTIMATE_BYTES_PER_NODE: i64 = 64;
+pub const TIME_WINDOW_SECONDS: u64 = 3600;
 const ASSIGNMENT_PURPOSE: &str = "partition.experiment.region_assignment";
 
 pub struct PartitionExperimentResult {
@@ -63,6 +64,11 @@ pub struct PartitionExperimentMetadata {
     pub candidate_max_neighbors: Option<u32>,
     pub baseline_neighbors_by_worker: Vec<u32>,
     pub candidate_neighbors_by_worker: Option<Vec<u32>>,
+    pub time_window_start_seconds: Vec<u64>,
+    pub time_window_sidecar: Option<String>,
+    pub legs_without_departure_time: Option<u64>,
+    pub baseline_time_window_work_by_worker: Vec<Vec<u64>>,
+    pub candidate_time_window_work_by_worker: Option<Vec<Vec<u64>>>,
     pub solver_evaluations: Option<u64>,
     pub solver_moves: Option<u64>,
     pub solver_sweeps: Option<u64>,
@@ -83,6 +89,8 @@ struct LayoutMetrics {
     max_neighbors: u32,
     neighbors_by_worker: Vec<u32>,
     connected: bool,
+    max_time_work_by_window: Vec<u64>,
+    time_work_by_window: Vec<Vec<u64>>,
 }
 
 #[derive(Clone)]
@@ -91,6 +99,22 @@ struct Region {
     nodes: Vec<Id<Node>>,
     work: i64,
     memory: i64,
+    time_work: Vec<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimeWindowDemand {
+    pub start_seconds: u64,
+    pub node_work_by_external_id: BTreeMap<String, u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimeWindowDemandFile {
+    pub source_population: String,
+    pub window_seconds: u64,
+    pub units: String,
+    pub legs_without_departure_time: u64,
+    pub windows: Vec<TimeWindowDemand>,
 }
 
 /// Partition a preweighted network into coarse METIS regions, then assign those regions to QSim
@@ -104,11 +128,36 @@ pub fn prepare(
     base_seed: u64,
     options: &MetisOptions,
 ) -> Result<PartitionExperimentResult, String> {
+    prepare_with_time_windows(
+        network,
+        input_network,
+        worker_count,
+        region_count,
+        base_seed,
+        options,
+        &[],
+        None,
+        None,
+    )
+}
+
+pub fn prepare_with_time_windows(
+    network: &Network,
+    input_network: &str,
+    worker_count: u32,
+    region_count: u32,
+    base_seed: u64,
+    options: &MetisOptions,
+    time_windows: &[TimeWindowDemand],
+    time_window_sidecar: Option<&str>,
+    legs_without_departure_time: Option<u64>,
+) -> Result<PartitionExperimentResult, String> {
     let preparation_started = Instant::now();
     if worker_count == 0 || region_count <= worker_count {
         return Err("coarse regions must outnumber at least one worker".to_string());
     }
     validate_edge_weights(network, options)?;
+    validate_time_windows(network, time_windows)?;
     let mut nodes = network.nodes();
     nodes.sort_by_key(|node| node.id.external().to_string());
     if region_count as usize > nodes.len() {
@@ -130,11 +179,11 @@ pub fn prepare(
             )
         })
         .collect::<IntMap<_, _>>();
-    let baseline_metrics = measure_layout(network, &baseline, worker_count, options)?;
+    let baseline_metrics = measure_layout(network, &baseline, worker_count, options, time_windows)?;
     let baseline_preparation_nanos = elapsed_nanos(baseline_started);
 
     let coarse_raw = metis_partitioning::partition(network, region_count, &metis_options);
-    let regions = canonical_regions(network, coarse_raw)?;
+    let regions = canonical_regions_with_windows(network, coarse_raw, time_windows)?;
     if regions.len() != region_count as usize {
         return Err(format!(
             "METIS produced {} nonempty regions, expected {region_count}",
@@ -152,19 +201,29 @@ pub fn prepare(
         .map_err(|_| "baseline work capacity exceeds solver range".to_string())?;
     let memory_capacity = i64::try_from(baseline_metrics.max_memory)
         .map_err(|_| "baseline memory capacity exceeds solver range".to_string())?;
+    let mut specs = vec![
+        Spec::capacity(0, work_capacity),
+        Spec::capacity(1, memory_capacity),
+        Spec::Balance { dim: 0, weight: 4 },
+        Spec::Balance { dim: 1, weight: 1 },
+        Spec::MinimizeMovement { weight: 1 },
+    ];
+    for (index, window_max) in baseline_metrics.max_time_work_by_window.iter().enumerate() {
+        let dim = 2 + index;
+        specs.push(Spec::capacity(
+            dim,
+            i64::try_from(*window_max)
+                .map_err(|_| "time-window work capacity exceeds solver range".to_string())?,
+        ));
+        specs.push(Spec::Balance { dim, weight: 1 });
+    }
     let problem = Problem {
         num_objects: regions.len(),
         num_containers: worker_count as usize,
-        num_dims: 2,
+        num_dims: 2 + time_windows.len(),
         demands,
         initial,
-        specs: vec![
-            Spec::capacity(0, work_capacity),
-            Spec::capacity(1, memory_capacity),
-            Spec::Balance { dim: 0, weight: 4 },
-            Spec::Balance { dim: 1, weight: 1 },
-            Spec::MinimizeMovement { weight: 1 },
-        ],
+        specs,
     };
     let limits = Limits {
         max_evaluations: 250_000,
@@ -202,7 +261,7 @@ pub fn prepare(
 
     let candidate_metrics_result = candidate
         .as_ref()
-        .map(|owners| measure_layout(network, owners, worker_count, options));
+        .map(|owners| measure_layout(network, owners, worker_count, options, time_windows));
     let candidate_validation_error = candidate_metrics_result
         .as_ref()
         .and_then(|result| result.as_ref().err())
@@ -213,6 +272,7 @@ pub fn prepare(
         candidate_metrics.as_ref(),
         candidate.is_some(),
         candidate_validation_error.as_deref(),
+        time_windows.len(),
     );
     let baseline_layout_id = layout_id(network, &baseline)?;
     let candidate_layout_id = candidate
@@ -250,9 +310,13 @@ pub fn prepare(
         advisory_time_limit_enabled: limits.time.is_some(),
         workload_source: "network cmp_weight, accumulated route-link occurrences",
         input_ordering: "regions assigned by descending work then minimum external node ID; each goes to the lowest-work worker, ties by worker ID",
-        objective_weights: "work balance=4, memory balance=1, movement penalty=1",
+        objective_weights: "work balance=4, memory balance=1, hourly work balance=1 per window, movement penalty=1",
         memory_estimate_bytes_per_node: MEMORY_ESTIMATE_BYTES_PER_NODE,
-        time_window_workload: "unavailable: input network has no simulated-time demand windows",
+        time_window_workload: if time_windows.is_empty() {
+            "unavailable: no workload-window sidecar supplied"
+        } else {
+            "hourly route-link occurrences grouped by planned departure time"
+        },
         selected_layout: if accepted { "candidate" } else { "baseline" },
         baseline_layout_id,
         candidate_layout_id,
@@ -278,6 +342,18 @@ pub fn prepare(
         candidate_neighbors_by_worker: candidate_metrics
             .as_ref()
             .map(|metrics| metrics.neighbors_by_worker.clone()),
+        time_window_start_seconds: time_windows
+            .iter()
+            .map(|window| window.start_seconds)
+            .collect(),
+        time_window_sidecar: time_window_sidecar.map(str::to_string),
+        legs_without_departure_time,
+        baseline_time_window_work_by_worker: transpose_window_loads(
+            &baseline_metrics.time_work_by_window,
+        ),
+        candidate_time_window_work_by_worker: candidate_metrics
+            .as_ref()
+            .map(|metrics| transpose_window_loads(&metrics.time_work_by_window)),
         solver_evaluations: solver_stats.as_ref().map(|stats| stats.0),
         solver_moves: solver_stats.as_ref().map(|stats| stats.1),
         solver_sweeps: solver_stats.as_ref().map(|stats| stats.2),
@@ -299,6 +375,7 @@ fn candidate_rejection_reasons(
     candidate: Option<&LayoutMetrics>,
     candidate_exists: bool,
     validation_error: Option<&str>,
+    time_window_count: usize,
 ) -> Vec<String> {
     let mut reasons = Vec::new();
     match (candidate_exists, candidate) {
@@ -311,7 +388,14 @@ fn candidate_rejection_reasons(
             if candidate.max_work >= baseline.max_work {
                 reasons.push("maximum estimated work did not improve".to_string());
             }
-            if candidate.max_work > baseline.max_work || candidate.max_memory > baseline.max_memory
+            if candidate.max_work > baseline.max_work
+                || candidate.max_memory > baseline.max_memory
+                || candidate
+                    .max_time_work_by_window
+                    .iter()
+                    .zip(&baseline.max_time_work_by_window)
+                    .take(time_window_count)
+                    .any(|(candidate, baseline)| candidate > baseline)
             {
                 reasons.push("candidate exceeds baseline load capacity".to_string());
             }
@@ -376,9 +460,10 @@ fn validate_edge_weights(network: &Network, options: &MetisOptions) -> Result<()
     Ok(())
 }
 
-fn canonical_regions(
+fn canonical_regions_with_windows(
     network: &Network,
     raw_owners: IntMap<Id<Node>, metis::Idx>,
+    time_windows: &[TimeWindowDemand],
 ) -> Result<Vec<Region>, String> {
     let mut grouped = BTreeMap::<metis::Idx, Vec<Id<Node>>>::new();
     for (node, region) in raw_owners {
@@ -399,11 +484,31 @@ fn canonical_regions(
                 .ok()
                 .and_then(|count| count.checked_mul(MEMORY_ESTIMATE_BYTES_PER_NODE))
                 .ok_or_else(|| "region memory estimate exceeds solver range".to_string())?;
+            let mut time_work = Vec::with_capacity(time_windows.len());
+            for window in time_windows {
+                let mut work = 0u64;
+                for node in &nodes {
+                    work = work
+                        .checked_add(
+                            window
+                                .node_work_by_external_id
+                                .get(&node.external().to_string())
+                                .copied()
+                                .unwrap_or_default(),
+                        )
+                        .ok_or_else(|| "region time-window work overflow".to_string())?;
+                }
+                time_work.push(
+                    i64::try_from(work)
+                        .map_err(|_| "region time-window work exceeds solver range".to_string())?,
+                );
+            }
             Ok(Region {
                 representative,
                 nodes,
                 work,
                 memory,
+                time_work,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -433,9 +538,11 @@ fn initial_assignment(regions: &[Region], workers: u32) -> Result<(Vec<u32>, Vec
             .checked_add(regions[region].work)
             .ok_or_else(|| "initial work load exceeds solver range".to_string())?;
     }
-    let mut demands = Vec::with_capacity(regions.len() * 2);
+    let window_count = regions.first().map_or(0, |region| region.time_work.len());
+    let mut demands = Vec::with_capacity(regions.len() * (2 + window_count));
     for region in regions {
         demands.extend([region.work, region.memory]);
+        demands.extend(region.time_work.iter().copied());
     }
     Ok((assignments, demands))
 }
@@ -445,12 +552,14 @@ fn measure_layout(
     owners: &IntMap<Id<Node>, u32>,
     workers: u32,
     options: &MetisOptions,
+    time_windows: &[TimeWindowDemand],
 ) -> Result<LayoutMetrics, String> {
     if owners.len() != network.nodes().len() {
         return Err("ownership does not cover every network node".to_string());
     }
     let mut loads = vec![0u64; workers as usize];
     let mut memory = vec![0u64; workers as usize];
+    let mut time_work = vec![vec![0u64; workers as usize]; time_windows.len()];
     let mut members = vec![BTreeSet::<u64>::new(); workers as usize];
     let mut owner_by_internal = BTreeMap::new();
     for node in network.nodes() {
@@ -465,6 +574,18 @@ fn measure_layout(
         memory[worker] = memory[worker]
             .checked_add(MEMORY_ESTIMATE_BYTES_PER_NODE as u64)
             .ok_or_else(|| "worker memory estimate overflow".to_string())?;
+        let external_id = node.id.external().to_string();
+        for (index, window) in time_windows.iter().enumerate() {
+            time_work[index][worker] = time_work[index][worker]
+                .checked_add(
+                    window
+                        .node_work_by_external_id
+                        .get(&external_id)
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .ok_or_else(|| "worker time-window work overflow".to_string())?;
+        }
         members[worker].insert(node.id.internal());
         owner_by_internal.insert(node.id.internal(), worker as u32);
     }
@@ -542,14 +663,52 @@ fn measure_layout(
         max_neighbors,
         neighbors_by_worker,
         connected,
+        max_time_work_by_window: time_work
+            .iter()
+            .map(|loads| loads.iter().copied().max().unwrap_or(0))
+            .collect(),
+        time_work_by_window: time_work,
     })
+}
+
+fn validate_time_windows(network: &Network, windows: &[TimeWindowDemand]) -> Result<(), String> {
+    let node_ids = network
+        .nodes()
+        .into_iter()
+        .map(|node| node.id.external().to_string())
+        .collect::<BTreeSet<_>>();
+    let mut previous = None;
+    for window in windows {
+        if window.start_seconds % TIME_WINDOW_SECONDS != 0
+            || previous.is_some_and(|time| time >= window.start_seconds)
+        {
+            return Err("time windows must be unique and sorted hourly start times".to_string());
+        }
+        previous = Some(window.start_seconds);
+        for (node, work) in &window.node_work_by_external_id {
+            if !node_ids.contains(node) {
+                return Err(format!("time-window demand references unknown node {node}"));
+            }
+            i64::try_from(*work)
+                .map_err(|_| format!("time-window demand for node {node} exceeds solver range"))?;
+        }
+    }
+    Ok(())
+}
+
+fn transpose_window_loads(windows: &[Vec<u64>]) -> Vec<Vec<u64>> {
+    let workers = windows.first().map_or(0, Vec::len);
+    (0..workers)
+        .map(|worker| windows.iter().map(|window| window[worker]).collect())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        LayoutMetrics, Region, candidate_rejection_reasons, canonical_regions, initial_assignment,
-        prepare, should_accept_candidate, validate_edge_weights,
+        LayoutMetrics, Region, TimeWindowDemand, candidate_rejection_reasons,
+        canonical_regions_with_windows, initial_assignment, prepare, should_accept_candidate,
+        validate_edge_weights, validate_time_windows,
     };
     use crate::simulation::config::{EdgeWeight, MetisOptions};
     use crate::simulation::id::Id;
@@ -585,13 +744,24 @@ mod tests {
         renamed_labels.insert(nodes[1].0.clone(), 8);
         renamed_labels.insert(nodes[0].0.clone(), 9);
 
-        let first = canonical_regions(&network, first_labels).unwrap();
-        let renamed = canonical_regions(&network, renamed_labels).unwrap();
+        let window = TimeWindowDemand {
+            start_seconds: 0,
+            node_work_by_external_id: BTreeMap::from([
+                ("region-a".to_string(), 2),
+                ("region-b".to_string(), 8),
+                ("region-c".to_string(), 5),
+            ]),
+        };
+        let first =
+            canonical_regions_with_windows(&network, first_labels, &[window.clone()]).unwrap();
+        let renamed = canonical_regions_with_windows(&network, renamed_labels, &[window]).unwrap();
 
         assert_eq!(first[0].representative, renamed[0].representative);
         assert_eq!(first[1].representative, renamed[1].representative);
         assert_eq!(first[0].work, 7);
         assert_eq!(first[0].memory, 128);
+        assert_eq!(first[0].time_work, vec![7]);
+        assert_eq!(first[1].time_work, vec![8]);
         assert_eq!(
             first
                 .iter()
@@ -612,18 +782,21 @@ mod tests {
                 nodes: Vec::new(),
                 work: 9,
                 memory: 64,
+                time_work: Vec::new(),
             },
             Region {
                 representative: "node-b".to_string(),
                 nodes: Vec::new(),
                 work: 9,
                 memory: 64,
+                time_work: Vec::new(),
             },
             Region {
                 representative: "node-e".to_string(),
                 nodes: Vec::new(),
                 work: 2,
                 memory: 64,
+                time_work: Vec::new(),
             },
         ];
         let first = initial_assignment(&regions, 2).unwrap().0;
@@ -671,6 +844,23 @@ mod tests {
         );
     }
 
+    #[deterministic_id_test]
+    fn time_window_input_rejects_unknown_nodes_and_unaligned_windows() {
+        let mut network = Network::new();
+        let node = Id::create("window-node");
+        network.add_node(Node::new(node, Coordinate::new_2d(0., 0.), 0, 1));
+        let unknown_node = TimeWindowDemand {
+            start_seconds: 0,
+            node_work_by_external_id: BTreeMap::from([("missing".to_string(), 1)]),
+        };
+        assert!(validate_time_windows(&network, &[unknown_node]).is_err());
+        let unaligned = TimeWindowDemand {
+            start_seconds: 1,
+            node_work_by_external_id: BTreeMap::new(),
+        };
+        assert!(validate_time_windows(&network, &[unaligned]).is_err());
+    }
+
     #[test]
     fn candidate_gate_accepts_improvement_and_falls_back_when_constraints_fail() {
         let baseline = LayoutMetrics {
@@ -682,6 +872,8 @@ mod tests {
             max_neighbors: 3,
             neighbors_by_worker: vec![2, 3],
             connected: true,
+            max_time_work_by_window: vec![12],
+            time_work_by_window: vec![vec![12, 8]],
         };
         let improved = LayoutMetrics {
             max_work: 90,
@@ -692,17 +884,20 @@ mod tests {
             max_neighbors: 3,
             neighbors_by_worker: vec![2, 3],
             connected: true,
+            max_time_work_by_window: vec![10],
+            time_work_by_window: vec![vec![10, 9]],
         };
-        let reasons = candidate_rejection_reasons(&baseline, Some(&improved), true, None);
+        let reasons = candidate_rejection_reasons(&baseline, Some(&improved), true, None, 1);
         assert!(reasons.is_empty());
         assert!(should_accept_candidate(true, &reasons));
 
         let worse = LayoutMetrics {
             max_work: 100,
             connected: false,
+            max_time_work_by_window: vec![13],
             ..improved
         };
-        let reasons = candidate_rejection_reasons(&baseline, Some(&worse), true, None);
+        let reasons = candidate_rejection_reasons(&baseline, Some(&worse), true, None, 1);
         assert!(
             reasons
                 .iter()
@@ -712,6 +907,11 @@ mod tests {
             reasons
                 .iter()
                 .any(|reason| reason == "candidate partitions are disconnected")
+        );
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason == "candidate exceeds baseline load capacity")
         );
         assert!(!should_accept_candidate(true, &reasons));
         assert!(!should_accept_candidate(false, &[]));

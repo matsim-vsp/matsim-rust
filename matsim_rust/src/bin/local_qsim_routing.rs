@@ -8,6 +8,7 @@ use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::logging::init_std_out_logging_thread_local;
 use matsim_rust::simulation::population::agent_source::PreplanningHorizonAgentSource;
 use matsim_rust::simulation::scenario::Scenario;
+use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 use tracing::info;
 
@@ -18,6 +19,9 @@ struct RoutingCommandLineArgs {
     router_ip: Vec<String>,
     #[clap(flatten)]
     delegate: matsim_rust::simulation::config::CommandLineArgs,
+    /// Write partition work and communication diagnostics in hourly simulated-time windows.
+    #[arg(long)]
+    partition_diagnostics: Option<PathBuf>,
 }
 
 #[hotpath::main]
@@ -69,13 +73,15 @@ fn main() {
     let scenario = Scenario::load(config);
 
     // Create controller
-    let controller = ControllerBuilder::default_with_scenario(scenario)
+    let mut controller = ControllerBuilder::default_with_scenario(scenario)
         .external_services(services)
         .agent_source(PreplanningHorizonAgentSource)
         .global_barrier(barrier)
-        .adapter_handles(adapters)
-        .build()
-        .unwrap();
+        .adapter_handles(adapters);
+    if let Some(path) = args.partition_diagnostics {
+        controller = controller.partition_diagnostics_output(path);
+    }
+    let controller = controller.build().unwrap();
 
     // Run controller
     controller.run();

@@ -6,13 +6,15 @@ use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
     ScoringPool, create_output_filename,
 };
+use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent};
 use crate::simulation::framework_events::{
-    ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn,
-    WorkerListenerRegisterFunction,
+    ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn, MobsimEvent,
+    PartitionEvent, WorkerListenerRegisterFunction,
 };
 use crate::simulation::id::Id;
 use crate::simulation::logging::init_controller_logging;
 use crate::simulation::network::LinkStorageCapacities;
+use crate::simulation::network::partition_diagnostics::PartitionDiagnostics;
 use crate::simulation::population::agent_source::{
     DynAgentSource, IntoDynAgentSource, PopulationAgentSource,
 };
@@ -32,13 +34,14 @@ use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
 use crate::simulation::scoring::{PersonExperiences, PlanScorer};
+use crate::simulation::time::SimTime;
 use crate::simulation::{id, io};
 use arc_swap::ArcSwap;
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
 use itertools::Itertools;
 use nohash_hasher::IntMap;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -72,6 +75,7 @@ pub struct Controller {
     transit_capacity_feedback:
         Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
     transit_capacity_snapshot: Arc<ArcSwap<BTreeMap<TransitSegment, TransitSegmentObservation>>>,
+    partition_diagnostics: Option<(PathBuf, Arc<PartitionDiagnostics>)>,
 }
 
 pub struct ControllerBuilder {
@@ -84,6 +88,7 @@ pub struct ControllerBuilder {
     adapter_handles: Vec<AdapterHandle>,
     scoring_function: Option<Box<dyn PlanScorer>>,
     replanning_strategies: Vec<Box<dyn ReplanningStrategy>>,
+    partition_diagnostics_output: Option<PathBuf>,
 }
 
 impl ControllerBuilder {
@@ -98,6 +103,7 @@ impl ControllerBuilder {
             adapter_handles: Vec::new(),
             scoring_function: None,
             replanning_strategies: Vec::new(),
+            partition_diagnostics_output: None,
         }
     }
 
@@ -199,6 +205,10 @@ impl ControllerBuilder {
         let config = scenario.core.config.clone();
         let transit_capacity_feedback = Arc::new(Default::default());
         let transit_capacity_snapshot = Arc::new(ArcSwap::from_pointee(BTreeMap::new()));
+        let partition_diagnostics = self
+            .partition_diagnostics_output
+            .as_ref()
+            .map(|_| Arc::new(PartitionDiagnostics::default()));
 
         let experienced_plans = if config.scoring().mode == ScoringMode::Enabled {
             let (worker_registrations, controller_registration, experienced_plans) =
@@ -247,6 +257,66 @@ impl ControllerBuilder {
                     );
                     PartitionTravelTimeCollector::register_partition_events(&ttc, partition);
                 }));
+            if let Some(diagnostics) = partition_diagnostics.as_ref().cloned() {
+                self.worker_listener_register_fn
+                    .entry(i)
+                    .or_default()
+                    .push(Box::new(move |events, mobsim, partition, _migration| {
+                        let step_started = Rc::new(RefCell::new(None::<(u32, SimTime, Instant)>));
+                        let current_iteration = Rc::new(Cell::new(0));
+                        let started = step_started.clone();
+                        let iteration = current_iteration.clone();
+                        let step_diagnostics = diagnostics.clone();
+                        mobsim.on_event(move |event| match &event.payload {
+                            MobsimEvent::BeforeSimStep(sample) => {
+                                iteration.set(event.meta.iteration);
+                                *started.borrow_mut() =
+                                    Some((event.meta.iteration, sample.time, Instant::now()));
+                            }
+                            MobsimEvent::AfterSimStep(_) => {
+                                if let Some((iteration, time, started)) =
+                                    started.borrow_mut().take()
+                                {
+                                    step_diagnostics.record_step(
+                                        i,
+                                        iteration,
+                                        time,
+                                        u64::try_from(started.elapsed().as_nanos())
+                                            .unwrap_or(u64::MAX),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        });
+                        let network_diagnostics = diagnostics.clone();
+                        let iteration = current_iteration.clone();
+                        events.on::<LinkLeaveEvent, _>(move |event| {
+                            network_diagnostics.record_network_event(
+                                i,
+                                iteration.get(),
+                                event.time,
+                                false,
+                            );
+                        });
+                        let transitions = diagnostics.clone();
+                        let iteration = current_iteration;
+                        events.on::<LinkEnterEvent, _>(move |event| {
+                            transitions.record_network_event(i, iteration.get(), event.time, true);
+                        });
+                        let migration_diagnostics = diagnostics;
+                        partition.on_event(move |event| {
+                            if let PartitionEvent::VehicleEntersPartition(migration) =
+                                &event.payload
+                            {
+                                migration_diagnostics.record_migration(
+                                    i,
+                                    event.meta.iteration,
+                                    migration.time,
+                                );
+                            }
+                        });
+                    }));
+            }
         }
 
         Ok(Controller {
@@ -267,6 +337,9 @@ impl ControllerBuilder {
             person_demographics: Vec::new(),
             transit_capacity_feedback,
             transit_capacity_snapshot,
+            partition_diagnostics: self
+                .partition_diagnostics_output
+                .map(|path| (path, partition_diagnostics.unwrap())),
         })
     }
 
@@ -314,6 +387,12 @@ impl ControllerBuilder {
         worker_listener_register_fn: HashMap<u32, Vec<Box<WorkerListenerRegisterFunction>>>,
     ) -> Self {
         self.worker_listener_register_fn = worker_listener_register_fn;
+        self
+    }
+
+    /// Records per-worker work, synchronization wait and network counts in hourly simulated-time windows.
+    pub fn partition_diagnostics_output(mut self, path: impl Into<PathBuf>) -> Self {
+        self.partition_diagnostics_output = Some(path.into());
         self
     }
 
@@ -551,6 +630,11 @@ impl Controller {
 
         let finalization_started = Instant::now();
         mobsim_workers.shutdown();
+        if let Some((path, diagnostics)) = &self.partition_diagnostics {
+            diagnostics
+                .write_csv(path)
+                .unwrap_or_else(|error| panic!("Failed to write partition diagnostics: {error}"));
+        }
         self.shutdown_adapters();
 
         info!("Writing output files:");
@@ -608,7 +692,7 @@ impl Controller {
             )
             .with_runtime(crate::simulation::analysis::AnalysisRuntimeMetadata {
                 simulation_seconds: Some(simulation_started.elapsed().as_secs_f64()),
-                phase_seconds,
+                phase_seconds: phase_seconds.clone(),
                 worker_count: Some(self.config.partitioning().num_parts as usize),
                 available_logical_cpus: std::thread::available_parallelism().ok().map(usize::from),
                 operating_system: Some(std::env::consts::OS.to_owned()),
@@ -635,6 +719,21 @@ impl Controller {
             )
             .unwrap_or_else(|err| panic!("Automatic analysis failed: {err}"));
             info!("Analysis report: {}", report.display());
+        }
+        if let Some((path, _)) = &self.partition_diagnostics {
+            let metrics_path = path.with_extension("controller.json");
+            let metrics = serde_json::json!({
+                "simulation_wall_seconds": simulation_started.elapsed().as_secs_f64(),
+                "phase_seconds": phase_seconds,
+                "worker_count": self.config.partitioning().num_parts,
+                "network_links": self.scenario.core.network.links().len(),
+                "population_persons": self.scenario.population.persons.len(),
+            });
+            std::fs::write(
+                &metrics_path,
+                serde_json::to_vec_pretty(&metrics).expect("controller metrics must serialize"),
+            )
+            .unwrap_or_else(|error| panic!("Failed to write controller metrics: {error}"));
         }
         (self.trip_router, self.scenario.population)
     }
@@ -809,6 +908,11 @@ impl Controller {
             .agent_source(self.agent_source.clone())
             .external_services(self.external_services.clone())
             .worker_listener(mem::take(&mut self.worker_listener))
+            .partition_diagnostics(
+                self.partition_diagnostics
+                    .as_ref()
+                    .map(|(_, diagnostics)| diagnostics.clone()),
+            )
             .global_barrier(self.global_barrier.clone())
             .build()
             .unwrap();

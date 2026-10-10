@@ -1,5 +1,8 @@
 use crate::simulation::config::PartitionMethod;
 use crate::simulation::id::Id;
+use crate::simulation::network::partition_experiment::{
+    TIME_WINDOW_SECONDS, TimeWindowDemand, TimeWindowDemandFile,
+};
 use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::Population;
@@ -8,6 +11,7 @@ use crate::simulation::scenario::vehicles::Garage;
 use ahash::HashMapExt;
 use clap::Parser;
 use nohash_hasher::IntMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tracing::info;
 
@@ -54,6 +58,7 @@ pub fn run(
     let mut pop = Population::from_file(&args.population, &mut veh);
 
     let cmp_weights = compute_computational_weights(&pop);
+    let time_window_demands = compute_time_window_demands(&pop, &net, &args.population);
     assign_computational_weights(&mut net, cmp_weights);
 
     f(
@@ -73,6 +78,59 @@ pub fn run(
     }
     if let Some(facilities) = facilities.as_ref() {
         facilities.to_file(&create_file_path(args, "facilities"));
+    }
+    let window_path = args
+        .output_dir
+        .join(format!("{}.workload_windows.json", args.run_id));
+    std::fs::write(
+        window_path,
+        serde_json::to_vec_pretty(&time_window_demands)
+            .expect("time-window workload must serialize"),
+    )
+    .expect("time-window workload sidecar must be written");
+}
+
+fn compute_time_window_demands(
+    population: &Population,
+    network: &Network,
+    source_population: &std::path::Path,
+) -> TimeWindowDemandFile {
+    let mut windows = BTreeMap::<u64, BTreeMap<String, u64>>::new();
+    let mut legs_without_departure_time = 0u64;
+    for person in population.persons.values() {
+        for leg in person.selected_plan().as_ref().unwrap().legs() {
+            let Some(route) = leg.route.as_ref().and_then(|route| route.as_network()) else {
+                continue;
+            };
+            let Some(departure) = leg.dep_time else {
+                legs_without_departure_time = legs_without_departure_time
+                    .checked_add(1)
+                    .expect("un-timed leg count overflow");
+                continue;
+            };
+            let window_start = departure.as_secs() / TIME_WINDOW_SECONDS * TIME_WINDOW_SECONDS;
+            let demand = windows.entry(window_start).or_default();
+            for link_id in route.route() {
+                let node_id = network.get_link(link_id).to.external().to_string();
+                let count = demand.entry(node_id).or_default();
+                *count = count.checked_add(1).expect("time-window demand overflow");
+            }
+        }
+    }
+    TimeWindowDemandFile {
+        source_population: source_population.display().to_string(),
+        window_seconds: TIME_WINDOW_SECONDS,
+        units: "route-link occurrences per node per hour".to_string(),
+        legs_without_departure_time,
+        windows: windows
+            .into_iter()
+            .map(
+                |(start_seconds, node_work_by_external_id)| TimeWindowDemand {
+                    start_seconds,
+                    node_work_by_external_id,
+                },
+            )
+            .collect(),
     }
 }
 
@@ -128,10 +186,12 @@ fn assign_computational_weights(net: &mut Network, cmp_weights: IntMap<Id<Link>,
 
 #[cfg(test)]
 mod tests {
-    use super::assign_computational_weights;
+    use super::{assign_computational_weights, compute_time_window_demands};
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node};
+    use crate::simulation::scenario::population::Population;
+    use crate::simulation::scenario::vehicles::Garage;
     use ahash::HashMapExt;
     use macros::deterministic_id_test;
     use nohash_hasher::IntMap;
@@ -191,5 +251,34 @@ mod tests {
             assign_computational_weights(&mut network, overflowing_demand);
         }));
         assert!(overflow_result.is_err());
+    }
+
+    #[deterministic_id_test]
+    fn routed_population_demand_is_grouped_into_sorted_hourly_windows() {
+        let network =
+            Network::from_file_as_is(std::path::Path::new("./assets/equil/equil-network.xml"));
+        let mut vehicles =
+            Garage::from_file(std::path::Path::new("./assets/equil/equil-vehicles.xml"));
+        let population = Population::from_file("./assets/equil/equil-plans.xml", &mut vehicles);
+
+        let windows =
+            compute_time_window_demands(&population, &network, std::path::Path::new("plans.xml"));
+
+        assert_eq!(3600, windows.window_seconds);
+        assert_eq!("route-link occurrences per node per hour", windows.units);
+        assert!(!windows.windows.is_empty());
+        assert!(
+            windows
+                .windows
+                .windows(2)
+                .all(|pair| { pair[0].start_seconds < pair[1].start_seconds })
+        );
+        assert!(
+            windows.windows.iter().all(|window| window
+                .node_work_by_external_id
+                .values()
+                .sum::<u64>()
+                > 0)
+        );
     }
 }
