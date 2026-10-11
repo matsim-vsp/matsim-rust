@@ -6,7 +6,9 @@ use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
     ScoringPool, create_output_filename,
 };
-use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent};
+use crate::simulation::events::{
+    LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
+};
 use crate::simulation::framework_events::{
     ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn, MobsimEvent,
     PartitionEvent, WorkerListenerRegisterFunction,
@@ -41,6 +43,7 @@ use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
 use itertools::Itertools;
 use nohash_hasher::IntMap;
+use nohash_hasher::IntSet;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -208,7 +211,7 @@ impl ControllerBuilder {
         let partition_diagnostics = self
             .partition_diagnostics_output
             .as_ref()
-            .map(|_| Arc::new(PartitionDiagnostics::default()));
+            .map(|_| Arc::new(PartitionDiagnostics::new(config.partitioning().num_parts)));
 
         let experienced_plans = if config.scoring().mode == ScoringMode::Enabled {
             let (worker_registrations, controller_registration, experienced_plans) =
@@ -264,12 +267,18 @@ impl ControllerBuilder {
                     .push(Box::new(move |events, mobsim, partition, _migration| {
                         let step_started = Rc::new(RefCell::new(None::<(u32, SimTime, Instant)>));
                         let current_iteration = Rc::new(Cell::new(0));
+                        let active_vehicles = Rc::new(RefCell::new(IntSet::default()));
+                        let vehicle_transitions =
+                            Rc::new(RefCell::new(BTreeMap::<(u32, u64), u64>::new()));
                         let started = step_started.clone();
-                        let iteration = current_iteration.clone();
                         let step_diagnostics = diagnostics.clone();
+                        let iteration = current_iteration.clone();
+                        let step_active_vehicles = active_vehicles.clone();
+                        let step_vehicle_transitions = vehicle_transitions.clone();
                         mobsim.on_event(move |event| match &event.payload {
                             MobsimEvent::BeforeSimStep(sample) => {
                                 iteration.set(event.meta.iteration);
+                                step_vehicle_transitions.borrow_mut().clear();
                                 *started.borrow_mut() =
                                     Some((event.meta.iteration, sample.time, Instant::now()));
                             }
@@ -284,36 +293,76 @@ impl ControllerBuilder {
                                         u64::try_from(started.elapsed().as_nanos())
                                             .unwrap_or(u64::MAX),
                                     );
+                                    step_diagnostics.record_active_network_work(
+                                        i,
+                                        iteration,
+                                        time,
+                                        step_active_vehicles.borrow().len(),
+                                    );
+                                    for ((transition_iteration, hour), transitions) in
+                                        std::mem::take(&mut *step_vehicle_transitions.borrow_mut())
+                                    {
+                                        step_diagnostics.record_vehicle_transitions(
+                                            i,
+                                            transition_iteration,
+                                            SimTime::from_secs(hour * 3600),
+                                            transitions,
+                                        );
+                                    }
                                 }
+                            }
+                            MobsimEvent::BeforeCleanup => {
+                                step_active_vehicles.borrow_mut().clear();
                             }
                             _ => {}
                         });
-                        let network_diagnostics = diagnostics.clone();
-                        let iteration = current_iteration.clone();
+                        let active_vehicles_on_leave = active_vehicles.clone();
                         events.on::<LinkLeaveEvent, _>(move |event| {
-                            network_diagnostics.record_network_event(
-                                i,
-                                iteration.get(),
-                                event.time,
-                                false,
-                            );
+                            active_vehicles_on_leave.borrow_mut().remove(&event.vehicle);
                         });
-                        let transitions = diagnostics.clone();
+                        let transitions = vehicle_transitions;
                         let iteration = current_iteration;
+                        let active_vehicles_on_enter = active_vehicles.clone();
                         events.on::<LinkEnterEvent, _>(move |event| {
-                            transitions.record_network_event(i, iteration.get(), event.time, true);
+                            active_vehicles_on_enter
+                                .borrow_mut()
+                                .insert(event.vehicle.clone());
+                            let bucket = (iteration.get(), event.time.as_secs() / 3600);
+                            let mut transitions = transitions.borrow_mut();
+                            let count = transitions.entry(bucket).or_default();
+                            *count = count.saturating_add(1);
+                        });
+                        let active_vehicles_on_departure = active_vehicles.clone();
+                        events.on::<VehicleEntersTrafficEvent, _>(move |event| {
+                            active_vehicles_on_departure
+                                .borrow_mut()
+                                .insert(event.vehicle.clone());
+                        });
+                        let active_vehicles_on_arrival = active_vehicles.clone();
+                        events.on::<VehicleLeavesTrafficEvent, _>(move |event| {
+                            active_vehicles_on_arrival
+                                .borrow_mut()
+                                .remove(&event.vehicle);
                         });
                         let migration_diagnostics = diagnostics;
-                        partition.on_event(move |event| {
-                            if let PartitionEvent::VehicleEntersPartition(migration) =
-                                &event.payload
-                            {
+                        let active_vehicles_on_migration = active_vehicles;
+                        partition.on_event(move |event| match &event.payload {
+                            PartitionEvent::VehicleEntersPartition(migration) => {
                                 migration_diagnostics.record_migration(
                                     i,
                                     event.meta.iteration,
                                     migration.time,
                                 );
+                                active_vehicles_on_migration
+                                    .borrow_mut()
+                                    .insert(migration.vehicle_id.clone());
                             }
+                            PartitionEvent::VehicleLeavesPartition(migration) => {
+                                active_vehicles_on_migration
+                                    .borrow_mut()
+                                    .remove(&migration.vehicle_id);
+                            }
+                            _ => {}
                         });
                     }));
             }

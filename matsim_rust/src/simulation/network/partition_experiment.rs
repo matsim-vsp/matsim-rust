@@ -5,25 +5,28 @@ use std::hash::Hasher;
 use std::time::Instant;
 
 use fnv::FnvHasher;
-use katgpt_assign::{Limits, Problem, Seed, Spec, solve};
+use katgpt_assign::NEVER_WORSE_GUARD;
+use katgpt_assign::{Limits, Problem, Seed, Spec, StopReason, solve};
 use nohash_hasher::IntMap;
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 use crate::simulation::build_info::GIT_VERSION;
-use crate::simulation::config::{EdgeWeight, MetisOptions, VertexWeight};
+use crate::simulation::config::{MetisOptions, VertexWeight};
 use crate::simulation::id::Id;
-use crate::simulation::network::metis_partitioning;
+use crate::simulation::network::metis_partitioning::{self, get_adjwgt};
 use crate::simulation::random::get_rng;
 use crate::simulation::scenario::network::{Network, Node};
 
 const ASSIGNMENT_REVISION: &str = "b72a2c03383ed0c055df15e56b6a2d4c55cd1474";
 const MEMORY_ESTIMATE_BYTES_PER_NODE: i64 = 64;
 pub const TIME_WINDOW_SECONDS: u64 = 3600;
+pub const TIME_WINDOW_UNITS: &str = "route-link occurrences per node per hour";
 const ASSIGNMENT_PURPOSE: &str = "partition.experiment.region_assignment";
 
 pub struct PartitionExperimentResult {
     pub node_owners: IntMap<Id<Node>, u32>,
+    pub baseline_node_owners: IntMap<Id<Node>, u32>,
     pub metadata: PartitionExperimentMetadata,
 }
 
@@ -34,6 +37,8 @@ pub struct PartitionExperimentMetadata {
     pub assignment_revision: &'static str,
     pub worker_count: u32,
     pub region_count: u32,
+    pub metis_contiguous: bool,
+    pub coarse_partition_error: Option<String>,
     pub base_seed: u64,
     pub derived_seed: u64,
     pub evaluations_limit: u64,
@@ -49,8 +54,14 @@ pub struct PartitionExperimentMetadata {
     pub time_window_workload: &'static str,
     pub selected_layout: &'static str,
     pub baseline_layout_id: String,
+    pub baseline_network_path: Option<String>,
+    pub baseline_network_fnv64: Option<String>,
+    pub initial_layout_id: String,
+    pub initial_region_representatives: Vec<String>,
+    pub initial_region_assignment: Vec<u32>,
     pub candidate_layout_id: Option<String>,
     pub selected_layout_id: String,
+    pub selected_network_fnv64: Option<String>,
     pub rejection_reasons: Vec<String>,
     pub baseline_max_work: u64,
     pub baseline_work_by_worker: Vec<u64>,
@@ -66,6 +77,8 @@ pub struct PartitionExperimentMetadata {
     pub candidate_neighbors_by_worker: Option<Vec<u32>>,
     pub time_window_start_seconds: Vec<u64>,
     pub time_window_sidecar: Option<String>,
+    pub time_window_source_population: Option<String>,
+    pub time_window_units: Option<String>,
     pub legs_without_departure_time: Option<u64>,
     pub baseline_time_window_work_by_worker: Vec<Vec<u64>>,
     pub candidate_time_window_work_by_worker: Option<Vec<Vec<u64>>>,
@@ -91,6 +104,63 @@ struct LayoutMetrics {
     connected: bool,
     max_time_work_by_window: Vec<u64>,
     time_work_by_window: Vec<Vec<u64>>,
+}
+
+struct NetworkTopology {
+    adjacency: BTreeMap<u64, BTreeSet<u64>>,
+    component_by_node: BTreeMap<u64, usize>,
+    connected: bool,
+}
+
+impl NetworkTopology {
+    fn new(network: &Network) -> Self {
+        let mut adjacency = network
+            .nodes()
+            .into_iter()
+            .map(|node| (node.id.internal(), BTreeSet::new()))
+            .collect::<BTreeMap<_, _>>();
+        for link in network.links() {
+            let from = link.from.internal();
+            let to = link.to.internal();
+            if from != to {
+                adjacency.entry(from).or_default().insert(to);
+                adjacency.entry(to).or_default().insert(from);
+            }
+        }
+        let mut component_by_node = BTreeMap::new();
+        let mut component = 0;
+        for &start in adjacency.keys() {
+            if component_by_node.contains_key(&start) {
+                continue;
+            }
+            component_by_node.insert(start, component);
+            let mut queue = VecDeque::from([start]);
+            while let Some(node) = queue.pop_front() {
+                for &neighbor in &adjacency[&node] {
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        component_by_node.entry(neighbor)
+                    {
+                        entry.insert(component);
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+            component += 1;
+        }
+        Self {
+            adjacency,
+            component_by_node,
+            connected: component <= 1,
+        }
+    }
+}
+
+struct AssignmentSolverStats {
+    evaluations: u64,
+    moves: u64,
+    sweeps: u64,
+    stopped_by: StopReason,
+    violation: i64,
 }
 
 #[derive(Clone)]
@@ -156,10 +226,10 @@ pub fn prepare_with_time_windows(
     if worker_count == 0 || region_count <= worker_count {
         return Err("coarse regions must outnumber at least one worker".to_string());
     }
-    validate_edge_weights(network, options)?;
     validate_time_windows(network, time_windows)?;
+    validate_objective_magnitude(network, time_windows, region_count)?;
+    let topology = NetworkTopology::new(network);
     let mut nodes = network.nodes();
-    nodes.sort_by_key(|node| node.id.external().to_string());
     if region_count as usize > nodes.len() {
         return Err(format!(
             "region count {region_count} exceeds network node count {}",
@@ -167,9 +237,13 @@ pub fn prepare_with_time_windows(
         ));
     }
 
-    let metis_options = options.clone().add_vertex_weight(VertexWeight::PreComputed);
+    // METIS's contiguous mode cannot handle a disconnected input graph.
+    let metis_options = options
+        .clone()
+        .add_vertex_weight(VertexWeight::PreComputed)
+        .set_contiguous(options.contiguous && topology.connected);
     let baseline_started = Instant::now();
-    let baseline_raw = metis_partitioning::partition(network, worker_count, &metis_options);
+    let baseline_raw = metis_partitioning::try_partition(network, worker_count, &metis_options)?;
     let baseline = baseline_raw
         .into_iter()
         .map(|(node, part)| {
@@ -179,52 +253,53 @@ pub fn prepare_with_time_windows(
             )
         })
         .collect::<IntMap<_, _>>();
-    let baseline_metrics = measure_layout(network, &baseline, worker_count, options, time_windows)?;
+    let baseline_metrics = measure_layout(
+        network,
+        &baseline,
+        worker_count,
+        options,
+        time_windows,
+        &topology,
+    )?;
+    if options.contiguous && !baseline_metrics.connected {
+        return Err("weighted METIS baseline violates component-wise connectivity".to_string());
+    }
     let baseline_preparation_nanos = elapsed_nanos(baseline_started);
 
-    let coarse_raw = metis_partitioning::partition(network, region_count, &metis_options);
-    let regions = canonical_regions_with_windows(network, coarse_raw, time_windows)?;
-    if regions.len() != region_count as usize {
-        return Err(format!(
-            "METIS produced {} nonempty regions, expected {region_count}",
-            regions.len()
-        ));
+    let (regions, coarse_partition_error) =
+        match metis_partitioning::try_partition(network, region_count, &metis_options) {
+            Ok(coarse_raw) => {
+                match canonical_regions_with_windows(network, coarse_raw, time_windows) {
+                    Ok(regions) => (regions, None),
+                    Err(error) => (Vec::new(), Some(error)),
+                }
+            }
+            Err(error) => (Vec::new(), Some(error)),
+        };
+    let region_count_mismatch = regions.len() != region_count as usize;
+    let baseline_layout_id = layout_id(network, &baseline)?;
+    let (initial, demands) = if region_count_mismatch {
+        (Vec::new(), Vec::new())
+    } else {
+        initial_assignment(&regions, worker_count)?
+    };
+    let mut initial_owners = IntMap::default();
+    for (region, &worker) in regions.iter().zip(&initial) {
+        for node in &region.nodes {
+            initial_owners.insert(node.clone(), worker);
+        }
     }
-    let (initial, demands) = initial_assignment(&regions, worker_count)?;
+    let initial_layout_id = if region_count_mismatch {
+        baseline_layout_id.clone()
+    } else {
+        layout_id(network, &initial_owners)?
+    };
     let derived_seed = get_rng(
         base_seed,
         ASSIGNMENT_PURPOSE,
         &format!("workers={worker_count};regions={region_count}"),
     )
     .random::<u64>();
-    let work_capacity = i64::try_from(baseline_metrics.max_work)
-        .map_err(|_| "baseline work capacity exceeds solver range".to_string())?;
-    let memory_capacity = i64::try_from(baseline_metrics.max_memory)
-        .map_err(|_| "baseline memory capacity exceeds solver range".to_string())?;
-    let mut specs = vec![
-        Spec::capacity(0, work_capacity),
-        Spec::capacity(1, memory_capacity),
-        Spec::Balance { dim: 0, weight: 4 },
-        Spec::Balance { dim: 1, weight: 1 },
-        Spec::MinimizeMovement { weight: 1 },
-    ];
-    for (index, window_max) in baseline_metrics.max_time_work_by_window.iter().enumerate() {
-        let dim = 2 + index;
-        specs.push(Spec::capacity(
-            dim,
-            i64::try_from(*window_max)
-                .map_err(|_| "time-window work capacity exceeds solver range".to_string())?,
-        ));
-        specs.push(Spec::Balance { dim, weight: 1 });
-    }
-    let problem = Problem {
-        num_objects: regions.len(),
-        num_containers: worker_count as usize,
-        num_dims: 2 + time_windows.len(),
-        demands,
-        initial,
-        specs,
-    };
     let limits = Limits {
         max_evaluations: 250_000,
         max_accepted_moves: 25_000,
@@ -232,36 +307,81 @@ pub fn prepare_with_time_windows(
         time: None,
         ..Limits::default()
     };
-
-    let solver_started = Instant::now();
-    let solver_result = solve(&problem, Seed(derived_seed), &limits);
-    let assignment_solver_nanos = elapsed_nanos(solver_started);
-    let (candidate, solver_stats, solver_error) = match solver_result {
-        Ok(solution) => {
-            let mut owners = IntMap::default();
-            for (region, &worker) in regions.iter().zip(&solution.assignment.containers) {
-                for node in &region.nodes {
-                    owners.insert(node.clone(), worker);
-                }
-            }
-            (
-                Some(owners),
-                Some((
-                    solution.moves_evaluated,
-                    solution.moves_accepted,
-                    solution.sweeps,
-                    format!("{:?}", solution.stopped_by),
-                    solution.violation_root,
-                )),
-                None,
-            )
+    let (candidate, solver_stats, solver_error, assignment_solver_nanos) = if region_count_mismatch
+    {
+        (None, None, None, 0)
+    } else {
+        let work_capacity = i64::try_from(baseline_metrics.max_work)
+            .map_err(|_| "baseline work capacity exceeds solver range".to_string())?;
+        let memory_capacity = i64::try_from(baseline_metrics.max_memory)
+            .map_err(|_| "baseline memory capacity exceeds solver range".to_string())?;
+        let mut specs = vec![
+            Spec::capacity(0, work_capacity),
+            Spec::capacity(1, memory_capacity),
+            Spec::Balance { dim: 0, weight: 4 },
+            Spec::Balance { dim: 1, weight: 1 },
+            Spec::MinimizeMovement { weight: 1 },
+        ];
+        for (index, window_max) in baseline_metrics.max_time_work_by_window.iter().enumerate() {
+            let dim = 2 + index;
+            specs.push(Spec::capacity(
+                dim,
+                i64::try_from(*window_max)
+                    .map_err(|_| "time-window work capacity exceeds solver range".to_string())?,
+            ));
+            specs.push(Spec::Balance { dim, weight: 1 });
         }
-        Err(error) => (None, None, Some(error.to_string())),
+        let problem = Problem {
+            num_objects: regions.len(),
+            num_containers: worker_count as usize,
+            num_dims: 2 + time_windows.len(),
+            demands,
+            initial: initial.clone(),
+            specs,
+        };
+        let solver_started = Instant::now();
+        let solver_result = solve(&problem, Seed(derived_seed), &limits);
+        let assignment_solver_nanos = elapsed_nanos(solver_started);
+        let (candidate, solver_stats, solver_error) = match solver_result {
+            Ok(solution) => {
+                let mut owners = IntMap::default();
+                for (region, &worker) in regions.iter().zip(&solution.assignment.containers) {
+                    for node in &region.nodes {
+                        owners.insert(node.clone(), worker);
+                    }
+                }
+                (
+                    Some(owners),
+                    Some(AssignmentSolverStats {
+                        evaluations: solution.moves_evaluated,
+                        moves: solution.moves_accepted,
+                        sweeps: solution.sweeps,
+                        stopped_by: solution.stopped_by,
+                        violation: solution.violation_root,
+                    }),
+                    None,
+                )
+            }
+            Err(error) => (None, None, Some(error.to_string())),
+        };
+        (
+            candidate,
+            solver_stats,
+            solver_error,
+            assignment_solver_nanos,
+        )
     };
 
-    let candidate_metrics_result = candidate
-        .as_ref()
-        .map(|owners| measure_layout(network, owners, worker_count, options, time_windows));
+    let candidate_metrics_result = candidate.as_ref().map(|owners| {
+        measure_layout(
+            network,
+            owners,
+            worker_count,
+            options,
+            time_windows,
+            &topology,
+        )
+    });
     let candidate_validation_error = candidate_metrics_result
         .as_ref()
         .and_then(|result| result.as_ref().err())
@@ -270,11 +390,27 @@ pub fn prepare_with_time_windows(
     let mut rejection_reasons = candidate_rejection_reasons(
         &baseline_metrics,
         candidate_metrics.as_ref(),
-        candidate.is_some(),
+        !region_count_mismatch,
         candidate_validation_error.as_deref(),
         time_windows.len(),
     );
-    let baseline_layout_id = layout_id(network, &baseline)?;
+    if region_count_mismatch && coarse_partition_error.is_none() {
+        rejection_reasons.push(format!(
+            "candidate rejected because METIS produced {} nonempty regions, expected {region_count}",
+            regions.len()
+        ));
+    }
+    if let Some(error) = &coarse_partition_error {
+        rejection_reasons.push(format!("coarse METIS partition rejected: {error}"));
+    }
+    if let Some(stats) = &solver_stats {
+        if solver_budget_exhausted(stats.stopped_by) {
+            rejection_reasons.push(format!(
+                "assignment solver budget exhausted: {:?}",
+                stats.stopped_by
+            ));
+        }
+    }
     let candidate_layout_id = candidate
         .as_ref()
         .and_then(|owners| layout_id(network, owners).ok());
@@ -292,7 +428,7 @@ pub fn prepare_with_time_windows(
     let selected = if accepted {
         candidate.expect("accepted candidate exists")
     } else {
-        baseline
+        baseline.clone()
     };
     let metadata = PartitionExperimentMetadata {
         input_network: input_network.to_string(),
@@ -300,6 +436,8 @@ pub fn prepare_with_time_windows(
         assignment_revision: ASSIGNMENT_REVISION,
         worker_count,
         region_count,
+        metis_contiguous: metis_options.contiguous,
+        coarse_partition_error,
         base_seed,
         derived_seed,
         evaluations_limit: limits.max_evaluations,
@@ -319,8 +457,17 @@ pub fn prepare_with_time_windows(
         },
         selected_layout: if accepted { "candidate" } else { "baseline" },
         baseline_layout_id,
+        baseline_network_path: None,
+        baseline_network_fnv64: None,
+        initial_layout_id,
+        initial_region_representatives: regions
+            .iter()
+            .map(|region| region.representative.clone())
+            .collect(),
+        initial_region_assignment: initial,
         candidate_layout_id,
         selected_layout_id,
+        selected_network_fnv64: None,
         rejection_reasons,
         baseline_max_work: baseline_metrics.max_work,
         baseline_work_by_worker: baseline_metrics.work_by_worker.clone(),
@@ -347,6 +494,8 @@ pub fn prepare_with_time_windows(
             .map(|window| window.start_seconds)
             .collect(),
         time_window_sidecar: time_window_sidecar.map(str::to_string),
+        time_window_source_population: None,
+        time_window_units: None,
         legs_without_departure_time,
         baseline_time_window_work_by_worker: transpose_window_loads(
             &baseline_metrics.time_work_by_window,
@@ -354,11 +503,13 @@ pub fn prepare_with_time_windows(
         candidate_time_window_work_by_worker: candidate_metrics
             .as_ref()
             .map(|metrics| transpose_window_loads(&metrics.time_work_by_window)),
-        solver_evaluations: solver_stats.as_ref().map(|stats| stats.0),
-        solver_moves: solver_stats.as_ref().map(|stats| stats.1),
-        solver_sweeps: solver_stats.as_ref().map(|stats| stats.2),
-        solver_stopped_by: solver_stats.as_ref().map(|stats| stats.3.clone()),
-        solver_violation: solver_stats.as_ref().map(|stats| stats.4),
+        solver_evaluations: solver_stats.as_ref().map(|stats| stats.evaluations),
+        solver_moves: solver_stats.as_ref().map(|stats| stats.moves),
+        solver_sweeps: solver_stats.as_ref().map(|stats| stats.sweeps),
+        solver_stopped_by: solver_stats
+            .as_ref()
+            .map(|stats| format!("{:?}", stats.stopped_by)),
+        solver_violation: solver_stats.as_ref().map(|stats| stats.violation),
         solver_error,
         baseline_preparation_nanos,
         assignment_solver_nanos,
@@ -366,6 +517,7 @@ pub fn prepare_with_time_windows(
     };
     Ok(PartitionExperimentResult {
         node_owners: selected,
+        baseline_node_owners: baseline,
         metadata,
     })
 }
@@ -373,17 +525,17 @@ pub fn prepare_with_time_windows(
 fn candidate_rejection_reasons(
     baseline: &LayoutMetrics,
     candidate: Option<&LayoutMetrics>,
-    candidate_exists: bool,
+    solver_attempted: bool,
     validation_error: Option<&str>,
     time_window_count: usize,
 ) -> Vec<String> {
     let mut reasons = Vec::new();
-    match (candidate_exists, candidate) {
-        (false, _) => reasons.push("assignment solver rejected the problem".to_string()),
-        (true, None) => reasons.push(format!(
-            "candidate ownership failed validation: {}",
-            validation_error.unwrap_or("unknown error")
-        )),
+    match (solver_attempted, candidate) {
+        (false, _) => {}
+        (true, None) => reasons.push(match validation_error {
+            Some(error) => format!("candidate ownership failed validation: {error}"),
+            None => "assignment solver rejected the problem".to_string(),
+        }),
         (true, Some(candidate)) => {
             if candidate.max_work >= baseline.max_work {
                 reasons.push("maximum estimated work did not improve".to_string());
@@ -417,6 +569,10 @@ fn should_accept_candidate(candidate_exists: bool, rejection_reasons: &[String])
     candidate_exists && rejection_reasons.is_empty()
 }
 
+fn solver_budget_exhausted(stopped_by: StopReason) -> bool {
+    stopped_by != StopReason::NoImprovingMove
+}
+
 fn elapsed_nanos(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
 }
@@ -443,19 +599,49 @@ fn layout_id(network: &Network, owners: &IntMap<Id<Node>, u32>) -> Result<String
     Ok(format!("{:016x}", hasher.finish()))
 }
 
-fn validate_edge_weights(network: &Network, options: &MetisOptions) -> Result<(), String> {
-    if options.edge_weight == EdgeWeight::Capacity {
-        for link in network.links() {
-            if !link.capacity.is_finite()
-                || link.capacity < 0.0
-                || link.capacity > metis::Idx::MAX as f64
-            {
-                return Err(format!(
-                    "link {} has capacity outside the METIS integer edge-weight range",
-                    link.id
-                ));
-            }
-        }
+fn validate_objective_magnitude(
+    network: &Network,
+    time_windows: &[TimeWindowDemand],
+    region_count: u32,
+) -> Result<(), String> {
+    let mut totals = vec![0u128; 2 + time_windows.len()];
+    totals[0] = network
+        .nodes()
+        .into_iter()
+        .map(|node| node.cmp_weight as u128)
+        .sum();
+    totals[1] = network.nodes().len() as u128 * MEMORY_ESTIMATE_BYTES_PER_NODE as u128;
+    for (index, window) in time_windows.iter().enumerate() {
+        totals[index + 2] = window
+            .node_work_by_external_id
+            .values()
+            .try_fold(0u128, |total, &work| total.checked_add(work as u128))
+            .ok_or_else(|| "time-window workload exceeds solver range".to_string())?;
+    }
+    let total_capacity_violation = totals
+        .iter()
+        .try_fold(0u128, |total, &demand| total.checked_add(demand))
+        .and_then(|total| total.checked_mul(katgpt_assign::FIX_IT_WEIGHT as u128))
+        .ok_or_else(|| "assignment capacity objective exceeds solver range".to_string())?;
+    let max_capacity_violation =
+        totals.iter().copied().max().unwrap_or(0) * katgpt_assign::FIX_IT_WEIGHT as u128;
+    let goal_bound = totals[0]
+        .checked_mul(4)
+        .and_then(|total| {
+            totals
+                .iter()
+                .skip(1)
+                .try_fold(total, |sum, &demand| sum.checked_add(demand))
+        })
+        .and_then(|total| total.checked_add(region_count as u128))
+        .ok_or_else(|| "assignment objective exceeds solver range".to_string())?;
+    let folded_bound = max_capacity_violation
+        .checked_mul(NEVER_WORSE_GUARD as u128)
+        .and_then(|guarded| guarded.checked_add(total_capacity_violation))
+        .and_then(|total| total.checked_add(goal_bound))
+        .ok_or_else(|| "assignment objective exceeds solver range".to_string())?;
+    if folded_bound > i64::MAX as u128 {
+        return Err("assignment objective magnitude exceeds solver range".to_string());
     }
     Ok(())
 }
@@ -553,6 +739,7 @@ fn measure_layout(
     workers: u32,
     options: &MetisOptions,
     time_windows: &[TimeWindowDemand],
+    topology: &NetworkTopology,
 ) -> Result<LayoutMetrics, String> {
     if owners.len() != network.nodes().len() {
         return Err("ownership does not cover every network node".to_string());
@@ -590,7 +777,6 @@ fn measure_layout(
         owner_by_internal.insert(node.id.internal(), worker as u32);
     }
 
-    let mut adjacency = BTreeMap::<u64, BTreeSet<u64>>::new();
     let mut edge_weights = BTreeMap::<(u64, u64), u64>::new();
     for link in network.links() {
         let from = link.from.internal();
@@ -598,13 +784,9 @@ fn measure_layout(
         if from == to {
             continue;
         }
-        adjacency.entry(from).or_default().insert(to);
-        adjacency.entry(to).or_default().insert(from);
         let edge = if from < to { (from, to) } else { (to, from) };
-        let weight = match options.edge_weight {
-            EdgeWeight::Capacity => link.capacity as u64,
-            EdgeWeight::Constant => 1,
-        };
+        let weight = u64::try_from(get_adjwgt(options, link)?)
+            .map_err(|_| "METIS edge weight is negative".to_string())?;
         let edge_weight = edge_weights.entry(edge).or_default();
         *edge_weight = edge_weight
             .checked_add(weight)
@@ -631,19 +813,28 @@ fn measure_layout(
 
     let connected = !options.contiguous
         || members.iter().all(|partition| {
-            let Some(&start) = partition.first() else {
-                return true;
-            };
-            let mut visited = BTreeSet::from([start]);
-            let mut queue = VecDeque::from([start]);
-            while let Some(node) = queue.pop_front() {
-                for &neighbor in adjacency.get(&node).into_iter().flatten() {
-                    if partition.contains(&neighbor) && visited.insert(neighbor) {
-                        queue.push_back(neighbor);
+            let mut members_by_component = BTreeMap::<usize, BTreeSet<u64>>::new();
+            for &node in partition {
+                members_by_component
+                    .entry(topology.component_by_node[&node])
+                    .or_default()
+                    .insert(node);
+            }
+            members_by_component.values().all(|component_members| {
+                let Some(&start) = component_members.first() else {
+                    return true;
+                };
+                let mut visited = BTreeSet::from([start]);
+                let mut queue = VecDeque::from([start]);
+                while let Some(node) = queue.pop_front() {
+                    for &neighbor in &topology.adjacency[&node] {
+                        if component_members.contains(&neighbor) && visited.insert(neighbor) {
+                            queue.push_back(neighbor);
+                        }
                     }
                 }
-            }
-            visited.len() == partition.len()
+                visited.len() == component_members.len()
+            })
         });
 
     let neighbors_by_worker = neighbors
@@ -706,15 +897,17 @@ fn transpose_window_loads(windows: &[Vec<u64>]) -> Vec<Vec<u64>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LayoutMetrics, Region, TimeWindowDemand, candidate_rejection_reasons,
-        canonical_regions_with_windows, initial_assignment, prepare, should_accept_candidate,
-        validate_edge_weights, validate_time_windows,
+        LayoutMetrics, NetworkTopology, Region, TimeWindowDemand, candidate_rejection_reasons,
+        canonical_regions_with_windows, initial_assignment, measure_layout, prepare,
+        should_accept_candidate, solver_budget_exhausted, validate_objective_magnitude,
+        validate_time_windows,
     };
     use crate::simulation::config::{EdgeWeight, MetisOptions};
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node};
     use ahash::HashMapExt;
+    use katgpt_assign::StopReason;
     use macros::deterministic_id_test;
     use nohash_hasher::IntMap;
     use std::collections::BTreeMap;
@@ -845,6 +1038,56 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn disconnected_network_uses_baseline_and_records_contiguity_fallback() {
+        let mut network = Network::new();
+        let nodes = ["a", "b", "c", "d"].map(|name| {
+            let id = Id::create(name);
+            network.add_node(Node::new(id.clone(), Coordinate::new_2d(0., 0.), 0, 1));
+            id
+        });
+        for (index, (from, to)) in [(0, 1), (2, 3)].into_iter().enumerate() {
+            let link_id = Id::create(["disconnected-link-0", "disconnected-link-1"][index]);
+            network.add_link(Link::new_with_default(
+                link_id,
+                network.get_node(&nodes[from]),
+                network.get_node(&nodes[to]),
+            ));
+        }
+
+        let result = prepare(
+            &network,
+            "disconnected.xml",
+            1,
+            2,
+            4711,
+            &MetisOptions::default(),
+        )
+        .unwrap();
+
+        assert!(!result.metadata.metis_contiguous);
+        assert_eq!(result.metadata.selected_layout, "baseline");
+        assert!(
+            result
+                .metadata
+                .rejection_reasons
+                .iter()
+                .any(|reason| reason == "maximum estimated work did not improve")
+        );
+
+        let multiple_workers = prepare(
+            &network,
+            "disconnected.xml",
+            2,
+            3,
+            4711,
+            &MetisOptions::default(),
+        )
+        .unwrap();
+        assert!(!multiple_workers.metadata.metis_contiguous);
+        assert_eq!(multiple_workers.baseline_node_owners.len(), 4);
+    }
+
+    #[deterministic_id_test]
     fn time_window_input_rejects_unknown_nodes_and_unaligned_windows() {
         let mut network = Network::new();
         let node = Id::create("window-node");
@@ -859,6 +1102,16 @@ mod tests {
             node_work_by_external_id: BTreeMap::new(),
         };
         assert!(validate_time_windows(&network, &[unaligned]).is_err());
+    }
+
+    #[test]
+    fn objective_bound_rejects_large_time_window_inputs_before_metis() {
+        let network = Network::new();
+        let window = TimeWindowDemand {
+            start_seconds: 0,
+            node_work_by_external_id: BTreeMap::from([("node".to_string(), u64::MAX)]),
+        };
+        assert!(validate_objective_magnitude(&network, &[window], 2).is_err());
     }
 
     #[test]
@@ -918,21 +1171,79 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn capacity_edge_weights_reject_nonfinite_input() {
+    fn disconnected_partitions_check_connectivity_within_each_network_component() {
         let mut network = Network::new();
-        let from = Id::create("capacity-from");
-        let to = Id::create("capacity-to");
+        let nodes = ["component-a", "component-b", "component-c", "component-d"].map(|name| {
+            let id = Id::create(name);
+            network.add_node(Node::new(id.clone(), Coordinate::new_2d(0., 0.), 0, 1));
+            id
+        });
+        for (link_name, from, to) in [("component-link-a", 0, 1), ("component-link-b", 2, 3)] {
+            network.add_link(Link::new_with_default(
+                Id::create(link_name),
+                network.get_node(&nodes[from]),
+                network.get_node(&nodes[to]),
+            ));
+        }
+        let mut owners = IntMap::default();
+        for (node, owner) in nodes.iter().zip([0, 1, 1, 0]) {
+            owners.insert(node.clone(), owner);
+        }
+
+        let topology = NetworkTopology::new(&network);
+        let metrics = measure_layout(
+            &network,
+            &owners,
+            2,
+            &MetisOptions::default(),
+            &[],
+            &topology,
+        )
+        .unwrap();
+
+        assert!(metrics.connected);
+    }
+
+    #[deterministic_id_test]
+    fn capacity_edge_metrics_reject_nonfinite_input() {
+        let mut network = Network::new();
+        let from = Id::create("metrics-capacity-from");
+        let to = Id::create("metrics-capacity-to");
         network.add_node(Node::new(from.clone(), Coordinate::new_2d(0., 0.), 0, 1));
         network.add_node(Node::new(to.clone(), Coordinate::new_2d(1., 0.), 0, 1));
-        let link_id = Id::create("capacity-link");
+        let link = Id::create("metrics-capacity-link");
         network.add_link(Link::new_with_default(
-            link_id.clone(),
+            link.clone(),
             network.get_node(&from),
             network.get_node(&to),
         ));
-        network.get_link_mut(&link_id).capacity = f64::NAN;
-        let options = MetisOptions::default().set_edge_weight(EdgeWeight::Capacity);
+        network.get_link_mut(&link).capacity = f64::NAN;
+        let owners = IntMap::from_iter([(from, 0), (to, 1)]);
+        let topology = NetworkTopology::new(&network);
 
-        assert!(validate_edge_weights(&network, &options).is_err());
+        assert!(
+            measure_layout(
+                &network,
+                &owners,
+                2,
+                &MetisOptions::default().set_edge_weight(EdgeWeight::Capacity),
+                &[],
+                &topology,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn assignment_budget_stops_reject_the_candidate() {
+        for reason in [
+            StopReason::MoveLimit,
+            StopReason::EvalLimit,
+            StopReason::SweepLimit,
+            StopReason::TimeLimit,
+        ] {
+            assert!(solver_budget_exhausted(reason));
+        }
+        assert!(!solver_budget_exhausted(StopReason::NoImprovingMove));
     }
 }

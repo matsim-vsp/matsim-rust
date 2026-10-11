@@ -1,7 +1,7 @@
 use crate::simulation::config::PartitionMethod;
 use crate::simulation::id::Id;
 use crate::simulation::network::partition_experiment::{
-    TIME_WINDOW_SECONDS, TimeWindowDemand, TimeWindowDemandFile,
+    TIME_WINDOW_SECONDS, TIME_WINDOW_UNITS, TimeWindowDemand, TimeWindowDemandFile,
 };
 use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
@@ -31,6 +31,9 @@ pub struct InputArgs {
     pub transit_schedule: Option<PathBuf>,
     #[arg(short, long)]
     pub facilities: Option<PathBuf>,
+    /// Write hourly selected-plan route demand for partition experiments.
+    #[arg(long)]
+    pub workload_sidecar: bool,
 }
 
 pub fn run(
@@ -58,7 +61,9 @@ pub fn run(
     let mut pop = Population::from_file(&args.population, &mut veh);
 
     let cmp_weights = compute_computational_weights(&pop);
-    let time_window_demands = compute_time_window_demands(&pop, &net, &args.population);
+    let time_window_demands = args
+        .workload_sidecar
+        .then(|| compute_time_window_demands(&pop, &net, &args.population));
     assign_computational_weights(&mut net, cmp_weights);
 
     f(
@@ -79,15 +84,17 @@ pub fn run(
     if let Some(facilities) = facilities.as_ref() {
         facilities.to_file(&create_file_path(args, "facilities"));
     }
-    let window_path = args
-        .output_dir
-        .join(format!("{}.workload_windows.json", args.run_id));
-    std::fs::write(
-        window_path,
-        serde_json::to_vec_pretty(&time_window_demands)
-            .expect("time-window workload must serialize"),
-    )
-    .expect("time-window workload sidecar must be written");
+    if let Some(time_window_demands) = time_window_demands {
+        let window_path = args
+            .output_dir
+            .join(format!("{}.workload_windows.json", args.run_id));
+        std::fs::write(
+            window_path,
+            serde_json::to_vec_pretty(&time_window_demands)
+                .expect("time-window workload must serialize"),
+        )
+        .expect("time-window workload sidecar must be written");
+    }
 }
 
 fn compute_time_window_demands(
@@ -120,7 +127,7 @@ fn compute_time_window_demands(
     TimeWindowDemandFile {
         source_population: source_population.display().to_string(),
         window_seconds: TIME_WINDOW_SECONDS,
-        units: "route-link occurrences per node per hour".to_string(),
+        units: TIME_WINDOW_UNITS.to_string(),
         legs_without_departure_time,
         windows: windows
             .into_iter()

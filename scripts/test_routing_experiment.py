@@ -1,9 +1,11 @@
 import csv
 import json
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from routing_experiment import hash_input, routing_profile_summary, run_one
@@ -25,6 +27,30 @@ class RoutingExperimentTests(unittest.TestCase):
             self.assertEqual(result["exit_code"], 0)
             self.assertGreater(result["peak_rss_kib"], 0)
             self.assertGreaterEqual(result["cpu_seconds"], 0)
+
+    def test_timeout_signal_does_not_reap_child_before_wait4(self):
+        class Child:
+            pid = 4242
+            returncode = None
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            child = Child()
+            with (
+                patch("routing_experiment.subprocess.Popen", return_value=child),
+                patch("routing_experiment.os.pidfd_open", side_effect=OSError, create=True),
+                patch("routing_experiment.os.kill") as kill,
+                patch("routing_experiment.os.wait4", side_effect=[(0, 0, None), (child.pid, 0, None)]) as wait4,
+                patch("routing_experiment.time.monotonic", side_effect=[0, 2, 2, 3, 4]),
+                patch("routing_experiment.time.sleep"),
+                patch("routing_experiment.peak_rss_kib", return_value=0),
+                patch("routing_experiment.process_cpu_seconds", return_value=0),
+            ):
+                result = run_one(["unused"], Path(temporary_directory) / "run.log", 1, None)
+
+            kill.assert_called_once_with(child.pid, signal.SIGTERM)
+            self.assertEqual(wait4.call_count, 2)
+            self.assertEqual(result["exit_code"], 0)
+            self.assertTrue(result["timed_out"])
 
     def test_directory_hash_includes_file_boundaries(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

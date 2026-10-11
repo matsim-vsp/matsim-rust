@@ -10,6 +10,7 @@ use matsim_rust::simulation::config::{CommandLineArgs, Config};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::events::utils::compare_event_folder;
 use matsim_rust::simulation::id::Id;
+use matsim_rust::simulation::network::partition_experiment;
 use matsim_rust::simulation::scenario::Scenario;
 use matsim_rust::simulation::scenario::network::{Network, Node};
 use nohash_hasher::IntMap;
@@ -80,17 +81,9 @@ fn start_route_service_with_network(
     output_dir: &Path,
     diagnostics_path: Option<&Path>,
 ) -> (RouteClient, Vec<u8>) {
-    let config_source =
-        std::fs::read_to_string("./tests/resources/equil/equil-config-silo-routing.yml")
-            .unwrap()
-            .replace(
-                "method: !Metis\n      vertex_weight:\n        - Constant",
-                "method: None",
-            );
     std::fs::create_dir_all(output_dir).unwrap();
-    let config_path = output_dir.join("config.yml");
-    std::fs::write(&config_path, config_source).unwrap();
     let overrides = vec![
+        ("partitioning.method".to_string(), "None".to_string()),
         (
             "network.path".to_string(),
             network_path.display().to_string(),
@@ -119,7 +112,7 @@ fn start_route_service_with_network(
         ),
     ];
     let config = Config::from_args(CommandLineArgs {
-        config: config_path.display().to_string(),
+        config: "./tests/resources/equil/equil-config-silo-routing.yml".to_string(),
         overrides,
     });
     let mut controller = ControllerBuilder::default_with_scenario(Scenario::load(config));
@@ -134,20 +127,7 @@ fn start_route_service_with_network(
         silo_routing::serve(router, population, "127.0.0.1:0", &owned_ready_file).unwrap();
     });
 
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !ready_file.exists() {
-        assert!(Instant::now() < deadline, "route service never started");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let address = std::fs::read_to_string(ready_file).unwrap();
-    let stream = TcpStream::connect(address.trim()).unwrap();
-    (
-        RouteClient {
-            reader: BufReader::new(stream.try_clone().unwrap()),
-            writer: stream,
-        },
-        final_plans,
-    )
+    (connect_when_ready(ready_file), final_plans)
 }
 
 fn start_pt_route_service(
@@ -173,6 +153,7 @@ fn start_pt_route_service(
                 "partitioning.num_parts".to_owned(),
                 worker_count.to_string(),
             ),
+            ("partitioning.method".to_owned(), "None".to_owned()),
             (
                 "output.output_dir".to_owned(),
                 output_dir.display().to_string(),
@@ -188,6 +169,10 @@ fn start_pt_route_service(
         silo_routing::serve(router, population, "127.0.0.1:0", &owned_ready_file).unwrap();
     });
 
+    connect_when_ready(ready_file)
+}
+
+fn connect_when_ready(ready_file: &Path) -> RouteClient {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !ready_file.exists() {
         assert!(Instant::now() < deadline, "route service never started");
@@ -359,27 +344,54 @@ fn disconnected_link_is_a_no_path_and_the_connection_stays_open() {
 #[deterministic_id_test(matsim_rust)]
 fn two_partition_controller_preserves_population_events_and_routing_results() {
     let directory = tempfile::tempdir().unwrap();
-    let source_network =
-        std::path::Path::new("./tests/resources/equil/equil-network-with-island.xml");
+    let source_network = std::path::Path::new("./assets/equil/equil-network.xml");
     let mut candidate_network = Network::from_file_as_is(source_network);
-    let owners = candidate_network
+    let mut node_ids = candidate_network
         .nodes()
         .into_iter()
-        .map(|node| (node.id.clone(), u32::from(node.coord.x > 0.0)))
-        .collect::<IntMap<Id<Node>, u32>>();
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    node_ids.sort_by_key(|id| id.external().to_string());
+    let experiment = partition_experiment::prepare(
+        &candidate_network,
+        "equil-network.xml",
+        2,
+        4,
+        4711,
+        &matsim_rust::simulation::config::MetisOptions::default(),
+    )
+    .unwrap();
+    // Keep a deliberately different hand-partitioned layout as the controller seam so that
+    // compatibility is checked across layouts even when the experiment rejects its candidate.
+    let owners = node_ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (id.clone(), (index % 2) as u32))
+        .collect::<IntMap<_, _>>();
+    assert!(
+        owners
+            .iter()
+            .any(|(node, owner)| experiment.baseline_node_owners.get(node) != Some(owner))
+    );
+    let mut baseline_network = candidate_network.clone();
+    baseline_network
+        .apply_partition_ownership(&experiment.baseline_node_owners, 2)
+        .unwrap();
     candidate_network
         .apply_partition_ownership(&owners, 2)
         .unwrap();
     let candidate_network_path = directory.path().join("candidate-network.xml");
     candidate_network.to_file(&candidate_network_path);
+    let baseline_network_path = directory.path().join("baseline-network.xml");
+    baseline_network.to_file(&baseline_network_path);
 
     let baseline_output = directory.path().join("baseline");
     let candidate_output = directory.path().join("candidate");
     let diagnostics_path = directory.path().join("candidate-diagnostics.csv");
     let (mut baseline, baseline_plans) = start_route_service_with_network(
         &directory.path().join("baseline.address"),
-        source_network,
-        1,
+        &baseline_network_path,
+        2,
         &baseline_output,
         None,
     );
@@ -408,6 +420,21 @@ fn two_partition_controller_preserves_population_events_and_routing_results() {
     let diagnostics = std::fs::read_to_string(diagnostics_path).unwrap();
     assert!(diagnostics.contains("worker,time_window_start_seconds,work_nanos,wait_nanos"));
     assert!(diagnostics.contains("0,0,"));
+    let overnight_active_work = diagnostics
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields = line.split(',').collect::<Vec<_>>();
+            (fields[2] == "82800").then(|| fields[5].parse::<u64>().unwrap())
+        })
+        .sum::<u64>();
+    assert_eq!(0, overnight_active_work);
+    let active_work = diagnostics
+        .lines()
+        .skip(1)
+        .map(|line| line.split(',').nth(5).unwrap().parse::<u64>().unwrap())
+        .sum::<u64>();
+    assert!(active_work > 0);
     let controller_metrics = std::fs::read_to_string(
         directory
             .path()
@@ -439,7 +466,7 @@ fn two_partition_controller_preserves_supported_pt_routing_results() {
     candidate_network.to_file(&candidate_network_path);
     let mut baseline = start_pt_route_service(
         &directory.path().join("pt-baseline.address"),
-        config_path,
+        &config_path,
         population_path,
         source_network,
         1,
@@ -447,7 +474,7 @@ fn two_partition_controller_preserves_supported_pt_routing_results() {
     );
     let mut candidate = start_pt_route_service(
         &directory.path().join("pt-candidate.address"),
-        config_path,
+        &config_path,
         population_path,
         &candidate_network_path,
         2,

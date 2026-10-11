@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import platform
+import select
 import signal
 import statistics
 import subprocess
@@ -91,6 +92,13 @@ def routing_profile_summary(output_dir: Path) -> dict[str, int | bool | list[str
     }
 
 
+def signal_unreaped_child(pid: int, sig: int) -> None:
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        pass
+
+
 def run_one(command: list[str], log_path: Path, timeout: float, rss_limit_kib: int | None):
     start = time.monotonic()
     peak = 0
@@ -98,44 +106,57 @@ def run_one(command: list[str], log_path: Path, timeout: float, rss_limit_kib: i
     timed_out = False
     rss_limited = False
     child_usage = None
+    completed_at = None
+    pidfd = None
     with log_path.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        poller = None
         try:
+            try:
+                pidfd = os.pidfd_open(process.pid)
+                poller = select.poll()
+                poller.register(pidfd, select.POLLIN)
+            except (AttributeError, OSError):
+                pass
             termination_deadline = None
             while process.returncode is None:
-                try:
-                    child_pid, status, child_usage = os.wait4(process.pid, os.WNOHANG)
-                except InterruptedError:
-                    continue
+                if poller is not None:
+                    poller.poll(100)
+                else:
+                    time.sleep(0.1)
+                child_pid, status, child_usage = os.wait4(process.pid, os.WNOHANG)
                 if child_pid:
                     process.returncode = os.waitstatus_to_exitcode(status)
+                    completed_at = time.monotonic()
                     break
                 peak = max(peak, peak_rss_kib(process.pid))
                 cpu_seconds = max(cpu_seconds, process_cpu_seconds(process.pid))
                 elapsed = time.monotonic() - start
                 if elapsed >= timeout and not timed_out:
                     timed_out = True
-                    process.send_signal(signal.SIGTERM)
+                    signal_unreaped_child(process.pid, signal.SIGTERM)
                     termination_deadline = time.monotonic() + 5
                 if rss_limit_kib is not None and peak >= rss_limit_kib and not rss_limited:
                     rss_limited = True
-                    process.send_signal(signal.SIGTERM)
+                    signal_unreaped_child(process.pid, signal.SIGTERM)
                     termination_deadline = time.monotonic() + 5
                 if termination_deadline is not None and time.monotonic() >= termination_deadline:
-                    process.kill()
+                    signal_unreaped_child(process.pid, signal.SIGKILL)
                     termination_deadline = None
-                time.sleep(0.1)
             return_code = process.returncode
         finally:
             if process.returncode is None:
-                process.kill()
+                signal_unreaped_child(process.pid, signal.SIGKILL)
                 _, status, child_usage = os.wait4(process.pid, 0)
                 process.returncode = os.waitstatus_to_exitcode(status)
+                completed_at = time.monotonic()
+            if pidfd is not None:
+                os.close(pidfd)
     if child_usage is not None:
         cpu_seconds = child_usage.ru_utime + child_usage.ru_stime
         peak = max(peak, child_usage.ru_maxrss)
     return {
-        "elapsed_seconds": round(time.monotonic() - start, 6),
+        "elapsed_seconds": round(completed_at - start, 6),
         "peak_rss_kib": peak,
         "cpu_seconds": round(cpu_seconds, 6),
         "exit_code": return_code,

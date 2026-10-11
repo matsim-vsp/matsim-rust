@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import math
 import json
 import os
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -16,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from routing_experiment import hash_input, run_one
+from compare_experiment_events import compare_summaries, summarize as summarize_events
 
 
 def parse_networks(values: list[str]) -> dict[int, Path]:
@@ -39,12 +43,155 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def fnv1a64(path: Path) -> str:
+    value = 0xCBF29CE484222325
+    with path.open("rb") as content:
+        for chunk in iter(lambda: content.read(1024 * 1024), b""):
+            for byte in chunk:
+                value = ((value ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+
+def validate_partition_metadata(metadata: dict, workers: int, baseline: Path, candidate: Path) -> None:
+    if metadata.get("worker_count") != workers:
+        raise ValueError(f"partition metadata worker_count does not match {workers} workers")
+    if (
+        not isinstance(metadata.get("baseline_network_fnv64"), str)
+        or fnv1a64(baseline) != metadata["baseline_network_fnv64"]
+    ):
+        raise ValueError(f"baseline network does not match corrected weighted-METIS metadata for {workers} workers")
+    if (
+        not isinstance(metadata.get("selected_network_fnv64"), str)
+        or fnv1a64(candidate) != metadata["selected_network_fnv64"]
+    ):
+        raise ValueError(f"candidate network does not match selected layout metadata for {workers} workers")
+
+
+def compares_same_layout(metadata: dict) -> bool:
+    return metadata.get("baseline_layout_id") == metadata.get("selected_layout_id")
+
+
+def diagnostics_order(pair_index: int) -> tuple[bool, bool]:
+    return (True, False) if (pair_index // 2) % 2 else (False, True)
+
+
 def plan_state_sha256(path: Path | None) -> str | None:
     if path is None:
         return None
     xml = subprocess.run(["zstdcat", str(path)], capture_output=True, check=True).stdout.decode()
+    root = ET.fromstring(xml)
+    people = sorted((person for person in root if person.tag == "person"), key=lambda person: person.get("id", ""))
+    people_iter = iter(people)
+    for index, child in enumerate(root):
+        if child.tag == "person":
+            root[index] = next(people_iter)
+    xml = ET.tostring(root, encoding="unicode")
     canonical = ET.canonicalize(xml_data=xml, strip_text=True)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def run_outcome_signature(run: dict) -> tuple[dict, dict]:
+    output = Path(run["output_dir"])
+    plan = next(iter(sorted(path for path in output.glob("output_plans.xml*") if path.is_file())), None)
+    event_summary = summarize_events(output / "events")
+    signature = {
+        "events": event_summary["canonical_events_sha256"],
+        "final_population": plan_state_sha256(plan),
+    }
+    if run["diagnostics_enabled"]:
+        with Path(run["diagnostics_csv"]).open(encoding="utf-8", newline="") as diagnostics_file:
+            rows = csv.DictReader(diagnostics_file)
+            counts = [
+                [row[key] for key in (
+                    "iteration",
+                    "worker",
+                    "time_window_start_seconds",
+                    "active_network_work",
+                    "vehicle_transitions",
+                    "migrations",
+                    "inter_partition_messages",
+                )]
+                for row in rows
+            ]
+        signature["diagnostic_counts"] = hashlib.sha256(
+            json.dumps(counts, separators=(",", ":")).encode()
+        ).hexdigest()
+    return signature, event_summary
+
+
+def compare_run_signatures(left: dict | None, right: dict | None, compare_counts: bool) -> dict:
+    result = {
+        "events_match": left is not None and right is not None and left["events"] == right["events"],
+        "final_population_match": (
+            left is not None
+            and right is not None
+            and left["final_population"] is not None
+            and left["final_population"] == right["final_population"]
+        ),
+    }
+    if compare_counts:
+        result["diagnostic_counts_match"] = (
+            left is not None
+            and right is not None
+            and left.get("diagnostic_counts") == right.get("diagnostic_counts")
+        )
+    result["matches"] = all(result.values())
+    return result
+
+
+def valid_timeout(value: float) -> bool:
+    return math.isfinite(value) and value > 0
+
+
+def require_no_metis_partitioning(config: Path, overrides: list[str]) -> None:
+    text = config.read_text(encoding="utf-8")
+    text = re.sub(
+        r"(?<!\\)\\u([0-9a-fA-F]{4})|(?<!\\)\\U([0-9a-fA-F]{8})|(?<!\\)\\x([0-9a-fA-F]{2})",
+        lambda match: chr(int(next(group for group in match.groups() if group), 16)),
+        text,
+    )
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.rstrip().endswith("\\") or line.lstrip().startswith("?"):
+            raise ValueError("pair sweeps require simple block-style YAML keys")
+        content = line.split("#", 1)[0].strip()
+        if "partitioning" not in content:
+            continue
+        match = re.match(r"^(\s*)partitioning:\s*(?:#.*)?$", line)
+        if not match:
+            raise ValueError("pair sweeps require block-style partitioning.method: none configuration")
+        indent = len(match.group(1))
+        for nested in lines[index + 1 :]:
+            nested_content = nested.split("#", 1)[0].strip()
+            if not nested_content:
+                continue
+            if len(nested) - len(nested.lstrip()) <= indent:
+                break
+            method_line = nested[: len(nested) - len(nested.lstrip())] + nested_content
+            method = re.match(r"\s+method:\s*(\S+)\s*$", method_line)
+            if "method" in nested_content and not method:
+                raise ValueError("pair sweeps require a plain block-style method: None setting")
+            if method and method.group(1) != "None":
+                raise ValueError("pair sweeps require partitioning.method: none; supplied layouts must remain unchanged")
+    reserved = {
+        "network.path",
+        "population.path",
+        "vehicles.path",
+        "transit.schedule_path",
+        "facilities.path",
+        "ids.path",
+        "partitioning.method",
+        "partitioning.num_parts",
+        "computational_setup.replanning_threads",
+        "computational_setup.random_seed",
+        "output.output_dir",
+    }
+    for override in overrides:
+        key, separator, _value = override.partition("=")
+        if not separator:
+            continue
+        if key.strip() in reserved:
+            raise ValueError(f"--set cannot override runner-controlled setting {key.strip()}")
 
 
 def summarize_runs(runs: list[dict]) -> dict:
@@ -98,7 +245,7 @@ def main() -> int:
         partition_metadata = parse_networks(args.partition_metadata)
     except (ValueError, OSError) as error:
         parser.error(str(error))
-    if args.runs < 1 or args.warmups < 0 or args.max_seconds <= 0:
+    if args.runs < 1 or args.warmups < 0 or not valid_timeout(args.max_seconds):
         parser.error("runs must be positive, warmups non-negative, and max seconds positive")
     if args.replanning_workers <= 0 or args.seed < 0 or args.population_size <= 0 or args.simulated_duration_seconds <= 0:
         parser.error("worker counts and population/duration must be positive, and seed non-negative")
@@ -112,16 +259,37 @@ def main() -> int:
     binary = args.binary.resolve()
     if not config.is_file() or not binary.is_file():
         parser.error("config and binary must exist")
+    try:
+        require_no_metis_partitioning(config, args.set)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     for path in [*baseline.values(), *candidate.values(), *partition_metadata.values()]:
         if not path.is_file():
             parser.error(f"partition network does not exist: {path}")
+    try:
+        metadata_by_workers = {
+            workers: json.loads(path.read_text(encoding="utf-8"))
+            for workers, path in partition_metadata.items()
+        }
+    except (OSError, ValueError) as error:
+        parser.error(f"invalid partition metadata: {error}")
+    try:
+        for metadata in metadata_by_workers.values():
+            for key in ("baseline_preparation_nanos", "total_preparation_nanos"):
+                if not isinstance(metadata[key], int) or metadata[key] < 0:
+                    raise ValueError(f"{key} must be a non-negative integer")
+        for workers in args.workers:
+            validate_partition_metadata(
+                metadata_by_workers[workers], workers, baseline[workers], candidate[workers]
+            )
+    except (KeyError, ValueError, TypeError) as error:
+        parser.error(f"invalid partition preparation timing metadata: {error}")
     if not Path("/proc/self/status").exists():
         parser.error("resource sampling requires Linux /proc")
 
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     source_root = Path(__file__).resolve().parent.parent
-    compare_script = Path(__file__).with_name("compare_experiment_events.py")
     input_hashes = [hash_input(path.resolve()) for path in args.input]
     run_records = []
     comparisons = []
@@ -131,11 +299,13 @@ def main() -> int:
             warmup = repetition < 0
             pair_id = f"workers-{workers}-run-{repetition}"
             results = {}
+            reverse_pair = pair_index % 2 == 1
             order = ["baseline", "candidate"]
-            if pair_index % 2:
+            if reverse_pair:
                 order.reverse()
+            diagnostic_modes = diagnostics_order(pair_index)
             pair_index += 1
-            for diagnostic_mode in (False, True):
+            for diagnostic_mode in diagnostic_modes:
                 mode_key = "diagnostics_on" if diagnostic_mode else "diagnostics_off"
                 mode_results = {}
                 for variant in order:
@@ -143,12 +313,13 @@ def main() -> int:
                     run_dir = output / f"{pair_id}-{mode_key}-{variant}"
                     diagnostics_path = run_dir / "partition_diagnostics.csv"
                     overrides = [
+                        *args.set,
                         f"network.path={network}",
                         f"partitioning.num_parts={workers}",
                         f"computational_setup.replanning_threads={args.replanning_workers}",
                         f"computational_setup.random_seed={args.seed}",
                         f"output.output_dir={run_dir}",
-                        *args.set,
+                        "partitioning.method=None",
                     ]
                     command = [str(binary), "--config", str(config)]
                     for override in overrides:
@@ -161,6 +332,14 @@ def main() -> int:
                         args.max_seconds,
                         args.max_rss_kib,
                     )
+                    controller_metrics = None
+                    diagnostics_parse_error = None
+                    controller_metrics_path = diagnostics_path.with_suffix(".controller.json")
+                    if diagnostic_mode and controller_metrics_path.is_file():
+                        try:
+                            controller_metrics = json.loads(controller_metrics_path.read_text(encoding="utf-8"))
+                        except (OSError, ValueError) as error:
+                            diagnostics_parse_error = str(error)
                     result.update(
                         {
                             "pair_id": pair_id,
@@ -174,13 +353,16 @@ def main() -> int:
                             "output_dir": str(run_dir),
                             "command": command,
                             "diagnostics_csv": str(diagnostics_path) if diagnostic_mode else None,
-                            "controller_metrics": (
-                                json.loads(diagnostics_path.with_suffix(".controller.json").read_text(encoding="utf-8"))
-                                if diagnostic_mode and diagnostics_path.with_suffix(".controller.json").is_file()
-                                else None
-                            ),
+                            "controller_metrics": controller_metrics,
+                            "diagnostics_parse_error": diagnostics_parse_error,
                         }
                     )
+                    if result["exit_code"] == 0:
+                        try:
+                            result["outcome_signature"], result["_event_summary"] = run_outcome_signature(result)
+                        except (OSError, RuntimeError, ValueError, ET.ParseError, subprocess.SubprocessError) as error:
+                            result["outcome_signature_error"] = str(error)
+                            result["outcome_signature"] = None
                     mode_results[variant] = result
                     run_records.append(result)
                 results[mode_key] = mode_results
@@ -189,6 +371,7 @@ def main() -> int:
                 comparison = {
                     "pair_id": pair_id,
                     "instrumentation": mode_key,
+                    "compares_same_layout": compares_same_layout(metadata_by_workers[workers]),
                     "baseline_exit_code": left["exit_code"],
                     "candidate_exit_code": right["exit_code"],
                 }
@@ -201,37 +384,82 @@ def main() -> int:
                         round(right["cpu_seconds"] / left["cpu_seconds"], 6)
                         if left["cpu_seconds"] else None
                     )
+                    metadata = metadata_by_workers[workers]
+                    baseline_preparation = metadata["baseline_preparation_nanos"] / 1e9
+                    candidate_preparation = metadata["total_preparation_nanos"] / 1e9
+                    comparison["baseline_end_to_end_seconds"] = left["elapsed_seconds"] + baseline_preparation
+                    comparison["candidate_end_to_end_seconds"] = right["elapsed_seconds"] + candidate_preparation
+                    comparison["candidate_to_baseline_end_to_end_ratio"] = round(
+                        comparison["candidate_end_to_end_seconds"] / comparison["baseline_end_to_end_seconds"], 6
+                    ) if comparison["baseline_end_to_end_seconds"] else None
                     baseline_output = Path(left["output_dir"])
                     candidate_output = Path(right["output_dir"])
-                    event_comparison = subprocess.run(
-                        [
-                            sys.executable,
-                            str(compare_script),
-                            str(baseline_output / "events"),
-                            str(candidate_output / "events"),
-                        ],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    comparison["event_comparison_exit_code"] = event_comparison.returncode
-                    comparison["event_comparison"] = (
-                        json.loads(event_comparison.stdout) if event_comparison.returncode == 0 else None
-                    )
-                    comparison["event_comparison_error"] = event_comparison.stderr or None
-                    plan_files = [
-                        next(iter(sorted(path for path in directory.glob("output_plans.xml*") if path.is_file())), None)
-                        for directory in (baseline_output, candidate_output)
-                    ]
-                    comparison["final_population_sha256"] = [plan_state_sha256(path) for path in plan_files]
-                    comparison["final_population_match"] = (
-                        comparison["final_population_sha256"][0] is not None
-                        and comparison["final_population_sha256"][0]
-                        == comparison["final_population_sha256"][1]
-                    )
+                    try:
+                        comparison["event_comparison_exit_code"] = 0
+                        comparison["event_comparison"] = compare_summaries(
+                            left["_event_summary"], right["_event_summary"]
+                        )
+                        comparison["event_comparison_error"] = None
+                        comparison["final_population_sha256"] = [
+                            left["outcome_signature"]["final_population"],
+                            right["outcome_signature"]["final_population"],
+                        ]
+                        comparison["final_population_match"] = (
+                            comparison["final_population_sha256"][0] is not None
+                            and comparison["final_population_sha256"][0]
+                            == comparison["final_population_sha256"][1]
+                        )
+                        comparison["events_match"] = (
+                            comparison["event_comparison"].get("events_match") is True
+                        )
+                    except (KeyError, OSError, RuntimeError, ValueError, ET.ParseError, subprocess.SubprocessError) as error:
+                        comparison["comparison_error"] = str(error)
+                        comparison["events_match"] = False
+                        comparison["final_population_match"] = False
                 comparisons.append(comparison)
+                for run in mode_results.values():
+                    run.pop("_event_summary", None)
 
     run_summary = summarize_runs(run_records)
+    measured_runs = [run for run in run_records if not run["warmup"]]
+    outcomes = {
+        (run["worker_count"], run["repetition"], run["variant"], run["diagnostics_enabled"]): run
+        for run in measured_runs
+    }
+    invariance_checks = []
+    for worker in args.workers:
+        for variant in ("baseline", "candidate"):
+            repetitions = sorted(
+                repetition for (count, repetition, name, _enabled) in outcomes
+                if count == worker and name == variant
+            )
+            for repetition in repetitions:
+                off = outcomes.get((worker, repetition, variant, False))
+                on = outcomes.get((worker, repetition, variant, True))
+                invariance_checks.append({
+                    "worker_count": worker,
+                    "variant": variant,
+                    "comparison": f"diagnostics-off-vs-on/run-{repetition}",
+                    **compare_run_signatures(
+                        off.get("outcome_signature") if off else None,
+                        on.get("outcome_signature") if on else None,
+                        False,
+                    ),
+                })
+            for enabled in (False, True):
+                reference = outcomes.get((worker, repetitions[0], variant, enabled)) if repetitions else None
+                for repetition in repetitions[1:]:
+                    current = outcomes.get((worker, repetition, variant, enabled))
+                    invariance_checks.append({
+                        "worker_count": worker,
+                        "variant": variant,
+                        "comparison": f"repeatability/diagnostics-{str(enabled).lower()}/run-{repetition}",
+                        **compare_run_signatures(
+                            reference.get("outcome_signature") if reference else None,
+                            current.get("outcome_signature") if current else None,
+                            enabled,
+                        ),
+                    })
     instrumentation_overhead = {}
     groups = {key.rsplit("/diagnostics-", 1)[0] for key in run_summary}
     for group in sorted(groups):
@@ -278,7 +506,7 @@ def main() -> int:
             str(workers): {
                 "path": str(partition_metadata[workers]),
                 "sha256": sha256(partition_metadata[workers]),
-                "contents": json.loads(partition_metadata[workers].read_text(encoding="utf-8")),
+                "contents": metadata_by_workers[workers],
             }
             for workers in args.workers
         },
@@ -293,6 +521,7 @@ def main() -> int:
         "comparisons": comparisons,
         "summary": run_summary,
         "instrumentation_overhead": instrumentation_overhead,
+        "invariance_checks": invariance_checks,
         "runner_revision": subprocess.run(
             ["git", "-C", str(source_root), "rev-parse", "HEAD"],
             capture_output=True,
@@ -305,11 +534,12 @@ def main() -> int:
     print(report_path)
     failed_run = any(record["exit_code"] != 0 for record in run_records if not record["warmup"])
     failed_comparison = any(
-        comparison.get("event_comparison_exit_code") != 0
-        or comparison.get("final_population_match") is False
+        comparison.get("events_match") is not True
+        or comparison.get("final_population_match") is not True
         for comparison in comparisons
     )
-    return 1 if failed_run or failed_comparison else 0
+    failed_invariance_check = any(not check["matches"] for check in invariance_checks)
+    return 1 if failed_run or failed_comparison or failed_invariance_check else 0
 
 
 if __name__ == "__main__":
