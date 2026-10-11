@@ -229,7 +229,7 @@ pub fn prepare_with_time_windows(
     validate_time_windows(network, time_windows)?;
     validate_objective_magnitude(network, time_windows, region_count)?;
     let topology = NetworkTopology::new(network);
-    let mut nodes = network.nodes();
+    let nodes = network.nodes();
     if region_count as usize > nodes.len() {
         return Err(format!(
             "region count {region_count} exceeds network node count {}",
