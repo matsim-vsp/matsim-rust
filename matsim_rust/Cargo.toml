@@ -23,6 +23,7 @@ flate2 = { version = "1.0.24", features = ["zlib-rs"] }
 fnv = "1.0.7"
 rand = "0.10.2"
 rand_xoshiro = "0.8.1"
+katgpt-assign = { git = "https://github.com/katopz/katgpt-rs", rev = "b72a2c03383ed0c055df15e56b6a2d4c55cd1474" }
 zstd = "0.13.3"
 metis = "0.2.2"
 clap = { version = "4.0.29", features = ["derive"] }

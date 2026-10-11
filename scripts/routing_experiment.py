@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import platform
+import select
 import signal
 import statistics
 import subprocess
@@ -91,45 +92,73 @@ def routing_profile_summary(output_dir: Path) -> dict[str, int | bool | list[str
     }
 
 
+def signal_unreaped_child(pid: int, sig: int) -> None:
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        pass
+
+
 def run_one(command: list[str], log_path: Path, timeout: float, rss_limit_kib: int | None):
     start = time.monotonic()
     peak = 0
     cpu_seconds = 0.0
     timed_out = False
     rss_limited = False
+    child_usage = None
+    completed_at = None
+    pidfd = None
     with log_path.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        poller = None
         try:
-            while process.poll() is None:
+            try:
+                pidfd = os.pidfd_open(process.pid)
+                poller = select.poll()
+                poller.register(pidfd, select.POLLIN)
+            except (AttributeError, OSError):
+                pass
+            termination_deadline = None
+            while process.returncode is None:
+                if poller is not None:
+                    poller.poll(100)
+                else:
+                    time.sleep(0.1)
+                child_pid, status, child_usage = os.wait4(process.pid, os.WNOHANG)
+                if child_pid:
+                    process.returncode = os.waitstatus_to_exitcode(status)
+                    completed_at = time.monotonic()
+                    break
                 peak = max(peak, peak_rss_kib(process.pid))
                 cpu_seconds = max(cpu_seconds, process_cpu_seconds(process.pid))
                 elapsed = time.monotonic() - start
-                if elapsed >= timeout:
+                if elapsed >= timeout and not timed_out:
                     timed_out = True
-                    process.send_signal(signal.SIGTERM)
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    break
-                if rss_limit_kib is not None and peak >= rss_limit_kib:
+                    signal_unreaped_child(process.pid, signal.SIGTERM)
+                    termination_deadline = time.monotonic() + 5
+                if rss_limit_kib is not None and peak >= rss_limit_kib and not rss_limited:
                     rss_limited = True
-                    process.send_signal(signal.SIGTERM)
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    break
-                time.sleep(0.1)
-            return_code = process.wait()
+                    signal_unreaped_child(process.pid, signal.SIGTERM)
+                    termination_deadline = time.monotonic() + 5
+                if termination_deadline is not None and time.monotonic() >= termination_deadline:
+                    signal_unreaped_child(process.pid, signal.SIGKILL)
+                    termination_deadline = None
+            return_code = process.returncode
         finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait()
+            if process.returncode is None:
+                signal_unreaped_child(process.pid, signal.SIGKILL)
+                _, status, child_usage = os.wait4(process.pid, 0)
+                process.returncode = os.waitstatus_to_exitcode(status)
+                completed_at = time.monotonic()
+            if pidfd is not None:
+                os.close(pidfd)
+    if child_usage is not None:
+        cpu_seconds = child_usage.ru_utime + child_usage.ru_stime
+        peak = max(peak, child_usage.ru_maxrss)
     return {
-        "elapsed_seconds": round(time.monotonic() - start, 3),
-        "peak_rss_kib_sampled": peak,
-        "cpu_seconds_sampled": round(cpu_seconds, 3),
+        "elapsed_seconds": round(completed_at - start, 6),
+        "peak_rss_kib": peak,
+        "cpu_seconds": round(cpu_seconds, 6),
         "exit_code": return_code,
         "timed_out": timed_out,
         "rss_limit_reached": rss_limited,
@@ -284,12 +313,11 @@ def main() -> int:
         "summary": {
             "completed_runs": len(completed),
             "median_elapsed_seconds": statistics.median([r["elapsed_seconds"] for r in completed]) if completed else None,
-            "median_sampled_peak_rss_kib": statistics.median([r["peak_rss_kib_sampled"] for r in completed]) if completed else None,
-            "median_sampled_cpu_seconds": statistics.median([r["cpu_seconds_sampled"] for r in completed]) if completed else None,
+            "median_peak_rss_kib": statistics.median([r["peak_rss_kib"] for r in completed]) if completed else None,
+            "median_cpu_seconds": statistics.median([r["cpu_seconds"] for r in completed]) if completed else None,
         },
         "limitations": [
-            "RSS is sampled from /proc at 100 ms intervals and can miss short-lived peaks.",
-            "CPU time is sampled from /proc at 100 ms intervals and can miss the final fraction of a second.",
+            "RSS limits use /proc samples every 100 ms; final CPU and peak RSS use Linux wait4 child accounting.",
             "Phase timings and routing counters must be read from simulation profiling outputs.",
             "Workload metadata is supplied by the operator and should be verified against inputs and config.",
         ],

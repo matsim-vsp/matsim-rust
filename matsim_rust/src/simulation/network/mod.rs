@@ -1,6 +1,8 @@
 mod flow_cap;
 pub mod link;
 pub mod metis_partitioning;
+pub mod partition_diagnostics;
+pub mod partition_experiment;
 pub mod signals;
 pub mod sim_network;
 mod storage_cap;

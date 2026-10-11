@@ -29,6 +29,7 @@ use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
 use nohash_hasher::IntSet;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::instrument;
 
 enum ResponsibleEngine {
@@ -155,7 +156,19 @@ impl<C: SimCommunicator> LegEngine<C> {
             .network_engine
             .move_links(now, &mut self.net_message_broker);
 
+        let diagnostics = self.comp_env.partition_diagnostics();
+        let sync_started = diagnostics.as_ref().map(|_| Instant::now());
         let sync_messages = self.send_recv(now);
+        if let (Some(diagnostics), Some(started)) = (diagnostics, sync_started) {
+            let iteration = self.comp_env.mobsim_event_bus().borrow().iteration();
+            diagnostics.record_communication(
+                self.net_message_broker.rank(),
+                iteration,
+                self.clock.tick_to_time(now),
+                sync_messages.len() as u64,
+                u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            );
+        }
 
         for mut msg in sync_messages {
             let from = msg.from_process();
