@@ -1,0 +1,25 @@
+modules:
+  network:
+    type: Network
+    path: ./tests/resources/3-links/3-links-disconnected-network.xml
+  population:
+    type: Population
+    path: ./assets/3-links/1-agent-generic-leg.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/3-links/vehicles.xml
+  partitioning:
+    type: Partitioning
+    num_parts: 2
+    method: None
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/execute_3_links_2_parts_teleport_disconnected
+  simulation:
+    type: Simulation
+    last_iteration: 0
+    main_modes: [ ]
+  routing:
+    type: Routing
+    mode: UsePlans

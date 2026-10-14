@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use clap::Parser;
 use tracing::info;
 
-use matsim_rust::simulation::config::{MetisOptions, PartitionMethod};
+use matsim_rust::simulation::config::{
+    MetisOptions, NonMainModeLinks, PartitionMethod, Partitioning,
+};
 use matsim_rust::simulation::id;
 use matsim_rust::simulation::scenario::network::Network;
 
@@ -13,7 +15,7 @@ use matsim_rust::simulation::scenario::network::Network;
 /// The new file has the same name as the input file, but with the number of parts appended to the name.
 /// e.g. `network.binpb` -> `network.4.binpb`
 fn main() {
-    matsim_rust::simulation::logging::init_std_out_logging_thread_local();
+    let _guard = matsim_rust::simulation::logging::init_std_out_logging_thread_local();
     let args = InputArgs::parse();
 
     if let Some(id_path) = args.id_path {
@@ -44,11 +46,13 @@ fn main() {
         args.num_parts
     );
 
-    let net1 = Network::from_file_path(
-        &args.net_path,
-        args.num_parts,
-        &PartitionMethod::Metis(MetisOptions::default()),
-    );
+    let mut net1 = Network::from_file(&args.net_path);
+    let partitioning = Partitioning {
+        num_parts: args.num_parts,
+        method: PartitionMethod::Metis(MetisOptions::default()),
+        non_main_mode_links: args.non_main_mode_links,
+    };
+    Network::partition_network(&mut net1, &partitioning, &args.main_modes);
     info!(
         "Network is loaded with {} links and {} nodes.",
         net1.links().len(),
@@ -71,4 +75,10 @@ struct InputArgs {
     pub id_path: Option<PathBuf>,
     #[arg(long)]
     pub num_parts: u32,
+    /// Modes simulated on the network, as `qsim.main_modes`. Without them, all nodes and links are
+    /// partitioned.
+    #[arg(long, value_delimiter = ',')]
+    pub main_modes: Vec<String>,
+    #[arg(long, value_enum, default_value_t = NonMainModeLinks::default())]
+    pub non_main_mode_links: NonMainModeLinks,
 }

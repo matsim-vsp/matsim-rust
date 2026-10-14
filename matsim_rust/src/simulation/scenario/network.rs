@@ -1,5 +1,7 @@
 use crate::simulation::InternalAttributes;
-use crate::simulation::config::{ModalLinkSelection, PartitionMethod};
+use crate::simulation::config::{
+    ModalLinkSelection, NonMainModeLinks, PartitionMethod, Partitioning,
+};
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_network::{
     load_from_proto, write_to_proto_with_link_attribute_overrides,
@@ -15,7 +17,7 @@ use itertools::Itertools;
 use nohash_hasher::{IntMap, IntSet};
 use spatial_index::{LazySpatialIndex, NetworkSpatialIndex};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 use tracing::{info, warn};
 
@@ -76,25 +78,32 @@ impl Network {
         self.effective_cell_size
     }
 
-    pub fn from_file(file: &str, num_parts: u32, partition_method: &PartitionMethod) -> Self {
-        Self::from_file_path(&PathBuf::from(file), num_parts, partition_method)
-    }
-
-    pub fn from_file_path(
-        file_path: &Path,
+    /// Reads the network and partitions all of its nodes and links with `partition_method`,
+    /// regardless of their modes (see [`NonMainModeLinks::Include`]).
+    pub fn from_file_with_partitioning(
+        file_path: impl AsRef<Path>,
         num_parts: u32,
         partition_method: &PartitionMethod,
     ) -> Self {
-        let mut result = from_file(file_path);
-        Self::partition_network(&mut result, partition_method, num_parts);
+        let mut result = from_file(file_path.as_ref());
+        let partitioning = Partitioning {
+            num_parts,
+            method: partition_method.clone(),
+            non_main_mode_links: NonMainModeLinks::Include,
+        };
+        Self::partition_network(&mut result, &partitioning, &[]);
         result
+    }
+
+    pub fn from_file(path: impl AsRef<Path>) -> Self {
+        from_file(path)
     }
 
     pub fn from_file_as_is(path: &Path) -> Self {
         from_file(path)
     }
 
-    pub fn to_file(&self, file_path: &Path) {
+    pub fn to_file(&self, file_path: impl AsRef<Path>) {
         to_file(self, file_path);
     }
 
@@ -259,14 +268,24 @@ impl Network {
         }
     }
 
+    /// Assigns every node and link to a partition according to `partitioning`. A link belongs to
+    /// the partition of its `to` node. Links that allow none of `main_modes` are treated according
+    /// to [`Partitioning::non_main_mode_links`]. With [`PartitionMethod::None`], the partitions
+    /// stored in the network are kept.
     pub fn partition_network(
         network: &mut Network,
-        partition_method: &PartitionMethod,
-        num_parts: u32,
+        partitioning: &Partitioning,
+        main_modes: &[String],
     ) {
-        match partition_method {
+        match &partitioning.method {
             PartitionMethod::Metis(options) => {
-                let partitions = metis_partitioning::partition(network, num_parts, options);
+                let partitions = metis_partitioning::partition_with_metis(
+                    network,
+                    partitioning.num_parts,
+                    options,
+                    partitioning.non_main_mode_links,
+                    main_modes,
+                );
                 for (id, node) in network.nodes.iter_mut() {
                     let partition = partitions.get(id).unwrap();
                     node.partition = *partition as u32;
@@ -488,17 +507,18 @@ impl Link {
     }
 }
 
-pub fn from_file(path: &Path) -> Network {
-    let network = if path.extension().unwrap().eq("binpb") {
-        load_from_proto(path)
-    } else if path.extension().unwrap().eq("xml")
-        || path.extension().unwrap().eq("gz")
-        || path.extension().unwrap().eq("zst")
+pub fn from_file(path: impl AsRef<Path>) -> Network {
+    let path_ref = path.as_ref();
+    let network = if path_ref.extension().unwrap().eq("binpb") {
+        load_from_proto(path_ref)
+    } else if path_ref.extension().unwrap().eq("xml")
+        || path_ref.extension().unwrap().eq("gz")
+        || path_ref.extension().unwrap().eq("zst")
     {
-        network::load_from_xml(path)
+        network::load_from_xml(path_ref)
     } else {
         panic!(
-            "Tried to load {path:?}. File format not supported. Either use `.xml`, `.xml.gz`, `.xml.zst`, or `.binpb` as extension"
+            "Tried to load {path_ref:?}. File format not supported. Either use `.xml`, `.xml.gz`, `.xml.zst`, or `.binpb` as extension"
         );
     };
 
@@ -510,21 +530,22 @@ pub fn from_file(path: &Path) -> Network {
         .count();
     if links_without_modes > 0 {
         warn!(
-            "{links_without_modes} links in {path:?} have no modes and therefore allow no mode. Modes must be listed explicitly."
+            "{links_without_modes} links in {path_ref:?} have no modes and therefore allow no mode. Modes must be listed explicitly."
         );
     }
     network
 }
 
-pub fn to_file(network: &Network, path: &Path) {
+pub fn to_file(network: &Network, path: impl AsRef<Path>) {
     to_file_with_link_attribute_overrides(network, path, &LinkAttributeOverrides::default());
 }
 
 pub(crate) fn to_file_with_link_attribute_overrides(
     network: &Network,
-    path: &Path,
+    path: impl AsRef<Path>,
     overrides: &LinkAttributeOverrides,
 ) {
+    let path = path.as_ref();
     if path.extension().unwrap().eq("binpb") {
         write_to_proto_with_link_attribute_overrides(network, path, overrides);
     } else if path.extension().unwrap().eq("xml")
@@ -576,14 +597,20 @@ pub mod utils {
 #[cfg(test)]
 mod tests {
     use crate::simulation::config::{
-        EdgeWeight, MetisOptions, ModalLinkSelection, PartitionMethod,
+        EdgeWeight, MetisOptions, ModalLinkSelection, NonMainModeLinks, PartitionMethod,
+        Partitioning,
     };
+    use crate::simulation::id;
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::network::{IOLink, IONode};
+    use crate::simulation::network::metis_partitioning;
+    use crate::simulation::network::metis_partitioning::nearest_node;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node, add_io_link, add_io_node};
     use macros::deterministic_id_test;
     use nohash_hasher::IntSet;
+    use rstar::RTree;
+    use rstar::primitives::GeomWithData;
 
     fn coord(x: f64, y: f64) -> Coordinate {
         Coordinate::new_2d(x, y)
@@ -727,17 +754,18 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    #[ignore] // ingore this test, because it keeps not working, due to non determined ordering of metis
     fn from_file() {
-        let network = Network::from_file(
+        let network = Network::from_file_with_partitioning(
             "./assets/equil/equil-network.xml",
             2,
-            //I don't know, why "edge_weight = true" sets 1 as partition for all nodes.
+            // Constant edge weights, so that the partitions only depend on the network structure.
             &PartitionMethod::Metis(MetisOptions::default().set_edge_weight(EdgeWeight::Constant)),
         );
 
         // check partitioning
-        let expected_partitions = [0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0];
+        // Node i has the internal id i - 1. A balanced split has to cut the nine routes between
+        // nodes 2 and 12 and the ring once. Part 1 contains the nodes 3 to 9 and node 12.
+        let expected_partitions = [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0];
         for node in network.nodes.values() {
             let expected_partition = expected_partitions[node.id.internal() as usize];
             assert_eq!(expected_partition, node.partition);
@@ -867,6 +895,178 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_metis_with_large_graph() {}
+
+    /// Road nodes `r0` to `r5` on a line, connected by `car` links in both directions, and a
+    /// `bike` link from `r1` to `r4`. The stops `s0` and `s1` are only connected by `pt` links.
+    /// `iso` has no links, and `tie` has the same distance to `r2` and `r3`.
+    fn network_with_transit() -> Network {
+        let mut network = Network::new();
+        for i in 0..6 {
+            let id = Id::create(&format!("r{i}"));
+            network.add_node(Node::new(id, coord(i as f64 * 100., 0.), 0, 1));
+        }
+        for (name, x, y) in [
+            ("s0", 10., 50.),
+            ("s1", 490., 50.),
+            ("iso", 205., 0.),
+            ("tie", 250., 0.),
+        ] {
+            network.add_node(Node::new(Id::create(name), coord(x, y), 0, 1));
+        }
+
+        let mut add_link = |name: &str, from: &str, to: &str, mode: &str| {
+            let mut link = Link::new_with_default(
+                Id::create(name),
+                network.get_node(&Id::get_from_ext(from)),
+                network.get_node(&Id::get_from_ext(to)),
+            );
+            link.modes.insert(Id::create(mode));
+            network.add_link(link);
+        };
+        for i in 0..5 {
+            let (from, to) = (format!("r{i}"), format!("r{}", i + 1));
+            add_link(&format!("{from}{to}"), &from, &to, "car");
+            add_link(&format!("{to}{from}"), &to, &from, "car");
+        }
+        add_link("r1r4", "r1", "r4", "bike");
+        for (from, to) in [("s0", "s0"), ("s0", "s1"), ("s1", "s0"), ("s1", "s1")] {
+            add_link(&format!("{from}{to}"), from, to, "pt");
+        }
+        network
+    }
+
+    fn metis_partitioning(num_parts: u32, non_main_mode_links: NonMainModeLinks) -> Partitioning {
+        Partitioning {
+            num_parts,
+            // The network has several components, so the partitions must not be contiguous.
+            method: PartitionMethod::Metis(MetisOptions::default().set_contiguous(false)),
+            non_main_mode_links,
+        }
+    }
+
+    fn partition_of(network: &Network, node: &str) -> u32 {
+        network.get_node(&Id::get_from_ext(node)).partition
+    }
+
+    fn assert_links_belong_to_their_to_node(network: &Network) {
+        for link in network.links() {
+            assert_eq!(
+                network.get_node(&link.to).partition,
+                link.partition,
+                "link {}",
+                link.id.external()
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn partition_assigns_non_main_mode_nodes_to_nearest_partition() {
+        let mut network = network_with_transit();
+        let partitioning =
+            metis_partitioning(2, NonMainModeLinks::AssignAfterPartitioningToNearest);
+        Network::partition_network(&mut network, &partitioning, &["car".to_string()]);
+
+        // Without the bike link, METIS gets a path of six nodes with a unique balanced cut.
+        let part = |node| partition_of(&network, node);
+        assert_eq!(part("r0"), part("r1"));
+        assert_eq!(part("r0"), part("r2"));
+        assert_eq!(part("r3"), part("r4"));
+        assert_eq!(part("r3"), part("r5"));
+        assert_ne!(part("r0"), part("r3"));
+
+        assert_eq!(part("r0"), part("s0"));
+        assert_eq!(part("r5"), part("s1"));
+        assert_eq!(part("r2"), part("iso"));
+        // `r2` and `r3` are equally near, the smaller external id wins.
+        assert_eq!(part("r2"), part("tie"));
+        assert_links_belong_to_their_to_node(&network);
+    }
+
+    #[deterministic_id_test]
+    fn partition_with_include_partitions_all_nodes() {
+        let mut network = network_with_transit();
+        let partitioning = metis_partitioning(2, NonMainModeLinks::Include);
+        let PartitionMethod::Metis(options) = &partitioning.method else {
+            unreachable!()
+        };
+        let expected = metis_partitioning::partition(&network, 2, options);
+
+        Network::partition_network(&mut network, &partitioning, &["car".to_string()]);
+
+        for node in network.nodes() {
+            assert_eq!(expected[&node.id] as u32, node.partition);
+        }
+        assert_links_belong_to_their_to_node(&network);
+    }
+
+    /// Without a link allowing a main mode, all nodes are partitioned. Main modes are only looked
+    /// up, so unknown modes do not create ids.
+    #[deterministic_id_test]
+    fn partition_without_main_mode_links_partitions_all_nodes() {
+        for main_modes in [vec![], vec!["ship".to_string()]] {
+            let mut network = network_with_transit();
+            let partitioning =
+                metis_partitioning(2, NonMainModeLinks::AssignAfterPartitioningToNearest);
+            let PartitionMethod::Metis(options) = &partitioning.method else {
+                unreachable!()
+            };
+            let expected = metis_partitioning::partition(&network, 2, options);
+            let num_ids = id::count_ids();
+
+            Network::partition_network(&mut network, &partitioning, &main_modes);
+
+            assert_eq!(num_ids, id::count_ids());
+            assert!(Id::<String>::try_get_from_ext("ship").is_none());
+            for node in network.nodes() {
+                assert_eq!(expected[&node.id] as u32, node.partition);
+            }
+            assert_links_belong_to_their_to_node(&network);
+        }
+    }
+
+    #[deterministic_id_test]
+    fn partition_into_one_part() {
+        let mut network = network_with_transit();
+        for node in network.nodes.values_mut() {
+            node.partition = 7;
+        }
+        let partitioning =
+            metis_partitioning(1, NonMainModeLinks::AssignAfterPartitioningToNearest);
+        Network::partition_network(&mut network, &partitioning, &["car".to_string()]);
+
+        assert!(network.nodes().iter().all(|node| node.partition == 0));
+        assert!(network.links().iter().all(|link| link.partition == 0));
+    }
+
+    #[deterministic_id_test]
+    fn nearest_node_breaks_ties_by_smallest_external_id() {
+        let candidates = [
+            ("b", 0., 10.),
+            ("a", 0., -10.),
+            ("c", 10., 0.),
+            ("d", 0., 20.),
+        ];
+        let tree = |order: &[usize]| {
+            RTree::bulk_load(
+                order
+                    .iter()
+                    .map(|&i| {
+                        let (name, x, y) = candidates[i];
+                        GeomWithData::new([x, y], Id::<Node>::create(name))
+                    })
+                    .collect(),
+            )
+        };
+
+        for order in [[0, 1, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]] {
+            let nearest = nearest_node(&tree(&order), &coord(0., 0.));
+            assert_eq!("a", nearest.external());
+        }
+        assert_eq!(
+            "d",
+            nearest_node(&tree(&[0, 1, 2, 3]), &coord(0., 30.)).external()
+        );
+    }
 
     #[deterministic_id_test]
     fn test_add_io_node() {

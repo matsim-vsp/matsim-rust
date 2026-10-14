@@ -1,8 +1,9 @@
 use crate::simulation::messaging::messages::{InternalSimMessage, InternalSyncMessage};
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::time::Tick;
+use hotpath::wrap::std::sync::mpsc::{Receiver, Sender};
 use nohash_hasher::{IntMap, IntSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Barrier};
 
 pub struct ChannelSimCommunicator {
@@ -56,6 +57,16 @@ impl SimCommunicator for ChannelSimCommunicator {
         }
     }
 
+    fn receive_pending(&self) -> Vec<InternalSyncMessage> {
+        self.receiver
+            .try_iter()
+            .filter_map(|msg| match msg {
+                InternalSimMessage::Sync(msg) => Some(msg),
+                InternalSimMessage::Barrier => None,
+            })
+            .collect()
+    }
+
     fn barrier(&self) {
         self.barrier.wait();
     }
@@ -72,7 +83,11 @@ impl ChannelSimCommunicator {
         let barrier = Arc::new(Barrier::new(num_parts as usize));
 
         for rank in 0..num_parts {
-            let (sender, receiver) = channel();
+            // if the feature `hotpath` is deactivated, this is a no-op!
+            let (sender, receiver) = hotpath::channel!(
+                channel::<InternalSimMessage>(),
+                label = "partition-messages"
+            );
             let comm = ChannelSimCommunicator {
                 receiver,
                 senders: vec![],
@@ -94,5 +109,47 @@ impl ChannelSimCommunicator {
 
     pub fn rank(&self) -> u32 {
         self.rank
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::simulation::messaging::messages::InternalSyncMessage;
+    use crate::simulation::messaging::sim_communication::SimCommunicator;
+    use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
+    use crate::simulation::time::Tick;
+    use nohash_hasher::{IntMap, IntSet};
+
+    /// Rank 1 does not expect messages from rank 0, so it does not read the message while
+    /// sending and receiving. Only `receive_pending` returns it.
+    #[test]
+    fn receive_pending_returns_unread_messages() {
+        let mut comms = ChannelSimCommunicator::create_n_2_n(2);
+        let comm_1 = comms.pop().unwrap();
+        let comm_0 = comms.pop().unwrap();
+
+        let message = InternalSyncMessage::new(Tick::new(7), 0, 1);
+        comm_0.send_receive_vehicles(
+            IntMap::from_iter([(1, message)]),
+            &mut IntSet::default(),
+            Tick::new(7),
+            |_| panic!("Rank 0 expects no messages"),
+        );
+        let mut received = vec![];
+        comm_1.send_receive_vehicles(
+            IntMap::default(),
+            &mut IntSet::default(),
+            Tick::new(7),
+            |msg| received.push(msg),
+        );
+        assert!(received.is_empty());
+
+        let pending = comm_1.receive_pending();
+        assert_eq!(1, pending.len());
+        assert_eq!(0, pending[0].from_process());
+        assert_eq!(Tick::new(7), pending[0].time());
+
+        assert!(comm_1.receive_pending().is_empty());
+        assert!(comm_0.receive_pending().is_empty());
     }
 }

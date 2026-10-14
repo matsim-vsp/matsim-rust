@@ -13,15 +13,14 @@ that the ID store is empty before the test starts and (2) run the test in serial
 If you need a test to be run exclusively in serial, it should be an integration test. This is also the case for tests
 where the logger is set during the test. As a convention, each integration test should be an `[deterministic_id_test]`.
 
-## Known flaky tests
+## METIS tests
 
-The tests in `simulation::network::metis_partitioning` call the native METIS library. They are known to be flaky: on some
-builds and machines, one of them (we have seen `test_andorra_with_inlinkcount_and_capacity`) occasionally aborts with
-`SIGSEGV`. A failure there does not indicate a regression in unrelated code, and rerunning usually passes.
+The tests in `simulation::network::metis_partitioning` call the native METIS library. They used to be flaky and
+occasionally aborted with `SIGSEGV` (e.g. `test_andorra_with_inlinkcount_and_capacity`). The cause was an invalid input
+graph: METIS does not check its input, and the graph contained loops, duplicate edges and edges without a reverse edge.
+Since the graph is built as described in [architecture.md](architecture.md#general-scenario-handling), these tests are
+expected to pass reliably. A crash there is a bug, not flakiness.
 
-Because a segmentation fault terminates the whole test process, it also hides all tests that would have run afterward. If
-you want to validate other code, skip these tests:
-
-```shell
-cargo test --workspace -- --test-threads=1 --skip berlin:: --skip metis_partitioning
-```
+`assert_valid_metis_graph` in these tests checks the input requirements of METIS, similar to METIS' own `graphchk`
+program. Use it when changing how the graph is built. On macOS, Guard Malloc makes invalid memory accesses inside METIS
+reproducible; run the test binary with `DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`.

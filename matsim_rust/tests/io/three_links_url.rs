@@ -13,7 +13,7 @@ fn load_files_from_url_have_content() {
     let input_dir = PathBuf::from(BASE_URL);
 
     // Load network and check if it contains nodes and links
-    let net = Network::from_file_as_is(&input_dir.join("3-links-network.xml"));
+    let net = Network::from_file(&input_dir.join("3-links-network.xml"));
     assert!(
         !net.nodes().is_empty() && !net.links().is_empty(),
         "Network should contain nodes and links"

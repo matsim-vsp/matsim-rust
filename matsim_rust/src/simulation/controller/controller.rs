@@ -1,5 +1,7 @@
 use crate::external_services::AdapterHandle;
-use crate::simulation::config::{Config, Logging, OverwriteFiles, WriteEvents, write_config};
+use crate::simulation::config::{
+    Config, Logging, OverwriteFiles, ScoringMode, WriteEvents, write_config,
+};
 use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
     ScoringPool, create_output_filename,
@@ -124,15 +126,20 @@ impl ControllerBuilder {
         let scenario: ControllerScenario = self.scenario.into();
         let config = scenario.core.config.clone();
 
-        let (worker_registrations, controller_registration, experienced_plans) =
-            scoring::create_registrations(&scenario);
-        for (rank, registrations) in worker_registrations {
-            self.worker_listener_register_fn
-                .entry(rank)
-                .or_default()
-                .extend(registrations);
-        }
-        controller_registration(&mut controller_event_manager);
+        let experienced_plans = if config.scoring().mode == ScoringMode::Enabled {
+            let (worker_registrations, controller_registration, experienced_plans) =
+                scoring::create_registrations(&scenario);
+            for (rank, registrations) in worker_registrations {
+                self.worker_listener_register_fn
+                    .entry(rank)
+                    .or_default()
+                    .extend(registrations);
+            }
+            controller_registration(&mut controller_event_manager);
+            experienced_plans
+        } else {
+            scoring::ExperiencedPlansCollection::default()
+        };
 
         let global_ttc = Arc::new(GlobalTravelTimeCalculator::new(
             num_parts as usize,
@@ -347,6 +354,17 @@ impl Controller {
             assert!(
                 self.config.qsim().sample_size > 0.0,
                 "Automatic analysis requires a positive qsim.sample_size: volumes are scaled up by its reciprocal."
+            );
+        }
+        if let Some(period) = self
+            .config
+            .output()
+            .analysis
+            .car_spot_speed_sample_period_seconds
+        {
+            assert!(
+                period > 0,
+                "Invalid output.analysis.car_spot_speed_sample_period_seconds: must be greater than 0."
             );
         }
 
@@ -579,6 +597,13 @@ impl Controller {
 
         self.controller_events_manager
             .process_event(ControllerEvent::scoring(is_last_iteration));
+
+        if self.config.scoring().mode == ScoringMode::Disabled {
+            for person in population.persons.values_mut() {
+                person.selected_plan_mut().score = None;
+            }
+            return population;
+        }
 
         let mut experienced_plans = self.experienced_plan_collection.take(iteration);
         assert_eq!(

@@ -246,6 +246,10 @@ impl<E> FrameworkEventsManager<E> {
         self.state.reset_iteration(iteration);
     }
 
+    pub fn iteration(&self) -> u32 {
+        self.state.iteration
+    }
+
     pub fn on_event<F>(&mut self, callback: F)
     where
         F: Fn(&RuntimeEvent<E>) + 'static,

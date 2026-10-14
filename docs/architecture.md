@@ -47,6 +47,45 @@ Network links must list their allowed modes explicitly: a link without modes all
 assumes `car` for links without a `modes` attribute, nothing is implied. Loading a network with such links logs a
 warning.
 
+With `PartitionMethod::Metis`, the nodes of the network are partitioned with METIS, and every link belongs to the
+partition of its `to` node. METIS partitions undirected graphs and requires them to be symmetric, without loops and
+without duplicate edges. It does not check this, and invalid input makes it access memory out of bounds. Therefore,
+each pair of nodes connected by at least one link becomes one edge. Its weight is the sum of the weights of all links
+between both nodes in either direction (each truncated to an integer), but at least 1. Loop links are ignored.
+`partitioning.non_main_mode_links` controls links that allow none of the `qsim.main_modes`, e.g. the links of a transit
+network whose vehicles are teleported. No vehicle moves on them, but agents perform activities on them, e.g.
+`pt interaction`. With the default `AssignAfterPartitioningToNearest`, METIS only partitions the nodes incident to a
+link that allows a main mode, and only these links become edges and contribute to vertex weights. Afterwards, every
+other node is assigned to the partition of the nearest partitioned node in the x/y plane; ties are broken by the
+smallest external node id. Only if no link allows a main mode, e.g. because `qsim.main_modes` is empty, all nodes and
+links are partitioned. With `Include`, all nodes and links are partitioned regardless of their modes, as before
+October 2026. `Network::from_file_with_partitioning` always partitions all nodes and links. `contiguous: true` requires a connected
+graph, i.e. a connected main-mode network with `AssignAfterPartitioningToNearest`. Networks with separate components,
+e.g. transit stop nodes with only a loop link or a transit network that is not connected to the road network, need
+`contiguous: false` with `Include`. Before October 2026, the graph was built from the
+directed links, with every incoming link turned into a loop. Network files partitioned with that version were computed
+from an invalid graph and should be partitioned again.
+
+METIS draws random numbers from a fixed seed. The workspace takes `metis-sys` from a fork (see `[patch.crates-io]` in
+`Cargo.toml`), which builds the bundled METIS with GKlib's own random number generator (`USE_GKRAND`) instead of the C
+library's `rand()`, and without floating-point contraction (`-ffp-contract=off`). Hence, METIS yields the same partitions
+on every platform. Changing the fork, the seed or the METIS version changes the partitions. The state of the random
+number generator is shared by the whole process, so all calls to METIS are serialized.
+
+In every step, a partition waits for messages from its neighbors, i.e. the partitions it shares a link with. Messages
+from other partitions, e.g. teleported agents whose destination link lies in a partition that is not a neighbor, are
+only read if they arrive while the partition is waiting, and never if the partition has no neighbors at all. This
+happens if the network consists of components that are not connected by links and a component forms a partition of
+its own. After each mobsim run, all workers wait for each other once more and return the messages they never
+processed. If there are any, the controller panics, because the agents in them are lost.
+
+Populations are read in parallel, both from XML and from protobuf. A reader thread splits the input into persons,
+which are parsed and converted by the rayon thread pool. The id store must stay independent of the number of threads:
+for protobuf, all ids except missing subpopulations are only looked up, and these are created in file order afterwards.
+For XML, all ids are created sequentially before the persons are converted, in the order in which converting the
+persons sorted by id one after another would create them (see `for_each_id_of_io_person`). Internal ids are the
+creation index of an id and never depend on hashing.
+
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
 (`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
@@ -100,7 +139,9 @@ module verifies iteration and rank and merges the populations deterministically 
 scores each reconstructed experienced plan and copies the result to exactly the selected original plan. Experienced
 plans receive the same score and are written only when `scoring.write_experienced_plans` and the configured plan
 writing interval allow it. Collection and scoring always run, even when experienced-plan output is disabled, so
-replanning can consume the updated selected-plan scores. Backpacks do not return to an initial or "home" partition.
+replanning can consume the updated selected-plan scores. The only exception is `scoring.mode: Disabled`: the controller
+then registers no backpacking engines, collects no experienced plans, and sets the score of each selected plan to
+`None`. Backpacks do not return to an initial or "home" partition.
 Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.

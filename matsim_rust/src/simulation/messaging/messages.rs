@@ -176,7 +176,6 @@ impl InternalSyncMessage {
         self.to_process
     }
 
-    #[cfg(test)]
     pub fn vehicles(&self) -> &[VehicleMessage] {
         &self.vehicles
     }
@@ -186,9 +185,15 @@ impl InternalSyncMessage {
         &mut self.vehicles
     }
 
-    #[cfg(test)]
     pub(crate) fn teleportations(&self) -> &[TeleportationMessage] {
         &self.teleportations
+    }
+
+    /// Whether the message carries nothing. Neighbors send such messages in every step.
+    pub fn is_empty(&self) -> bool {
+        self.vehicles.is_empty()
+            && self.teleportations.is_empty()
+            && self.storage_capacities.is_empty()
     }
 
     pub fn storage_capacities(&self) -> &Vec<StorageUpdate> {

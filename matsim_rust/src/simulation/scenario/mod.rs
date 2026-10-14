@@ -169,6 +169,7 @@ pub struct Scenario {
 }
 
 impl Scenario {
+    #[hotpath::measure]
     pub fn load<C: Into<Arc<Config>>>(config: C) -> Self {
         info!("Start loading mod.");
 
@@ -226,8 +227,13 @@ impl Scenario {
     fn load_network(config: &Config) -> Network {
         if let Some(path) = &config.network().path {
             let net_in_path = io::resolve_path(config.context(), path);
-            let num_parts = config.partitioning().num_parts;
-            Network::from_file_path(&net_in_path, num_parts, &config.partitioning().method)
+            let mut network = Network::from_file(&net_in_path);
+            Network::partition_network(
+                &mut network,
+                config.partitioning(),
+                &config.qsim().main_modes,
+            );
+            network
         } else {
             Network::default()
         }
@@ -346,6 +352,7 @@ impl From<Scenario> for ControllerScenario {
 }
 
 impl ControllerScenario {
+    #[hotpath::measure]
     pub(crate) fn split_for_mobsim(
         &mut self,
         storage_capacities: &LinkStorageCapacities,
@@ -515,7 +522,7 @@ mod tests {
         let population = Population::from_file("./assets/3-links/3-agent.xml", &mut garage);
         let original_len = population.persons.len();
         let config = Arc::new(Config::default());
-        let network = Network::from_file(
+        let network = Network::from_file_with_partitioning(
             "./assets/3-links/3-links-network.xml",
             config.partitioning().num_parts,
             &PartitionMethod::None,

@@ -56,9 +56,11 @@ avoid solving borrowing problems by cloning an entire scenario or population.
 ## Toolchain and native dependencies
 
 - Use the Rust version pinned in `rust-toolchain.toml` and Rust 2024 idioms.
-- The build requires the native METIS library and libclang. A compile or link
-  failure mentioning METIS, clang, or bindgen may be an environment problem,
-  not a source-code regression.
+- The build compiles METIS (via `metis-sys`, patched in the workspace
+  `Cargo.toml`) and protobuf (via `protobuf-src`) from bundled sources, so it
+  requires a C and C++ compiler and CMake, but no installed METIS library or
+  libclang. A compile or link failure in these crates may be an environment
+  problem, not a source-code regression.
 - `.cargo/config.toml` contains Apple Silicon Homebrew search paths. Do not
   generalize or replace them incidentally while working on unrelated code.
 - `matsim_rust/build.rs` compiles the `.proto` sources with the bundled

@@ -63,12 +63,14 @@ struct Uuid(pub u128);
 struct PersonId(pub String);
 struct Mode(pub String);
 struct Rank(pub u64);
+struct Iteration(pub u64);
 struct SimTime(pub SimulationTime);
 
 const MISSING_SIM_TIME: i64 = -1;
 
 struct MetadataVisitor {
     rank: Option<u64>,
+    iteration: Option<u64>,
     sim_time: Option<SimulationTime>,
 }
 
@@ -76,6 +78,7 @@ impl MetadataVisitor {
     fn new() -> Self {
         MetadataVisitor {
             rank: None,
+            iteration: None,
             sim_time: None,
         }
     }
@@ -86,6 +89,11 @@ impl Visit for MetadataVisitor {
         //fetch rank
         if field.name().eq("rank") {
             self.rank = Some(value);
+        }
+
+        //fetch iteration
+        if field.name().eq("iteration") {
+            self.iteration = Some(value);
         }
 
         if let Some(sim_time) = sim_time_from_field(field.name(), value) {
@@ -115,6 +123,7 @@ pub struct BufferedSpanData {
     durations: Vec<u64>,
     sim_times: Vec<i64>,
     ranks: Vec<i64>,
+    iterations: Vec<i64>,
 }
 
 impl BufferedSpanData {
@@ -130,6 +139,7 @@ impl BufferedSpanData {
             arrow2::datatypes::Field::new("duration_ns", DataType::UInt64, false),
             arrow2::datatypes::Field::new("sim_time", DataType::Int64, false),
             arrow2::datatypes::Field::new("rank", DataType::Int64, false),
+            arrow2::datatypes::Field::new("iteration", DataType::Int64, false),
         ];
         let schema = Schema::from(fields);
 
@@ -164,6 +174,7 @@ impl BufferedSpanData {
             durations: Vec::with_capacity(batch_size),
             sim_times: Vec::with_capacity(batch_size),
             ranks: Vec::with_capacity(batch_size),
+            iterations: Vec::with_capacity(batch_size),
         }
     }
 
@@ -173,6 +184,7 @@ impl BufferedSpanData {
     }
 
     /// Append a single row into the in-memory buffers and flush if we reached batch_size.
+    #[allow(clippy::too_many_arguments)]
     pub fn write_row(
         &mut self,
         timestamp: u128,
@@ -181,6 +193,7 @@ impl BufferedSpanData {
         duration_ns: u64,
         sim_time: i64,
         rank: i64,
+        iteration: i64,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.timestamps.push(timestamp);
         self.targets.push(target.to_string());
@@ -188,6 +201,7 @@ impl BufferedSpanData {
         self.durations.push(duration_ns);
         self.sim_times.push(sim_time);
         self.ranks.push(rank);
+        self.iterations.push(iteration);
 
         if self.timestamps.len() >= self.batch_size {
             self.flush_batch()?;
@@ -214,6 +228,7 @@ impl BufferedSpanData {
         let duration_array = UInt64Array::from_slice(&self.durations);
         let sim_time_array = Int64Array::from_slice(&self.sim_times);
         let rank_array = Int64Array::from_slice(&self.ranks);
+        let iteration_array = Int64Array::from_slice(&self.iterations);
 
         let columns: Vec<Box<dyn Array>> = vec![
             Box::new(ts_array),
@@ -222,6 +237,7 @@ impl BufferedSpanData {
             Box::new(duration_array),
             Box::new(sim_time_array),
             Box::new(rank_array),
+            Box::new(iteration_array),
         ];
 
         write_parquet(
@@ -239,6 +255,7 @@ impl BufferedSpanData {
         self.durations.clear();
         self.sim_times.clear();
         self.ranks.clear();
+        self.iterations.clear();
 
         Ok(())
     }
@@ -265,6 +282,7 @@ impl SpanDurationToFileLayer {
                 "duration_ns",
                 "sim_time",
                 "rank",
+                "iteration",
             ])
             .unwrap();
 
@@ -319,6 +337,9 @@ where
         if let Some(rank) = visitor.rank {
             extensions.insert(Rank(rank));
         }
+        if let Some(iteration) = visitor.iteration {
+            extensions.insert(Iteration(iteration));
+        }
         if let Some(sim_time) = visitor.sim_time {
             extensions.insert(SimTime(sim_time));
         }
@@ -338,6 +359,9 @@ where
         let meta = span.metadata();
         let (timestep, target, func_name, duration, sim_time) = extract_entries(&extensions, meta);
         let rank = extensions.get::<Rank>().map_or(-1, |rank| rank.0 as i64);
+        let iteration = extensions
+            .get::<Iteration>()
+            .map_or(-1, |iteration| iteration.0 as i64);
         match &self.backend {
             Backend::Csv { writer, .. } => {
                 let writer = &mut *writer.lock().unwrap();
@@ -349,6 +373,7 @@ where
                         &duration.to_string(),
                         &sim_time.to_string(),
                         &rank.to_string(),
+                        &iteration.to_string(),
                     ])
                     .unwrap();
 
@@ -358,9 +383,9 @@ where
             Backend::Parquet { inner, .. } => {
                 let mut inner = inner.lock().unwrap();
                 // write a single row immediately
-                if let Err(e) =
-                    inner.write_row(timestep, target, func_name, duration, sim_time, rank)
-                {
+                if let Err(e) = inner.write_row(
+                    timestep, target, func_name, duration, sim_time, rank, iteration,
+                ) {
                     eprintln!("Failed to write parquet row: {}", e);
                 }
 
@@ -525,6 +550,42 @@ mod tests {
 
         some_other_function(SimTime::from_secs(7), std::f32::consts::PI);
     }
+
+    #[test]
+    fn records_iteration_or_missing_marker() {
+        let path = PathBuf::from("./test_output/simulation/profiling/test_iteration.csv");
+        {
+            let (csv_layer, _guard) = SpanDurationToFileLayer::new_csv(&path);
+            let subscriber = tracing_subscriber::registry().with(csv_layer);
+            tracing::subscriber::with_default(subscriber, || {
+                function_with_iteration(3);
+                some_function();
+            });
+        }
+
+        let mut reader = csv::Reader::from_path(&path).unwrap();
+        let headers = reader.headers().unwrap().clone();
+        let column = |name: &str| headers.iter().position(|h| h == name).unwrap();
+        let (func_name, iteration) = (column("func_name"), column("iteration"));
+        let rows: Vec<(String, String)> = reader
+            .records()
+            .map(|record| {
+                let record = record.unwrap();
+                (record[func_name].to_string(), record[iteration].to_string())
+            })
+            .collect();
+
+        assert_eq!(
+            rows,
+            vec![
+                ("function_with_iteration".to_string(), "3".to_string()),
+                ("some_function".to_string(), "-1".to_string()),
+            ]
+        );
+    }
+
+    #[instrument(level = "info", skip_all, fields(iteration = iteration))]
+    fn function_with_iteration(iteration: u32) {}
 
     #[instrument]
     fn some_function() {

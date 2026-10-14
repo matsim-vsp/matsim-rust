@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use tracing::info;
 
 pub mod attributes;
+mod element_splitter;
 pub mod events;
 pub mod facilities;
 pub mod network;
@@ -27,6 +28,24 @@ where
 {
     use quick_xml::de::Deserializer;
 
+    let reader = open_xml_reader(file_path.as_ref());
+
+    // Parse the XML
+    info!("Starting to read from file: {:?}", file_path.as_ref());
+    let mut de = Deserializer::from_reader(reader);
+    let res = match serde_path_to_error::deserialize(&mut de) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            panic!("Failed to deserialize XML:\n{err:#?}");
+        }
+    };
+    info!("Finished reading from file: {:?}", file_path.as_ref());
+    res
+}
+
+/// Opens an XML file, which may be a URL and may be compressed with gzip or zstd, depending on its
+/// extension.
+pub(crate) fn open_xml_reader(file_path: impl AsRef<Path>) -> Box<dyn BufRead> {
     // Check if it's a URL or local file and if it's gzipped or not
 
     let compression = match file_path.as_ref().extension() {
@@ -73,18 +92,7 @@ where
     } else {
         local_file_reader(file_path.as_ref(), compression)
     };
-
-    // Parse the XML
-    info!("Starting to read from file: {:?}", file_path.as_ref());
-    let mut de = Deserializer::from_reader(reader);
-    let res = match serde_path_to_error::deserialize(&mut de) {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            panic!("Failed to deserialize XML:\n{err:#?}");
-        }
-    };
-    info!("Finished reading from file: {:?}", file_path.as_ref());
-    res
+    reader
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

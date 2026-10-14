@@ -103,6 +103,7 @@ where
         });
     }
 
+    #[hotpath::measure]
     pub fn send_recv(&mut self, now: impl Into<Tick>) -> Vec<InternalSyncMessage> {
         let now = now.into();
         let vehicles = self.prepare_send_recv(now);
@@ -129,6 +130,24 @@ where
         });
 
         result
+    }
+
+    /// Returns the non-empty messages this partition received but never processed. Must be called
+    /// by all partitions after their last step.
+    ///
+    /// A partition only waits for messages from its neighbors, i.e. the partitions it shares a link
+    /// with. Messages from other partitions, e.g. teleported agents, are only read if they arrive
+    /// while the partition is waiting for its neighbors, and never if it has no neighbors at all.
+    /// The agents in such messages are lost.
+    pub fn take_unprocessed_messages(&mut self) -> Vec<InternalSyncMessage> {
+        // Wait until all partitions have finished their last step, so that no message is still
+        // being sent.
+        self.communicator.barrier();
+
+        let mut messages: Vec<InternalSyncMessage> = self.in_messages.drain().collect();
+        messages.extend(self.communicator.receive_pending());
+        messages.retain(|msg| !msg.is_empty());
+        messages
     }
 
     fn handle_incoming_msg(

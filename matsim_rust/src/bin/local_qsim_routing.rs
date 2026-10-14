@@ -1,6 +1,7 @@
 use clap::Parser;
 use matsim_rust::external_services::routing::RoutingServiceAdapterFactory;
 use matsim_rust::external_services::{AdapterHandleBuilder, AsyncExecutor, ExternalServiceType};
+use matsim_rust::simulation::build_info::GIT_VERSION;
 use matsim_rust::simulation::config::Config;
 use matsim_rust::simulation::controller::ExternalServices;
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
@@ -11,7 +12,7 @@ use std::sync::{Arc, Barrier};
 use tracing::info;
 
 #[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version = GIT_VERSION, about, long_about = None)]
 struct RoutingCommandLineArgs {
     #[clap(long, short, num_args = 1.., value_delimiter = ' ')]
     router_ip: Vec<String>,
@@ -19,6 +20,7 @@ struct RoutingCommandLineArgs {
     delegate: matsim_rust::simulation::config::CommandLineArgs,
 }
 
+#[hotpath::main]
 fn main() {
     let _guard = init_std_out_logging_thread_local();
     let args = RoutingCommandLineArgs::parse();

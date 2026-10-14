@@ -304,6 +304,7 @@ impl Config {
                 Box::new(Partitioning {
                     num_parts: 1,
                     method: PartitionMethod::None,
+                    non_main_mode_links: NonMainModeLinks::default(),
                 }),
             );
         }
@@ -648,6 +649,16 @@ register_override!("ids.path", |config, value| {
 pub struct Partitioning {
     pub num_parts: u32,
     pub method: PartitionMethod,
+    #[serde(default)]
+    pub non_main_mode_links: NonMainModeLinks,
+}
+
+/// How partitioning handles links that allow none of the QSim main modes.
+#[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum NonMainModeLinks {
+    #[default]
+    AssignAfterPartitioningToNearest,
+    Include,
 }
 
 register_override!("partitioning.num_parts", |config, value| {
@@ -1208,10 +1219,18 @@ impl Default for Replanning {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Scoring {
+    pub mode: ScoringMode,
     pub write_experienced_plans: bool,
     pub activity_params: Vec<ActivityParameter>,
     pub mode_params: Vec<ModeParameter>,
     pub agent_params: Vec<AgentParameter>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+pub enum ScoringMode {
+    #[default]
+    Enabled,
+    Disabled,
 }
 
 register_override!("scoring.write_experienced_plans", |config, value| {
@@ -1221,6 +1240,7 @@ register_override!("scoring.write_experienced_plans", |config, value| {
 impl Default for Scoring {
     fn default() -> Self {
         Self {
+            mode: ScoringMode::Enabled,
             write_experienced_plans: true,
             activity_params: vec![
                 ActivityParameter::default_for_activity_type("home"),

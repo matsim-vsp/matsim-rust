@@ -161,6 +161,7 @@ impl TeleportationEngine {
         self.queue.add_with_order(teleportation, now, stable_order);
     }
 
+    #[hotpath::measure]
     pub fn do_step(&mut self, now: Tick) -> Vec<SimulationAgent> {
         let mut teleportation_agents = self.queue.pop(self.clock.tick_to_time(now));
         for teleporting_agent in &mut teleportation_agents {

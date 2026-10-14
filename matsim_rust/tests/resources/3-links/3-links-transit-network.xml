@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
+<network>
+    <nodes>
+        <node id="node1" x="0.0" y="0.0"/>
+        <node id="node2" x="100.0" y="0.0"/>
+        <node id="node3" x="1000.0" y="0.0"/>
+        <node id="node4" x="1100.0" y="0.0"/>
+        <node id="stop1" x="0.0" y="50.0"/>
+        <node id="stop4" x="1100.0" y="50.0"/>
+    </nodes>
+    <links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">
+        <link id="link1" from="node1" to="node2" length="100" freespeed="10" capacity="3600.0" permlanes="1.0" oneway="1" modes="car,bike"/>
+        <link id="link2" from="node2" to="node3" length="1000" freespeed="10" capacity="3600.0" permlanes="1.0" oneway="1" modes="car,bike"/>
+        <link id="link3" from="node3" to="node4" length="100" freespeed="10" capacity="3600.0" permlanes="1.0" oneway="1" modes="car,bike"/>
+        <link id="pt-stop1" from="stop1" to="stop1" length="1" freespeed="10" capacity="100000.0" permlanes="1.0" oneway="1" modes="pt"/>
+        <link id="pt-stop4" from="stop4" to="stop4" length="1" freespeed="10" capacity="100000.0" permlanes="1.0" oneway="1" modes="pt"/>
+        <link id="pt-stop1-stop4" from="stop1" to="stop4" length="1100" freespeed="10" capacity="100000.0" permlanes="1.0" oneway="1" modes="pt"/>
+        <link id="pt-stop4-stop1" from="stop4" to="stop1" length="1100" freespeed="10" capacity="100000.0" permlanes="1.0" oneway="1" modes="pt"/>
+    </links>
+</network>

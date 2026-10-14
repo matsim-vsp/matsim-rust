@@ -7,6 +7,7 @@ use crate::simulation::engines::leg_engine::LegEngine;
 use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::PersonStuckEventBuilder;
 use crate::simulation::framework_events::MobsimEvent;
+use crate::simulation::messaging::messages::InternalSyncMessage;
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::population::agent_source::DynAgentSource;
@@ -29,7 +30,8 @@ impl<C> Simulation<C>
 where
     C: SimCommunicator,
 {
-    #[tracing::instrument(level = "info", skip(self), fields(rank = self.leg_engine.net_message_broker().rank()))]
+    #[hotpath::measure]
+    #[tracing::instrument(level = "info", skip(self), fields(rank = self.leg_engine.net_message_broker().rank(), iteration = self.comp_env.mobsim_events_manager_borrow_mut().iteration()))]
     pub fn run(&mut self) -> Vec<SimulationAgent> {
         // use fixed start and end times
         let mut now = self.start_tick;
@@ -121,10 +123,19 @@ where
 
     /// Performs a sim step for the activity engine and the leg engine.
     /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
+    #[hotpath::measure]
     fn do_sim_step(&mut self, now: Tick, agents: Vec<SimulationAgent>) -> Vec<SimulationAgent> {
         let agents_act_to_leg = self.activity_engine.do_step(now, agents);
 
         self.leg_engine.do_step(now, agents_act_to_leg)
+    }
+
+    /// Returns the messages this partition received but never processed. Must be called by all partitions after [`Simulation::run`],
+    /// see [`NetMessageBroker::take_unprocessed_messages`]. Internally syncs all partitions to ensure that all messages have been sent and received.
+    pub fn take_unprocessed_messages(&mut self) -> Vec<InternalSyncMessage> {
+        self.leg_engine
+            .net_message_broker_mut()
+            .take_unprocessed_messages()
     }
 
     pub(crate) fn is_local_route(

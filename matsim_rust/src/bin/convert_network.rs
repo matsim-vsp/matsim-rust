@@ -21,7 +21,7 @@ fn main() {
         id::load_from_file(&id_path);
     }
 
-    let net = Network::from_file_path(&net_path, 1, &PartitionMethod::None);
+    let net = Network::from_file_with_partitioning(&net_path, 1, &PartitionMethod::None);
     let out_path = replace_extension(&net_path);
     net.to_file(&out_path);
 

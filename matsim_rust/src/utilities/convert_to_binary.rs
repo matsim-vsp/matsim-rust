@@ -1,4 +1,3 @@
-use crate::simulation::config::PartitionMethod;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
@@ -40,7 +39,7 @@ pub fn run(
     ),
 ) {
     let mut veh = Garage::from_file(&args.vehicles);
-    let mut net = Network::from_file_path(&args.network, 1, &PartitionMethod::None);
+    let mut net = Network::from_file(&args.network);
     let mut transit_schedule = args
         .transit_schedule
         .as_ref()

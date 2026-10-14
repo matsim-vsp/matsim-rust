@@ -1,0 +1,30 @@
+modules:
+  network:
+    type: Network
+    path: ./tests/resources/3-links/3-links-transit-network.xml
+  population:
+    type: Population
+    path: ./tests/resources/3-links/1-agent-walk-to-stop.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/3-links/vehicles.xml
+  partitioning:
+    type: Partitioning
+    num_parts: 2
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/execute_3_links_transit
+    write_events: File
+  controller:
+    type: Controller
+    last_iteration: 0
+  qsim:
+    type: QSim
+    main_modes: [ "car" ]
+  routing:
+    type: Routing
+    mode: UsePlans
