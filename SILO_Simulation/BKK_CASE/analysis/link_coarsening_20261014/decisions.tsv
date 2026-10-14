@@ -1,0 +1,2 @@
+ts	phase	decision	why	evidence	result
+2026-10-12T20:38:30Z	correction	Regenerated plans while preserving repeated link references and reran structural checks	The fixed serialization removes only distinct adjacent source links that became the same merged link	prepare_summary.json; prepare_link_coarsening_experiment.py	386650 plan routes verified; 847 transit routes verified; 29 links merged; capacities preserved
