@@ -10,6 +10,7 @@ use crate::simulation::framework_events::{
 };
 use crate::simulation::io::proto::proto_events::ProtoEventsWriter;
 use crate::simulation::io::xml::events::XmlEventsWriter;
+use crate::simulation::messaging::messages::InternalSyncMessage;
 use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
 use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
@@ -23,14 +24,14 @@ use crate::simulation::scoring::{
     CharyparNagelScoringFunction, PersonExperiences, PlanScorer, score_population,
 };
 use crate::simulation::simulation::{Simulation, SimulationBuilder};
-use crate::simulation::{io, logging};
+use crate::simulation::{Identifiable, io, logging};
 use derive_builder::Builder;
 use derive_more::Debug;
 use hotpath::wrap::std::sync::mpsc::{Receiver as StdReceiver, Sender as StdSender};
 use nohash_hasher::IntMap;
 use std::any::Any;
 use std::cell::{RefCell, RefMut};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
@@ -204,6 +205,8 @@ pub(crate) struct MobsimWorkerResult {
     pub rank: u32,
     pub iteration: u32,
     pub agents: Vec<SimulationAgent>,
+    /// Messages the worker received but never processed. The agents in them are lost.
+    pub unprocessed_messages: Vec<InternalSyncMessage>,
 }
 
 pub(crate) struct MobsimWorkerRun {
@@ -334,7 +337,7 @@ impl MobsimWorkerPool {
         }
 
         // wait for mobsim to be finished and receive population
-        let mut results: IntMap<u32, Vec<SimulationAgent>> = IntMap::default();
+        let mut results: IntMap<u32, MobsimWorkerResult> = IntMap::default();
         for _ in 0..self.num_parts {
             let result = self
                 .result_receiver
@@ -345,20 +348,33 @@ impl MobsimWorkerPool {
                 "Received mobsim result for iteration {}, expected {}.",
                 result.iteration, iteration
             );
-            let previous = results.insert(result.rank, result.agents);
+            let rank = result.rank;
+            let previous = results.insert(rank, result);
             assert!(
                 previous.is_none(),
                 "Received duplicate mobsim result for rank {} in iteration {}.",
-                result.rank,
+                rank,
                 iteration
             );
         }
 
         let mut agents = Vec::new();
+        let mut unprocessed_messages = Vec::new();
         for rank in 0..self.num_parts {
-            agents.extend(results.remove(&rank).unwrap_or_else(|| {
+            let result = results.remove(&rank).unwrap_or_else(|| {
                 panic!("Missing mobsim result for rank {rank} in iteration {iteration}.")
-            }));
+            });
+            agents.extend(result.agents);
+            unprocessed_messages.extend(result.unprocessed_messages);
+        }
+
+        // Panic here instead of in the workers: a panicking worker would leave the controller
+        // waiting for its result.
+        if !unprocessed_messages.is_empty() {
+            panic!(
+                "{}",
+                describe_unprocessed_messages(iteration, &unprocessed_messages)
+            );
         }
         agents
     }
@@ -380,6 +396,30 @@ impl MobsimWorkerPool {
                 .unwrap_or_else(|_| panic!("Mobsim worker rank {rank} panicked."));
         }
     }
+}
+
+/// Describes messages that were never processed, see
+/// [`NetMessageBroker::take_unprocessed_messages`].
+fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage]) -> String {
+    let pairs: BTreeSet<_> = messages
+        .iter()
+        .map(|msg| (msg.from_process(), msg.to_process()))
+        .collect();
+    // Messages arrive in no particular order, so sort the agents for a reproducible message.
+    let mut agents: Vec<_> = messages
+        .iter()
+        .flat_map(|msg| msg.teleportations())
+        .map(|teleportation| teleportation.id().external())
+        .collect();
+    agents.sort_unstable();
+    format!(
+        "Mobsim iteration {iteration} ended with {} unprocessed messages between partitions (from, to) {pairs:?}. \
+        {} teleported agents are lost, e.g. {:?}. A partition only reads messages from partitions it shares a link \
+        with. Check whether the network consists of components that are not connected by links.",
+        messages.len(),
+        agents.len(),
+        &agents[..agents.len().min(3)],
+    )
 }
 
 fn run_mobsim_worker(
@@ -480,7 +520,7 @@ impl MobsimWorker {
                         "Mobsim worker #{} starting iteration {}. Last iteration: {}",
                         self.rank, iteration, is_last_iteration
                     );
-                    let agents = self.run_iteration(iteration, input);
+                    let (agents, unprocessed_messages) = self.run_iteration(iteration, input);
                     self.comp_env
                         .mobsim_events_manager_borrow_mut()
                         .process_event(MobsimEvent::BeforeCleanup);
@@ -489,6 +529,7 @@ impl MobsimWorker {
                             rank: self.rank,
                             iteration,
                             agents,
+                            unprocessed_messages,
                         })
                         .unwrap_or_else(|err| {
                             panic!(
@@ -507,8 +548,14 @@ impl MobsimWorker {
         self.comp_env.finish_events();
     }
 
+    /// Runs the mobsim for one iteration and returns the agents and the messages that were never
+    /// processed.
     #[hotpath::measure]
-    fn run_iteration(&mut self, iteration: u32, input: MobsimInput) -> Vec<SimulationAgent> {
+    fn run_iteration(
+        &mut self,
+        iteration: u32,
+        input: MobsimInput,
+    ) -> (Vec<SimulationAgent>, Vec<InternalSyncMessage>) {
         self.comp_env.reset_iteration(iteration);
         assert_eq!(
             input.partition.rank, self.rank,
@@ -548,7 +595,9 @@ impl MobsimWorker {
             self.reached_initial_barrier = true;
         }
 
-        simulation.run()
+        let agents = simulation.run();
+        let unprocessed_messages = simulation.take_unprocessed_messages();
+        (agents, unprocessed_messages)
     }
 }
 

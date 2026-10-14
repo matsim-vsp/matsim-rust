@@ -15,6 +15,9 @@ pub trait SimCommunicator {
     ) where
         F: FnMut(InternalSyncMessage);
 
+    /// Returns all messages that have been received but not read yet, without blocking.
+    fn receive_pending(&self) -> Vec<InternalSyncMessage>;
+
     fn barrier(&self);
 
     fn rank(&self) -> u32;

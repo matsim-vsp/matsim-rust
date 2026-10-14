@@ -1594,8 +1594,7 @@ dependencies = [
 [[package]]
 name = "metis-sys"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "769ee6be814b21c52afcc631f07051f578487d642f3e89a45f2a086fd94fffa9"
+source = "git+https://github.com/paulheinr/metis-rs?rev=a5c25ea9c6f42b433e6041dba4c425cbb5696c7a#a5c25ea9c6f42b433e6041dba4c425cbb5696c7a"
 dependencies = [
  "cc",
 ]

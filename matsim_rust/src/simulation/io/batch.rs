@@ -35,6 +35,7 @@ impl RecordBatch {
     }
 
     /// Returns the records of this batch in input order.
+    #[allow(dead_code)] // Used by the parallel event conversion pipeline.
     pub(crate) fn records(&self) -> impl Iterator<Item = &[u8]> {
         self.ranges.iter().map(|range| &self.bytes[range.clone()])
     }
@@ -104,16 +105,19 @@ pub(crate) fn read_in_batches<Source, Open, Read, Process>(
 /// Reads records and transforms them on a separate thread, so that this overlaps with consuming
 /// the results on the calling thread. The records of a batch are transformed in parallel. The
 /// results are returned in input order.
+#[allow(dead_code)] // Used by the parallel event conversion pipeline.
 pub(crate) struct BatchPipeline<T> {
     receiver: Receiver<Vec<T>>,
     current: std::vec::IntoIter<T>,
     handle: Option<JoinHandle<()>>,
 }
 
+#[allow(dead_code)] // Used by the parallel event conversion pipeline.
 impl<T: Send + 'static> BatchPipeline<T> {
     /// Spawns the thread of the pipeline. `open` and `read_record` behave like in
     /// [`read_in_batches`] and run on that thread. `transform` receives the index of a record in
     /// the input and its bytes. Batches hold about `target_bytes` of input.
+    #[allow(dead_code)] // Used by the parallel event conversion pipeline.
     pub(crate) fn spawn<Source, Open, ReadRecord, Transform>(
         target_bytes: usize,
         open: Open,
@@ -162,6 +166,7 @@ impl<T: Send + 'static> BatchPipeline<T> {
     }
 }
 
+#[allow(dead_code)] // Used by the parallel event conversion pipeline.
 impl<T> Iterator for BatchPipeline<T> {
     type Item = T;
 

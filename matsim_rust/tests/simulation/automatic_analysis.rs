@@ -160,6 +160,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            car_spot_speed_sample_period_seconds: None,
             observed_data: Some(observed_data),
             journey_survey: None,
             comparison_runs: vec![PathBuf::from("comparison")],
@@ -356,6 +357,7 @@ fn final_iteration_report_exports_all_links_and_hourly_coverage() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            car_spot_speed_sample_period_seconds: None,
             ..Analysis::default()
         },
     )
@@ -1521,6 +1523,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            car_spot_speed_sample_period_seconds: None,
             link_labels: labels.clone(),
             urban_boundary: Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
             observed_data: None,
@@ -1630,6 +1633,7 @@ fn report_groups_coverage_by_explicit_labels_and_geographic_boundary() {
         &Analysis {
             enabled: true,
             interval_seconds: 3600,
+            car_spot_speed_sample_period_seconds: None,
             link_labels: labels,
             urban_boundary: None,
             observed_data: None,

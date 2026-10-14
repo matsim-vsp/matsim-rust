@@ -1051,6 +1051,8 @@ pub struct Output {
 #[serde(default)]
 pub struct Analysis {
     pub enabled: bool,
+    /// Optional interval for writing per-link car speed samples, in seconds.
+    pub car_spot_speed_sample_period_seconds: Option<u32>,
     /// Width of exported link-volume intervals in seconds.
     pub interval_seconds: u32,
     /// Explicit per-link labels. Missing or blank labels are reported as `unknown`.
@@ -1260,6 +1262,7 @@ impl Default for Analysis {
     fn default() -> Self {
         Self {
             enabled: false,
+            car_spot_speed_sample_period_seconds: None,
             interval_seconds: 3600,
             link_labels: std::collections::BTreeMap::new(),
             urban_boundary: None,

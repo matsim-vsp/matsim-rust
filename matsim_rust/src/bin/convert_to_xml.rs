@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use clap::Parser;
 use tracing::info;
 
-use matsim_rust::simulation::config::PartitionMethod;
 use matsim_rust::simulation::scenario::facilities::ActivityFacilities;
 use matsim_rust::simulation::scenario::network::Network;
 use matsim_rust::simulation::scenario::population::Population;
@@ -37,7 +36,7 @@ fn main() {
 
     if let Some(net_path) = net_path {
         info!("Loading network from {:?}", net_path);
-        let net = Network::from_file_path(&net_path, 1, &PartitionMethod::None);
+        let net = Network::from_file_as_is(&net_path);
 
         info!("Converting network to XML format");
         net.to_file(&replace_filename(net_path));

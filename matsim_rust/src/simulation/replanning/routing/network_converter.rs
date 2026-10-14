@@ -145,7 +145,6 @@ fn get_links<'net>(
 
 #[cfg(test)]
 mod test {
-    use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::graph::tests::{
         get_triangle_test_network, net_to_graph,
@@ -153,15 +152,13 @@ mod test {
     use crate::simulation::replanning::routing::network_converter;
     use crate::simulation::scenario::network::Network;
     use macros::deterministic_id_test;
+    use std::path::Path;
     use std::sync::Arc;
 
     #[deterministic_id_test]
     fn test_simple_network() {
-        let network = Network::from_file(
-            "./assets/routing_tests/triangle-network.xml",
-            1,
-            &PartitionMethod::Metis(MetisOptions::default()),
-        );
+        let network =
+            Network::from_file_as_is(Path::new("./assets/routing_tests/triangle-network.xml"));
         let graph = network_converter::convert_network_for_mode(Arc::new(network), None);
 
         assert_eq!(graph.forward_first_out(), &vec![0usize, 0, 2, 4, 6]);
@@ -177,11 +174,9 @@ mod test {
     /// and only includes links that allow the respective mode in each graph
     #[deterministic_id_test]
     fn test_simple_network_with_modes() {
-        let network = Network::from_file(
+        let network = Network::from_file_as_is(Path::new(
             "./assets/routing_tests/network_different_modes.xml",
-            1,
-            &PartitionMethod::Metis(MetisOptions::default()),
-        );
+        ));
 
         let car_mode_id = Id::<String>::get_from_ext("car");
         let bike_mode_id = Id::<String>::get_from_ext("bike");

@@ -90,6 +90,14 @@ impl Network {
         result
     }
 
+    pub fn from_file_with_partitioning(
+        file_path: impl AsRef<Path>,
+        num_parts: u32,
+        partition_method: &PartitionMethod,
+    ) -> Self {
+        Self::from_file_path(file_path.as_ref(), num_parts, partition_method)
+    }
+
     pub fn from_file_as_is(path: &Path) -> Self {
         from_file(path)
     }
@@ -281,6 +289,66 @@ impl Network {
                     .expect("METIS must return complete in-range node ownership");
             }
             PartitionMethod::None => {}
+        }
+    }
+
+    /// Assign nodes and links outside the configured main modes to their nearest main-mode node.
+    /// This keeps stop-only network components on the same worker as nearby road access.
+    pub fn assign_non_main_mode_nodes_to_nearest_partition(
+        network: &mut Network,
+        main_modes: &[String],
+    ) {
+        if main_modes.is_empty() {
+            return;
+        }
+        let main_mode_ids: IntSet<_> = main_modes
+            .iter()
+            .map(|mode| Id::get_from_ext(mode))
+            .collect();
+        let main_nodes: Vec<_> = network
+            .nodes
+            .values()
+            .filter(|node| {
+                node.in_links.iter().chain(&node.out_links).any(|link_id| {
+                    network.links.get(link_id).is_some_and(|link| {
+                        link.modes.iter().any(|mode| main_mode_ids.contains(mode))
+                    })
+                })
+            })
+            .map(|node| (node.id.clone(), node.coord.clone(), node.partition))
+            .collect();
+        if main_nodes.is_empty() {
+            return;
+        }
+
+        let mut assignments = Vec::new();
+        for node in network.nodes.values() {
+            let is_main = node.in_links.iter().chain(&node.out_links).any(|link_id| {
+                network
+                    .links
+                    .get(link_id)
+                    .is_some_and(|link| link.modes.iter().any(|mode| main_mode_ids.contains(mode)))
+            });
+            if is_main {
+                continue;
+            }
+            let nearest = main_nodes.iter().min_by(|a, b| {
+                let distance = |candidate: &&(Id<Node>, Coordinate, u32)| {
+                    (node.coord.x - candidate.1.x).powi(2) + (node.coord.y - candidate.1.y).powi(2)
+                };
+                distance(a)
+                    .total_cmp(&distance(b))
+                    .then_with(|| a.0.external().cmp(b.0.external()))
+            });
+            if let Some((_, _, partition)) = nearest {
+                assignments.push((node.id.clone(), *partition));
+            }
+        }
+        for (node_id, partition) in assignments {
+            network.nodes.get_mut(&node_id).unwrap().partition = partition;
+        }
+        for link in network.links.values_mut() {
+            link.partition = network.nodes.get(&link.to).unwrap().partition;
         }
     }
 

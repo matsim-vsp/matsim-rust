@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+
+<population desc="single agent walking from the road to a transit stop">
+    <person id="100">
+        <plan selected="yes">
+            <activity type="home" link="link1" x="50" y="0" end_time="9:00:00"/>
+            <leg mode="walk" dep_time="09:00:00">
+                <attributes>
+                    <attribute name="routingMode" class="java.lang.String">walk</attribute>
+                </attributes>
+                <route type="generic" start_link="link1" end_link="pt-stop4" trav_time="00:20:00" distance="1050.0"></route>
+            </leg>
+            <activity type="errands" link="pt-stop4" x="1100" y="50"/>
+        </plan>
+    </person>
+</population>

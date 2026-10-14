@@ -433,7 +433,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     pub fn get_triangle_test_network() -> Network {
-        Network::from_file(
+        Network::from_file_with_partitioning(
             "./assets/routing_tests/triangle-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),

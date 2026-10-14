@@ -867,7 +867,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_conversion() {
-        let _net = Network::from_file(
+        let _net = Network::from_file_with_partitioning(
             "./assets/equil/equil-network.xml",
             2,
             &PartitionMethod::Metis(MetisOptions::default()),

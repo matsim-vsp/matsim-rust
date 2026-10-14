@@ -228,7 +228,18 @@ impl Scenario {
         if let Some(path) = &config.network().path {
             let net_in_path = io::resolve_path(config.context(), path);
             let num_parts = config.partitioning().num_parts;
-            Network::from_file_path(&net_in_path, num_parts, &config.partitioning().method)
+            let mut network =
+                Network::from_file_path(&net_in_path, num_parts, &config.partitioning().method);
+            if matches!(
+                config.partitioning().method,
+                crate::simulation::config::PartitionMethod::Metis(_)
+            ) {
+                Network::assign_non_main_mode_nodes_to_nearest_partition(
+                    &mut network,
+                    &config.qsim().main_modes,
+                );
+            }
+            network
         } else {
             Network::default()
         }

@@ -446,6 +446,10 @@ impl<C: SimCommunicator> LegEngine<C> {
         &self.net_message_broker
     }
 
+    pub fn net_message_broker_mut(&mut self) -> &mut NetMessageBroker<C> {
+        &mut self.net_message_broker
+    }
+
     pub fn network(&self) -> &SimNetworkPartition {
         &self.network_engine.network
     }

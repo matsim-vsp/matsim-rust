@@ -7,3 +7,9 @@ debug = true
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+# METIS with GKlib's own random number generator and without floating-point contraction, so that
+# partitions do not depend on the platform. Remove once a metis-sys release contains this change.
+# See docs/architecture.md.
+metis-sys = { git = "https://github.com/paulheinr/metis-rs", rev = "a5c25ea9c6f42b433e6041dba4c425cbb5696c7a" }

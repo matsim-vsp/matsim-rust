@@ -11,6 +11,10 @@ fn test_berlin_1() {
     test_berlin(1);
 }
 
+// The transit network is not connected to the road network. With `NonMainModeLinks::Include`, METIS
+// could therefore create a partition that shares no link with the other one. By default, METIS only
+// partitions the road network, and the transit nodes are assigned to the partition of the nearest
+// road node.
 #[deterministic_id_test(matsim_rust)]
 fn test_berlin_2() {
     test_berlin(2);

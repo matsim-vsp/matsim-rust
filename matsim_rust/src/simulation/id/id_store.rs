@@ -598,7 +598,7 @@ mod tests {
         ));
         let store = IdStore::new();
 
-        let net = Network::from_file_path(
+        let net = Network::from_file_with_partitioning(
             &PathBuf::from("/Users/janek/Documents/rust_qsim/input/rvr.network.xml.gz"),
             1,
             &PartitionMethod::None,

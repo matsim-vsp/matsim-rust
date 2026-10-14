@@ -10,6 +10,7 @@ mod economic;
 mod emissions;
 mod ensemble;
 mod link_speed;
+pub(crate) mod spot_speed;
 mod zones;
 
 mod report;
@@ -925,6 +926,7 @@ pub fn reanalyze_completed_run(
     let settings = Analysis {
         enabled: true,
         interval_seconds: interval_seconds.unwrap_or(recorded.interval_seconds),
+        car_spot_speed_sample_period_seconds: None,
         link_labels: recorded.link_labels.clone(),
         urban_boundary: recorded.urban_boundary.clone(),
 

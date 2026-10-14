@@ -1,6 +1,7 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
+use crate::simulation::analysis::spot_speed::CarSpotSpeedSampler;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
@@ -25,6 +26,7 @@ pub struct Simulation<C: SimCommunicator> {
     end_tick: Tick,
     clock: SimClock,
     pending_leg_agents: Vec<(Tick, SimulationAgent)>,
+    car_spot_speed_sampler: Option<CarSpotSpeedSampler>,
 }
 
 impl<C> Simulation<C>
@@ -72,6 +74,16 @@ where
                 .mobsim_events_manager_borrow_mut()
                 .process_event(MobsimEvent::after_sim_step(now_time));
 
+            if let Some(sampler) = &mut self.car_spot_speed_sampler {
+                let now_seconds = self.clock.tick_to_secs(now);
+                if now_seconds.is_multiple_of(sampler.period_seconds() as u64) {
+                    sampler.sample(
+                        now_seconds,
+                        self.leg_engine.network().car_spot_speed_samples(now),
+                    );
+                }
+            }
+
             now = now.next();
         }
 
@@ -86,7 +98,20 @@ where
 
         // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
         self.emit_stuck_events(self.clock.tick_to_time(self.end_tick), &agents);
+        if let Some(sampler) = self.car_spot_speed_sampler.take() {
+            if let Err(error) = sampler.write() {
+                tracing::error!(%error, "Failed to write car spot-speed samples");
+            }
+        }
         agents
+    }
+
+    pub fn take_unprocessed_messages(
+        &mut self,
+    ) -> Vec<crate::simulation::messaging::messages::InternalSyncMessage> {
+        self.leg_engine
+            .net_message_broker_mut()
+            .take_unprocessed_messages()
     }
 
     fn emit_stuck_events(&mut self, time: SimTime, agents: &[SimulationAgent]) {
@@ -200,6 +225,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             network_partition,
             ..
         } = self.input.partition;
+        let partition = network_partition.partition();
 
         let activity_engine = ActivityEngineBuilder::new(
             agents.into_values().collect(),
@@ -239,6 +265,21 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             timetable_transit_engine,
         );
 
+        let car_spot_speed_sampler = scenario
+            .config
+            .output()
+            .analysis
+            .car_spot_speed_sample_period_seconds
+            .filter(|period| *period > 0)
+            .map(|period| {
+                CarSpotSpeedSampler::new(
+                    scenario.config.output().output_dir.clone(),
+                    period,
+                    self.iteration,
+                    partition,
+                )
+            });
+
         Simulation {
             activity_engine,
             leg_engine,
@@ -247,6 +288,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             end_tick: clock.secs_to_tick(scenario.config.qsim().end_time as u64),
             clock,
             pending_leg_agents: Vec::new(),
+            car_spot_speed_sampler,
         }
     }
 }

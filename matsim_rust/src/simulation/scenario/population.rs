@@ -1506,7 +1506,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn from_io() {
-        let net = Network::from_file(
+        let net = Network::from_file_with_partitioning(
             "./assets/equil/equil-network.xml",
             2,
             &PartitionMethod::Metis(MetisOptions::default()),
@@ -1533,7 +1533,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_from_xml_to_binpb_same() {
-        let net = Network::from_file(
+        let net = Network::from_file_with_partitioning(
             "./assets/equil/equil-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),

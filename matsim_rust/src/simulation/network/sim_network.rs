@@ -1,4 +1,4 @@
-use super::link::{LocalLink, SimLink, SplitInLink, SplitOutLink};
+use super::link::{CarSpotSpeedSample, LocalLink, SimLink, SplitInLink, SplitOutLink};
 use crate::simulation::Identifiable;
 use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::agents::agent::SimulationAgent;
@@ -128,6 +128,18 @@ enum FrontDecision {
 }
 
 impl SimNetworkPartition {
+    pub(crate) fn car_spot_speed_samples(&self, now: Tick) -> Vec<CarSpotSpeedSample> {
+        let mut ids: Vec<_> = self.active_links.into_iter().collect();
+        ids.sort_unstable_by_key(|id| id.internal());
+        let mut samples = Vec::new();
+        for id in ids {
+            if let Some(link) = self.links.get(id) {
+                link.append_car_spot_speed_samples(now, &mut samples);
+            }
+        }
+        samples
+    }
+
     pub fn from_network(
         global_network: &Network,
         storage_capacities: &LinkStorageCapacities,

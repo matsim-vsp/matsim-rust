@@ -4,12 +4,14 @@ use crate::simulation::id::Id;
 use crate::simulation::scenario::network::{Link, Network};
 use nohash_hasher::IntMap;
 
-use super::STORAGE_CAPACITY_USED_IN_QSIM;
+use super::{STORAGE_CAPACITY_USED_IN_QSIM, TRACE_QSIM_DISCHARGE};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct StorageCapacityDefinition {
     qsim_override: Option<f64>,
     original: f64,
+    acceptance_trace: bool,
+    discharge_trace: bool,
 }
 
 impl StorageCapacityDefinition {
@@ -38,6 +40,8 @@ impl StorageCapacityDefinition {
         Self {
             qsim_override: adjusted,
             original: max_storage_cap,
+            acceptance_trace: false,
+            discharge_trace: false,
         }
     }
 
@@ -68,7 +72,7 @@ impl LinkStorageCapacities {
             .links()
             .into_iter()
             .map(|link| {
-                let definition = StorageCapacityDefinition::build(
+                let mut definition = StorageCapacityDefinition::build(
                     link.length,
                     link.permlanes,
                     link.capacity,
@@ -77,6 +81,17 @@ impl LinkStorageCapacities {
                     effective_cell_size,
                     link.freespeed,
                 );
+                definition.discharge_trace =
+                    link.attributes.get::<bool>(TRACE_QSIM_DISCHARGE) == Some(true);
+                if let Some(capacity) = link.attributes.get::<f64>(STORAGE_CAPACITY_USED_IN_QSIM) {
+                    assert!(
+                        capacity.is_finite() && capacity > 0.0,
+                        "Invalid {STORAGE_CAPACITY_USED_IN_QSIM} for link {}: {capacity}",
+                        link.id
+                    );
+                    definition.qsim_override = Some(capacity);
+                    definition.acceptance_trace = true;
+                }
                 (link.id.clone(), definition)
             })
             .collect();
@@ -123,6 +138,10 @@ impl LinkStorageCapacities {
 pub struct StorageCap {
     max: f64,
     used: f64,
+    #[allow(dead_code)]
+    acceptance_trace: bool,
+    #[allow(dead_code)]
+    discharge_trace: bool,
 }
 
 impl StorageCap {
@@ -130,6 +149,8 @@ impl StorageCap {
         Self {
             max: definition.max(),
             used: 0.0,
+            acceptance_trace: definition.acceptance_trace,
+            discharge_trace: definition.discharge_trace,
         }
     }
 
@@ -158,7 +179,7 @@ impl StorageCap {
         self.used
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn max(&self) -> f64 {
         self.max
     }
@@ -184,6 +205,16 @@ impl StorageCap {
     pub fn is_available(&self) -> bool {
         let available_cap = self.max - self.used;
         available_cap > 0.0
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn traces_acceptance(&self) -> bool {
+        self.acceptance_trace
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn traces_discharge(&self) -> bool {
+        self.discharge_trace
     }
 }
 
