@@ -108,6 +108,7 @@ impl SimLink {
         }
     }
 
+    #[allow(dead_code)] // Diagnostic hooks are consumed by the alternate network stepper.
     pub(super) fn traces_discharge(&self) -> bool {
         match self {
             SimLink::Local(link) => link.storage_cap.traces_discharge(),
@@ -116,6 +117,7 @@ impl SimLink {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn flow_remaining(&self) -> f64 {
         match self {
             SimLink::Local(link) => link.flow_cap.remaining_capacity(),
@@ -124,6 +126,7 @@ impl SimLink {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn flow_limited_front(&self, now: Tick) -> Option<&SimulationVehicle> {
         match self {
             SimLink::Local(link) => link.flow_limited_front(now),
@@ -179,6 +182,7 @@ impl SimLink {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn used_storage(&self) -> f64 {
         match self {
             SimLink::Local(ll) => ll.storage_cap.used(),
@@ -187,6 +191,7 @@ impl SimLink {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn max_storage(&self) -> f64 {
         match self {
             SimLink::Local(ll) => ll.storage_cap.max(),
@@ -195,6 +200,7 @@ impl SimLink {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn traces_storage_acceptance(&self) -> bool {
         match self {
             SimLink::Local(ll) => ll.storage_cap.traces_acceptance(),
@@ -402,12 +408,15 @@ impl LocalLink {
 
     fn push_veh_to_queue(&mut self, vehicle: SimulationVehicle, now: Tick) {
         let speed = self.free_speed.min(vehicle.max_v());
-        // Requiring one queue-travel tick prevents a local zero-tick link from advancing one phase
-        // earlier than the same link split across partitions.
-        let duration = self
-            .clock
-            .secs_to_ticks_floor(self.length / speed)
-            .max(Tick::new(1));
+        // Transit vehicles are checked at a stop in the queue phase, then move across the node
+        // in the next tick. Account for that phase in their link time so each link does not add a
+        // tick of schedule delay; keep one queue tick to preserve partition-independent movement.
+        let duration = self.clock.secs_to_ticks_floor(self.length / speed);
+        let duration = if vehicle.driver().transit_driver().is_some() {
+            duration.saturating_sub(Tick::new(1)).max(Tick::new(1))
+        } else {
+            duration.max(Tick::new(1))
+        };
         let earliest_exit_time = now.saturating_add(duration);
 
         // update state
@@ -497,6 +506,7 @@ impl LocalLink {
                     self.clock.tick_to_time(now),
                     transit,
                     &mut comp_env.events_manager_borrow_mut(),
+                    false,
                 )
             } else {
                 StopOutcome::NoStop
@@ -672,6 +682,7 @@ impl LocalLink {
                 self.clock.tick_to_time(now),
                 transit,
                 &mut comp_env.events_manager_borrow_mut(),
+                false,
             ) {
                 StopOutcome::NoStop => return Some(vehicle),
                 StopOutcome::Departed => {}
@@ -697,6 +708,7 @@ impl LocalLink {
         self.flow_cap.remaining_capacity() - buffer_cap > 0.0
     }
 
+    #[allow(dead_code)]
     fn flow_limited_front(&self, now: Tick) -> Option<&SimulationVehicle> {
         if self.flow_cap.remaining_capacity() <= 0.0 {
             if let Some(vehicle) = self.buffer.front() {

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "requests": [
+    {
+      "id": "eligible_person_and_stop",
+      "mode": "pt",
+      "person": "eligible",
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 1000.0, "y": 1050.0 },
+      "to": { "link": "11", "x": 1100.0, "y": 1050.0 }
+    },
+    {
+      "id": "ineligible_person",
+      "mode": "pt",
+      "person": "ineligible",
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 1000.0, "y": 1050.0 },
+      "to": { "link": "11", "x": 1100.0, "y": 1050.0 }
+    },
+    {
+      "id": "ineligible_stop",
+      "mode": "pt",
+      "person": "eligible",
+      "departure_time": 28800.0,
+      "from": { "link": "12", "x": 2050.0, "y": 2940.0 },
+      "to": { "link": "12", "x": 2150.0, "y": 2940.0 }
+    }
+  ]
+}

@@ -32,7 +32,7 @@ fn main() {
     for i in 1..12 {
         info!("Loading network from {:?}", args.network);
         let num_parts: u32 = 2_i32.pow(i) as u32;
-        let net = Network::from_file_with_partitioning(
+        let net = Network::from_file_path(
             &args.network,
             num_parts,
             &PartitionMethod::Metis(MetisOptions {

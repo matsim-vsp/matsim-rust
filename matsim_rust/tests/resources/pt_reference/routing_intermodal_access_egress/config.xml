@@ -1,0 +1,64 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<config>
+	<module name="global">
+		<param name="randomSeed" value="4711" />
+		<param name="coordinateSystem" value="Atlantis" />
+	</module>
+	<module name="network">
+		<param name="inputNetworkFile" value="../../../../assets/pt_tutorial/multimodalnetwork.xml" />
+	</module>
+	<module name="vehicles">
+		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
+	</module>
+	<module name="transit">
+		<param name="transitScheduleFile" value="../routing_direct_vs_transfer/transit_schedule.xml" />
+		<param name="useTransit" value="true" />
+		<param name="usingTransitInMobsim" value="false" />
+	</module>
+	<module name="transitRouter">
+		<param name="directWalkFactor" value="Infinity" />
+	</module>
+	<module name="routing">
+		<param name="walkSpeed" value="0.8333333333333334" />
+		<param name="beelineDistanceFactor" value="1.3" />
+		<parameterset type="teleportedModeParameters">
+			<param name="mode" value="bike" />
+			<param name="teleportedModeSpeed" value="10.0" />
+			<param name="beelineDistanceFactor" value="1.0" />
+		</parameterset>
+	</module>
+	<module name="swissRailRaptor">
+		<param name="useIntermodalAccessEgress" value="true" />
+		<param name="intermodalLegOnlyHandling" value="avoid" />
+		<parameterset type="intermodalAccessEgress">
+			<param name="mode" value="walk" />
+			<param name="initialSearchRadius" value="1000.0" />
+			<param name="maxRadius" value="1000.0" />
+			<param name="searchExtensionRadius" value="500.0" />
+		</parameterset>
+		<parameterset type="intermodalAccessEgress">
+			<param name="mode" value="bike" />
+			<param name="initialSearchRadius" value="1000.0" />
+			<param name="maxRadius" value="1000.0" />
+			<param name="searchExtensionRadius" value="500.0" />
+		</parameterset>
+	</module>
+	<module name="qsim">
+		<param name="startTime" value="0" />
+		<param name="endTime" value="24:00:00" />
+		<param name="timeStepSize" value="1.0" />
+		<param name="insertingWaitingVehiclesBeforeDrivingVehicles" value="true" />
+		<param name="removeStuckVehicles" value="false" />
+		<param name="snapshotperiod" value="00:00:00" />
+	</module>
+	<module name="controller">
+		<param name="firstIteration" value="0" />
+		<param name="lastIteration" value="0" />
+		<param name="outputDirectory" value="out" />
+		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
+		<param name="eventsFileFormat" value="xml" />
+		<param name="compressionType" value="none" />
+		<param name="writeEventsInterval" value="1" />
+	</module>
+</config>

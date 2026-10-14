@@ -6,7 +6,7 @@ use crate::simulation::io::xml::events::XmlEventsReader;
 use crate::simulation::logging::init_std_out_logging_thread_local;
 use crate::simulation::time::SimTime;
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -193,7 +193,7 @@ impl EventBatchReader for XmlBatchReader {
 }
 
 struct ProtoBatchReader {
-    reader: ProtoEventsReader<File>,
+    reader: ProtoEventsReader,
 }
 
 impl ProtoBatchReader {

@@ -18,7 +18,7 @@ The writer now passes Java flow capacity as Rust `sample_size`, Java stuck time 
 
 ### Routing fallback defect
 
-The incomplete 1% run's PT `no_path` messages came from a link-mode mismatch at the SILO/Rust boundary. SILO selected endpoint links from its PT-only filtered network, while matsim-rs handles PT from coordinates and its no-transit-path fallback invokes the car network router. In the captured log this appears as PT requests from bus/rail links failing with `mode car`. SILO now anchors all matsim-rs requests on its car-filtered network; the Rust transit router still uses the request coordinates and schedule for PT. Rust no longer returns zero solely because an origin and destination share a link; the selected mode router handles that case.
+The incomplete 1% run's PT `no_path` messages came from a link-mode mismatch at the SILO/Rust boundary. SILO selected endpoint links from its PT-only filtered network, while matsim-rs handles PT from coordinates and its no-transit-path fallback invokes the car network router. A personless request no longer does by default: the car fallback is gated on a passenger's `ownsCar` attribute, and the legacy personless behavior moved to the opt-in `transit.personless_car_fallback`, which an integrator relying on it has to set. In the captured log this appears as PT requests from bus/rail links failing with `mode car`. SILO now anchors all matsim-rs requests on its car-filtered network; the Rust transit router still uses the request coordinates and schedule for PT. Rust no longer returns zero solely because an origin and destination share a link; the selected mode router handles that case.
 
 Regression checks pass: `MatsimTravelTimesRustRoutingTest` (3 tests) confirms PT requests use car-routable anchors, and `cargo test -p rust_qsim --test silo_routing -- --test-threads=1` passes all 6 route-service tests, including same-link mode dispatch. The end-to-end run predates this fix. A fixed 1% rerun was deferred because a separate 2% SILO run was already using the shared machine; no Java simulation started in the deferred attempt. The earlier partial output is preserved in `BKK_CASE/scenOutput/VMV_BAU_1pct_matsimrs_routing_incomplete_prior`.
 
@@ -55,6 +55,20 @@ The matsim-rs release binary used for this run has SHA-256 `a0cd56081cbd6e92887f
 Rust and Java encode transit link movement differently, so total link-entry counts are not comparable; the car-only Java count excludes transit vehicle IDs. Departure and boarding counts agree within 1.7%, but the completion, stuck, and car-link counts still differ materially. This pair does not establish behavioral equivalence.
 
 The first stuck-removal run exposed a second defect: aborted agents were omitted from the population returned for scoring, causing a population-size assertion after QSim. The fix retains aborted agents as terminal `STUCK` agents, preserving their partial plans for scoring while avoiding a duplicate end-of-day stuck event. The corrected standalone 1% QSim completed scoring and wrote events/plans under `BKK_CASE/scenOutput/VMV_BAU_1pct_matsimrs_routing_stuck_abort_retained`. The earlier failed output is preserved under `..._stuck_abort`.
+
+### Stranded agents are now resumed, not terminal
+
+Treating a stranded agent as terminal turned out to be a second defect, and the largest one in this pair. It kept the population size correct but ended the agent's day on the spot, so every remaining leg of its plan was never attempted.
+
+Measured on the same 1% export as the table above: the two engines agree within 1% on per-hour departures through hour 04, after which the Rust curve falls to 50-58% of Java's and never recovers — 251,893 legs that Java executes and Rust does not. Rust strands *fewer* agents than Java (72,207 versus 88,876 `stuckAndAbort` events) while executing far fewer legs, which is the contradiction that identifies the cause rather than congestion. Of the distinct persons who strand, 29.1% emit any later event in Java and 2.94% in Rust.
+
+The cause was a missing path. `RemoveStuck` marked the agent and parked it in `SimNetwork::stuck_agents`; that vector was drained only after the day loop exited, and `Simulation::emit_stuck_events` returned `None` for `STUCK`, so no stranded agent was ever re-queued.
+
+A stranded agent now abandons its leg and resumes its plan at the next activity. The leg is not completed: no arrival, no `travelled` event, no `PersonLeavesVehicle`, and the `stuckAndAbort` event already published stands as the record of the failure. A plan always ends with an activity, so an agent stranded on its final leg still performs that final activity rather than being dropped; the activity engine's existing end-of-activity routing accounts for it as a completed agent. `SimNetwork::move_links` now returns stranded agents in the per-step result instead of withholding them until `drain`.
+
+This supersedes the terminal-`STUCK` decision above. The invariant it must keep is the population-size one that fix was introduced for: no stranded agent is dropped from the population, whether it resumes or finishes. `stranded_agent_resumes_at_its_next_activity_and_runs_its_next_leg`, `stranded_agent_resumes_and_then_runs_its_next_leg`, and `stranded_agent_on_its_final_leg_still_performs_its_final_activity` in `activity_engine` cover it.
+
+The comparison above predates this change and has not been re-measured.
 
 ## Qualification gates
 

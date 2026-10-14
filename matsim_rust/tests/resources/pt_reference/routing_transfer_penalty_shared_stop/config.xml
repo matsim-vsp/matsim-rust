@@ -1,0 +1,72 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<!--
+  Routing-probe reference fixture: a transfer penalty large enough to change the choice.
+
+  Same schedule as routing_direct_vs_transfer, so the same request has the same three candidates:
+  a 08:00 -> 08:25 transfer and a 08:00 -> 08:50 direct service. Under the pinned default penalty
+  of one utility per transfer the faster transfer wins; here the penalty is 6 utils, which is more
+  than the 25 minutes the transfer saves, so both routers must take the direct service instead.
+
+  MATSim only reads transferPenaltyBaseCost once a per-travel-time-hour cost is configured
+  (RaptorUtils.createParameters falls back to -utilityOfLineSwitch otherwise), so the hourly cost is
+  set to a negligible non-zero value. That is a property of the reference, not a preference.
+-->
+<config>
+
+	<module name="global">
+		<param name="randomSeed" value="4711" />
+		<param name="coordinateSystem" value="Atlantis" />
+	</module>
+
+	<module name="network">
+		<param name="inputNetworkFile" value="../../../../assets/pt_tutorial/multimodalnetwork.xml" />
+	</module>
+
+	<module name="vehicles">
+		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
+	</module>
+
+	<module name="transit">
+		<param name="transitScheduleFile" value="transit_schedule.xml" />
+		<param name="useTransit" value="true" />
+		<!-- Transit vehicles are not driven: the reference teleports the pt legs, like the Rust
+		     fixture does, so execution stays comparable while the pt router is still registered. -->
+		<param name="usingTransitInMobsim" value="false" />
+	</module>
+
+	<module name="swissRailRaptor">
+		<param name="transferPenaltyBaseCost" value="6.0" />
+		<param name="transferPenaltyCostPerTravelTimeHour" value="1.0" />
+		<!-- Equal to the base cost, so the hourly part is clipped away and the penalty is exactly
+		     6 utils however long the journey runs. That pins the clipping boundary. -->
+		<param name="transferPenaltyMaxCost" value="6.0" />
+	</module>
+
+	<module name="routing">
+			<!-- Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. -->
+		<param name="walkSpeed" value="0.8333333333333334" />
+		<param name="beelineDistanceFactor" value="1.3" />
+	</module>
+
+	<module name="qsim">
+		<param name="startTime" value="0" />
+		<param name="endTime" value="24:00:00" />
+		<param name="timeStepSize" value="1.0" />
+		<param name="insertingWaitingVehiclesBeforeDrivingVehicles" value="true" />
+		<param name="removeStuckVehicles" value="false" />
+		<param name="snapshotperiod" value="00:00:00" />
+	</module>
+
+	<module name="controller">
+		<param name="firstIteration" value="0" />
+		<param name="lastIteration" value="0" />
+		<param name="outputDirectory" value="out" />
+		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
+		<param name="eventsFileFormat" value="xml" />
+		<!-- Uncompressed, so the recorded reference is a readable event file. -->
+		<param name="compressionType" value="none" />
+		<param name="writeEventsInterval" value="1" />
+	</module>
+
+</config>

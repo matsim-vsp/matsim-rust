@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v1.dtd">
+<transitSchedule>
+  <transitStops>
+    <stopFacility id="1" x="1050" y="1050" linkRefId="11" />
+    <stopFacility id="2a" x="2050" y="2940" linkRefId="12" />
+    <stopFacility id="2b" x="2050" y="2960" linkRefId="32" />
+    <stopFacility id="3" x="3950" y="1050" linkRefId="33" />
+  </transitStops>
+  <transitLine id="Blue Line">
+    <transitRoute id="1to3">
+      <transportMode>train</transportMode>
+      <routeProfile>
+        <stop refId="1" departureOffset="00:00:00" />
+        <stop refId="2a" arrivalOffset="00:03:20" departureOffset="00:04:00" />
+        <stop refId="3" arrivalOffset="00:09:00" />
+      </routeProfile>
+      <route><link refId="11" /><link refId="12" /><link refId="23" /><link refId="33" /></route>
+      <departures>
+        <departure id="train-0730" departureTime="07:30:00" vehicleRefId="train-0730" />
+        <departure id="train-0750" departureTime="07:50:00" vehicleRefId="train-0750" />
+        <departure id="train-0800" departureTime="08:00:00" vehicleRefId="train-0800" />
+      </departures>
+    </transitRoute>
+    <transitRoute id="3to1">
+      <transportMode>pt</transportMode>
+      <routeProfile>
+        <stop refId="3" departureOffset="00:00:00" />
+        <stop refId="2b" arrivalOffset="00:05:00" departureOffset="00:05:40" />
+        <stop refId="1" arrivalOffset="00:09:00" />
+      </routeProfile>
+      <route><link refId="33" /><link refId="32" /><link refId="21" /><link refId="11" /></route>
+      <departures>
+        <departure id="bus-0740" departureTime="07:40:00" vehicleRefId="bus-0740" />
+      </departures>
+    </transitRoute>
+  </transitLine>
+</transitSchedule>

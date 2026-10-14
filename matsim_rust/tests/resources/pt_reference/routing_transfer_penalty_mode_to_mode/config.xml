@@ -1,0 +1,73 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<!--
+  Routing-probe reference fixture: a mode-to-mode transfer penalty changes which service is used.
+
+  Same schedule as routing_distinct_platform_transfer, so at 08:00 the faster bus transfer is the
+  default choice. A 2 utils penalty on train -> bus makes that switch more expensive than the
+  ~1.5 utils that the 7.4 minutes of extra travel cost, so the slower rail transfer wins while the
+  direct train service stays available as a fallback. The penalty applies to the transport modes of
+  the two routes, so the Rust side keys on the same field.
+
+  MATSim's ModeSpecificTransferCostCalculator cannot combine a mode-to-mode penalty with a
+  per-travel-time-hour cost, so none is configured here and the default line-switch utility applies
+  on top of the mode penalty.
+-->
+<config>
+
+	<module name="global">
+		<param name="randomSeed" value="4711" />
+		<param name="coordinateSystem" value="Atlantis" />
+	</module>
+
+	<module name="network">
+		<param name="inputNetworkFile" value="../../../../assets/pt_tutorial/multimodalnetwork.xml" />
+	</module>
+
+	<module name="vehicles">
+		<param name="vehiclesFile" value="../../../../assets/pt_tutorial/vehicles.xml" />
+	</module>
+
+	<module name="transit">
+		<param name="transitScheduleFile" value="transit_schedule.xml" />
+		<param name="useTransit" value="true" />
+		<!-- Transit vehicles are not driven: the reference teleports the pt legs, like the Rust
+		     fixture does, so execution stays comparable while the pt router is still registered. -->
+		<param name="usingTransitInMobsim" value="false" />
+	</module>
+
+	<module name="swissRailRaptor">
+		<parameterset type="modeToModeTransferPenalty" >
+			<param name="fromMode" value="train" />
+			<param name="toMode" value="bus" />
+			<param name="transferPenalty" value="2.0" />
+		</parameterset>
+	</module>
+
+	<module name="routing">
+			<!-- Pinned on both sides: 3.0/3.6 m/s, beeline factor 1.3. -->
+		<param name="walkSpeed" value="0.8333333333333334" />
+		<param name="beelineDistanceFactor" value="1.3" />
+	</module>
+
+	<module name="qsim">
+		<param name="startTime" value="0" />
+		<param name="endTime" value="24:00:00" />
+		<param name="timeStepSize" value="1.0" />
+		<param name="insertingWaitingVehiclesBeforeDrivingVehicles" value="true" />
+		<param name="removeStuckVehicles" value="false" />
+		<param name="snapshotperiod" value="00:00:00" />
+	</module>
+
+	<module name="controller">
+		<param name="firstIteration" value="0" />
+		<param name="lastIteration" value="0" />
+		<param name="outputDirectory" value="out" />
+		<param name="overwriteFiles" value="deleteDirectoryIfExists" />
+		<param name="eventsFileFormat" value="xml" />
+		<!-- Uncompressed, so the recorded reference is a readable event file. -->
+		<param name="compressionType" value="none" />
+		<param name="writeEventsInterval" value="1" />
+	</module>
+
+</config>

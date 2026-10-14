@@ -138,7 +138,9 @@ impl LinkStorageCapacities {
 pub struct StorageCap {
     max: f64,
     used: f64,
+    #[allow(dead_code)]
     acceptance_trace: bool,
+    #[allow(dead_code)]
     discharge_trace: bool,
 }
 
@@ -177,6 +179,7 @@ impl StorageCap {
         self.used
     }
 
+    #[allow(dead_code)]
     pub(crate) fn max(&self) -> f64 {
         self.max
     }
@@ -204,10 +207,12 @@ impl StorageCap {
         available_cap > 0.0
     }
 
+    #[allow(dead_code)]
     pub(crate) fn traces_acceptance(&self) -> bool {
         self.acceptance_trace
     }
 
+    #[allow(dead_code)]
     pub(crate) fn traces_discharge(&self) -> bool {
         self.discharge_trace
     }

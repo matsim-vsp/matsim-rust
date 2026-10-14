@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <person id="transfer-person">
+    <plan selected="yes">
+      <activity type="h" link="11" x="1050" y="1050" end_time="08:00:00" />
+      <leg mode="pt" />
+      <activity type="w" link="33" x="3950" y="1050" />
+    </plan>
+  </person>
+</population>

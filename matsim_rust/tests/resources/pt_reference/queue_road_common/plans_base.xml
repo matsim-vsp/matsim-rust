@@ -1,0 +1,152 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+
+	<attributes>
+		<attribute name="coordinateReferenceSystem" class="java.lang.String">Atlantis</attribute>
+	</attributes>
+
+
+
+
+	<person id="102">
+		<attributes>
+			<attribute name="employed" class="java.lang.Boolean">false</attribute>
+			<attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"102"}</attribute>
+		</attributes>
+		<plan score="127.97011670773018" selected="yes">
+			<activity type="h" link="1112" x="938.0" y="642.0" end_time="07:32:06">
+			</activity>
+			<leg mode="walk" dep_time="07:32:06" trav_time="00:11:01">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="1112" end_link="11" trav_time="00:11:01" distance="550.0213814025778" />
+			</leg>
+			<activity type="pt interaction" link="11" x="1050.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="pt" dep_time="07:43:07" trav_time="00:15:53">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="default_pt" start_link="11" end_link="33" trav_time="00:15:53" distance="6100.0">{"transitRouteId":"1to3","boardingTime":"07:50:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"3"}</route>
+			</leg>
+			<activity type="pt interaction" link="33" x="3950.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="walk" dep_time="07:59:00" trav_time="00:09:39">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="33" end_link="3141" trav_time="00:09:39" distance="481.9652477098323" />
+			</leg>
+			<activity type="w" link="3141" x="3619.0" y="1217.0" end_time="17:27:24">
+			</activity>
+			<leg mode="walk" dep_time="17:27:24" trav_time="00:05:45">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="3141" end_link="4142" trav_time="00:05:45" distance="287.7232176936717" />
+			</leg>
+			<activity type="s" link="4142" x="3840.0" y="1205.0" end_time="18:25:10">
+			</activity>
+			<leg mode="walk" dep_time="18:25:10" trav_time="00:04:57">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="4142" end_link="33" trav_time="00:04:57" distance="247.08551151372677" />
+			</leg>
+			<activity type="pt interaction" link="33" x="3950.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="pt" dep_time="18:30:07" trav_time="00:18:53">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="default_pt" start_link="33" end_link="11" trav_time="00:18:53" distance="6100.0">{"transitRouteId":"3to1","boardingTime":"18:40:00","transitLineId":"Blue Line","accessFacilityId":"3","egressFacilityId":"1"}</route>
+			</leg>
+			<activity type="pt interaction" link="11" x="1050.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="walk" dep_time="18:49:00" trav_time="00:11:01">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="11" end_link="1112" trav_time="00:11:01" distance="550.0213814025778" />
+			</leg>
+			<activity type="h" link="1112" x="938.0" y="642.0">
+			</activity>
+		</plan>
+
+	</person>
+
+
+
+<person id="103">
+		<attributes>
+			<attribute name="employed" class="java.lang.Boolean">false</attribute>
+			<attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"102"}</attribute>
+		</attributes>
+		<plan score="127.97011670773018" selected="yes">
+			<activity type="h" link="1112" x="938.0" y="642.0" end_time="07:32:06">
+			</activity>
+			<leg mode="walk" dep_time="07:32:06" trav_time="00:11:01">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="1112" end_link="11" trav_time="00:11:01" distance="550.0213814025778" />
+			</leg>
+			<activity type="pt interaction" link="11" x="1050.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="pt" dep_time="07:43:07" trav_time="00:15:53">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="default_pt" start_link="11" end_link="33" trav_time="00:15:53" distance="6100.0">{"transitRouteId":"1to3","boardingTime":"07:50:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"3"}</route>
+			</leg>
+			<activity type="pt interaction" link="33" x="3950.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="walk" dep_time="07:59:00" trav_time="00:09:39">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="33" end_link="3141" trav_time="00:09:39" distance="481.9652477098323" />
+			</leg>
+			<activity type="w" link="3141" x="3619.0" y="1217.0" end_time="17:27:24">
+			</activity>
+			<leg mode="walk" dep_time="17:27:24" trav_time="00:05:45">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="3141" end_link="4142" trav_time="00:05:45" distance="287.7232176936717" />
+			</leg>
+			<activity type="s" link="4142" x="3840.0" y="1205.0" end_time="18:25:10">
+			</activity>
+			<leg mode="walk" dep_time="18:25:10" trav_time="00:04:57">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="4142" end_link="33" trav_time="00:04:57" distance="247.08551151372677" />
+			</leg>
+			<activity type="pt interaction" link="33" x="3950.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="pt" dep_time="18:30:07" trav_time="00:18:53">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="default_pt" start_link="33" end_link="11" trav_time="00:18:53" distance="6100.0">{"transitRouteId":"3to1","boardingTime":"18:40:00","transitLineId":"Blue Line","accessFacilityId":"3","egressFacilityId":"1"}</route>
+			</leg>
+			<activity type="pt interaction" link="11" x="1050.0" y="1050.0" max_dur="00:00:00">
+			</activity>
+			<leg mode="walk" dep_time="18:49:00" trav_time="00:11:01">
+				<attributes>
+					<attribute name="routingMode" class="java.lang.String">pt</attribute>
+				</attributes>
+				<route type="generic" start_link="11" end_link="1112" trav_time="00:11:01" distance="550.0213814025778" />
+			</leg>
+			<activity type="h" link="1112" x="938.0" y="642.0">
+			</activity>
+		</plan>
+
+	</person>
+
+
+
+</population>

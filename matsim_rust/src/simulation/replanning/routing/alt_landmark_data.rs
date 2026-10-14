@@ -101,7 +101,7 @@ impl AltLandmarkData {
                     // collect into ForwardBackwardTravelDisutility objects
                     Ok(forward_disutilities
                         .into_iter()
-                        .zip(backward_disutilities.into_iter())
+                        .zip(backward_disutilities)
                         .collect::<Vec<ForwardBackwardTravelDisutility>>())
                 },
             )
@@ -133,7 +133,7 @@ impl AltLandmarkData {
             .unwrap();
 
         // fresh buffers are fine here, since landmark data is only calculated once per graph
-        let disutilities_result = match a_star_core(a_star_request, &mut AStarBuffers::default()) {
+        match a_star_core(a_star_request, &mut AStarBuffers::default(), None, None) {
             // some graph error occurred in A* (link or node not found). Return it.
             Err(e) => Err(e),
             // everything fine, A* returned a disutility vector; use it
@@ -143,9 +143,7 @@ impl AltLandmarkData {
                 "A* with LandmarkCalcAStarActions should return DisutilityToAllWithoutParents \
                 result."
             ),
-        };
-
-        disutilities_result
+        }
     }
 }
 
@@ -156,9 +154,8 @@ mod tests {
     use crate::simulation::replanning::routing::graph::tests::{
         get_triangle_test_network, net_to_graph,
     };
-    use macros::deterministic_id_test;
 
-    #[deterministic_id_test]
+    #[test]
     fn test_landmark_choice_and_disutility_calculation() {
         let network = get_triangle_test_network();
         let graph = net_to_graph(&network);

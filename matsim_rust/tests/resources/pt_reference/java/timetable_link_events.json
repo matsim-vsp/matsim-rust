@@ -1,0 +1,693 @@
+{
+  "schema_version" : 3,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "321c5a49bc9e33eff22487bc994d2e37ff70a450b5a041db30e48c7152d5f265",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 30600.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "../timetable_mixed/plans.xml",
+      "sha256" : "56e848522feeabb3751bf8aa78a050cc766f65ecd464761642e5850d1c3a815a"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_vehicles",
+      "path" : "../timetable_mixed/transitVehicles.xml",
+      "sha256" : "6c1717da56e9f069a3314917ed9ef784af695663cfb0c8d4c6da0dbef9a5138e"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "../timetable_mixed/transitSchedule.xml",
+      "sha256" : "96ddbeb51818a80c66887d79d82dcb95e63da9cecf5b12e77040d3a889d6e74f"
+    } ]
+  },
+  "itineraries" : [ ],
+  "trees" : [ ],
+  "events" : [ {
+    "time" : 27000.0,
+    "type" : "actend",
+    "person" : "train-to-bus-transfer",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27000.0,
+    "type" : "departure",
+    "person" : "train-to-bus-transfer",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 27000.0,
+    "type" : "waitingForPt",
+    "person" : "train-to-bus-transfer",
+    "atStop" : "1",
+    "destinationStop" : "3"
+  }, {
+    "time" : 27000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_Blue Line_1to3_train-0730",
+    "vehicleId" : "train-0730",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "train-0730"
+  }, {
+    "time" : 27000.0,
+    "type" : "departure",
+    "person" : "pt_Blue Line_1to3_train-0730",
+    "legMode" : "train",
+    "link" : "11"
+  }, {
+    "time" : 27000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_Blue Line_1to3_train-0730",
+    "vehicle" : "train-0730"
+  }, {
+    "time" : 27000.0,
+    "type" : "vehicle enters traffic",
+    "person" : "pt_Blue Line_1to3_train-0730",
+    "link" : "11",
+    "vehicle" : "train-0730",
+    "networkMode" : "train",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 27000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0730",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 27001.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "train-to-bus-transfer",
+    "vehicle" : "train-0730"
+  }, {
+    "time" : 27003.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0730",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 27004.0,
+    "type" : "left link",
+    "vehicle" : "train-0730",
+    "link" : "11"
+  }, {
+    "time" : 27004.0,
+    "type" : "entered link",
+    "vehicle" : "train-0730",
+    "link" : "12"
+  }, {
+    "time" : 27200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0730",
+    "facility" : "2a",
+    "delay" : 0.0
+  }, {
+    "time" : 27240.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0730",
+    "facility" : "2a",
+    "delay" : 0.0
+  }, {
+    "time" : 27241.0,
+    "type" : "left link",
+    "vehicle" : "train-0730",
+    "link" : "12"
+  }, {
+    "time" : 27241.0,
+    "type" : "entered link",
+    "vehicle" : "train-0730",
+    "link" : "23"
+  }, {
+    "time" : 27532.0,
+    "type" : "left link",
+    "vehicle" : "train-0730",
+    "link" : "23"
+  }, {
+    "time" : 27532.0,
+    "type" : "entered link",
+    "vehicle" : "train-0730",
+    "link" : "33"
+  }, {
+    "time" : 27540.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0730",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27541.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "train-to-bus-transfer",
+    "vehicle" : "train-0730"
+  }, {
+    "time" : 27541.0,
+    "type" : "arrival",
+    "person" : "train-to-bus-transfer",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 27541.0,
+    "type" : "actstart",
+    "person" : "train-to-bus-transfer",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27541.0,
+    "type" : "actend",
+    "person" : "train-to-bus-transfer",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27541.0,
+    "type" : "departure",
+    "person" : "train-to-bus-transfer",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 27541.0,
+    "type" : "waitingForPt",
+    "person" : "train-to-bus-transfer",
+    "atStop" : "3",
+    "destinationStop" : "1"
+  }, {
+    "time" : 27543.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0730",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27543.0,
+    "type" : "vehicle leaves traffic",
+    "person" : "pt_Blue Line_1to3_train-0730",
+    "link" : "33",
+    "vehicle" : "train-0730",
+    "networkMode" : "train",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 27543.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_Blue Line_1to3_train-0730",
+    "vehicle" : "train-0730"
+  }, {
+    "time" : 27543.0,
+    "type" : "arrival",
+    "person" : "pt_Blue Line_1to3_train-0730",
+    "legMode" : "train",
+    "link" : "33"
+  }, {
+    "time" : 27600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_Blue Line_3to1_bus-0740",
+    "vehicleId" : "bus-0740",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "bus-0740"
+  }, {
+    "time" : 27600.0,
+    "type" : "departure",
+    "person" : "pt_Blue Line_3to1_bus-0740",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 27600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_Blue Line_3to1_bus-0740",
+    "vehicle" : "bus-0740"
+  }, {
+    "time" : 27600.0,
+    "type" : "vehicle enters traffic",
+    "person" : "pt_Blue Line_3to1_bus-0740",
+    "link" : "33",
+    "vehicle" : "bus-0740",
+    "networkMode" : "car",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 27600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus-0740",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27601.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "train-to-bus-transfer",
+    "vehicle" : "bus-0740"
+  }, {
+    "time" : 27603.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus-0740",
+    "facility" : "3",
+    "delay" : 3.0
+  }, {
+    "time" : 27604.0,
+    "type" : "left link",
+    "vehicle" : "bus-0740",
+    "link" : "33"
+  }, {
+    "time" : 27604.0,
+    "type" : "entered link",
+    "vehicle" : "bus-0740",
+    "link" : "32"
+  }, {
+    "time" : 27787.0,
+    "type" : "actend",
+    "person" : "capacity-b",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "departure",
+    "person" : "capacity-b",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "waitingForPt",
+    "person" : "capacity-b",
+    "atStop" : "1",
+    "destinationStop" : "3"
+  }, {
+    "time" : 27787.0,
+    "type" : "actend",
+    "person" : "capacity-a",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "departure",
+    "person" : "capacity-a",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "waitingForPt",
+    "person" : "capacity-a",
+    "atStop" : "1",
+    "destinationStop" : "3"
+  }, {
+    "time" : 27904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus-0740",
+    "facility" : "2b",
+    "delay" : 4.0
+  }, {
+    "time" : 27904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus-0740",
+    "facility" : "2b",
+    "delay" : -36.0
+  }, {
+    "time" : 27905.0,
+    "type" : "left link",
+    "vehicle" : "bus-0740",
+    "link" : "32"
+  }, {
+    "time" : 27905.0,
+    "type" : "entered link",
+    "vehicle" : "bus-0740",
+    "link" : "21"
+  }, {
+    "time" : 28106.0,
+    "type" : "left link",
+    "vehicle" : "bus-0740",
+    "link" : "21"
+  }, {
+    "time" : 28106.0,
+    "type" : "entered link",
+    "vehicle" : "bus-0740",
+    "link" : "11"
+  }, {
+    "time" : 28107.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus-0740",
+    "facility" : "1",
+    "delay" : -33.0
+  }, {
+    "time" : 28108.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "train-to-bus-transfer",
+    "vehicle" : "bus-0740"
+  }, {
+    "time" : 28108.0,
+    "type" : "arrival",
+    "person" : "train-to-bus-transfer",
+    "legMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 28108.0,
+    "type" : "actstart",
+    "person" : "train-to-bus-transfer",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28110.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus-0740",
+    "facility" : "1",
+    "delay" : -30.0
+  }, {
+    "time" : 28110.0,
+    "type" : "vehicle leaves traffic",
+    "person" : "pt_Blue Line_3to1_bus-0740",
+    "link" : "11",
+    "vehicle" : "bus-0740",
+    "networkMode" : "car",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 28110.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_Blue Line_3to1_bus-0740",
+    "vehicle" : "bus-0740"
+  }, {
+    "time" : 28110.0,
+    "type" : "arrival",
+    "person" : "pt_Blue Line_3to1_bus-0740",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_Blue Line_1to3_train-0750",
+    "vehicleId" : "train-0750",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "train-0750"
+  }, {
+    "time" : 28200.0,
+    "type" : "departure",
+    "person" : "pt_Blue Line_1to3_train-0750",
+    "legMode" : "train",
+    "link" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_Blue Line_1to3_train-0750",
+    "vehicle" : "train-0750"
+  }, {
+    "time" : 28200.0,
+    "type" : "vehicle enters traffic",
+    "person" : "pt_Blue Line_1to3_train-0750",
+    "link" : "11",
+    "vehicle" : "train-0750",
+    "networkMode" : "train",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 28200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0750",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28201.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "capacity-b",
+    "vehicle" : "train-0750"
+  }, {
+    "time" : 28203.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0750",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28204.0,
+    "type" : "left link",
+    "vehicle" : "train-0750",
+    "link" : "11"
+  }, {
+    "time" : 28204.0,
+    "type" : "entered link",
+    "vehicle" : "train-0750",
+    "link" : "12"
+  }, {
+    "time" : 28400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0750",
+    "facility" : "2a",
+    "delay" : 0.0
+  }, {
+    "time" : 28440.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0750",
+    "facility" : "2a",
+    "delay" : 0.0
+  }, {
+    "time" : 28441.0,
+    "type" : "left link",
+    "vehicle" : "train-0750",
+    "link" : "12"
+  }, {
+    "time" : 28441.0,
+    "type" : "entered link",
+    "vehicle" : "train-0750",
+    "link" : "23"
+  }, {
+    "time" : 28732.0,
+    "type" : "left link",
+    "vehicle" : "train-0750",
+    "link" : "23"
+  }, {
+    "time" : 28732.0,
+    "type" : "entered link",
+    "vehicle" : "train-0750",
+    "link" : "33"
+  }, {
+    "time" : 28740.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0750",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 28741.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "capacity-b",
+    "vehicle" : "train-0750"
+  }, {
+    "time" : 28741.0,
+    "type" : "arrival",
+    "person" : "capacity-b",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 28741.0,
+    "type" : "actstart",
+    "person" : "capacity-b",
+    "actType" : "w",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28743.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0750",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 28743.0,
+    "type" : "vehicle leaves traffic",
+    "person" : "pt_Blue Line_1to3_train-0750",
+    "link" : "33",
+    "vehicle" : "train-0750",
+    "networkMode" : "train",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 28743.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_Blue Line_1to3_train-0750",
+    "vehicle" : "train-0750"
+  }, {
+    "time" : 28743.0,
+    "type" : "arrival",
+    "person" : "pt_Blue Line_1to3_train-0750",
+    "legMode" : "train",
+    "link" : "33"
+  }, {
+    "time" : 28800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_Blue Line_1to3_train-0800",
+    "vehicleId" : "train-0800",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "train-0800"
+  }, {
+    "time" : 28800.0,
+    "type" : "departure",
+    "person" : "pt_Blue Line_1to3_train-0800",
+    "legMode" : "train",
+    "link" : "11"
+  }, {
+    "time" : 28800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_Blue Line_1to3_train-0800",
+    "vehicle" : "train-0800"
+  }, {
+    "time" : 28800.0,
+    "type" : "vehicle enters traffic",
+    "person" : "pt_Blue Line_1to3_train-0800",
+    "link" : "11",
+    "vehicle" : "train-0800",
+    "networkMode" : "train",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 28800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0800",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28801.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "capacity-a",
+    "vehicle" : "train-0800"
+  }, {
+    "time" : 28803.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0800",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28804.0,
+    "type" : "left link",
+    "vehicle" : "train-0800",
+    "link" : "11"
+  }, {
+    "time" : 28804.0,
+    "type" : "entered link",
+    "vehicle" : "train-0800",
+    "link" : "12"
+  }, {
+    "time" : 29000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0800",
+    "facility" : "2a",
+    "delay" : 0.0
+  }, {
+    "time" : 29040.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0800",
+    "facility" : "2a",
+    "delay" : 0.0
+  }, {
+    "time" : 29041.0,
+    "type" : "left link",
+    "vehicle" : "train-0800",
+    "link" : "12"
+  }, {
+    "time" : 29041.0,
+    "type" : "entered link",
+    "vehicle" : "train-0800",
+    "link" : "23"
+  }, {
+    "time" : 29332.0,
+    "type" : "left link",
+    "vehicle" : "train-0800",
+    "link" : "23"
+  }, {
+    "time" : 29332.0,
+    "type" : "entered link",
+    "vehicle" : "train-0800",
+    "link" : "33"
+  }, {
+    "time" : 29340.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "train-0800",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 29341.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "capacity-a",
+    "vehicle" : "train-0800"
+  }, {
+    "time" : 29341.0,
+    "type" : "arrival",
+    "person" : "capacity-a",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 29341.0,
+    "type" : "actstart",
+    "person" : "capacity-a",
+    "actType" : "w",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 29343.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "train-0800",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 29343.0,
+    "type" : "vehicle leaves traffic",
+    "person" : "pt_Blue Line_1to3_train-0800",
+    "link" : "33",
+    "vehicle" : "train-0800",
+    "networkMode" : "train",
+    "relativePosition" : 1.0
+  }, {
+    "time" : 29343.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_Blue Line_1to3_train-0800",
+    "vehicle" : "train-0800"
+  }, {
+    "time" : 29343.0,
+    "type" : "arrival",
+    "person" : "pt_Blue Line_1to3_train-0800",
+    "legMode" : "train",
+    "link" : "33"
+  }, {
+    "time" : 30000.0,
+    "type" : "actend",
+    "person" : "stranded-at-end",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 30000.0,
+    "type" : "departure",
+    "person" : "stranded-at-end",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 30000.0,
+    "type" : "waitingForPt",
+    "person" : "stranded-at-end",
+    "atStop" : "1",
+    "destinationStop" : "3"
+  }, {
+    "time" : 30600.0,
+    "type" : "stuckAndAbort",
+    "person" : "stranded-at-end",
+    "link" : "11",
+    "legMode" : "pt"
+  } ]
+}

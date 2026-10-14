@@ -5,10 +5,10 @@ use crate::simulation::analysis::spot_speed::CarSpotSpeedSampler;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
+use crate::simulation::engines::timetable_transit_engine::TimetableTransitEngine;
 use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::PersonStuckEventBuilder;
 use crate::simulation::framework_events::MobsimEvent;
-use crate::simulation::messaging::messages::InternalSyncMessage;
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::population::agent_source::DynAgentSource;
@@ -25,15 +25,15 @@ pub struct Simulation<C: SimCommunicator> {
     start_tick: Tick,
     end_tick: Tick,
     clock: SimClock,
-    spot_speed_sampler: Option<CarSpotSpeedSampler>,
+    pending_leg_agents: Vec<(Tick, SimulationAgent)>,
+    car_spot_speed_sampler: Option<CarSpotSpeedSampler>,
 }
 
 impl<C> Simulation<C>
 where
     C: SimCommunicator,
 {
-    #[hotpath::measure]
-    #[tracing::instrument(level = "info", skip(self), fields(rank = self.leg_engine.net_message_broker().rank(), iteration = self.comp_env.mobsim_events_manager_borrow_mut().iteration()))]
+    #[tracing::instrument(level = "info", skip(self), fields(rank = self.leg_engine.net_message_broker().rank()))]
     pub fn run(&mut self) -> Vec<SimulationAgent> {
         // use fixed start and end times
         let mut now = self.start_tick;
@@ -70,17 +70,19 @@ where
 
             agents_changing_engine = self.do_sim_step(now, agents_changing_engine);
 
-            if let Some(sampler) = &mut self.spot_speed_sampler {
-                let period = sampler.period_seconds();
-                if outward_now.is_multiple_of(period as u64) {
-                    let samples = self.leg_engine.network().car_spot_speed_samples(now);
-                    sampler.sample(outward_now, samples);
-                }
-            }
-
             self.comp_env
                 .mobsim_events_manager_borrow_mut()
                 .process_event(MobsimEvent::after_sim_step(now_time));
+
+            if let Some(sampler) = &mut self.car_spot_speed_sampler {
+                let now_seconds = self.clock.tick_to_secs(now);
+                if now_seconds.is_multiple_of(sampler.period_seconds() as u64) {
+                    sampler.sample(
+                        now_seconds,
+                        self.leg_engine.network().car_spot_speed_samples(now),
+                    );
+                }
+            }
 
             now = now.next();
         }
@@ -91,16 +93,25 @@ where
             .into_iter()
             .chain(self.leg_engine.drain())
             .chain(agents_changing_engine)
+            .chain(self.pending_leg_agents.drain(..).map(|(_, agent)| agent))
             .collect::<Vec<_>>();
 
         // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
         self.emit_stuck_events(self.clock.tick_to_time(self.end_tick), &agents);
-        if let Some(sampler) = self.spot_speed_sampler.take() {
-            sampler
-                .write()
-                .unwrap_or_else(|error| panic!("Failed to write car spot-speed metrics: {error}"));
+        if let Some(sampler) = self.car_spot_speed_sampler.take() {
+            if let Err(error) = sampler.write() {
+                tracing::error!(%error, "Failed to write car spot-speed samples");
+            }
         }
         agents
+    }
+
+    pub fn take_unprocessed_messages(
+        &mut self,
+    ) -> Vec<crate::simulation::messaging::messages::InternalSyncMessage> {
+        self.leg_engine
+            .net_message_broker_mut()
+            .take_unprocessed_messages()
     }
 
     fn emit_stuck_events(&mut self, time: SimTime, agents: &[SimulationAgent]) {
@@ -137,20 +148,23 @@ where
     }
 
     /// Performs a sim step for the activity engine and the leg engine.
-    /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
+    /// Leg arrivals start their next activity in the same tick; resulting legs enter the leg engine
+    /// on the next exchange while keeping their original event time.
     #[hotpath::measure]
     fn do_sim_step(&mut self, now: Tick, agents: Vec<SimulationAgent>) -> Vec<SimulationAgent> {
         let agents_act_to_leg = self.activity_engine.do_step(now, agents);
-
-        self.leg_engine.do_step(now, agents_act_to_leg)
-    }
-
-    /// Returns the messages this partition received but never processed. Must be called by all partitions after [`Simulation::run`],
-    /// see [`NetMessageBroker::take_unprocessed_messages`]. Internally syncs all partitions to ensure that all messages have been sent and received.
-    pub fn take_unprocessed_messages(&mut self) -> Vec<InternalSyncMessage> {
-        self.leg_engine
-            .net_message_broker_mut()
-            .take_unprocessed_messages()
+        for (event_time, agent) in self.pending_leg_agents.drain(..) {
+            self.leg_engine
+                .receive_agents_at(now, event_time, vec![agent]);
+        }
+        let agents_leg_to_act = self.leg_engine.do_step(now, agents_act_to_leg);
+        self.pending_leg_agents = self
+            .activity_engine
+            .complete_legs_same_tick(now, agents_leg_to_act)
+            .into_iter()
+            .map(|agent| (now, agent))
+            .collect();
+        Vec::new()
     }
 
     pub(crate) fn is_local_route(
@@ -211,6 +225,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             network_partition,
             ..
         } = self.input.partition;
+        let partition = network_partition.partition();
 
         let activity_engine = ActivityEngineBuilder::new(
             agents.into_values().collect(),
@@ -229,7 +244,16 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
                 clock.tick_to_time(start_tick),
             )
         });
-        let partition = network_partition.partition();
+        let timetable_transit_engine = scenario.config.transit().simulate_vehicles.then(|| {
+            TimetableTransitEngine::new(
+                &scenario,
+                network_partition.partition(),
+                self.comp_env.clone(),
+                clock,
+                clock.tick_to_time(start_tick),
+                self.iteration,
+            )
+        });
 
         let leg_engine = LegEngine::new(
             network_partition,
@@ -238,12 +262,15 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             scenario.config.qsim(),
             self.comp_env.clone(),
             transit_engine,
+            timetable_transit_engine,
         );
-        let spot_speed_sampler = scenario
+
+        let car_spot_speed_sampler = scenario
             .config
             .output()
             .analysis
             .car_spot_speed_sample_period_seconds
+            .filter(|period| *period > 0)
             .map(|period| {
                 CarSpotSpeedSampler::new(
                     scenario.config.output().output_dir.clone(),
@@ -260,7 +287,8 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             start_tick: clock.secs_to_tick(scenario.config.qsim().start_time as u64),
             end_tick: clock.secs_to_tick(scenario.config.qsim().end_time as u64),
             clock,
-            spot_speed_sampler,
+            pending_leg_agents: Vec::new(),
+            car_spot_speed_sampler,
         }
     }
 }

@@ -23,7 +23,8 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use tracing::{info, trace, warn};
+use std::sync::Arc;
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StorageUpdate {
@@ -128,14 +129,13 @@ enum FrontDecision {
 
 impl SimNetworkPartition {
     pub(crate) fn car_spot_speed_samples(&self, now: Tick) -> Vec<CarSpotSpeedSample> {
-        let mut links: Vec<_> = self.active_links.into_iter().collect();
-        links.sort_unstable_by_key(|id| id.internal());
+        let mut ids: Vec<_> = self.active_links.into_iter().collect();
+        ids.sort_unstable_by_key(|id| id.internal());
         let mut samples = Vec::new();
-        for id in links {
-            self.links
-                .get(id)
-                .unwrap()
-                .append_car_spot_speed_samples(now, &mut samples);
+        for id in ids {
+            if let Some(link) = self.links.get(id) {
+                link.append_car_spot_speed_samples(now, &mut samples);
+            }
         }
         samples
     }
@@ -146,6 +146,24 @@ impl SimNetworkPartition {
         partition: u32,
         config: &config::Config,
         signals: &Signals,
+    ) -> Self {
+        Self::from_network_with_feedback(
+            global_network,
+            storage_capacities,
+            partition,
+            config,
+            signals,
+            Arc::default(),
+        )
+    }
+
+    pub(crate) fn from_network_with_feedback(
+        global_network: &Network,
+        storage_capacities: &LinkStorageCapacities,
+        partition: u32,
+        config: &config::Config,
+        signals: &Signals,
+        feedback: Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
     ) -> Self {
         let qsim_config = config.qsim();
         let clock = SimClock::new(qsim_config.ticks_per_second);
@@ -197,6 +215,7 @@ impl SimNetworkPartition {
             clock,
             qsim_config.remove_stuck_vehicles,
             partition_signals,
+            feedback,
         )
     }
 
@@ -284,6 +303,7 @@ impl SimNetworkPartition {
         clock: SimClock,
         remove_stuck_vehicles: bool,
         signals: Signals,
+        feedback: Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
     ) -> Self {
         // Initialize RNG with a seed based on the base seed and node id
         let rng = nodes
@@ -308,7 +328,7 @@ impl SimNetworkPartition {
             remove_stuck_vehicles,
             stuck_agents: Vec::new(),
             signals,
-            transit_stops: TransitStops::default(),
+            transit_stops: TransitStops::with_feedback(feedback),
         }
     }
 
@@ -481,6 +501,11 @@ impl SimNetworkPartition {
             vehicles_exit_partition,
             vehicles_end_leg,
             passengers_end_leg: self.transit_stops.take_alighted(),
+            // Stranded agents leave the network in this step's result rather than waiting for
+            // `drain`, so the caller can resume them at their next activity. Anything stranded on
+            // the final step is picked up there, because `Simulation::run` chains the engine's
+            // per-step result into its end-of-day drain.
+            agents_stuck: std::mem::take(&mut self.stuck_agents),
             storage_cap_updates,
         }
     }
@@ -581,37 +606,6 @@ impl SimNetworkPartition {
         now: Tick,
     ) -> bool {
         let node = self.nodes.get(node_id).unwrap();
-        for in_id in &node.in_links {
-            let in_link = self.links.get(in_id).unwrap();
-            let Some(vehicle) = in_link.flow_limited_front(now) else {
-                continue;
-            };
-            let Some(next_id) = vehicle.peek_next_route_element() else {
-                continue;
-            };
-            let Some(out_link) = self.links.get(next_id) else {
-                continue;
-            };
-            if in_link.traces_discharge() || out_link.traces_discharge() {
-                info!(
-                    target: "matsim_rust::qsim::discharge_trace",
-                    event = "[QSIM-DISCHARGE-TRACE]",
-                    tick = ?now,
-                    vehicle = vehicle.id().external(),
-                    from_link = in_id.external(),
-                    to_link = next_id.external(),
-                    decision = "blocked_flow_capacity",
-                    source_flow_remaining = in_link.flow_remaining(),
-                    receiving_storage_used = out_link.used_storage(),
-                    receiving_storage_capacity = out_link.max_storage(),
-                    signal_allows = self.signals.allows_departure(
-                        in_id,
-                        self.clock.tick_to_secs(now) as u32
-                    ),
-                    "front vehicle cannot enter the candidate link because source flow budget is exhausted"
-                );
-            }
-        }
         let (mut candidates, mut total_capacity) =
             Self::get_candidates(&node.in_links, &self.links);
         let rng = self.rng.get_mut(node_id).unwrap();
@@ -725,135 +719,19 @@ impl SimNetworkPartition {
         // The plan is expressed in whole seconds and the sim day is 24 h, so the
         // tick-derived second is always in range; the cast is exact for that span.
         let at_red = !signals.allows_departure(in_id, clock.tick_to_secs(now) as u32);
-        let trace_discharge = in_link.traces_discharge() || out_link.traces_discharge();
         if at_red {
-            if trace_discharge {
-                info!(
-                    target: "matsim_rust::qsim::discharge_trace",
-                    event = "[QSIM-DISCHARGE-TRACE]",
-                    tick = ?now,
-                    vehicle = vehicle.id().external(),
-                    from_link = in_id.external(),
-                    to_link = next_id.external(),
-                    decision = "held_signal",
-                    source_flow_remaining = in_link.flow_remaining(),
-                    receiving_storage_used = out_link.used_storage(),
-                    receiving_storage_capacity = out_link.max_storage(),
-                    "candidate movement is held at a red signal"
-                );
-            }
-            if out_link.traces_storage_acceptance() {
-                info!(
-                    target: "matsim_rust::qsim::storage_acceptance",
-                    event = "[STORAGE-ACCEPTANCE]",
-                    tick = ?now,
-                    vehicle = vehicle.id().external(),
-                    from_link = in_id.external(),
-                    to_link = next_id.external(),
-                    decision = "held_by_signal",
-                    receiving_storage_used = out_link.used_storage(),
-                    receiving_storage_capacity = out_link.max_storage(),
-                    vehicle_pce = vehicle.pce(),
-                    "storage admission not evaluated because signal is red"
-                );
-            }
             return FrontDecision::WaitAtRedSignal;
         }
-        let storage_available = out_link.is_available();
-        if trace_discharge {
-            info!(
-                target: "matsim_rust::qsim::discharge_trace",
-                event = "[QSIM-DISCHARGE-TRACE]",
-                tick = ?now,
-                vehicle = vehicle.id().external(),
-                from_link = in_id.external(),
-                to_link = next_id.external(),
-                decision = if storage_available { "space_available" } else { "blocked_storage" },
-                source_flow_remaining = in_link.flow_remaining(),
-                receiving_storage_used = out_link.used_storage(),
-                receiving_storage_capacity = out_link.max_storage(),
-                "candidate movement decision"
-            );
-        }
-        if out_link.traces_storage_acceptance() {
-            info!(
-                target: "matsim_rust::qsim::storage_acceptance",
-                event = "[STORAGE-ACCEPTANCE]",
-                tick = ?now,
-                vehicle = vehicle.id().external(),
-                from_link = in_id.external(),
-                to_link = next_id.external(),
-                decision = if storage_available { "accept" } else { "block_storage" },
-                receiving_storage_used = out_link.used_storage(),
-                receiving_storage_capacity = out_link.max_storage(),
-                remaining_storage = out_link.max_storage() - out_link.used_storage(),
-                vehicle_pce = vehicle.pce(),
-                "QSim storage acceptance decision"
-            );
-        }
-        if storage_available {
+        if out_link.is_available() {
             FrontDecision::MoveNormally
-        } else {
-            let stuck = in_link.is_veh_stuck(now);
-            if clock.tick_to_secs(now).is_multiple_of(60) {
-                info!(
-                    target: "matsim_rust::qsim::blocked_movement",
-                    event = "[BLOCKED-MOVE-SAMPLE]",
-                    tick = ?now,
-                    vehicle = vehicle.id().external(),
-                    from_link = in_id.external(),
-                    to_link = next_id.external(),
-                    receiving_storage_used = out_link.used_storage(),
-                    receiving_storage_capacity = out_link.max_storage(),
-                    stuck,
-                    "vehicle cannot enter its next link at the minute sample"
-                );
-            }
-            trace!(
-                target: "matsim_rust::qsim::blocked_movement",
-                event = "[BLOCKED-MOVE]",
-                tick = ?now,
-                vehicle = vehicle.id().external(),
-                from_link = in_id.external(),
-                to_link = next_id.external(),
-                receiving_storage_used = out_link.used_storage(),
-                receiving_storage_capacity = out_link.max_storage(),
-                stuck,
-                "vehicle cannot enter its next link"
-            );
-            if stuck {
-                if remove_stuck_vehicles {
-                    info!(
-                        target: "matsim_rust::qsim::blocked_movement",
-                        event = "[BLOCKED-MOVE-PERSISTENT]",
-                        tick = ?now,
-                        vehicle = vehicle.id().external(),
-                        from_link = in_id.external(),
-                        to_link = next_id.external(),
-                        receiving_storage_used = out_link.used_storage(),
-                        receiving_storage_capacity = out_link.max_storage(),
-                        action = "remove_stuck",
-                        "vehicle remained blocked until stuck threshold"
-                    );
-                    FrontDecision::RemoveStuck
-                } else {
-                    info!(
-                        target: "matsim_rust::qsim::blocked_movement",
-                        event = "[BLOCKED-MOVE-PERSISTENT]",
-                        tick = ?now,
-                        vehicle = vehicle.id().external(),
-                        from_link = in_id.external(),
-                        to_link = next_id.external(),
-                        receiving_storage_used = out_link.used_storage(),
-                        receiving_storage_capacity = out_link.max_storage(),
-                        action = "forced_move",
-                        "vehicle remained blocked until stuck threshold"
-                    );
-                    FrontDecision::MoveAlthoughStuck
-                }
+        } else if in_link.is_veh_stuck(now) {
+            if remove_stuck_vehicles {
+                FrontDecision::RemoveStuck
             } else {
-                FrontDecision::Wait
+                FrontDecision::MoveAlthoughStuck
             }
+        } else {
+            FrontDecision::Wait
         }
     }
 
@@ -1005,6 +883,10 @@ pub struct MoveAllLinksResult {
     pub vehicles_end_leg: Vec<SimulationVehicle>,
     /// Transit passengers who got off at a stop; their arrival has been published already.
     pub passengers_end_leg: Vec<SimulationAgent>,
+    /// Agents whose vehicle was removed because it was stuck. Their `stuckAndAbort` event has
+    /// already been published, and their leg produced no arrival, so the caller must not publish
+    /// one for them either.
+    pub agents_stuck: Vec<SimulationAgent>,
     pub storage_cap_updates: Vec<StorageUpdate>,
 }
 
@@ -1577,7 +1459,7 @@ mod tests {
         let register = XmlEventsWriter::register_fn("test_output/test.xml");
         register(&mut env.events_manager_borrow_mut());
 
-        let global_net = Network::from_file_with_partitioning(
+        let global_net = Network::from_file(
             "./assets/3-links/3-links-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),
@@ -1624,7 +1506,7 @@ mod tests {
     #[deterministic_id_test]
     fn vehicle_reaches_boundary() {
         let mut env = Default::default();
-        let global_net = Network::from_file_with_partitioning(
+        let global_net = Network::from_file(
             "./assets/3-links/3-links-network.xml",
             2,
             &PartitionMethod::None,
@@ -1663,7 +1545,7 @@ mod tests {
     /// test helper but is called per test anyway to keep each test's ids local.
     #[cfg(test)]
     fn three_link_network() -> Network {
-        Network::from_file_with_partitioning(
+        Network::from_file(
             "./assets/3-links/3-links-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),
@@ -1825,7 +1707,7 @@ mod tests {
     #[deterministic_id_test]
     fn move_nodes_enter_exit_constraint() {
         let mut env = Default::default();
-        let global_net = Network::from_file_with_partitioning(
+        let global_net = Network::from_file(
             "./assets/3-links/3-links-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),
@@ -1856,7 +1738,7 @@ mod tests {
     #[deterministic_id_test]
     fn move_nodes_storage_cap_constraint() {
         let mut env = ThreadLocalComputationalEnvironment::default();
-        let mut global_net = Network::from_file_with_partitioning(
+        let mut global_net = Network::from_file(
             "./assets/3-links/3-links-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),
@@ -1955,7 +1837,7 @@ mod tests {
     fn move_nodes_stuck_threshold() {
         let mut env = ThreadLocalComputationalEnvironment::default();
         XmlEventsWriter::register_fn("test_output/test.xml")(&mut env.events_manager_borrow_mut());
-        let mut global_net = Network::from_file_with_partitioning(
+        let mut global_net = Network::from_file(
             "./assets/3-links/3-links-network.xml",
             1,
             &PartitionMethod::Metis(MetisOptions::default()),

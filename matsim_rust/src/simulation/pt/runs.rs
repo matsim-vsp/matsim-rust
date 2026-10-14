@@ -25,6 +25,8 @@ use std::time::Duration;
 pub struct ServiceRoute {
     pub line: Id<TransitLine>,
     pub route: Id<TransitRoute>,
+    pub transport_mode: Id<String>,
+    pub deterministic: bool,
     /// The full route, departure and arrival link included.
     pub links: Vec<Id<Link>>,
     link_lengths: Vec<f64>,
@@ -38,6 +40,8 @@ pub struct ServiceStop {
     pub arrival_offset: Option<Duration>,
     pub departure_offset: Option<Duration>,
     pub await_departure: bool,
+    pub allow_boarding: bool,
+    pub allow_alighting: bool,
     /// A blocking stop holds the vehicle in its lane, so traffic behind it waits too.
     pub is_blocking: bool,
 }
@@ -103,6 +107,13 @@ impl VehicleRun {
     pub fn start_link(&self) -> &Id<Link> {
         &self.legs[0].links()[0]
     }
+
+    pub fn is_deterministic(&self) -> bool {
+        matches!(
+            &self.legs[0],
+            RunLeg::Service { route, .. } if route.deterministic
+        )
+    }
 }
 
 /// All vehicle runs of a scenario, built once and shared by every partition.
@@ -129,6 +140,7 @@ impl TransitVehicleRuns {
         schedule: &TransitSchedule,
         garage: &Garage,
         network: &Network,
+        deterministic_service_modes: &[String],
     ) -> Result<Self, String> {
         let mut pieces = Vec::new();
         let mut lines: Vec<_> = schedule.lines().values().collect();
@@ -140,7 +152,13 @@ impl TransitVehicleRuns {
                 if route.departures.is_empty() {
                     continue;
                 }
-                let service = Arc::new(service_route(schedule, network, line.id.clone(), route)?);
+                let service = Arc::new(service_route(
+                    schedule,
+                    network,
+                    line.id.clone(),
+                    route,
+                    deterministic_service_modes,
+                )?);
                 for departure in &route.departures {
                     let vehicle = departure
                         .vehicle_ref_id
@@ -168,7 +186,19 @@ impl TransitVehicleRuns {
         pieces.sort_by_key(|(time, ..)| *time);
 
         let mut by_vehicle: IntMap<Id<InternalVehicle>, Vec<RunLeg>> = IntMap::default();
+        let mut timetable_runs = Vec::new();
         for (departure_time, vehicle, route, departure) in pieces {
+            let service_leg = RunLeg::Service {
+                route: route.clone(),
+                departure: departure.clone(),
+                departure_time,
+            };
+            if route.deterministic {
+                // shortcut: deterministic departures do not share vehicle turnaround state; add
+                // chained timetable runs when a vehicle must continue across departures.
+                timetable_runs.push((vehicle, service_leg));
+                continue;
+            }
             let legs = by_vehicle.entry(vehicle).or_default();
             if let Some(previous) = legs.last() {
                 // MATSim's `UmlaufInterpolator.addUmlaufStueckToUmlauf`: a deadhead joins two
@@ -182,11 +212,7 @@ impl TransitVehicleRuns {
                     });
                 }
             }
-            legs.push(RunLeg::Service {
-                route,
-                departure,
-                departure_time,
-            });
+            legs.push(service_leg);
         }
 
         // Drivers build their plans and events from these ids on the mobsim threads. Creating
@@ -221,6 +247,51 @@ impl TransitVehicleRuns {
                 legs,
             }));
         }
+        timetable_runs.sort_by(|(vehicle_a, leg_a), (vehicle_b, leg_b)| {
+            let service_key = |leg: &RunLeg| match leg {
+                RunLeg::Service {
+                    route, departure, ..
+                } => (
+                    route.line.external().to_owned(),
+                    route.route.external().to_owned(),
+                    departure.external().to_owned(),
+                ),
+                RunLeg::Deadhead { .. } => unreachable!(),
+            };
+            service_key(leg_a)
+                .cmp(&service_key(leg_b))
+                .then_with(|| vehicle_a.external().cmp(vehicle_b.external()))
+        });
+        for (vehicle, leg) in timetable_runs {
+            let vehicle_type = &garage.vehicles[&vehicle].vehicle_type;
+            let capacity = garage.vehicle_types[vehicle_type]
+                .capacity
+                .map(|capacity| capacity.persons())
+                .unwrap_or(0);
+            if capacity == 0 {
+                return Err(format!(
+                    "Transit vehicle {vehicle} has type {vehicle_type}, which declares no passenger capacity."
+                ));
+            }
+            let RunLeg::Service {
+                route, departure, ..
+            } = &leg
+            else {
+                unreachable!();
+            };
+            let driver = Id::create(&format!(
+                "pt_{}_{}_{}",
+                route.line.external(),
+                route.route.external(),
+                departure.external()
+            ));
+            drivers.insert(driver.clone());
+            runs.push(Arc::new(VehicleRun {
+                driver,
+                vehicle,
+                legs: vec![leg],
+            }));
+        }
         Ok(Self { runs, drivers })
     }
 }
@@ -230,6 +301,7 @@ fn service_route(
     network: &Network,
     line: Id<TransitLine>,
     route: &TransitRoute,
+    deterministic_service_modes: &[String],
 ) -> Result<ServiceRoute, String> {
     let describe = || format!("transit route {} on line {}", route.id, line);
     if route.network_route.is_empty() {
@@ -288,6 +360,8 @@ fn service_route(
             arrival_offset: stop.arrival_offset,
             departure_offset: stop.departure_offset,
             await_departure: stop.await_departure.unwrap_or(false),
+            allow_boarding: stop.allow_boarding,
+            allow_alighting: stop.allow_alighting,
             is_blocking: facility.is_blocking.unwrap_or(false),
         });
     }
@@ -295,6 +369,10 @@ fn service_route(
     Ok(ServiceRoute {
         line,
         route: route.id.clone(),
+        transport_mode: route.transport_mode.clone(),
+        deterministic: deterministic_service_modes
+            .iter()
+            .any(|mode| mode == route.transport_mode.external()),
         links: route.network_route.clone(),
         link_lengths,
         stops,
@@ -398,7 +476,7 @@ mod tests {
     #[deterministic_id_test]
     fn tutorial_vehicles_alternate_directions_without_deadheads() {
         let (schedule, garage, network) = pt_tutorial();
-        let runs = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap();
+        let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
 
         let drivers: Vec<_> = runs.runs().iter().map(|r| r.driver.external()).collect();
         assert_eq!(vec!["pt_tr_1_1", "pt_tr_2_1"], drivers);
@@ -430,6 +508,33 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn deterministic_service_modes_split_departures_from_queue_vehicle_runs() {
+        let (schedule, garage, network) = pt_tutorial();
+        let runs =
+            TransitVehicleRuns::build(&schedule, &garage, &network, &["train".into()]).unwrap();
+
+        let timetable_runs: Vec<_> = runs
+            .runs()
+            .iter()
+            .filter(|run| run.is_deterministic())
+            .collect();
+        let queue_runs: Vec<_> = runs
+            .runs()
+            .iter()
+            .filter(|run| !run.is_deterministic())
+            .collect();
+
+        assert_eq!(50, timetable_runs.len());
+        assert_eq!(2, queue_runs.len());
+        assert!(timetable_runs.iter().all(|run| run.legs.len() == 1));
+        assert!(timetable_runs.iter().all(|run| match &run.legs[0] {
+            RunLeg::Service { route, .. } => route.transport_mode.external() == "train",
+            RunLeg::Deadhead { .. } => false,
+        }));
+        assert!(queue_runs.iter().all(|run| !run.legs.is_empty()));
+    }
+
+    #[deterministic_id_test]
     fn unconnected_departures_get_a_freespeed_deadhead() {
         let (mut schedule, garage, network) = pt_tutorial();
         // One vehicle serves two 1to3 departures in a row, so it has to return from link 33
@@ -449,7 +554,7 @@ mod tests {
             }
         }
 
-        let runs = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap();
+        let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
         assert_eq!(1, runs.runs().len());
         let run = &runs.runs()[0];
         assert_eq!(3, run.legs.len());
@@ -469,7 +574,7 @@ mod tests {
     #[deterministic_id_test]
     fn ride_distance_counts_links_after_access_through_egress() {
         let (schedule, garage, network) = pt_tutorial();
-        let runs = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap();
+        let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
         let RunLeg::Service { route, .. } = &runs.runs()[0].legs[0] else {
             panic!()
         };
@@ -498,7 +603,7 @@ mod tests {
                 }
             }
         }
-        let error = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap_err();
+        let error = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap_err();
         assert!(error.contains("names no vehicle"), "{error}");
     }
 
@@ -512,7 +617,7 @@ mod tests {
         let route = line.routes.get_mut(&Id::get_from_ext("1to3")).unwrap();
         // Stop 2b lies on link 32, which 1to3 never drives.
         route.stops[1].facility_id = Id::get_from_ext("2b");
-        let error = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap_err();
+        let error = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap_err();
         assert!(error.contains("stop 2b on link 32"), "{error}");
     }
 }

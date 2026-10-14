@@ -1,55 +1,41 @@
-use crate::simulation::config::{EdgeWeight, MetisOptions, NonMainModeLinks, VertexWeight};
-use crate::simulation::id::Id;
-use crate::simulation::scenario::Coordinate;
-use crate::simulation::scenario::network::{Link, Network, Node};
 use ahash::HashMapExt;
-use itertools::Itertools;
 use metis::{Graph, Idx};
-use nohash_hasher::{IntMap, IntSet};
-use rstar::RTree;
-use rstar::primitives::GeomWithData;
+use nohash_hasher::IntMap;
 use std::collections::BTreeMap;
-use std::sync::{Mutex, PoisonError};
 use tracing::info;
 
-/// Serializes all calls to METIS. METIS is built with GKlib's own random number generator (see
-/// `[patch.crates-io]` in the workspace manifest), whose state is shared by the whole process and
-/// not synchronized. Concurrent calls would race on it and make the partitions irreproducible.
-static METIS_LOCK: Mutex<()> = Mutex::new(());
+use crate::simulation::config::{EdgeWeight, MetisOptions, VertexWeight};
+use crate::simulation::id::Id;
+use crate::simulation::scenario::network::{Link, Network, Node};
 
-/// Partitions the nodes of `network` into `num_parts` parts using METIS.
-///
-/// METIS partitions undirected graphs. Each node becomes a vertex. Each pair of nodes connected
-/// by at least one link becomes one edge, whose weight is the sum of the weights of all links
-/// between both nodes in either direction (see [`EdgeWeight`]), but at least 1. Loop links, whose
-/// `from` and `to` node are the same, are ignored.
 pub fn partition(
     network: &Network,
     num_parts: u32,
     options: &MetisOptions,
 ) -> IntMap<Id<Node>, Idx> {
-    partition_subnetwork(network, &network.nodes(), |_| true, num_parts, options)
+    try_partition(network, num_parts, options)
+        .unwrap_or_else(|error| panic!("METIS partitioning failed: {error}"))
 }
 
-/// Like [`partition`], but only partitions `nodes`, and only the links for which `include_link`
-/// is true become edges or contribute to vertex weights. Both nodes of every included link must be
-/// in `nodes`. The result contains exactly the nodes in `nodes`. Their order determines the order
-/// of the METIS vertices, so it must be reproducible.
-pub fn partition_subnetwork(
+pub fn try_partition(
     network: &Network,
-    nodes: &[&Node],
-    include_link: impl Fn(&Link) -> bool,
     num_parts: u32,
     options: &MetisOptions,
-) -> IntMap<Id<Node>, Idx> {
+) -> Result<IntMap<Id<Node>, Idx>, String> {
     if num_parts <= 1 {
         let mut result = IntMap::new();
-        for node in nodes {
+        for node in network.nodes() {
             result.insert(node.id.clone(), 0);
         }
-        return result;
+        return Ok(result);
     }
+    let num_parts = Idx::try_from(num_parts)
+        .map_err(|_| "METIS partition count exceeds index range".to_string())?;
 
+    let mut vwgt: Vec<Idx> = Vec::new();
+    let mut nodes = network.nodes();
+    nodes.sort_by_key(|node| node.id.external().to_string());
+    Idx::try_from(nodes.len()).map_err(|_| "METIS node count exceeds index range".to_string())?;
     let mut metis_result: Vec<Idx> = vec![0x00; nodes.len()];
 
     let mut pos_by_node_id = IntMap::default();
@@ -60,35 +46,44 @@ pub fn partition_subnetwork(
     }
 
     info!("Converting network into Metis format");
-    let metis_graph = to_metis_graph(network, nodes, &include_link, options, &pos_by_node_id);
+    let (xadj, adjncy, adjwgt) = build_adjacency(network, options, &nodes, &pos_by_node_id)?;
+    for node in &nodes {
+        // Add vertex weights
+        add_vwgt(network, options, &mut vwgt, node)?;
+    }
 
     let ncon = if options.vertex_weight.is_empty() {
         1
     } else {
         options.vertex_weight.len() as Idx
     };
-
-    info!("Calling Metis Partitioning Library");
-    // METIS reseeds the random number generator with the seed below in every call. Holding the
-    // lock until the call returns keeps other calls from drawing numbers in between.
-    let _metis_guard = METIS_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut graph = Graph::new(
-        ncon,
-        num_parts as Idx,
-        &metis_graph.xadj,
-        &metis_graph.adjncy,
-    )
-    .expect("Failed to create graph")
-    .set_option(metis::option::UFactor(options.ufactor() as Idx))
-    .set_option(metis::option::Seed(4711))
-    .set_option(metis::option::Contig(options.contiguous))
-    .set_adjwgt(&metis_graph.adjwgt);
-
-    if !metis_graph.vwgt.is_empty() {
-        graph = graph.set_vwgt(&metis_graph.vwgt);
+    if !vwgt.is_empty() {
+        for dimension in 0..ncon as usize {
+            (0..nodes.len())
+                .try_fold(0i64, |total, position| {
+                    total
+                        .checked_add(vwgt[position * ncon as usize + dimension] as i64)
+                        .filter(|total| *total <= Idx::MAX as i64)
+                })
+                .ok_or_else(|| "combined METIS vertex weight exceeds index range".to_string())?;
+        }
     }
 
-    graph.part_kway(&mut metis_result).unwrap();
+    info!("Calling Metis Partitioning Library");
+    let mut graph = Graph::new(ncon, num_parts, &xadj, &adjncy)
+        .map_err(|error| format!("failed to create graph: {error:?}"))?
+        .set_option(metis::option::UFactor(options.ufactor() as Idx))
+        .set_option(metis::option::Seed(4711))
+        .set_option(metis::option::Contig(options.contiguous))
+        .set_adjwgt(&adjwgt);
+
+    if !vwgt.is_empty() {
+        graph = graph.set_vwgt(&vwgt);
+    }
+
+    graph
+        .part_kway(&mut metis_result)
+        .map_err(|error| format!("METIS k-way partition failed: {error:?}"))?;
 
     let mut result = IntMap::default();
     for (pos, part) in metis_result.iter().enumerate() {
@@ -99,202 +94,144 @@ pub fn partition_subnetwork(
         result.insert(id, *part);
     }
 
-    result
+    Ok(result)
 }
 
-/// The network in the CSR format expected by METIS. Vertex `i` is the node at position `i` in
-/// `pos_by_node_id`.
-struct MetisGraph {
-    //stores start positions of each node in the adjacency list
-    xadj: Vec<Idx>,
-    adjncy: Vec<Idx>,
-    adjwgt: Vec<Idx>,
-    vwgt: Vec<Idx>,
-}
-
-fn to_metis_graph(
+fn build_adjacency(
     network: &Network,
-    nodes: &[&Node],
-    include_link: &impl Fn(&Link) -> bool,
     options: &MetisOptions,
+    nodes: &[&Node],
     pos_by_node_id: &IntMap<u64, usize>,
-) -> MetisGraph {
-    let mut xadj: Vec<Idx> = Vec::from([0]);
-    let mut adjncy: Vec<Idx> = Vec::new();
-    let mut adjwgt: Vec<Idx> = Vec::new();
-    let mut vwgt: Vec<Idx> = Vec::new();
-
-    for node in nodes {
-        // Add vertex weights
-        add_vwgt(network, include_link, options, &mut vwgt, node);
-
-        // METIS expects an undirected graph without loops and without duplicate edges, in which
-        // every edge u-v is also stored as v-u with the same weight. It does not check this, and
-        // invalid input makes it access memory out of bounds. Links are directed, so all links
-        // between two nodes, in either direction, are merged into one edge. The weight of each
-        // link is truncated to an integer before summing, so the sum is the same from both ends.
-        // Loop links do not connect two nodes and are dropped. The BTreeMap orders the neighbors
-        // by position, which keeps the input to METIS reproducible. Excluded links are skipped at
-        // both of their nodes, so the graph stays symmetric.
-        let own_pos = pos_by_node_id[&node.id.internal()];
-        let mut neighbors: BTreeMap<usize, Idx> = BTreeMap::new();
-        let out_neighbors = node.out_links.iter().map(|id| {
-            let link = network.get_link(id);
-            (&link.to, link)
-        });
-        let in_neighbors = node.in_links.iter().map(|id| {
-            let link = network.get_link(id);
-            (&link.from, link)
-        });
-        let included_neighbors = out_neighbors
-            .chain(in_neighbors)
-            .filter(|(_, link)| include_link(link));
-        for (neighbor_id, link) in included_neighbors {
-            let neighbor_pos = pos_by_node_id[&neighbor_id.internal()];
-            if neighbor_pos != own_pos {
-                let weight = neighbors.entry(neighbor_pos).or_insert(0);
-                *weight = weight.saturating_add(get_adjwgt(options, link) as Idx);
-            }
+) -> Result<(Vec<Idx>, Vec<Idx>, Vec<Idx>), String> {
+    let mut edge_weights = BTreeMap::<(usize, usize), Idx>::new();
+    for link in network.links() {
+        let (from, to) = (
+            *pos_by_node_id
+                .get(&link.from.internal())
+                .ok_or_else(|| format!("link {} has an unknown source node", link.id))?,
+            *pos_by_node_id
+                .get(&link.to.internal())
+                .ok_or_else(|| format!("link {} has an unknown destination node", link.id))?,
+        );
+        if from == to {
+            continue;
         }
-
-        for (neighbor_pos, weight) in neighbors {
-            adjncy.push(neighbor_pos as Idx);
-            // METIS requires positive edge weights, but links with a capacity below 1 yield 0.
-            adjwgt.push(weight.max(1));
-        }
-        xadj.push(adjncy.len() as Idx);
+        let edge = if from < to { (from, to) } else { (to, from) };
+        let weight = edge_weights.entry(edge).or_default();
+        *weight = weight
+            .checked_add(get_adjwgt(options, link)?)
+            .ok_or_else(|| "combined METIS edge weight exceeds index range".to_string())?;
     }
 
-    MetisGraph {
-        xadj,
-        adjncy,
-        adjwgt,
-        vwgt,
+    let mut neighbors = vec![Vec::<(Idx, Idx)>::new(); nodes.len()];
+    for ((from, to), weight) in edge_weights {
+        let from_pos = from as Idx;
+        let to_pos = to as Idx;
+        neighbors[from_pos as usize].push((to_pos, weight));
+        neighbors[to_pos as usize].push((from_pos, weight));
     }
+
+    if !valid_adjwgt_total(&neighbors) {
+        return Err("combined METIS adjacency weight exceeds index range".to_string());
+    }
+
+    // Stores start positions of each node in the adjacency list.
+    let mut xadj = vec![0];
+    let mut adjncy = Vec::new();
+    let mut adjwgt = Vec::new();
+    for node_neighbors in neighbors {
+        for (neighbor, weight) in node_neighbors {
+            adjncy.push(neighbor);
+            adjwgt.push(weight);
+        }
+        xadj.push(
+            Idx::try_from(adjncy.len())
+                .map_err(|_| "METIS adjacency count exceeds index range".to_string())?,
+        );
+    }
+    Ok((xadj, adjncy, adjwgt))
 }
 
 fn add_vwgt(
     network: &Network,
-    include_link: &impl Fn(&Link) -> bool,
     options: &MetisOptions,
     vwgt: &mut Vec<Idx>,
     node: &Node,
-) {
-    let in_links = || {
-        node.in_links
-            .iter()
-            .map(|id| network.get_link(id))
-            .filter(|link| include_link(link))
-    };
+) -> Result<(), String> {
     for weight in options.vertex_weight.iter() {
         match weight {
             VertexWeight::InLinkCapacity => {
-                vwgt.push(in_links().map(|link| link.capacity as Idx).sum());
+                let total = node
+                    .in_links
+                    .iter()
+                    .try_fold(0i64, |total, id| {
+                        let capacity = network.get_link(id).capacity;
+                        if !capacity.is_finite() || capacity < 0.0 || capacity > Idx::MAX as f64 {
+                            return None;
+                        }
+                        total
+                            .checked_add(capacity as Idx as i64)
+                            .filter(|total| *total <= Idx::MAX as i64)
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "combined METIS vertex weight exceeds index range at {}",
+                            node.id
+                        )
+                    })?;
+                vwgt.push(total as Idx);
             }
             VertexWeight::InLinkCount => {
-                vwgt.push(in_links().count() as Idx);
+                vwgt.push(Idx::try_from(node.in_links.len()).map_err(|_| {
+                    format!(
+                        "METIS incoming-link count exceeds index range at {}",
+                        node.id
+                    )
+                })?);
             }
             VertexWeight::Constant => {
                 vwgt.push(1);
             }
             VertexWeight::PreComputed => {
-                vwgt.push(node.cmp_weight as Idx);
+                vwgt.push(Idx::try_from(node.cmp_weight).map_err(|_| {
+                    format!(
+                        "precomputed METIS vertex weight exceeds index range at {}",
+                        node.id
+                    )
+                })?);
             }
         }
     }
+    Ok(())
 }
 
-fn get_adjwgt(options: &MetisOptions, link: &Link) -> f64 {
+pub(super) fn get_adjwgt(options: &MetisOptions, link: &Link) -> Result<Idx, String> {
     match options.edge_weight {
-        EdgeWeight::Capacity => link.capacity,
-        EdgeWeight::Constant => 1.,
+        EdgeWeight::Capacity => {
+            if !(link.capacity.is_finite()
+                && link.capacity >= 0.0
+                && link.capacity <= Idx::MAX as f64)
+            {
+                return Err(format!(
+                    "link {} has capacity outside the METIS integer edge-weight range",
+                    link.id
+                ));
+            }
+            Ok(link.capacity as Idx)
+        }
+        EdgeWeight::Constant => Ok(1),
     }
 }
 
-/// Partitions the nodes of `network` with METIS. See [`NonMainModeLinks`] for the handling of links
-/// that allow none of `main_modes`.
-pub fn partition_with_metis(
-    network: &Network,
-    num_parts: u32,
-    options: &MetisOptions,
-    non_main_mode_links: NonMainModeLinks,
-    main_modes: &[String],
-) -> IntMap<Id<Node>, Idx> {
-    if num_parts <= 1 || non_main_mode_links == NonMainModeLinks::Include {
-        return partition(network, num_parts, options);
-    }
-
-    // Only look up the mode ids. Creating them would change the id store. A main mode without an
-    // id is allowed on no link.
-    let main_modes: IntSet<Id<String>> = main_modes
+fn adjwgt_total(neighbors: &[Vec<(Idx, Idx)>]) -> Option<i64> {
+    neighbors
         .iter()
-        .filter_map(|mode| Id::try_get_from_ext(mode))
-        .collect();
-    let is_main_mode_link = |link: &Link| link.modes.iter().any(|mode| main_modes.contains(mode));
-
-    let nodes = network.nodes();
-    let (main_mode_nodes, other_nodes): (Vec<&Node>, Vec<&Node>) = nodes.iter().partition(|node| {
-        node.in_links
-            .iter()
-            .chain(&node.out_links)
-            .any(|id| is_main_mode_link(network.get_link(id)))
-    });
-
-    if main_mode_nodes.is_empty() {
-        info!(
-            "No link allows one of the main modes {:?}. Partitioning all nodes and links.",
-            main_modes.iter().map(Id::external).sorted().collect_vec()
-        );
-        return partition(network, num_parts, options);
-    }
-
-    info!(
-        "Partitioning the {} nodes incident to links with a main mode. The other {} nodes are assigned to the partition of the nearest of these nodes.",
-        main_mode_nodes.len(),
-        other_nodes.len()
-    );
-    let mut partitions = partition_subnetwork(
-        network,
-        &main_mode_nodes,
-        is_main_mode_link,
-        num_parts,
-        options,
-    );
-
-    let tree = RTree::bulk_load(
-        main_mode_nodes
-            .iter()
-            .map(|node| GeomWithData::new([node.coord.x, node.coord.y], node.id.clone()))
-            .collect(),
-    );
-    for node in other_nodes {
-        let nearest = nearest_node(&tree, &node.coord);
-        let partition = partitions[&nearest];
-        partitions.insert(node.id.clone(), partition);
-    }
-    partitions
+        .flatten()
+        .try_fold(0i64, |total, (_, weight)| total.checked_add(*weight as i64))
 }
 
-/// Returns the node in `tree` with the smallest distance to `coord` in the x/y plane. Ties are
-/// broken by the smallest external node id, so that the result does not depend on the order of the
-/// nodes in the tree.
-pub fn nearest_node(
-    tree: &RTree<GeomWithData<[f64; 2], Id<Node>>>,
-    coord: &Coordinate,
-) -> Id<Node> {
-    // The iterator yields nodes in ascending distance, so all nodes sharing the minimal distance
-    // come first. Exact float equality is intended: only true ties are broken by id.
-    let mut candidates = tree.nearest_neighbor_iter_with_distance_2([coord.x, coord.y]);
-    let (first, min_distance_2) = candidates
-        .next()
-        .expect("The tree contains at least one node");
-    candidates
-        .take_while(|(_, distance_2)| *distance_2 == min_distance_2)
-        .map(|(node, _)| &node.data)
-        .chain(std::iter::once(&first.data))
-        .min_by_key(|id| id.external())
-        .cloned()
-        .unwrap()
+fn valid_adjwgt_total(neighbors: &[Vec<(Idx, Idx)>]) -> bool {
+    adjwgt_total(neighbors).is_some_and(|total| total <= Idx::MAX as i64)
 }
 
 #[cfg(test)]
@@ -302,14 +239,202 @@ mod tests {
     use crate::simulation::config::{EdgeWeight, MetisOptions, PartitionMethod, VertexWeight};
     use crate::simulation::id::Id;
     use crate::simulation::network::metis_partitioning::{
-        MetisGraph, partition, partition_subnetwork, to_metis_graph,
+        build_adjacency, partition, try_partition, valid_adjwgt_total,
     };
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node};
     use macros::deterministic_id_test;
     use metis::Idx;
-    use nohash_hasher::IntMap;
     use std::collections::BTreeMap;
+
+    #[deterministic_id_test]
+    fn try_partition_returns_precomputed_vertex_weight_overflow() {
+        let mut network = Network::new();
+        for (name, weight) in [("too-heavy", Idx::MAX as u32 + 1), ("other", 1)] {
+            let id = Id::create(name);
+            network.add_node(Node::new(id, Coordinate::new_2d(0., 0.), 0, weight));
+        }
+
+        let result = try_partition(
+            &network,
+            2,
+            &MetisOptions::default()
+                .add_vertex_weight(VertexWeight::PreComputed)
+                .set_contiguous(false),
+        );
+
+        assert!(
+            result
+                .unwrap_err()
+                .contains("precomputed METIS vertex weight")
+        );
+    }
+
+    #[deterministic_id_test]
+    fn try_partition_returns_combined_vertex_weight_overflow() {
+        let mut network = Network::new();
+        for name in ["heavy-a", "heavy-b"] {
+            let id = Id::create(name);
+            network.add_node(Node::new(
+                id,
+                Coordinate::new_2d(0., 0.),
+                0,
+                Idx::MAX as u32,
+            ));
+        }
+
+        let result = try_partition(
+            &network,
+            2,
+            &MetisOptions::default()
+                .add_vertex_weight(VertexWeight::PreComputed)
+                .set_contiguous(false),
+        );
+
+        assert!(result.unwrap_err().contains("combined METIS vertex weight"));
+    }
+
+    #[deterministic_id_test]
+    fn incoming_links_connect_back_to_their_source_in_metis_graph() {
+        let mut net = Network::new();
+        let source = Id::create("source");
+        let middle = Id::create("middle");
+        let sink = Id::create("sink");
+        net.add_node(Node::new(source.clone(), Coordinate::new_2d(0., 0.), 0, 1));
+        net.add_node(Node::new(middle.clone(), Coordinate::new_2d(1., 0.), 0, 1));
+        net.add_node(Node::new(sink.clone(), Coordinate::new_2d(2., 0.), 0, 1));
+        net.add_link(Link::new_with_default(
+            Id::create("source-middle"),
+            net.get_node(&source),
+            net.get_node(&middle),
+        ));
+        net.add_link(Link::new_with_default(
+            Id::create("middle-sink"),
+            net.get_node(&middle),
+            net.get_node(&sink),
+        ));
+
+        let mut nodes = net.nodes();
+        nodes.sort_by_key(|node| node.id.external().to_string());
+        let positions = nodes
+            .iter()
+            .enumerate()
+            .map(|(position, node)| (node.id.internal(), position))
+            .collect();
+        let (xadj, adjncy, _) =
+            build_adjacency(&net, &MetisOptions::default(), &nodes, &positions).unwrap();
+
+        let middle_position = positions[&middle.internal()];
+        let sink_position = positions[&sink.internal()];
+        assert_eq!(xadj[sink_position], xadj[sink_position + 1] - 1);
+        assert_eq!(adjncy[xadj[sink_position] as usize], middle_position as Idx);
+    }
+
+    #[deterministic_id_test]
+    fn metis_adjacency_combines_parallel_links_and_drops_self_loops() {
+        let mut net = Network::new();
+        let a = Id::create("a");
+        let b = Id::create("b");
+        net.add_node(Node::new(a.clone(), Coordinate::new_2d(0., 0.), 0, 1));
+        net.add_node(Node::new(b.clone(), Coordinate::new_2d(1., 0.), 0, 1));
+        for id in ["ab-1", "ab-2"] {
+            net.add_link(Link::new_with_default(
+                Id::create(id),
+                net.get_node(&a),
+                net.get_node(&b),
+            ));
+        }
+        net.add_link(Link::new_with_default(
+            Id::create("ba"),
+            net.get_node(&b),
+            net.get_node(&a),
+        ));
+        net.add_link(Link::new_with_default(
+            Id::create("self"),
+            net.get_node(&a),
+            net.get_node(&a),
+        ));
+
+        let mut nodes = net.nodes();
+        nodes.sort_by_key(|node| node.id.external().to_string());
+        let positions = nodes
+            .iter()
+            .enumerate()
+            .map(|(position, node)| (node.id.internal(), position))
+            .collect();
+        let (xadj, adjncy, adjwgt) =
+            build_adjacency(&net, &MetisOptions::default(), &nodes, &positions).unwrap();
+        let a_position = positions[&a.internal()];
+        let b_position = positions[&b.internal()];
+
+        assert_eq!(1, xadj[a_position + 1] - xadj[a_position]);
+        assert_eq!(1, xadj[b_position + 1] - xadj[b_position]);
+        assert_eq!(b_position as Idx, adjncy[xadj[a_position] as usize]);
+        assert_eq!(a_position as Idx, adjncy[xadj[b_position] as usize]);
+        assert_eq!(3, adjwgt[xadj[a_position] as usize]);
+        assert_eq!(3, adjwgt[xadj[b_position] as usize]);
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "combined METIS vertex weight exceeds index range")]
+    fn rejects_vertex_weight_totals_outside_metis_index_range() {
+        let mut net = Network::new();
+        let first = Id::create("large-first");
+        let second = Id::create("large-second");
+        net.add_node(Node::new(
+            first,
+            Coordinate::new_2d(0., 0.),
+            0,
+            Idx::MAX as u32,
+        ));
+        net.add_node(Node::new(second, Coordinate::new_2d(1., 0.), 0, 1));
+        partition(
+            &net,
+            2,
+            &MetisOptions::default().add_vertex_weight(VertexWeight::PreComputed),
+        );
+    }
+
+    #[test]
+    fn rejects_doubled_total_adjacency_weight_overflow() {
+        let neighbors = vec![
+            vec![(1, 1_000_000_000)],
+            vec![(0, 1_000_000_000), (2, 1_000_000_000)],
+            vec![(1, 1_000_000_000)],
+        ];
+        assert!(!valid_adjwgt_total(&neighbors));
+    }
+
+    #[deterministic_id_test]
+    fn try_partition_reports_invalid_and_overflowing_capacity_edge_weights() {
+        let mut network = Network::new();
+        let from = Id::create("edge-weight-from");
+        let to = Id::create("edge-weight-to");
+        network.add_node(Node::new(from.clone(), Coordinate::new_2d(0., 0.), 0, 1));
+        network.add_node(Node::new(to.clone(), Coordinate::new_2d(1., 0.), 0, 1));
+        let invalid_capacity_link = Id::create("edge-weight-a");
+        for id in [invalid_capacity_link.clone(), Id::create("edge-weight-b")] {
+            network.add_link(Link::new_with_default(
+                id.clone(),
+                network.get_node(&from),
+                network.get_node(&to),
+            ));
+            network.get_link_mut(&id).capacity = Idx::MAX as f64;
+        }
+        let options = MetisOptions::default().set_edge_weight(EdgeWeight::Capacity);
+        assert!(
+            try_partition(&network, 2, &options)
+                .unwrap_err()
+                .contains("combined METIS edge weight")
+        );
+
+        network.get_link_mut(&invalid_capacity_link).capacity = f64::NAN;
+        assert!(
+            try_partition(&network, 2, &options)
+                .unwrap_err()
+                .contains("capacity outside the METIS integer edge-weight range")
+        );
+    }
 
     #[deterministic_id_test]
     fn simple_graph() {
@@ -326,301 +451,13 @@ mod tests {
         ));
 
         for _n in 0..100 {
-            let partition_result = partition(&net, 2, &MetisOptions::default());
-            assert_ne!(partition_result[&from_id], partition_result[&to_id]);
-        }
-    }
-
-    /// Covers all cases in which links do not map one-to-one to METIS edges: a one-way link, a
-    /// pair of opposite links, parallel links, a loop link, an isolated node and capacities
-    /// below 1.
-    #[deterministic_id_test]
-    fn metis_graph_merges_links_into_undirected_edges() {
-        let mut net = Network::new();
-        for (i, name) in ["a", "b", "c", "d", "e"].into_iter().enumerate() {
-            let coord = Coordinate::new_2d(i as f64 * 100., 0.);
-            net.add_node(Node::new(Id::create(name), coord, 0, 1));
-        }
-        for (name, from, to, capacity) in [
-            ("ab", "a", "b", 100.),
-            ("ad", "a", "d", 0.5),
-            ("bc", "b", "c", 300.),
-            ("cb", "c", "b", 200.),
-            ("cd-1", "c", "d", 50.),
-            ("cd-2", "c", "d", 0.4),
-            ("dd", "d", "d", 10.),
-        ] {
-            let mut link = Link::new_with_default(
-                Id::create(name),
-                net.get_node(&Id::get_from_ext(from)),
-                net.get_node(&Id::get_from_ext(to)),
-            );
-            link.capacity = capacity;
-            net.add_link(link);
-        }
-
-        let capacity = MetisOptions::default()
-            .set_edge_weight(EdgeWeight::Capacity)
-            .add_vertex_weight(VertexWeight::InLinkCount);
-        let graph = full_metis_graph(&net, &capacity);
-        assert_valid_metis_graph(&graph, 1);
-        // Capacities are truncated per link before they are summed: 0.5 becomes 0 and is raised
-        // to the minimum weight 1, 0.4 becomes 0 and adds nothing to the 50 of the parallel link.
-        assert_eq!(
-            BTreeMap::from([
-                ("a", vec![("b", 100), ("d", 1)]),
-                ("b", vec![("a", 100), ("c", 500)]),
-                ("c", vec![("b", 500), ("d", 50)]),
-                ("d", vec![("a", 1), ("c", 50)]),
-                ("e", vec![]),
-            ]),
-            adjacency_by_name(&net.nodes(), &graph)
-        );
-
-        let constant = MetisOptions::default().set_edge_weight(EdgeWeight::Constant);
-        let graph = full_metis_graph(&net, &constant);
-        assert_valid_metis_graph(&graph, 0);
-        assert_eq!(
-            BTreeMap::from([
-                ("a", vec![("b", 1), ("d", 1)]),
-                ("b", vec![("a", 1), ("c", 2)]),
-                ("c", vec![("b", 2), ("d", 2)]),
-                ("d", vec![("a", 1), ("c", 2)]),
-                ("e", vec![]),
-            ]),
-            adjacency_by_name(&net.nodes(), &graph)
-        );
-    }
-
-    #[deterministic_id_test]
-    fn metis_graph_of_andorra_is_valid() {
-        let network = Network::from_file_with_partitioning(
-            "./assets/andorra-network.xml.gz",
-            1,
-            &PartitionMethod::None,
-        );
-        for edge_weight in [EdgeWeight::Capacity, EdgeWeight::Constant] {
-            let options = MetisOptions::default()
-                .set_edge_weight(edge_weight)
-                .add_vertex_weight(VertexWeight::InLinkCapacity)
-                .add_vertex_weight(VertexWeight::InLinkCount);
-            let graph = full_metis_graph(&network, &options);
-            assert_valid_metis_graph(&graph, 2);
-        }
-    }
-
-    fn andorra_network() -> Network {
-        Network::from_file_with_partitioning(
-            "./assets/andorra-network.xml.gz",
-            1,
-            &PartitionMethod::None,
-        )
-    }
-
-    fn andorra_options() -> MetisOptions {
-        MetisOptions::default()
-            .set_edge_weight(EdgeWeight::Capacity)
-            .add_vertex_weight(VertexWeight::InLinkCount)
-            .set_contiguous(false)
-    }
-
-    /// The partition of each node by external id, independent of the internal ids.
-    fn partitions_by_name(partitions: &IntMap<Id<Node>, Idx>) -> BTreeMap<String, Idx> {
-        partitions
-            .iter()
-            .map(|(id, partition)| (id.external().to_string(), *partition))
-            .collect()
-    }
-
-    /// METIS draws random numbers. It is built with GKlib's own random number generator and
-    /// without floating-point contraction, so the same seed yields the same partitions on every
-    /// platform. The expected values were computed once and must be reproduced by CI, which runs
-    /// on another platform. A network as large as Andorra is needed, because the partitions of
-    /// small networks hardly depend on the random numbers.
-    #[deterministic_id_test]
-    fn partition_is_platform_independent() {
-        let network = andorra_network();
-        let partitions = partitions_by_name(&partition(&network, 8, &andorra_options()));
-
-        let mut nodes_per_partition = BTreeMap::new();
-        for partition in partitions.values() {
-            *nodes_per_partition.entry(*partition).or_insert(0) += 1;
-        }
-        // FNV-1a hash of all external ids and their partitions, ordered by external id.
-        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        for (name, partition) in &partitions {
-            let bytes = name.bytes().chain([0]).chain(partition.to_le_bytes());
-            for byte in bytes {
-                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
-            }
-        }
-
-        assert_eq!(
-            BTreeMap::from([
-                (0, 314),
-                (1, 276),
-                (2, 305),
-                (3, 270),
-                (4, 272),
-                (5, 274),
-                (6, 276),
-                (7, 272)
-            ]),
-            nodes_per_partition
-        );
-        assert_eq!(517_327_694_060_400_677, hash);
-    }
-
-    /// METIS calls are serialized, so that concurrent calls do not draw random numbers from each
-    /// other's sequence.
-    #[deterministic_id_test]
-    fn concurrent_partitioning_is_deterministic() {
-        let network = andorra_network();
-        let expected = partitions_by_name(&partition(&network, 8, &andorra_options()));
-
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..4)
-                .map(|_| scope.spawn(|| partition(&network, 8, &andorra_options())))
-                .collect();
-            for handle in handles {
-                assert_eq!(expected, partitions_by_name(&handle.join().unwrap()));
-            }
-        });
-    }
-
-    /// Only nodes `a` to `c` are connected by `car` links. The `bike` link `ca` connects two of
-    /// them, and the `pt` links connect the stops `s1` and `s2`, which are not connected to the
-    /// other nodes.
-    #[deterministic_id_test]
-    fn metis_graph_of_subnetwork_skips_excluded_links() {
-        let mut net = Network::new();
-        for (i, name) in ["a", "b", "c", "s1", "s2"].into_iter().enumerate() {
-            let coord = Coordinate::new_2d(i as f64 * 100., 0.);
-            net.add_node(Node::new(Id::create(name), coord, 0, 1));
-        }
-        for (name, from, to, mode) in [
-            ("ab", "a", "b", "car"),
-            ("bc", "b", "c", "car"),
-            ("ca", "c", "a", "bike"),
-            ("s1s1", "s1", "s1", "pt"),
-            ("s1s2", "s1", "s2", "pt"),
-            ("s2s2", "s2", "s2", "pt"),
-        ] {
-            let mut link = Link::new_with_default(
-                Id::create(name),
-                net.get_node(&Id::get_from_ext(from)),
-                net.get_node(&Id::get_from_ext(to)),
-            );
-            link.modes.insert(Id::create(mode));
-            net.add_link(link);
-        }
-
-        let car: Id<String> = Id::get_from_ext("car");
-        let is_car_link = |link: &Link| link.contains_mode(&car);
-        let nodes: Vec<&Node> = net
-            .nodes()
-            .into_iter()
-            .filter(|node| ["a", "b", "c"].contains(&node.id.external()))
-            .collect();
-        let options = MetisOptions::default().add_vertex_weight(VertexWeight::InLinkCount);
-
-        let graph = to_metis_graph(&net, &nodes, &is_car_link, &options, &positions(&nodes));
-        assert_valid_metis_graph(&graph, 1);
-        assert_eq!(
-            BTreeMap::from([
-                ("a", vec![("b", 1)]),
-                ("b", vec![("a", 1), ("c", 1)]),
-                ("c", vec![("b", 1)]),
-            ]),
-            adjacency_by_name(&nodes, &graph)
-        );
-        // The only incoming link of `a` is the bike link.
-        let vertex_weights: BTreeMap<&str, Idx> = nodes
-            .iter()
-            .map(|node| node.id.external())
-            .zip(graph.vwgt.iter().copied())
-            .collect();
-        assert_eq!(
-            BTreeMap::from([("a", 0), ("b", 1), ("c", 1)]),
-            vertex_weights
-        );
-
-        let partitions = partition_subnetwork(&net, &nodes, is_car_link, 2, &options);
-        let mut partitioned: Vec<&str> = partitions.keys().map(|id| id.external()).collect();
-        partitioned.sort();
-        assert_eq!(vec!["a", "b", "c"], partitioned);
-    }
-
-    /// The METIS graph of all nodes and links, as built by [`partition`].
-    fn full_metis_graph(network: &Network, options: &MetisOptions) -> MetisGraph {
-        let nodes = network.nodes();
-        to_metis_graph(network, &nodes, &|_| true, options, &positions(&nodes))
-    }
-
-    /// Node positions in the same order as in [`partition_subnetwork`].
-    fn positions(nodes: &[&Node]) -> IntMap<u64, usize> {
-        nodes
-            .iter()
-            .enumerate()
-            .map(|(i, node)| (node.id.internal(), i))
-            .collect()
-    }
-
-    /// Neighbors and edge weights of each node by external id, independent of node positions.
-    fn adjacency_by_name<'a>(
-        nodes: &[&'a Node],
-        graph: &MetisGraph,
-    ) -> BTreeMap<&'a str, Vec<(&'a str, Idx)>> {
-        let name = |pos: usize| nodes[pos].id.external();
-        (0..nodes.len())
-            .map(|u| {
-                let edges = graph.xadj[u] as usize..graph.xadj[u + 1] as usize;
-                let mut neighbors: Vec<_> = edges
-                    .map(|e| (name(graph.adjncy[e] as usize), graph.adjwgt[e]))
-                    .collect();
-                neighbors.sort();
-                (name(u), neighbors)
-            })
-            .collect()
-    }
-
-    /// Checks the input requirements of METIS, similar to its `graphchk` program: an undirected
-    /// graph without loops and without duplicate edges, in which every edge is stored in both
-    /// directions with the same positive weight.
-    fn assert_valid_metis_graph(graph: &MetisGraph, num_vertex_weights: usize) {
-        let num_vertices = graph.xadj.len() - 1;
-        assert_eq!(0, graph.xadj[0]);
-        assert!(graph.xadj.windows(2).all(|w| w[0] <= w[1]));
-        assert_eq!(graph.adjncy.len(), *graph.xadj.last().unwrap() as usize);
-        assert_eq!(graph.adjncy.len(), graph.adjwgt.len());
-        assert_eq!(num_vertex_weights * num_vertices, graph.vwgt.len());
-
-        let mut edges = BTreeMap::new();
-        for u in 0..num_vertices {
-            for e in graph.xadj[u] as usize..graph.xadj[u + 1] as usize {
-                let v = graph.adjncy[e] as usize;
-                let weight = graph.adjwgt[e];
-                assert!(v < num_vertices, "vertex {u} has neighbor {v} out of range");
-                assert_ne!(u, v, "vertex {u} has a loop");
-                assert!(weight > 0, "edge {u}-{v} has weight {weight}");
-                assert!(
-                    edges.insert((u, v), weight).is_none(),
-                    "edge {u}-{v} is duplicated"
-                );
-            }
-        }
-        for (&(u, v), weight) in &edges {
-            assert_eq!(
-                Some(weight),
-                edges.get(&(v, u)),
-                "edge {u}-{v} has no reverse edge with the same weight"
-            );
+            let _partition_result = partition(&net, 2, &MetisOptions::default());
         }
     }
 
     #[deterministic_id_test]
     fn test_andorra_with_default() {
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/andorra-network.xml.gz",
             5,
             &PartitionMethod::Metis(MetisOptions::default().set_contiguous(false)),
@@ -632,7 +469,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_andorra_with_capacity() {
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/andorra-network.xml.gz",
             5,
             &PartitionMethod::Metis(
@@ -649,7 +486,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_andorra_with_inlinkcount() {
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/andorra-network.xml.gz",
             5,
             &PartitionMethod::Metis(
@@ -666,7 +503,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_andorra_with_inlinkcount_and_capacity() {
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/andorra-network.xml.gz",
             5,
             &PartitionMethod::Metis(
@@ -684,7 +521,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_andorra_with_vertex_constant() {
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/andorra-network.xml.gz",
             5,
             &PartitionMethod::Metis(
@@ -701,7 +538,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn test_andorra_with_vertex_constant_and_inlinkcount() {
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/andorra-network.xml.gz",
             5,
             &PartitionMethod::Metis(

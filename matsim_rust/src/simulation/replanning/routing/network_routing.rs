@@ -498,7 +498,7 @@ mod tests {
     }
 
     fn calc_route_with_alt(from: &Facility, to: &Facility) -> Vec<InternalPlanElement> {
-        let network = Arc::new(Network::from_file(&PathBuf::from(
+        let network = Arc::new(Network::from_file_as_is(&PathBuf::from(
             "./assets/equil/equil-network.xml",
         )));
         let travel_cost = Arc::new(FreeSpeedTravelTimeAndDisutility {});

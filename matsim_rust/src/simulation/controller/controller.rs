@@ -6,16 +6,21 @@ use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
     ScoringPool, create_output_filename,
 };
+use crate::simulation::events::{
+    LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent, VehicleLeavesTrafficEvent,
+};
 use crate::simulation::framework_events::{
-    ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn,
-    WorkerListenerRegisterFunction,
+    ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn, MobsimEvent,
+    PartitionEvent, WorkerListenerRegisterFunction,
 };
 use crate::simulation::id::Id;
 use crate::simulation::logging::init_controller_logging;
 use crate::simulation::network::LinkStorageCapacities;
+use crate::simulation::network::partition_diagnostics::PartitionDiagnostics;
 use crate::simulation::population::agent_source::{
     DynAgentSource, IntoDynAgentSource, PopulationAgentSource,
 };
+use crate::simulation::pt::feedback::{TransitSegment, TransitSegmentObservation};
 use crate::simulation::replanning::ReplanningStrategy;
 use crate::simulation::replanning::routing::a_star::{AStar, AltHeuristic};
 use crate::simulation::replanning::routing::cost::ScoringBasedTravelTimeAndDisutility;
@@ -31,12 +36,15 @@ use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
 use crate::simulation::scoring::{PersonExperiences, PlanScorer};
+use crate::simulation::time::SimTime;
 use crate::simulation::{id, io};
+use arc_swap::ArcSwap;
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
 use itertools::Itertools;
 use nohash_hasher::IntMap;
-use std::cell::RefCell;
+use nohash_hasher::IntSet;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -67,6 +75,10 @@ pub struct Controller {
     #[debug(skip)]
     replanning_strategies: Vec<Box<dyn ReplanningStrategy>>,
     person_demographics: Vec<crate::simulation::analysis::PersonDemographic>,
+    transit_capacity_feedback:
+        Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
+    transit_capacity_snapshot: Arc<ArcSwap<BTreeMap<TransitSegment, TransitSegmentObservation>>>,
+    partition_diagnostics: Option<(PathBuf, Arc<PartitionDiagnostics>)>,
 }
 
 pub struct ControllerBuilder {
@@ -79,6 +91,7 @@ pub struct ControllerBuilder {
     adapter_handles: Vec<AdapterHandle>,
     scoring_function: Option<Box<dyn PlanScorer>>,
     replanning_strategies: Vec<Box<dyn ReplanningStrategy>>,
+    partition_diagnostics_output: Option<PathBuf>,
 }
 
 impl ControllerBuilder {
@@ -93,12 +106,80 @@ impl ControllerBuilder {
             adapter_handles: Vec::new(),
             scoring_function: None,
             replanning_strategies: Vec::new(),
+            partition_diagnostics_output: None,
         }
     }
 
     // Implementing a custom build function in order to set the barrier if not set by the user.
     pub fn build(mut self) -> Result<Controller, String> {
+        self.scenario.config.transit().validate()?;
         self.scenario.config.travel_time_calculator().validate()?;
+        self.scenario.config.scoring().validate()?;
+        let transit = self.scenario.config.transit();
+        if !transit.deterministic_service_modes.is_empty() && !transit.simulate_vehicles {
+            return Err(
+                "transit.deterministic_service_modes requires transit.simulate_vehicles: true"
+                    .to_owned(),
+            );
+        }
+        for mode in &transit.deterministic_service_modes {
+            if self.scenario.config.qsim().main_modes.contains(mode) {
+                return Err(format!(
+                    "Transit service mode {mode} cannot also be a qsim main mode"
+                ));
+            }
+            if !self.scenario.transit_schedule.lines().values().any(|line| {
+                line.routes.values().any(|route| {
+                    route.transport_mode.external() == mode && !route.departures.is_empty()
+                })
+            }) {
+                return Err(format!(
+                    "transit.deterministic_service_modes contains {mode}, but the schedule has no departures for that service mode"
+                ));
+            }
+        }
+        if transit.use_mode_mapping_for_passengers
+            || !transit.mode_mapping_for_passengers.is_empty()
+        {
+            if transit.use_mode_mapping_for_passengers
+                && transit.mode_mapping_for_passengers.is_empty()
+            {
+                return Err("transit.mode_mapping_for_passengers must not be empty when passenger mode mapping is enabled".to_owned());
+            }
+            for (route_mode, passenger_mode) in &transit.mode_mapping_for_passengers {
+                if route_mode.trim().is_empty() || passenger_mode.trim().is_empty() {
+                    return Err("transit.mode_mapping_for_passengers routeMode and passengerMode must not be empty".to_owned());
+                }
+                if !self.scenario.transit_schedule.lines().values().any(|line| {
+                    line.routes
+                        .values()
+                        .any(|route| route.transport_mode.external() == route_mode)
+                }) {
+                    return Err(format!(
+                        "transit.mode_mapping_for_passengers routeMode {route_mode} is not present in the transit schedule"
+                    ));
+                }
+                if transit.use_mode_mapping_for_passengers {
+                    if !transit.transit_modes.contains(passenger_mode) {
+                        return Err(format!(
+                            "transit.mode_mapping_for_passengers passengerMode {passenger_mode} must be listed in transit.transit_modes"
+                        ));
+                    }
+                    if !self
+                        .scenario
+                        .config
+                        .scoring()
+                        .mode_params
+                        .iter()
+                        .any(|params| params.mode == *passenger_mode)
+                    {
+                        return Err(format!(
+                            "transit.mode_mapping_for_passengers passengerMode {passenger_mode} needs scoring mode parameters"
+                        ));
+                    }
+                }
+            }
+        }
         let num_parts = self.scenario.config.partitioning().num_parts;
         let bin_size = self.scenario.config.travel_time_calculator().bin_size;
         let end_time = self.scenario.config.qsim().end_time;
@@ -125,6 +206,12 @@ impl ControllerBuilder {
         );
         let scenario: ControllerScenario = self.scenario.into();
         let config = scenario.core.config.clone();
+        let transit_capacity_feedback = Arc::new(Default::default());
+        let transit_capacity_snapshot = Arc::new(ArcSwap::from_pointee(BTreeMap::new()));
+        let partition_diagnostics = self
+            .partition_diagnostics_output
+            .as_ref()
+            .map(|_| Arc::new(PartitionDiagnostics::new(config.partitioning().num_parts)));
 
         let experienced_plans = if config.scoring().mode == ScoringMode::Enabled {
             let (worker_registrations, controller_registration, experienced_plans) =
@@ -146,7 +233,12 @@ impl ControllerBuilder {
             Duration::from_secs(u64::from(config.travel_time_calculator().bin_size)),
             Duration::from_secs(u64::from(config.qsim().end_time)),
         ));
-        let router = Self::create_trip_router(config.as_ref(), &scenario, global_ttc.clone())?;
+        let router = Self::create_trip_router(
+            config.as_ref(),
+            &scenario,
+            global_ttc.clone(),
+            transit_capacity_snapshot.clone(),
+        )?;
 
         for i in 0..num_parts {
             let net = scenario.core.network.clone();
@@ -168,6 +260,112 @@ impl ControllerBuilder {
                     );
                     PartitionTravelTimeCollector::register_partition_events(&ttc, partition);
                 }));
+            if let Some(diagnostics) = partition_diagnostics.as_ref().cloned() {
+                self.worker_listener_register_fn
+                    .entry(i)
+                    .or_default()
+                    .push(Box::new(move |events, mobsim, partition, _migration| {
+                        let step_started = Rc::new(RefCell::new(None::<(u32, SimTime, Instant)>));
+                        let current_iteration = Rc::new(Cell::new(0));
+                        let active_vehicles = Rc::new(RefCell::new(IntSet::default()));
+                        let vehicle_transitions =
+                            Rc::new(RefCell::new(BTreeMap::<(u32, u64), u64>::new()));
+                        let started = step_started.clone();
+                        let step_diagnostics = diagnostics.clone();
+                        let iteration = current_iteration.clone();
+                        let step_active_vehicles = active_vehicles.clone();
+                        let step_vehicle_transitions = vehicle_transitions.clone();
+                        mobsim.on_event(move |event| match &event.payload {
+                            MobsimEvent::BeforeSimStep(sample) => {
+                                iteration.set(event.meta.iteration);
+                                step_vehicle_transitions.borrow_mut().clear();
+                                *started.borrow_mut() =
+                                    Some((event.meta.iteration, sample.time, Instant::now()));
+                            }
+                            MobsimEvent::AfterSimStep(_) => {
+                                if let Some((iteration, time, started)) =
+                                    started.borrow_mut().take()
+                                {
+                                    step_diagnostics.record_step(
+                                        i,
+                                        iteration,
+                                        time,
+                                        u64::try_from(started.elapsed().as_nanos())
+                                            .unwrap_or(u64::MAX),
+                                    );
+                                    step_diagnostics.record_active_network_work(
+                                        i,
+                                        iteration,
+                                        time,
+                                        step_active_vehicles.borrow().len(),
+                                    );
+                                    for ((transition_iteration, hour), transitions) in
+                                        std::mem::take(&mut *step_vehicle_transitions.borrow_mut())
+                                    {
+                                        step_diagnostics.record_vehicle_transitions(
+                                            i,
+                                            transition_iteration,
+                                            SimTime::from_secs(hour * 3600),
+                                            transitions,
+                                        );
+                                    }
+                                }
+                            }
+                            MobsimEvent::BeforeCleanup => {
+                                step_active_vehicles.borrow_mut().clear();
+                            }
+                            _ => {}
+                        });
+                        let active_vehicles_on_leave = active_vehicles.clone();
+                        events.on::<LinkLeaveEvent, _>(move |event| {
+                            active_vehicles_on_leave.borrow_mut().remove(&event.vehicle);
+                        });
+                        let transitions = vehicle_transitions;
+                        let iteration = current_iteration;
+                        let active_vehicles_on_enter = active_vehicles.clone();
+                        events.on::<LinkEnterEvent, _>(move |event| {
+                            active_vehicles_on_enter
+                                .borrow_mut()
+                                .insert(event.vehicle.clone());
+                            let bucket = (iteration.get(), event.time.as_secs() / 3600);
+                            let mut transitions = transitions.borrow_mut();
+                            let count = transitions.entry(bucket).or_default();
+                            *count = count.saturating_add(1);
+                        });
+                        let active_vehicles_on_departure = active_vehicles.clone();
+                        events.on::<VehicleEntersTrafficEvent, _>(move |event| {
+                            active_vehicles_on_departure
+                                .borrow_mut()
+                                .insert(event.vehicle.clone());
+                        });
+                        let active_vehicles_on_arrival = active_vehicles.clone();
+                        events.on::<VehicleLeavesTrafficEvent, _>(move |event| {
+                            active_vehicles_on_arrival
+                                .borrow_mut()
+                                .remove(&event.vehicle);
+                        });
+                        let migration_diagnostics = diagnostics;
+                        let active_vehicles_on_migration = active_vehicles;
+                        partition.on_event(move |event| match &event.payload {
+                            PartitionEvent::VehicleEntersPartition(migration) => {
+                                migration_diagnostics.record_migration(
+                                    i,
+                                    event.meta.iteration,
+                                    migration.time,
+                                );
+                                active_vehicles_on_migration
+                                    .borrow_mut()
+                                    .insert(migration.vehicle_id.clone());
+                            }
+                            PartitionEvent::VehicleLeavesPartition(migration) => {
+                                active_vehicles_on_migration
+                                    .borrow_mut()
+                                    .remove(&migration.vehicle_id);
+                            }
+                            _ => {}
+                        });
+                    }));
+            }
         }
 
         Ok(Controller {
@@ -186,6 +384,11 @@ impl ControllerBuilder {
             scoring_function: self.scoring_function,
             replanning_strategies: self.replanning_strategies,
             person_demographics: Vec::new(),
+            transit_capacity_feedback,
+            transit_capacity_snapshot,
+            partition_diagnostics: self
+                .partition_diagnostics_output
+                .map(|path| (path, partition_diagnostics.unwrap())),
         })
     }
 
@@ -236,10 +439,19 @@ impl ControllerBuilder {
         self
     }
 
+    /// Records per-worker work, synchronization wait and network counts in hourly simulated-time windows.
+    pub fn partition_diagnostics_output(mut self, path: impl Into<PathBuf>) -> Self {
+        self.partition_diagnostics_output = Some(path.into());
+        self
+    }
+
     fn create_trip_router(
         config: &Config,
         controller_scenario: &ControllerScenario,
         global_ttc: Arc<GlobalTravelTimeCalculator>,
+        transit_capacity_snapshot: Arc<
+            ArcSwap<BTreeMap<TransitSegment, TransitSegmentObservation>>,
+        >,
     ) -> Result<TripRouter, String> {
         let mut routers: IntMap<Id<String>, Arc<dyn RoutingModule>> = IntMap::default();
 
@@ -305,25 +517,89 @@ impl ControllerBuilder {
                 .expect("routing config always includes walk parameters");
             let mode = Id::create("pt");
             let car_fallback = routers.get(&Id::create("car")).cloned();
-            routers.insert(
-                mode,
-                Arc::new(
-                    TransitRoutingModule::new(
-                        controller_scenario.core.transit_schedule.clone(),
-                        walk.teleported_mode_speed,
-                        walk.beeline_distance_factor,
-                        controller_scenario.core.garage.clone(),
-                        car_fallback,
-                    )
-                    .with_stop_to_stop_legs(config.transit().simulate_vehicles),
-                ),
-            );
+            let feeder_routers = routers.clone();
+            let mut transit_router = TransitRoutingModule::new_with_transfer_construction(
+                controller_scenario.core.transit_schedule.clone(),
+                walk.teleported_mode_speed,
+                walk.beeline_distance_factor,
+                controller_scenario.core.garage.clone(),
+                car_fallback,
+                config.transit().transfer_construction,
+            )
+            .with_capacity_feedback_snapshot(transit_capacity_snapshot)
+            .with_personless_fallback(config.transit().personless_car_fallback)
+            .with_passenger_mode_mapping(
+                config.transit().use_mode_mapping_for_passengers,
+                config.transit().mode_mapping_for_passengers.clone(),
+                &config.scoring().mode_params,
+                &config.scoring().agent_params,
+            )
+            .with_range_queries(
+                config.transit().range_query_settings.clone(),
+                config.transit().route_selector_settings.clone(),
+                config.computational_setup().random_seed,
+            )
+            .with_transfer_penalty(config.transit().transfer_penalty.clone());
+            if config.transit().use_intermodal_access_egress {
+                if config.transit().intermodal_access_egress.is_empty() {
+                    return Err("transit.use_intermodal_access_egress requires at least one transit.intermodal_access_egress entry".to_owned());
+                }
+                for setting in &config.transit().intermodal_access_egress {
+                    if setting.mode.is_empty()
+                        || !setting.initial_search_radius.is_finite()
+                        || setting.initial_search_radius <= 0.0
+                        || setting.max_radius.is_nan()
+                        || setting.max_radius < setting.initial_search_radius
+                        || !setting.search_extension_radius.is_finite()
+                        || setting.search_extension_radius <= 0.0
+                        || setting.share_trip_search_radius.is_nan()
+                        || setting.share_trip_search_radius <= 0.0
+                    {
+                        return Err(format!(
+                            "Invalid transit intermodal access/egress settings for mode '{}': search radii and share_trip_search_radius must be positive, and max_radius must be at least initial_search_radius",
+                            setting.mode
+                        ));
+                    }
+                    if !feeder_routers.contains_key(&Id::create(&setting.mode)) {
+                        return Err(format!(
+                            "No routing module found for configured transit feeder mode '{}'",
+                            setting.mode
+                        ));
+                    }
+                    if setting.person_filter_attribute.is_some()
+                        != setting.person_filter_value.is_some()
+                        || setting.stop_filter_attribute.is_some()
+                            != setting.stop_filter_value.is_some()
+                    {
+                        return Err(format!(
+                            "Transit feeder mode '{}' must configure both each filter attribute and its value",
+                            setting.mode
+                        ));
+                    }
+                }
+                let utilities = config
+                    .scoring()
+                    .mode_params
+                    .iter()
+                    .map(|params| (params.mode.clone(), params.marginal_utility_of_traveling))
+                    .collect::<BTreeMap<_, _>>();
+                transit_router = transit_router.with_intermodal_access_egress(
+                    config.transit().intermodal_access_egress.clone(),
+                    feeder_routers,
+                    utilities,
+                    config.transit().intermodal_access_egress_mode_selection,
+                    config.transit().intermodal_leg_only_handling,
+                    config.computational_setup().random_seed,
+                );
+            }
+            routers.insert(mode, Arc::new(transit_router));
         }
 
         Ok(TripRouter::new(routers))
     }
 }
 
+#[hotpath::measure_all]
 impl Controller {
     /// Runs the simulation and joins all threads before returning.
     pub fn run(mut self) -> (TripRouter, Population) {
@@ -356,17 +632,6 @@ impl Controller {
                 "Automatic analysis requires a positive qsim.sample_size: volumes are scaled up by its reciprocal."
             );
         }
-        if let Some(period) = self
-            .config
-            .output()
-            .analysis
-            .car_spot_speed_sample_period_seconds
-        {
-            assert!(
-                period > 0,
-                "Invalid output.analysis.car_spot_speed_sample_period_seconds: must be greater than 0."
-            );
-        }
 
         self.controller_events_manager
             .reset_iteration(first_iteration);
@@ -385,6 +650,7 @@ impl Controller {
             fs::create_dir_all(&log_path).expect("Failed to create logs output path");
         }
 
+        // Initialized after the output directory is prepared, so the controller files are not deleted.
         let _controller_log_guards = init_controller_logging(&self.config);
         let simulation_started = Instant::now();
         let mut mobsim_workers = self.start_mobsim_workers();
@@ -413,6 +679,11 @@ impl Controller {
 
         let finalization_started = Instant::now();
         mobsim_workers.shutdown();
+        if let Some((path, diagnostics)) = &self.partition_diagnostics {
+            diagnostics
+                .write_csv(path)
+                .unwrap_or_else(|error| panic!("Failed to write partition diagnostics: {error}"));
+        }
         self.shutdown_adapters();
 
         info!("Writing output files:");
@@ -470,7 +741,7 @@ impl Controller {
             )
             .with_runtime(crate::simulation::analysis::AnalysisRuntimeMetadata {
                 simulation_seconds: Some(simulation_started.elapsed().as_secs_f64()),
-                phase_seconds,
+                phase_seconds: phase_seconds.clone(),
                 worker_count: Some(self.config.partitioning().num_parts as usize),
                 available_logical_cpus: std::thread::available_parallelism().ok().map(usize::from),
                 operating_system: Some(std::env::consts::OS.to_owned()),
@@ -497,6 +768,21 @@ impl Controller {
             )
             .unwrap_or_else(|err| panic!("Automatic analysis failed: {err}"));
             info!("Analysis report: {}", report.display());
+        }
+        if let Some((path, _)) = &self.partition_diagnostics {
+            let metrics_path = path.with_extension("controller.json");
+            let metrics = serde_json::json!({
+                "simulation_wall_seconds": simulation_started.elapsed().as_secs_f64(),
+                "phase_seconds": phase_seconds,
+                "worker_count": self.config.partitioning().num_parts,
+                "network_links": self.scenario.core.network.links().len(),
+                "population_persons": self.scenario.population.persons.len(),
+            });
+            std::fs::write(
+                &metrics_path,
+                serde_json::to_vec_pretty(&metrics).expect("controller metrics must serialize"),
+            )
+            .unwrap_or_else(|error| panic!("Failed to write controller metrics: {error}"));
         }
         (self.trip_router, self.scenario.population)
     }
@@ -575,10 +861,14 @@ impl Controller {
                 &self.config.output().analysis,
             );
         }
-        let inputs = self
-            .scenario
-            .split_for_mobsim(&self.link_storage_capacities);
+        let inputs = self.scenario.split_for_mobsim(
+            &self.link_storage_capacities,
+            self.transit_capacity_feedback.clone(),
+        );
         let agents = mobsim_workers.run_mobsim(iteration, is_last_iteration, inputs);
+
+        self.transit_capacity_snapshot
+            .store(Arc::new(self.transit_capacity_feedback.take()));
 
         self.controller_events_manager
             .process_event(ControllerEvent::after_mobsim(is_last_iteration));
@@ -599,6 +889,7 @@ impl Controller {
             .process_event(ControllerEvent::scoring(is_last_iteration));
 
         if self.config.scoring().mode == ScoringMode::Disabled {
+            info!("Scoring is disabled. Selected plans receive no score in iteration {iteration}");
             for person in population.persons.values_mut() {
                 person.selected_plan_mut().score = None;
             }
@@ -666,6 +957,11 @@ impl Controller {
             .agent_source(self.agent_source.clone())
             .external_services(self.external_services.clone())
             .worker_listener(mem::take(&mut self.worker_listener))
+            .partition_diagnostics(
+                self.partition_diagnostics
+                    .as_ref()
+                    .map(|(_, diagnostics)| diagnostics.clone()),
+            )
             .global_barrier(self.global_barrier.clone())
             .build()
             .unwrap();
@@ -829,7 +1125,7 @@ pub(crate) fn write_experienced_population(
                 });
             experience.convert_to_person(original)
         })
-        .sorted_by(|a, b| a.id().cmp(&b.id()))
+        .sorted_by(|a, b| a.id().cmp(b.id()))
         .collect();
     let filename = config
         .controller()
@@ -852,10 +1148,50 @@ pub(crate) fn write_experienced_population(
 
 #[cfg(test)]
 mod tests {
-    use super::prepare_output_directory;
-    use crate::simulation::config::OverwriteFiles;
+    use super::{ControllerBuilder, prepare_output_directory};
+    use crate::simulation::config::{CommandLineArgs, Config, OverwriteFiles, WriteEvents};
+    use crate::simulation::scenario::Scenario;
+    use macros::deterministic_id_test;
     use std::fs;
     use tempfile::tempdir;
+
+    #[deterministic_id_test]
+    fn transit_feedback_is_published_identically_across_worker_partitions() {
+        let output = tempdir().unwrap();
+        let run = |num_parts| {
+            let mut config = Config::from_args(CommandLineArgs::new_with_path(
+                "./tests/resources/pt_simulated/queue_execution.yml",
+            ));
+            config.partitioning_mut().num_parts = num_parts;
+            config.controller_mut().last_iteration = 1;
+            config.qsim_mut().end_time = 30_000;
+            config.output_mut().output_dir = output.path().join(format!("parts-{num_parts}"));
+            config.output_mut().write_events = WriteEvents::None;
+
+            let controller = ControllerBuilder::default_with_scenario(Scenario::load(config))
+                .build()
+                .unwrap();
+            let snapshot = controller.transit_capacity_snapshot.clone();
+            let _ = controller.run();
+            snapshot.load_full().as_ref().clone()
+        };
+
+        let one_partition = run(1);
+        let two_partitions = run(2);
+        assert!(
+            one_partition
+                .values()
+                .any(|observation| observation.passengers > 0 && observation.capacity > 0),
+            "no occupied transit segment feedback collected"
+        );
+        assert!(
+            one_partition
+                .values()
+                .any(|observation| observation.failed_boardings > 0),
+            "no failed boarding feedback collected"
+        );
+        assert_eq!(one_partition, two_partitions);
+    }
 
     #[test]
     fn delete_directory_if_exists_recreates_output_dir() {

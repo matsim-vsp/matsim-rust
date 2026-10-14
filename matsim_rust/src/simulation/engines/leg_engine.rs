@@ -4,9 +4,12 @@ use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
 use crate::simulation::config::QSim;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
-use crate::simulation::engines::leg_engine::ResponsibleEngine::{Leg, Teleportation, Transit};
+use crate::simulation::engines::leg_engine::ResponsibleEngine::{
+    Leg, Teleportation, TimetableTransit, Transit,
+};
 use crate::simulation::engines::network_engine::NetworkEngine;
 use crate::simulation::engines::teleportation_engine::TeleportationEngine;
+use crate::simulation::engines::timetable_transit_engine::TimetableTransitEngine;
 use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::{
     PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
@@ -26,12 +29,14 @@ use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
 use nohash_hasher::IntSet;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::instrument;
 
 enum ResponsibleEngine {
     Leg,
     Teleportation,
     Transit,
+    TimetableTransit,
 }
 
 pub struct LegEngine<C: SimCommunicator> {
@@ -39,6 +44,7 @@ pub struct LegEngine<C: SimCommunicator> {
     network_engine: NetworkEngine,
     /// Present when transit vehicles are simulated instead of teleporting PT legs.
     transit_engine: Option<TransitEngine>,
+    timetable_transit_engine: Option<TimetableTransitEngine>,
     garage: Arc<Garage>,
     net_message_broker: NetMessageBroker<C>,
     departure_handler: VehicularDepartureHandler,
@@ -55,6 +61,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         config: &QSim,
         comp_env: ThreadLocalComputationalEnvironment,
         transit_engine: Option<TransitEngine>,
+        timetable_transit_engine: Option<TimetableTransitEngine>,
     ) -> Self {
         let clock = SimClock::new(config.ticks_per_second);
         let main_modes: IntSet<Id<String>> = config
@@ -72,6 +79,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             teleportation_engine: TeleportationEngine::new(comp_env.clone(), clock),
             network_engine: NetworkEngine::new(network, comp_env.clone(), clock),
             transit_engine,
+            timetable_transit_engine,
             garage,
             net_message_broker,
             departure_handler,
@@ -90,6 +98,11 @@ impl<C: SimCommunicator> LegEngine<C> {
                 self.transit_engine
                     .iter_mut()
                     .flat_map(TransitEngine::drain),
+            )
+            .chain(
+                self.timetable_transit_engine
+                    .iter_mut()
+                    .flat_map(TimetableTransitEngine::drain),
             )
             .collect()
     }
@@ -121,6 +134,17 @@ impl<C: SimCommunicator> LegEngine<C> {
         agents: Vec<SimulationAgent>,
     ) -> Vec<SimulationAgent> {
         self.receive_agents(now, agents);
+        let timetable_completed = self
+            .timetable_transit_engine
+            .as_mut()
+            .map(|engine| {
+                engine.do_step(
+                    now,
+                    &mut self.network_engine.network.transit_stops,
+                    &mut self.net_message_broker,
+                )
+            })
+            .unwrap_or_default();
         if let Some(transit) = &mut self.transit_engine {
             for vehicle in transit.depart_drivers(now) {
                 self.network_engine.receive_vehicle(now, vehicle, true);
@@ -128,11 +152,23 @@ impl<C: SimCommunicator> LegEngine<C> {
         }
 
         self.network_engine.move_nodes(now);
-        let (network_vehicles, alighted_passengers) = self
+        let (network_vehicles, alighted_passengers, stranded_agents) = self
             .network_engine
             .move_links(now, &mut self.net_message_broker);
 
+        let diagnostics = self.comp_env.partition_diagnostics();
+        let sync_started = diagnostics.as_ref().map(|_| Instant::now());
         let sync_messages = self.send_recv(now);
+        if let (Some(diagnostics), Some(started)) = (diagnostics, sync_started) {
+            let iteration = self.comp_env.mobsim_event_bus().borrow().iteration();
+            diagnostics.record_communication(
+                self.net_message_broker.rank(),
+                iteration,
+                self.clock.tick_to_time(now),
+                sync_messages.len() as u64,
+                u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            );
+        }
 
         for mut msg in sync_messages {
             let from = msg.from_process();
@@ -159,7 +195,18 @@ impl<C: SimCommunicator> LegEngine<C> {
                     from,
                     self.clock.tick_to_time(now),
                 );
-                self.pass_to_leg_vehicle(now, veh, false);
+                if self
+                    .timetable_transit_engine
+                    .as_ref()
+                    .is_some_and(|engine| engine.owns_vehicle(&veh))
+                {
+                    self.timetable_transit_engine
+                        .as_mut()
+                        .unwrap()
+                        .receive_vehicle(now, veh);
+                } else {
+                    self.pass_to_leg_vehicle(now, veh, false);
+                }
             }
 
             for mut teleportation in msg.take_teleportations() {
@@ -179,6 +226,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         let teleported_vehicles = self.teleportation_engine.do_step(now);
 
         let mut agents = alighted_passengers;
+        agents.extend(timetable_completed);
         for agent in self.publish_vehicular_end_events(now, network_vehicles) {
             match &mut self.transit_engine {
                 Some(transit) if agent.transit_driver().is_some() => {
@@ -195,6 +243,10 @@ impl<C: SimCommunicator> LegEngine<C> {
             }
         }
         agents.extend(self.publish_teleported_end_events(now, teleported_vehicles));
+        // A stranded agent has already been reported as `stuckAndAbort`, so it is passed on
+        // without an arrival, a `PersonLeavesVehicle`, or a `PersonEntersVehicle`: its leg was
+        // abandoned, not completed. The activity engine resumes it at its next activity.
+        agents.extend(stranded_agents);
         agents
     }
 
@@ -203,9 +255,20 @@ impl<C: SimCommunicator> LegEngine<C> {
         self.net_message_broker.send_recv(now)
     }
 
-    fn receive_agents(&mut self, now: Tick, agents: Vec<SimulationAgent>) {
+    pub(crate) fn receive_agents(&mut self, now: Tick, agents: Vec<SimulationAgent>) {
         for agent in agents {
-            self.receive_agent(now, agent);
+            self.receive_agent_at(now, now, agent);
+        }
+    }
+
+    pub(crate) fn receive_agents_at(
+        &mut self,
+        now: Tick,
+        event_time: Tick,
+        agents: Vec<SimulationAgent>,
+    ) {
+        for agent in agents {
+            self.receive_agent_at(now, event_time, agent);
         }
     }
 
@@ -283,16 +346,16 @@ impl<C: SimCommunicator> LegEngine<C> {
         );
     }
 
-    pub(crate) fn receive_agent(&mut self, now: Tick, mut agent: SimulationAgent) {
-        let now_time = self.clock.tick_to_time(now);
-        agent.advance_plan(now_time);
+    fn receive_agent_at(&mut self, now: Tick, event_time: Tick, mut agent: SimulationAgent) {
+        let event_time = self.clock.tick_to_time(event_time);
+        agent.advance_plan(event_time);
 
         let leg = agent.curr_leg();
         let route = leg.route.as_ref().unwrap();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonDepartureEventBuilder::default()
-                .time(now_time)
+                .time(event_time)
                 .person(agent.id().clone())
                 .link(route.start_link().clone())
                 .leg_mode(leg.mode.clone())
@@ -307,10 +370,10 @@ impl<C: SimCommunicator> LegEngine<C> {
         );
 
         match self.find_responsible_engine(&agent) {
-            Leg => self.pass_to_leg(now, agent, true),
-            Teleportation => self.pass_to_teleportation(now, agent),
-            Transit => self.transit_engine.as_mut().unwrap().receive_passenger(
-                now,
+            Leg => self.pass_to_leg(now, event_time, agent, true),
+            Teleportation => self.pass_to_teleportation(now, event_time, agent),
+            Transit | TimetableTransit => self.transit_engine.as_mut().unwrap().receive_passenger(
+                self.clock.time_to_tick(event_time),
                 agent,
                 &mut self.network_engine.network.transit_stops,
             ),
@@ -319,6 +382,14 @@ impl<C: SimCommunicator> LegEngine<C> {
 
     fn find_responsible_engine(&self, agent: &SimulationAgent) -> ResponsibleEngine {
         let leg = agent.curr_leg();
+
+        if self
+            .timetable_transit_engine
+            .as_ref()
+            .is_some_and(|transit| transit.serves(agent))
+        {
+            return TimetableTransit;
+        }
 
         if self
             .transit_engine
@@ -340,19 +411,27 @@ impl<C: SimCommunicator> LegEngine<C> {
         }
     }
 
-    fn pass_to_teleportation(&mut self, now: Tick, agent: SimulationAgent) {
-        self.teleportation_engine
-            .receive_agent(now, agent, &mut self.net_message_broker);
+    fn pass_to_teleportation(&mut self, now: Tick, event_time: SimTime, agent: SimulationAgent) {
+        self.teleportation_engine.receive_agent_at(
+            now,
+            event_time,
+            agent,
+            &mut self.net_message_broker,
+        );
     }
 
-    fn pass_to_leg(&mut self, now: Tick, agent: SimulationAgent, route_begin: bool) {
-        let now_time = self.clock.tick_to_time(now);
-
+    fn pass_to_leg(
+        &mut self,
+        now: Tick,
+        event_time: SimTime,
+        agent: SimulationAgent,
+        route_begin: bool,
+    ) {
         let agent_id = agent.id().clone();
 
         let vehicle = self
             .departure_handler
-            .handle_departure(now_time, agent, &self.garage)
+            .handle_departure(event_time, agent, &self.garage)
             .unwrap_or_else(|| panic!("Failed to handle departure for agent {}", agent_id));
 
         self.pass_to_leg_vehicle(now, vehicle, route_begin);

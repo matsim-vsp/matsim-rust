@@ -145,6 +145,10 @@ pub struct IORouteStop {
     pub arrival_offset: Option<String>,
     #[serde(rename = "@departureOffset", skip_serializing_if = "Option::is_none")]
     pub departure_offset: Option<String>,
+    #[serde(rename = "@allowBoarding", skip_serializing_if = "Option::is_none")]
+    pub allow_boarding: Option<bool>,
+    #[serde(rename = "@allowAlighting", skip_serializing_if = "Option::is_none")]
+    pub allow_alighting: Option<bool>,
     #[serde(
         rename = "@awaitDepartureTime",
         alias = "@awaitDeparture",
@@ -181,8 +185,20 @@ pub struct IODeparture {
     pub departure_time: String,
     #[serde(rename = "@vehicleRefId", skip_serializing_if = "Option::is_none")]
     pub vehicle_ref_id: Option<String>,
+    #[serde(rename = "chainedDeparture", default)]
+    pub chained_departures: Vec<IOChainedDeparture>,
     #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
     pub attributes: Option<IOAttributes>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+pub struct IOChainedDeparture {
+    #[serde(rename = "@toDeparture")]
+    pub to_departure: String,
+    #[serde(rename = "@toTransitLine", skip_serializing_if = "Option::is_none")]
+    pub to_transit_line: Option<String>,
+    #[serde(rename = "@toTransitRoute", skip_serializing_if = "Option::is_none")]
+    pub to_transit_route: Option<String>,
 }
 
 #[cfg(test)]
@@ -260,6 +276,51 @@ mod tests {
                 .stops[0]
                 .await_departure
         );
+    }
+
+    #[test]
+    fn parse_route_stop_boarding_constraints() {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+                    <!DOCTYPE transitSchedule SYSTEM \"http://www.matsim.org/files/dtd/transitSchedule_v2.dtd\">\
+                    <transitSchedule>\
+                        <transitStops><stopFacility id=\"s1\" x=\"1.0\" y=\"2.0\"/></transitStops>\
+                        <transitLine id=\"l1\"><transitRoute id=\"r1\">\
+                            <transportMode>pt</transportMode>\
+                            <routeProfile><stop refId=\"s1\" departureOffset=\"00:00:00\" allowBoarding=\"false\" allowAlighting=\"false\"/></routeProfile>\
+                            <route><link refId=\"link-1\"/></route>\
+                            <departures><departure id=\"d1\" departureTime=\"06:00:00\"/></departures>\
+                        </transitRoute></transitLine>\
+                    </transitSchedule>";
+
+        let schedule: IOTransitSchedule = from_str(xml).unwrap();
+        let stop = &schedule.transit_lines[0].transit_routes[0]
+            .route_profile
+            .stops[0];
+        assert_eq!(Some(false), stop.allow_boarding);
+        assert_eq!(Some(false), stop.allow_alighting);
+    }
+
+    #[test]
+    fn parse_chained_departure_with_implicit_and_explicit_targets() {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+                    <!DOCTYPE transitSchedule SYSTEM \"http://www.matsim.org/files/dtd/transitSchedule_v2.dtd\">\
+                    <transitSchedule><transitStops><stopFacility id=\"s1\" x=\"0\" y=\"0\"/></transitStops>\
+                    <transitLine id=\"line-a\"><transitRoute id=\"route-a\"><transportMode>train</transportMode>\
+                    <routeProfile><stop refId=\"s1\" departureOffset=\"00:00:00\"/></routeProfile><route><link refId=\"l1\"/></route>\
+                    <departures><departure id=\"dep-a\" departureTime=\"06:00:00\"><chainedDeparture toDeparture=\"dep-b\"/>\
+                    <chainedDeparture toDeparture=\"dep-c\" toTransitLine=\"line-b\" toTransitRoute=\"route-b\"/></departure></departures>\
+                    </transitRoute></transitLine></transitSchedule>";
+
+        let schedule: IOTransitSchedule = from_str(xml).unwrap();
+        let chained = &schedule.transit_lines[0].transit_routes[0]
+            .departures
+            .departures[0]
+            .chained_departures;
+        assert_eq!(2, chained.len());
+        assert_eq!("dep-b", chained[0].to_departure);
+        assert_eq!(None, chained[0].to_transit_line);
+        assert_eq!(Some("line-b".into()), chained[1].to_transit_line);
+        assert_eq!(Some("route-b".into()), chained[1].to_transit_route);
     }
 
     #[test]

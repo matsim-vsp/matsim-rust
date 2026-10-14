@@ -1,0 +1,154 @@
+{
+  "schema_version" : 3,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "1dc87a30b9246988ba00b95f5b412119ee44632b59ab4388d5f2da643b4978e9",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "population.xml",
+      "sha256" : "cb663c17fa4154bf81af14211be57d4222103309aae3bac958aeb221083037cc"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "transit_schedule.xml",
+      "sha256" : "e0370c6241ab7aea530b2f48cc6243193a1e760baafb3cd582f7ba27aef3131a"
+    }, {
+      "role" : "routing_requests",
+      "path" : "requests.json",
+      "sha256" : "ad277e9832d14262fe29a911d4bd9404558b5e3178928565a2adc6a4572abc08"
+    } ]
+  },
+  "itineraries" : [ {
+    "id" : "default_subpopulation_takes_the_direct_rail_service",
+    "request" : {
+      "id" : "default_subpopulation_takes_the_direct_rail_service",
+      "mode" : "pt",
+      "person" : {
+        "id" : "person-1",
+        "subpopulation" : "default"
+      },
+      "departure_time" : 28800.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 28800.0,
+      "arrival_time" : 28800.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "rail",
+      "departure_time" : 28800.0,
+      "arrival_time" : 31800.0,
+      "distance" : 6100.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "direct",
+        "boarding_time" : 28800.0,
+        "access_stop" : "ra",
+        "egress_stop" : "rc"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 31800.0,
+      "arrival_time" : 31800.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 5.833,
+    "arrival_time" : 31800.0
+  }, {
+    "id" : "freight_subpopulation_takes_the_walked_transfer",
+    "request" : {
+      "id" : "freight_subpopulation_takes_the_walked_transfer",
+      "mode" : "pt",
+      "person" : {
+        "id" : "freight-hauler",
+        "subpopulation" : "freight"
+      },
+      "departure_time" : 28800.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 28800.0,
+      "arrival_time" : 28800.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "rail",
+      "departure_time" : 28800.0,
+      "arrival_time" : 29400.0,
+      "distance" : 2400.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "a_to_b",
+        "boarding_time" : 28800.0,
+        "access_stop" : "ra",
+        "egress_stop" : "rb"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 29400.0,
+      "arrival_time" : 29551.0,
+      "distance" : 130.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "road",
+      "departure_time" : 29556.0,
+      "arrival_time" : 30000.0,
+      "distance" : 100.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "b_to_c_bus",
+        "boarding_time" : 29700.0,
+        "access_stop" : "rb_platform",
+        "egress_stop" : "rc"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 30000.0,
+      "arrival_time" : 30000.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 8.917,
+    "arrival_time" : 30000.0
+  } ],
+  "trees" : [ ],
+  "events" : [ ]
+}

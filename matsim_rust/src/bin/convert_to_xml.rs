@@ -36,7 +36,7 @@ fn main() {
 
     if let Some(net_path) = net_path {
         info!("Loading network from {:?}", net_path);
-        let net = Network::from_file(&net_path);
+        let net = Network::from_file_as_is(&net_path);
 
         info!("Converting network to XML format");
         net.to_file(&replace_filename(net_path));

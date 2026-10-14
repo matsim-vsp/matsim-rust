@@ -14,6 +14,7 @@ use crate::simulation::messaging::messages::InternalSyncMessage;
 use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
 use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
+use crate::simulation::network::partition_diagnostics::PartitionDiagnostics;
 use crate::simulation::population::agent_source::DynAgentSource;
 use crate::simulation::replanning::routing::TripRouter;
 use crate::simulation::replanning::{ReplanningStrategy, StrategyManager, replan_population};
@@ -106,6 +107,8 @@ pub struct ThreadLocalComputationalEnvironment {
     partition_events_manager: Rc<RefCell<PartitionEventsManager>>,
     #[builder(default)]
     partition_migration_extensions_manager: Rc<RefCell<PartitionChangeExtensionsManager>>,
+    #[builder(default)]
+    partition_diagnostics: Option<Arc<PartitionDiagnostics>>,
 }
 
 #[cfg(test)]
@@ -120,6 +123,7 @@ impl Default for ThreadLocalComputationalEnvironment {
             partition_migration_extensions_manager: Rc::new(RefCell::new(
                 PartitionChangeExtensionsManager::default(),
             )),
+            partition_diagnostics: None,
         }
     }
 }
@@ -158,6 +162,10 @@ impl ThreadLocalComputationalEnvironment {
 
     pub fn partition_event_bus(&self) -> Rc<RefCell<PartitionEventsManager>> {
         self.partition_events_manager.clone()
+    }
+
+    pub fn partition_diagnostics(&self) -> Option<Arc<PartitionDiagnostics>> {
+        self.partition_diagnostics.clone()
     }
 
     pub fn partition_migration_extensions_manager_borrow_mut(
@@ -217,6 +225,8 @@ pub(crate) struct MobsimWorkerPoolArguments {
     #[builder(default)]
     worker_listener: HashMap<u32, Vec<Box<WorkerListenerRegisterFunction>>>,
     global_barrier: Arc<Barrier>,
+    #[builder(default)]
+    partition_diagnostics: Option<Arc<PartitionDiagnostics>>,
 }
 
 #[derive(Builder)]
@@ -231,6 +241,8 @@ struct MobsimWorkerArguments {
     #[builder(default)]
     worker_listener: Vec<Box<WorkerListenerRegisterFunction>>,
     global_barrier: Arc<Barrier>,
+    #[builder(default)]
+    partition_diagnostics: Option<Arc<PartitionDiagnostics>>,
 }
 
 struct MobsimWorker {
@@ -272,6 +284,7 @@ impl MobsimWorkerPool {
                 .external_services(args.external_services.clone())
                 .worker_listener(args.worker_listener.remove(&rank).unwrap_or_default())
                 .global_barrier(args.global_barrier.clone())
+                .partition_diagnostics(args.partition_diagnostics.clone())
                 .build()
                 .unwrap();
 
@@ -432,6 +445,7 @@ impl MobsimWorker {
             external_services,
             mut worker_listener,
             global_barrier,
+            partition_diagnostics,
         } = args;
 
         let config = &scenario_core.config;
@@ -474,6 +488,7 @@ impl MobsimWorker {
             .mobsim_events_manager(Rc::new(RefCell::new(mobsim_events)))
             .partition_events_manager(Rc::new(RefCell::new(partition_events)))
             .partition_migration_extensions_manager(Rc::new(RefCell::new(partition_changes)))
+            .partition_diagnostics(partition_diagnostics)
             .build()
             .unwrap();
 
@@ -717,7 +732,7 @@ impl ScoringPool {
     #[hotpath::measure]
     pub(crate) fn score_population(
         &self,
-        experienced_plans: &mut Vec<PersonExperiences>,
+        experienced_plans: &mut [PersonExperiences],
         population: &mut Population,
     ) {
         match &self.pool {
@@ -834,7 +849,7 @@ impl IterationEventsWriter {
     }
 
     fn should_write(&self, iteration: u32) -> bool {
-        iteration == self.last_iteration || iteration % self.write_events_interval == 0
+        iteration == self.last_iteration || iteration.is_multiple_of(self.write_events_interval)
     }
 
     fn on_any(&self, event: &dyn EventTrait) {

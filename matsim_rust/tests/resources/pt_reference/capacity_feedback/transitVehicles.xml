@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+	<vehicleType id="pt">
+		<description>Single-seat crowding fixture vehicle</description>
+		<capacity seats="1" standingRoomInPersons="0" />
+		<length meter="15" />
+		<width meter="2.5" />
+		<maximumVelocity meterPerSecond="25" />
+		<passengerCarEquivalents pce="5.0" />
+		<networkMode networkMode="car" />
+	</vehicleType>
+	<vehicleType id="transfer">
+		<description>Transfer service vehicle</description>
+		<capacity seats="10" standingRoomInPersons="0" />
+		<length meter="15" />
+		<width meter="2.5" />
+		<maximumVelocity meterPerSecond="25" />
+		<passengerCarEquivalents pce="5.0" />
+		<networkMode networkMode="car" />
+	</vehicleType>
+	<vehicle id="tr_1" type="pt" />
+	<vehicle id="tr_2" type="pt" />
+	<vehicle id="transfer_a" type="transfer" />
+	<vehicle id="transfer_b" type="transfer" />
+</vehicleDefinitions>

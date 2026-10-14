@@ -32,7 +32,7 @@ where
     F: Fn(&mut Population),
 {
     let input_dir = PathBuf::from("./assets/equil/");
-    let net = Network::from_file(&input_dir.join("equil-network.xml"));
+    let net = Network::from_file_as_is(&input_dir.join("equil-network.xml"));
     let mut garage = Garage::from_file(&input_dir.join("equil-vehicles.xml"));
     let mut pop = Population::from_file(input_dir.join("equil-1-plan.xml"), &mut garage);
 

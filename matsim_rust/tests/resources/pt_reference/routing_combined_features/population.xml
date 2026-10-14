@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<!--
+  Both routing requests of routing_combined_features need real persons: without the subpopulation
+  attribute they would route as personless queries and never see the person-specific costs.
+-->
+<population>
+  <person id="person-1">
+    <attributes>
+      <attribute name="subpopulation" class="java.lang.String">default</attribute>
+    </attributes>
+    <plan selected="yes">
+      <activity type="home" link="11" x="1050" y="1050" />
+    </plan>
+  </person>
+  <person id="freight-hauler">
+    <attributes>
+      <attribute name="subpopulation" class="java.lang.String">freight</attribute>
+    </attributes>
+    <plan selected="yes">
+      <activity type="home" link="11" x="1050" y="1050" />
+    </plan>
+  </person>
+</population>

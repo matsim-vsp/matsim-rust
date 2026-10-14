@@ -4,9 +4,9 @@ use crate::simulation::io::proto::proto_transit::{load_from_proto, write_to_prot
 use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
 use crate::simulation::io::xml::transit;
 use crate::simulation::io::xml::transit::{
-    IODeparture, IODepartures, IOMinimalTransferRelation, IOMinimalTransferTimes, IONetworkRoute,
-    IORouteLink, IORouteProfile, IORouteStop, IOStopFacility, IOTransitLine, IOTransitRoute,
-    IOTransitSchedule, IOTransitStops,
+    IOChainedDeparture, IODeparture, IODepartures, IOMinimalTransferRelation,
+    IOMinimalTransferTimes, IONetworkRoute, IORouteLink, IORouteProfile, IORouteStop,
+    IOStopFacility, IOTransitLine, IOTransitRoute, IOTransitSchedule, IOTransitStops,
 };
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
@@ -55,8 +55,15 @@ pub struct TransitDeparture {
     pub id: Id<TransitDeparture>,
     pub departure_time: SimTime,
     pub vehicle_ref_id: Option<Id<String>>,
+    pub chained_departures: Vec<ChainedDeparture>,
     pub attributes: InternalAttributes,
-    // TODO in java there are chainedDepartures. Not sure, if we need this.
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ChainedDeparture {
+    pub transit_line_id: Id<TransitLine>,
+    pub transit_route_id: Id<TransitRoute>,
+    pub departure_id: Id<TransitDeparture>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -266,6 +273,15 @@ impl From<&TransitDeparture> for IODeparture {
                 .vehicle_ref_id
                 .as_ref()
                 .map(|id| id.external().to_string()),
+            chained_departures: departure
+                .chained_departures
+                .iter()
+                .map(|chained| IOChainedDeparture {
+                    to_departure: chained.departure_id.external().to_string(),
+                    to_transit_line: Some(chained.transit_line_id.external().to_string()),
+                    to_transit_route: Some(chained.transit_route_id.external().to_string()),
+                })
+                .collect(),
             attributes: IOAttributes::from_internal_none_if_empty(&departure.attributes),
         }
     }
@@ -384,7 +400,44 @@ impl From<crate::generated::transit::TransitDeparture> for TransitDeparture {
             id: Id::get(wire.id),
             departure_time: SimTime::from_nanos(wire.departure_time_ns),
             vehicle_ref_id: wire.vehicle_ref_id.map(Id::get),
+            chained_departures: wire
+                .chained_departures
+                .into_iter()
+                .map(|chained| ChainedDeparture {
+                    transit_line_id: Id::get(chained.transit_line_id),
+                    transit_route_id: Id::get(chained.transit_route_id),
+                    departure_id: Id::get(chained.departure_id),
+                })
+                .collect(),
             attributes: InternalAttributes::from(&wire.attributes),
+        }
+    }
+}
+
+impl From<(IODeparture, Id<TransitLine>, Id<TransitRoute>)> for TransitDeparture {
+    fn from(
+        (io, parent_line, parent_route): (IODeparture, Id<TransitLine>, Id<TransitRoute>),
+    ) -> Self {
+        TransitDeparture {
+            id: Id::create(&io.id),
+            departure_time: parse_time_required(&io.departure_time, "departureTime"),
+            vehicle_ref_id: io.vehicle_ref_id.map(|id| Id::create(&id)),
+            chained_departures: io
+                .chained_departures
+                .into_iter()
+                .map(|chained| ChainedDeparture {
+                    transit_line_id: chained
+                        .to_transit_line
+                        .map(|id| Id::create(&id))
+                        .unwrap_or_else(|| parent_line.clone()),
+                    transit_route_id: chained
+                        .to_transit_route
+                        .map(|id| Id::create(&id))
+                        .unwrap_or_else(|| parent_route.clone()),
+                    departure_id: Id::create(&chained.to_departure),
+                })
+                .collect(),
+            attributes: io.attributes.map(Into::into).unwrap_or_default(),
         }
     }
 }
@@ -417,15 +470,16 @@ impl From<crate::generated::transit::MinimalTransferTime> for MinimalTransferTim
 impl From<IOTransitLine> for TransitLine {
     fn from(io: IOTransitLine) -> Self {
         Id::<String>::create(&io.id);
+        let id = Id::create(&io.id);
         let routes = io
             .transit_routes
             .into_iter()
-            .map(TransitRoute::from)
+            .map(|route| TransitRoute::from((route, id.clone())))
             .map(|route| (route.id.clone(), route))
             .collect();
 
         TransitLine {
-            id: Id::create(&io.id),
+            id,
             name: io.name.unwrap_or_default(),
             routes,
             attributes: io.attributes.map(Into::into).unwrap_or_default(),
@@ -433,11 +487,12 @@ impl From<IOTransitLine> for TransitLine {
     }
 }
 
-impl From<IOTransitRoute> for TransitRoute {
-    fn from(io: IOTransitRoute) -> Self {
+impl From<(IOTransitRoute, Id<TransitLine>)> for TransitRoute {
+    fn from((io, parent_line): (IOTransitRoute, Id<TransitLine>)) -> Self {
         Id::<String>::create(&io.id);
+        let id = Id::<TransitRoute>::create(&io.id);
         TransitRoute {
-            id: Id::create(&io.id),
+            id: id.clone(),
             description: io.description,
             transport_mode: Id::create(&io.transport_mode),
             stops: io
@@ -456,7 +511,9 @@ impl From<IOTransitRoute> for TransitRoute {
                 .departures
                 .departures
                 .into_iter()
-                .map(TransitDeparture::from)
+                .map(|departure| {
+                    TransitDeparture::from((departure, parent_line.clone(), id.clone()))
+                })
                 .collect(),
             attributes: io.attributes.map(Into::into).unwrap_or_default(),
         }
@@ -474,8 +531,14 @@ impl From<IORouteStop> for TransitRouteStop {
             arrival_offset: parse_duration_opt(&io.arrival_offset),
             departure_offset: parse_duration_opt(&io.departure_offset),
             await_departure,
-            allow_boarding: find_bool_attr(&io.attributes, "allowBoarding").unwrap_or(true),
-            allow_alighting: find_bool_attr(&io.attributes, "allowAlighting").unwrap_or(true),
+            allow_boarding: io
+                .allow_boarding
+                .or_else(|| find_bool_attr(&io.attributes, "allowBoarding"))
+                .unwrap_or(true),
+            allow_alighting: io
+                .allow_alighting
+                .or_else(|| find_bool_attr(&io.attributes, "allowAlighting"))
+                .unwrap_or(true),
             minimum_stop_duration: find_duration_attr(&io.attributes, "minimumStopDuration")
                 .unwrap_or_default(),
         }
@@ -485,16 +548,6 @@ impl From<IORouteStop> for TransitRouteStop {
 impl From<&TransitRouteStop> for IORouteStop {
     fn from(stop: &TransitRouteStop) -> Self {
         let mut attributes = Vec::new();
-        attributes.push(IOAttribute::new_with_class(
-            "allowBoarding".to_string(),
-            "java.lang.Boolean".to_string(),
-            stop.allow_boarding.to_string(),
-        ));
-        attributes.push(IOAttribute::new_with_class(
-            "allowAlighting".to_string(),
-            "java.lang.Boolean".to_string(),
-            stop.allow_alighting.to_string(),
-        ));
         if let Some(await_departure) = stop.await_departure {
             attributes.push(IOAttribute::new_with_class(
                 "awaitDeparture".to_string(),
@@ -512,19 +565,10 @@ impl From<&TransitRouteStop> for IORouteStop {
             ref_id: stop.facility_id.external().to_string(),
             arrival_offset: format_duration_opt(stop.arrival_offset),
             departure_offset: format_duration_opt(stop.departure_offset),
+            allow_boarding: Some(stop.allow_boarding),
+            allow_alighting: Some(stop.allow_alighting),
             await_departure: stop.await_departure,
             attributes: Some(IOAttributes { attributes }),
-        }
-    }
-}
-
-impl From<IODeparture> for TransitDeparture {
-    fn from(io: IODeparture) -> Self {
-        TransitDeparture {
-            id: Id::create(&io.id),
-            departure_time: parse_time_required(&io.departure_time, "departureTime"),
-            vehicle_ref_id: io.vehicle_ref_id.map(|id| Id::create(&id)),
-            attributes: io.attributes.map(Into::into).unwrap_or_default(),
         }
     }
 }
@@ -650,6 +694,38 @@ mod tests {
         let loaded = TransitSchedule::from_file(&path);
 
         assert_eq!(schedule, loaded);
+    }
+
+    #[deterministic_id_test]
+    fn chained_departures_round_trip_through_xml() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source.xml");
+        let output = temp_dir.path().join("output.xml");
+        std::fs::write(
+            &source,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v2.dtd">
+<transitSchedule><transitStops><stopFacility id="s" x="0" y="0"/></transitStops>
+<transitLine id="l1"><transitRoute id="r1"><transportMode>train</transportMode><routeProfile><stop refId="s" departureOffset="00:00:00"/></routeProfile><route><link refId="link"/></route><departures><departure id="d1" departureTime="06:00:00"><chainedDeparture toDeparture="d2"/><chainedDeparture toDeparture="d3" toTransitLine="l2" toTransitRoute="r2"/></departure></departures></transitRoute></transitLine>
+<transitLine id="l2"><transitRoute id="r2"><transportMode>train</transportMode><routeProfile><stop refId="s" departureOffset="00:00:00"/></routeProfile><route><link refId="link"/></route><departures><departure id="d2" departureTime="06:10:00"/><departure id="d3" departureTime="06:20:00"/></departures></transitRoute></transitLine>
+</transitSchedule>"#,
+        )
+        .unwrap();
+
+        let schedule = TransitSchedule::from_file(&source);
+        let chain = &schedule.get_line(&Id::get_from_ext("l1")).routes[&Id::get_from_ext("r1")]
+            .departures[0]
+            .chained_departures;
+        assert_eq!(2, chain.len());
+        assert_eq!(Id::get_from_ext("l1"), chain[0].transit_line_id);
+        assert_eq!(Id::get_from_ext("r1"), chain[0].transit_route_id);
+        assert_eq!(Id::get_from_ext("d2"), chain[0].departure_id);
+        assert_eq!(Id::get_from_ext("l2"), chain[1].transit_line_id);
+        assert_eq!(Id::get_from_ext("r2"), chain[1].transit_route_id);
+        assert_eq!(Id::get_from_ext("d3"), chain[1].departure_id);
+
+        schedule.to_file(&output);
+        assert_eq!(schedule, TransitSchedule::from_file(&output));
     }
 
     #[deterministic_id_test]

@@ -1,0 +1,325 @@
+{
+  "schema_version" : 3,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "1196036c97c452e3d22d40542699f0a1b943a79100beb161418543533290ec38",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "plans.xml",
+      "sha256" : "c0fe6f963e2c8907984888a902276c7a51bb65277d3e75be419ba7a475bcee88"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_vehicles",
+      "path" : "transitVehicles.xml",
+      "sha256" : "4b3114bc64a72cf0ec1fecb31413ff14847598469ca83617fecd62152e53ca05"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "transitSchedule.xml",
+      "sha256" : "ba46c2f94ffb1b5fac73f63abe290c4de43f50db113d7ca059864283a02e4f29"
+    } ]
+  },
+  "itineraries" : [ ],
+  "trees" : [ ],
+  "events" : [ {
+    "time" : 28800.0,
+    "type" : "actend",
+    "person" : "transfer-person",
+    "actType" : "h",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28800.0,
+    "type" : "departure",
+    "person" : "transfer-person",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 28800.0,
+    "type" : "waitingForPt",
+    "person" : "transfer-person",
+    "atStop" : "ra",
+    "destinationStop" : "rb"
+  }, {
+    "time" : 28800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Reference Line",
+    "transitRouteId" : "a_to_b",
+    "departureId" : "a_0800"
+  }, {
+    "time" : 28800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "ra",
+    "delay" : 0.0
+  }, {
+    "time" : 28801.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "transfer-person",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28803.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "ra",
+    "delay" : 3.0
+  }, {
+    "time" : 29004.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "rb",
+    "delay" : -396.0
+  }, {
+    "time" : 29005.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "transfer-person",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 29005.0,
+    "type" : "arrival",
+    "person" : "transfer-person",
+    "legMode" : "pt",
+    "link" : "12"
+  }, {
+    "time" : 29005.0,
+    "type" : "actstart",
+    "person" : "transfer-person",
+    "actType" : "pt interaction",
+    "link" : "12",
+    "x" : 2050.0,
+    "y" : 2940.0
+  }, {
+    "time" : 29005.0,
+    "type" : "actend",
+    "person" : "transfer-person",
+    "actType" : "pt interaction",
+    "link" : "12",
+    "x" : 2050.0,
+    "y" : 2940.0
+  }, {
+    "time" : 29005.0,
+    "type" : "departure",
+    "person" : "transfer-person",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "12"
+  }, {
+    "time" : 29007.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "rb",
+    "delay" : -393.0
+  }, {
+    "time" : 29007.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 29007.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "12"
+  }, {
+    "time" : 29130.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_bus_1_1",
+    "vehicleId" : "bus_1",
+    "transitLineId" : "Reference Line",
+    "transitRouteId" : "b_to_c_bus",
+    "departureId" : "bus_080530"
+  }, {
+    "time" : 29130.0,
+    "type" : "departure",
+    "person" : "pt_bus_1_1",
+    "legMode" : "car",
+    "link" : "23"
+  }, {
+    "time" : 29130.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_bus_1_1",
+    "vehicle" : "bus_1"
+  }, {
+    "time" : 29130.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus_1",
+    "facility" : "rb_platform",
+    "delay" : 0.0
+  }, {
+    "time" : 29130.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus_1",
+    "facility" : "rb_platform",
+    "delay" : 0.0
+  }, {
+    "time" : 29132.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus_1",
+    "facility" : "rc",
+    "delay" : -298.0
+  }, {
+    "time" : 29132.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus_1",
+    "facility" : "rc",
+    "delay" : -298.0
+  }, {
+    "time" : 29132.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_bus_1_1",
+    "vehicle" : "bus_1"
+  }, {
+    "time" : 29132.0,
+    "type" : "arrival",
+    "person" : "pt_bus_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 29156.0,
+    "type" : "travelled",
+    "person" : "transfer-person",
+    "mode" : "walk",
+    "distance" : 130.0
+  }, {
+    "time" : 29156.0,
+    "type" : "arrival",
+    "person" : "transfer-person",
+    "legMode" : "walk",
+    "link" : "23"
+  }, {
+    "time" : 29156.0,
+    "type" : "actstart",
+    "person" : "transfer-person",
+    "actType" : "pt interaction",
+    "link" : "23",
+    "x" : 2150.0,
+    "y" : 2940.0
+  }, {
+    "time" : 29156.0,
+    "type" : "actend",
+    "person" : "transfer-person",
+    "actType" : "pt interaction",
+    "link" : "23",
+    "x" : 2150.0,
+    "y" : 2940.0
+  }, {
+    "time" : 29156.0,
+    "type" : "departure",
+    "person" : "transfer-person",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "23"
+  }, {
+    "time" : 29156.0,
+    "type" : "waitingForPt",
+    "person" : "transfer-person",
+    "atStop" : "rb_platform",
+    "destinationStop" : "rc"
+  }, {
+    "time" : 29700.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_bus_2_1",
+    "vehicleId" : "bus_2",
+    "transitLineId" : "Reference Line",
+    "transitRouteId" : "b_to_c_bus",
+    "departureId" : "bus_0815"
+  }, {
+    "time" : 29700.0,
+    "type" : "departure",
+    "person" : "pt_bus_2_1",
+    "legMode" : "car",
+    "link" : "23"
+  }, {
+    "time" : 29700.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_bus_2_1",
+    "vehicle" : "bus_2"
+  }, {
+    "time" : 29700.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus_2",
+    "facility" : "rb_platform",
+    "delay" : 0.0
+  }, {
+    "time" : 29701.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "transfer-person",
+    "vehicle" : "bus_2"
+  }, {
+    "time" : 29703.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus_2",
+    "facility" : "rb_platform",
+    "delay" : 3.0
+  }, {
+    "time" : 29705.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "bus_2",
+    "facility" : "rc",
+    "delay" : -295.0
+  }, {
+    "time" : 29706.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "transfer-person",
+    "vehicle" : "bus_2"
+  }, {
+    "time" : 29706.0,
+    "type" : "arrival",
+    "person" : "transfer-person",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 29706.0,
+    "type" : "actstart",
+    "person" : "transfer-person",
+    "actType" : "w",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 29708.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "bus_2",
+    "facility" : "rc",
+    "delay" : -292.0
+  }, {
+    "time" : 29708.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_bus_2_1",
+    "vehicle" : "bus_2"
+  }, {
+    "time" : 29708.0,
+    "type" : "arrival",
+    "person" : "pt_bus_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  } ]
+}

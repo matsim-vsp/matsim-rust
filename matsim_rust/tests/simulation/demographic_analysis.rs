@@ -145,7 +145,7 @@ fn publish_run(
         AnalysisInputPaths::default(),
     )
     .with_person_demographics(capture_person_demographics(population, settings));
-    let report = analyze_final_iteration(
+    analyze_final_iteration(
         output,
         0,
         1,
@@ -155,8 +155,7 @@ fn publish_run(
         &Network::new(),
         settings,
     )
-    .unwrap();
-    report
+    .unwrap()
 }
 
 /// Events where every planned leg of the commuter and the walker arrives.
@@ -350,12 +349,12 @@ fn group_burdens_retain_weights_missing_attributes_and_incomplete_persons() {
         assert_eq!(entry["status"], expected, "{module}: {status}");
     }
 
-    // The report presents the tables and states the equity criterion next to them.
+    // The report presents metric ranges and states the equity criterion next to them.
     let html = fs::read_to_string(&report).unwrap();
     assert!(html.contains("Demographic outcomes and equity"));
-    assert!(html.contains("csvTable('#group-burdens'"));
-    assert!(html.contains("csvTable('#person-demographics'"));
-    assert!(html.contains("csvTable('#equity-comparison'"));
+    assert!(html.contains("group_burdens.csv"));
+    assert!(html.contains("person_demographics.csv"));
+    assert!(html.contains("equity_comparison.csv"));
     assert!(
         html.contains("lower_daily_completed_travel_time"),
         "the criterion is stated"
@@ -575,7 +574,7 @@ fn an_unconfigured_module_publishes_its_tables_as_empty() {
         "{status}"
     );
     let html = fs::read_to_string(&report).unwrap();
-    assert!(html.contains("csvTable('#group-burdens'"));
+    assert!(html.contains("group_burdens.csv"));
 }
 
 #[deterministic_id_test(matsim_rust)]

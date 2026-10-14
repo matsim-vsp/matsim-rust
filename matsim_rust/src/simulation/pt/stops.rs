@@ -6,9 +6,13 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::id::Id;
+use crate::simulation::pt::feedback::{
+    TransitCapacityFeedbackCollector, TransitSegment, TransitSegmentObservation,
+};
 use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
 use crate::simulation::time::SimTime;
 use nohash_hasher::IntMap;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) struct WaitingPassenger {
@@ -44,20 +48,56 @@ impl WaitingPassenger {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct TransitStops {
     waiting: IntMap<Id<TransitStopFacility>, Vec<WaitingPassenger>>,
     alighted: Vec<SimulationAgent>,
+    feedback: Arc<TransitCapacityFeedbackCollector>,
+}
+
+impl Default for TransitStops {
+    fn default() -> Self {
+        Self::with_feedback(Arc::default())
+    }
 }
 
 impl TransitStops {
+    pub(crate) fn with_feedback(feedback: Arc<TransitCapacityFeedbackCollector>) -> Self {
+        Self {
+            waiting: IntMap::default(),
+            alighted: Vec::new(),
+            feedback,
+        }
+    }
+
+    pub(crate) fn record_segment(
+        &self,
+        segment: TransitSegment,
+        passengers: usize,
+        capacity: usize,
+        boarded: usize,
+        failed_boardings: usize,
+    ) {
+        self.feedback.record(
+            segment,
+            TransitSegmentObservation {
+                passengers,
+                capacity,
+                boarded,
+                failed_boardings,
+            },
+        );
+    }
+
     /// Queues a passenger behind everyone who arrived earlier. Passengers arriving in the same
-    /// instant are ordered by person id, because the order in which engines hand them over
-    /// depends on how the scenario is partitioned.
+    /// instant use descending person ID, matching MATSim's same-time boarding order independently
+    /// of how engines hand them over across partitions.
     pub(crate) fn add(&mut self, stop: Id<TransitStopFacility>, passenger: WaitingPassenger) {
         let queue = self.waiting.entry(stop).or_default();
         let key = (passenger.since, passenger.agent.id().internal());
-        let position = queue.partition_point(|p| (p.since, p.agent.id().internal()) <= key);
+        let position = queue.partition_point(|p| {
+            p.since < key.0 || (p.since == key.0 && p.agent.id().internal() >= key.1)
+        });
         queue.insert(position, passenger);
     }
 

@@ -43,6 +43,13 @@ message TransitDeparture {
   uint64 departure_time_ns = 2;
   optional uint64 vehicle_ref_id = 3;
   map<string, general.AttributeValue> attributes = 4;
+  repeated ChainedDeparture chained_departures = 5;
+}
+
+message ChainedDeparture {
+  uint64 transit_line_id = 1;
+  uint64 transit_route_id = 2;
+  uint64 departure_id = 3;
 }
 
 message TransitStopFacility {

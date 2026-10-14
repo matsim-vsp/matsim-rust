@@ -385,10 +385,20 @@ impl TransitCollector {
 
     pub(super) fn process_timestamp(&mut self, events: &[Box<dyn EventTrait>], time: SimTime) {
         let seconds = time.as_nanos() as f64 / 1e9;
+        let arriving_people: BTreeSet<_> = events
+            .iter()
+            .filter_map(|event| {
+                event
+                    .as_any()
+                    .downcast_ref::<PersonArrivalEvent>()
+                    .map(|event| event.person.external().to_owned())
+            })
+            .collect();
+        let mut deferred_waits = Vec::new();
         // A ride is assembled before any trip is closed: the vehicle's run, the stop the passenger
         // waits at, the boarding and the alighting all precede the leg's arrival. A driver also
         // enters and leaves its own vehicle, so only a passenger that announced a transit leg can
-        // board, and a new wait clears whatever an earlier leg left behind.
+        // board. A wait after a same-timestamp arrival is installed after that arrival closes.
         for event in events {
             if let Some(event) = event.as_any().downcast_ref::<TransitDriverStartsEvent>() {
                 self.runs.insert(
@@ -401,15 +411,13 @@ impl TransitCollector {
                 );
             } else if let Some(event) = event.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
                 let person = event.person.external().to_owned();
-                self.waiting.insert(
-                    person.clone(),
-                    (
-                        event.at_stop.external().to_owned(),
-                        event.destination_stop.external().to_owned(),
-                    ),
-                );
-                self.boarded.remove(&person);
-                self.rides.remove(&person);
+                let access = event.at_stop.external().to_owned();
+                let destination = event.destination_stop.external().to_owned();
+                if arriving_people.contains(&person) {
+                    deferred_waits.push((person, access, destination));
+                } else {
+                    self.start_waiting(person, access, destination);
+                }
             } else if let Some(event) = event.as_any().downcast_ref::<PersonEntersVehicleEvent>() {
                 let person = event.person.external();
                 if self.waiting.contains_key(person) {
@@ -536,6 +544,9 @@ impl TransitCollector {
                 }
             }
         }
+        for (person, access, destination) in deferred_waits {
+            self.start_waiting(person, access, destination);
+        }
         for event in events {
             if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
                 let person = event.person.external();
@@ -566,6 +577,12 @@ impl TransitCollector {
                 }
             }
         }
+    }
+
+    fn start_waiting(&mut self, person: String, access: String, destination: String) {
+        self.waiting.insert(person.clone(), (access, destination));
+        self.boarded.remove(&person);
+        self.rides.remove(&person);
     }
 
     fn close_incomplete(&mut self, person: &str, (mode, departure): (String, f64)) {

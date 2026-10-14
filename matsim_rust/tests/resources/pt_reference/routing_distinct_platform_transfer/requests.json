@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "requests": [
+    {
+      "id": "distinct_platform_bus_transfer",
+      "mode": "pt",
+      "person": null,
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 1050.0, "y": 1050.0 },
+      "to": { "link": "33", "x": 3950.0, "y": 1050.0 }
+    },
+    {
+      "id": "distinct_platform_just_missed",
+      "mode": "pt",
+      "person": null,
+      "departure_time": 28801.0,
+      "from": { "link": "11", "x": 1050.0, "y": 1050.0 },
+      "to": { "link": "33", "x": 3950.0, "y": 1050.0 }
+    },
+    {
+      "id": "distinct_platform_rail_transfer",
+      "mode": "pt",
+      "person": null,
+      "departure_time": 31800.0,
+      "from": { "link": "11", "x": 1050.0, "y": 1050.0 },
+      "to": { "link": "33", "x": 3950.0, "y": 1050.0 }
+    },
+    {
+      "id": "transfer_beyond_walking_radius",
+      "mode": "pt",
+      "person": null,
+      "departure_time": 28800.0,
+      "from": { "link": "11", "x": 10000.0, "y": 10000.0 },
+      "to": { "link": "33", "x": 40000.0, "y": 10000.0 }
+    }
+  ]
+}

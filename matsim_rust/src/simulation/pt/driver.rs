@@ -16,7 +16,8 @@ use crate::simulation::events::{
 };
 use crate::simulation::id::Id;
 use crate::simulation::pt::doors::Doors;
-use crate::simulation::pt::runs::{RunLeg, ServiceRoute, VehicleRun};
+use crate::simulation::pt::feedback::TransitSegment;
+use crate::simulation::pt::runs::{RunLeg, VehicleRun};
 use crate::simulation::pt::stops::{TransitStops, WaitingPassenger};
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
@@ -27,6 +28,7 @@ use crate::simulation::scenario::transit::TransitStopFacility;
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::SimTime;
 use crate::simulation::vehicles::SimulationVehicle;
+use nohash_hasher::IntSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,6 +65,8 @@ pub struct TransitDriver {
     doors: Doors,
     /// Parallel to the vehicle's passengers.
     riders: Vec<Rider>,
+    boarded_at_stop: usize,
+    failed_boardings_at_stop: IntSet<Id<InternalPerson>>,
 }
 
 impl TransitDriver {
@@ -114,11 +118,28 @@ impl TransitDriver {
             capacity,
             doors: Doors::for_vehicle_type(vehicle_type),
             riders: Vec::new(),
+            boarded_at_stop: 0,
+            failed_boardings_at_stop: IntSet::default(),
         }
     }
 
     pub(crate) fn run(&self) -> &VehicleRun {
         &self.run
+    }
+
+    pub(crate) fn next_stop_index(&self) -> usize {
+        self.next_stop
+    }
+
+    pub(crate) fn curr_link_position(&self) -> usize {
+        self.curr_link
+    }
+
+    pub(crate) fn next_stop_link(&self) -> &Id<Link> {
+        match self.run_leg() {
+            RunLeg::Service { route, .. } => &route.stops[self.next_stop].link,
+            RunLeg::Deadhead { .. } => unreachable!("timetable services have no deadheads"),
+        }
     }
 
     /// The driver has driven its last leg and stays parked for the rest of the day.
@@ -212,20 +233,19 @@ pub(crate) fn serve_stop(
     now: SimTime,
     stops: &mut TransitStops,
     events: &mut EventsManager,
+    timetable: bool,
 ) -> StopOutcome {
     let Some((driver, passengers, vehicle_id)) = vehicle.transit_parts_mut() else {
         return StopOutcome::NoStop;
     };
-    let RunLeg::Service {
-        route,
-        departure_time: scheduled,
-        ..
-    } = driver.run_leg()
-    else {
-        return StopOutcome::NoStop;
+    let (route, departure, scheduled) = match driver.run_leg() {
+        RunLeg::Service {
+            route,
+            departure,
+            departure_time,
+        } => (route.clone(), departure.clone(), *departure_time),
+        RunLeg::Deadhead { .. } => return StopOutcome::NoStop,
     };
-    let route: Arc<ServiceRoute> = route.clone();
-    let scheduled = *scheduled;
     let Some(stop) = route.stops.get(driver.next_stop) else {
         return StopOutcome::NoStop;
     };
@@ -233,7 +253,8 @@ pub(crate) fn serve_stop(
         return StopOutcome::NoStop;
     }
 
-    if !driver.at_stop {
+    let arrived = !driver.at_stop;
+    if arrived {
         driver.at_stop = true;
         events.process_event(
             &VehicleArrivesAtFacilityEventBuilder::default()
@@ -254,24 +275,29 @@ pub(crate) fn serve_stop(
         .riders
         .iter()
         .enumerate()
-        .filter(|(_, rider)| rider.egress == stop.facility)
+        .filter(|(_, rider)| stop.allow_alighting && rider.egress == stop.facility)
         .map(|(position, _)| position)
         .collect();
     let mut free = driver.capacity - passengers.len() + leaving.len();
     let mut entering = Vec::new();
     for (position, waiting) in stops.waiting_at(&stop.facility).iter().enumerate() {
-        if free == 0 {
+        if !stop.allow_boarding {
             break;
         }
         let stops_to_come = route.stops[driver.next_stop + 1..]
             .iter()
             .map(|stop| stop.facility.clone());
         if waiting.accepts(&route.line, stops_to_come) {
-            entering.push(position);
-            free -= 1;
+            if free == 0 {
+                driver
+                    .failed_boardings_at_stop
+                    .insert(waiting.agent.id().clone());
+            } else {
+                entering.push(position);
+                free -= 1;
+            }
         }
     }
-
     let step = driver.doors.step(leaving.len(), entering.len());
     // Parallel doors board before they alight, as MATSim's handler does; serial doors only do
     // one of the two in a call.
@@ -287,6 +313,7 @@ pub(crate) fn serve_stop(
                 .unwrap(),
         );
         passengers.push(agent);
+        driver.boarded_at_stop += 1;
         driver.riders.push(Rider {
             boarded_at: driver.next_stop,
             egress,
@@ -326,10 +353,30 @@ pub(crate) fn serve_stop(
 
     let mut stop_time = step.stop_time;
     if stop_time == 0.0 {
-        stop_time = driver.wait_for_schedule(stop.departure_offset, stop.await_departure, now);
+        let offset = if timetable {
+            stop.departure_offset.or(stop.arrival_offset)
+        } else {
+            stop.departure_offset
+        };
+        stop_time = driver.wait_for_schedule(offset, timetable || stop.await_departure, now);
     }
 
     if stop_time == 0.0 {
+        if let Some(next_stop) = route.stops.get(driver.next_stop + 1) {
+            stops.record_segment(
+                TransitSegment {
+                    line: route.line.clone(),
+                    route: route.route.clone(),
+                    departure: departure.clone(),
+                    from: stop.facility.clone(),
+                    to: next_stop.facility.clone(),
+                },
+                passengers.len(),
+                driver.capacity,
+                driver.boarded_at_stop,
+                driver.failed_boardings_at_stop.len(),
+            );
+        }
         events.process_event(
             &VehicleDepartsAtFacilityEventBuilder::default()
                 .time(now)
@@ -345,6 +392,8 @@ pub(crate) fn serve_stop(
         );
         driver.next_stop += 1;
         driver.at_stop = false;
+        driver.boarded_at_stop = 0;
+        driver.failed_boardings_at_stop.clear();
         assert!(
             driver.next_stop < route.stops.len() || passengers.is_empty(),
             "Transit vehicle {vehicle_id} left its last stop with passengers on board."
@@ -388,7 +437,12 @@ impl SimulationAgentLogic for TransitDriver {
     }
 
     fn next_act(&self) -> &InternalActivity {
-        let next = self.curr_element + if self.curr_element % 2 == 0 { 2 } else { 1 };
+        let next = self.curr_element
+            + if self.curr_element.is_multiple_of(2) {
+                2
+            } else {
+                1
+            };
         self.elements[next].as_activity().unwrap()
     }
 
@@ -397,7 +451,12 @@ impl SimulationAgentLogic for TransitDriver {
     }
 
     fn next_leg(&self) -> Option<&InternalLeg> {
-        let next = self.curr_element + if self.curr_element % 2 == 0 { 1 } else { 2 };
+        let next = self.curr_element
+            + if self.curr_element.is_multiple_of(2) {
+                1
+            } else {
+                2
+            };
         self.elements
             .get(next)
             .and_then(InternalPlanElement::as_leg)
@@ -480,7 +539,7 @@ mod tests {
         let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
         let network =
             Network::from_file_as_is(&PathBuf::from("./assets/pt_tutorial/multimodalnetwork.xml"));
-        let runs = TransitVehicleRuns::build(&schedule, &garage, &network).unwrap();
+        let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
         TransitDriver::new(runs.runs()[0].clone(), &garage)
     }
 

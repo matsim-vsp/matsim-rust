@@ -769,7 +769,7 @@ impl Report {
         let cells: Vec<&Cell> = self.accessibility.keys().collect();
         let rendered = cells.len().min(MAP_PANEL_LIMIT);
         let omitted = cells.len() - rendered;
-        let columns = rendered.min(MAP_COLUMNS).max(1);
+        let columns = rendered.clamp(1, MAP_COLUMNS);
         let rows = rendered.div_ceil(columns);
         let width = columns as f64 * MAP_PANEL_WIDTH + MAP_MARGIN;
         // The truncation note needs its own strip below the last panel. Without one it lands

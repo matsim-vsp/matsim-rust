@@ -1,0 +1,81 @@
+modules:
+  network:
+    type: Network
+    path: ./assets/pt_tutorial/multimodalnetwork.xml
+  vehicles:
+    type: Vehicles
+    path: ./assets/pt_tutorial/vehicles.xml
+  transit:
+    type: Transit
+    schedule_path: ./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml
+    use_intermodal_access_egress: true
+    intermodal_leg_only_handling: avoid
+    intermodal_access_egress:
+      - mode: walk
+        initial_search_radius: 1000.0
+        max_radius: 1000.0
+        search_extension_radius: 500.0
+      - mode: bike
+        initial_search_radius: 1000.0
+        max_radius: 1000.0
+        search_extension_radius: 500.0
+  population:
+    type: Population
+    path: ./tests/resources/pt_reference/routing_intermodal_execution/plans.xml
+  scoring:
+    type: Scoring
+    activity_params:
+      - activity_type: home
+        typical_duration_s: 43200.0
+      - activity_type: work
+        typical_duration_s: 28800.0
+    mode_params:
+      - mode: walk
+        marginal_utility_of_traveling: -3600.0
+        marginal_utility_of_distance: 0.0
+        monetary_distance_cost_rate: 0.0
+        daily_money_constant: 0.0
+        daily_utility_constant: 0.0
+        constant: 0.0
+      - mode: bike
+        marginal_utility_of_traveling: -3600.0
+        marginal_utility_of_distance: 0.0
+        monetary_distance_cost_rate: 0.0
+        daily_money_constant: 0.0
+        daily_utility_constant: 0.0
+        constant: 0.0
+    agent_params:
+      - subpopulation: person
+        late_arrival: 0.0
+        early_departure: 0.0
+        performing: 0.0
+        waiting: 0.0
+        marginal_utility_of_money: 1.0
+        aborted_plan_score: 0.0
+  partitioning:
+    type: Partitioning
+    num_parts: 1
+    method: !Metis
+      vertex_weight:
+        - Constant
+  output:
+    type: Output
+    overwrite_files: DeleteDirectoryIfExists
+    output_dir: ./test_output/simulation/pt_reference_routing_intermodal_execution
+  routing:
+    type: Routing
+    mode: UsePlans
+    teleported_mode_params:
+      - mode: walk
+        beeline_distance_factor: 1.3
+        teleported_mode_speed: 0.8333333333333334
+      - mode: bike
+        beeline_distance_factor: 1.0
+        teleported_mode_speed: 10.0
+  qsim:
+    type: QSim
+    start_time: 0
+    end_time: 86400
+  controller:
+    type: Controller
+    last_iteration: 0

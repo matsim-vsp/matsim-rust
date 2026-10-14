@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v1.dtd">
+<transitSchedule>
+  <transitStops>
+    <stopFacility id="ra" x="1050" y="1050" linkRefId="11" />
+    <stopFacility id="rb" x="2050" y="2940" linkRefId="12" />
+    <stopFacility id="rb_platform" x="2150" y="2940" linkRefId="23" />
+    <stopFacility id="rc" x="3950" y="1050" linkRefId="33" />
+  </transitStops>
+  <transitLine id="Reference Line">
+    <transitRoute id="a_to_b">
+      <transportMode>train</transportMode>
+      <routeProfile>
+        <stop refId="ra" departureOffset="00:00:00" />
+        <stop refId="rb" arrivalOffset="00:10:00" />
+      </routeProfile>
+      <route>
+        <link refId="11" />
+        <link refId="12" />
+      </route>
+      <departures>
+        <departure id="a_0800" departureTime="08:00:00" vehicleRefId="tr_1" />
+      </departures>
+    </transitRoute>
+    <transitRoute id="b_to_c_bus">
+      <transportMode>bus</transportMode>
+      <routeProfile>
+        <stop refId="rb_platform" departureOffset="00:00:00" />
+        <stop refId="rc" arrivalOffset="00:05:00" />
+      </routeProfile>
+      <route>
+        <link refId="23" />
+        <link refId="33" />
+      </route>
+      <departures>
+        <departure id="bus_080530" departureTime="08:05:30" vehicleRefId="bus_1" />
+        <departure id="bus_0815" departureTime="08:15:00" vehicleRefId="bus_2" />
+      </departures>
+    </transitRoute>
+  </transitLine>
+</transitSchedule>

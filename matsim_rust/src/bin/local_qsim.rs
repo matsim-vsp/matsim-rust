@@ -14,8 +14,12 @@ struct LocalQSimArgs {
     /// Keep the Rust route service alive after QSim and publish its address here.
     #[arg(long)]
     routing_service_ready_file: Option<PathBuf>,
+    /// Write partition work and communication diagnostics in hourly simulated-time windows.
+    #[arg(long)]
+    partition_diagnostics: Option<PathBuf>,
 }
 
+#[hotpath::main]
 fn main() {
     let _guard = init_std_out_logging_thread_local();
 
@@ -29,9 +33,11 @@ fn main() {
     let scenario = Scenario::load(config);
 
     // Create and run simulation
-    let controller = ControllerBuilder::default_with_scenario(scenario)
-        .build()
-        .unwrap();
+    let mut controller = ControllerBuilder::default_with_scenario(scenario);
+    if let Some(path) = args.partition_diagnostics {
+        controller = controller.partition_diagnostics_output(path);
+    }
+    let controller = controller.build().unwrap();
 
     let (router, population) = controller.run();
     if let Some(ready_file) = args.routing_service_ready_file {

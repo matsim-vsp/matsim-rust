@@ -487,6 +487,7 @@ mod tests {
 
     fn mode_params(mode: &str, traveling: f64, distance: f64) -> ModeParameter {
         ModeParameter {
+            subpopulation: String::new(),
             mode: mode.to_string(),
             marginal_utility_of_traveling: traveling,
             marginal_utility_of_distance: distance,

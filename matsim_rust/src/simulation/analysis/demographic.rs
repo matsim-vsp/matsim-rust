@@ -954,8 +954,7 @@ mod tests {
         )
         .unwrap();
         let error = write_module_outcomes(dir.path())
-            .err()
-            .expect("a table without the agreed columns cannot be folded in");
+            .expect_err("a table without the agreed columns cannot be folded in");
         assert!(
             error.to_string().contains("missing the metric column"),
             "{error}"

@@ -1,4 +1,4 @@
-use crate::simulation::config::Config;
+use crate::simulation::config::{Config, ModeParameter};
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::utils::calc_distance;
 use crate::simulation::scenario::network::Network;
@@ -42,7 +42,13 @@ struct AgentScoringParams {
 #[derive(Debug)]
 pub struct CharyparNagelScoringFunction {
     activity_params: BTreeMap<String, ActivityScoringParams>,
-    mode_params: BTreeMap<String, ModeScoringParams>,
+    /// Per-subpopulation mode parameters, keyed by subpopulation first (empty string = applies to
+    /// every subpopulation without its own override) and mode name second. The nested layout is
+    /// required so that two `ModeParameter` entries sharing a `mode` field (e.g. a global "rail"
+    /// alongside a subpopulation-specific "rail") keep their distinct marginal utilities; a flat
+    /// `BTreeMap<mode, _>` would let the later entry silently overwrite the earlier and disagree
+    /// with the routing cost that already saw the per-subpopulation value.
+    mode_params: BTreeMap<String, BTreeMap<String, ModeScoringParams>>,
     agent_params: BTreeMap<String, AgentScoringParams>,
     network: Arc<Network>,
     qsim_end_time_s: f64,
@@ -63,25 +69,7 @@ impl CharyparNagelScoringFunction {
                 )
             })
             .collect();
-        let mode_params = config
-            .scoring()
-            .mode_params
-            .iter()
-            .map(|params| {
-                (
-                    params.mode.clone(),
-                    ModeScoringParams {
-                        marginal_utility_of_traveling_s: params.marginal_utility_of_traveling
-                            / SECONDS_PER_HOUR,
-                        marginal_utility_of_distance_m: params.marginal_utility_of_distance,
-                        monetary_distance_cost_rate: params.monetary_distance_cost_rate,
-                        daily_money_constant: params.daily_money_constant,
-                        daily_utility_constant: params.daily_utility_constant,
-                        constant: params.constant,
-                    },
-                )
-            })
-            .collect();
+        let mode_params = build_mode_params_by_subpopulation(&config.scoring().mode_params);
         let agent_params = config
             .scoring()
             .agent_params
@@ -241,6 +229,7 @@ impl CharyparNagelScoringFunction {
     fn score_trips(
         &self,
         person_id: &Id<InternalPerson>,
+        subpopulation: &str,
         plan: &InternalPlan,
         agent_params: &AgentScoringParams,
     ) -> Result<f64, String> {
@@ -255,6 +244,7 @@ impl CharyparNagelScoringFunction {
             for (leg_index, leg) in trip.legs(&plan.elements).enumerate() {
                 score += self.score_leg(
                     person_id,
+                    subpopulation,
                     trip_index,
                     leg_index,
                     leg,
@@ -271,6 +261,7 @@ impl CharyparNagelScoringFunction {
     fn score_leg(
         &self,
         person_id: &Id<InternalPerson>,
+        subpopulation: &str,
         trip_index: usize,
         leg_index: usize,
         leg: &InternalLeg,
@@ -279,9 +270,9 @@ impl CharyparNagelScoringFunction {
         seen_modes_in_plan: &mut BTreeSet<String>,
     ) -> Result<f64, String> {
         let mode = leg.mode.external();
-        let params = self.mode_params.get(mode).ok_or_else(|| {
+        let params = mode_params_for(&self.mode_params, subpopulation, mode).ok_or_else(|| {
             format!(
-                "Cannot score person {} trip {trip_index} leg {leg_index}: no scoring parameters configured for mode {mode}.",
+                "Cannot score person {} trip {trip_index} leg {leg_index}: no scoring parameters configured for mode {mode} in subpopulation {subpopulation}.",
                 person_id.external()
             )
         })?;
@@ -406,7 +397,8 @@ impl PlanScorer for CharyparNagelScoringFunction {
         let aborted = is_aborted(experienced_plan);
         let activity_score =
             self.score_activities(person_id, experienced_plan, aborted, agent_params)?;
-        let trip_score = self.score_trips(person_id, experienced_plan, agent_params)?;
+        let trip_score =
+            self.score_trips(person_id, subpopulation, experienced_plan, agent_params)?;
         let abort_score = if aborted {
             require_finite(
                 person_id,
@@ -477,6 +469,48 @@ fn is_aborted(plan: &InternalPlan) -> bool {
         }
         InternalPlanElement::Leg(leg) => leg.attributes.get::<bool>("aborted") == Some(true),
     })
+}
+
+/// Build the nested `subpopulation → mode → params` map used by the scorer. A flat
+/// `BTreeMap<mode, _>` would let two entries with the same `mode` field but different
+/// `subpopulation` fields overwrite each other on insertion, after which the routing layer and
+/// the scoring layer could disagree on the same person's marginal utility of traveling. Resolution
+/// of duplicates inside a single subpopulation keeps the first occurrence, matching the
+/// controller-side `validate()` ordering.
+fn build_mode_params_by_subpopulation(
+    mode_params: &[ModeParameter],
+) -> BTreeMap<String, BTreeMap<String, ModeScoringParams>> {
+    let mut nested: BTreeMap<String, BTreeMap<String, ModeScoringParams>> = BTreeMap::new();
+    for params in mode_params {
+        nested
+            .entry(params.subpopulation.clone())
+            .or_default()
+            .entry(params.mode.clone())
+            .or_insert(ModeScoringParams {
+                marginal_utility_of_traveling_s: params.marginal_utility_of_traveling
+                    / SECONDS_PER_HOUR,
+                marginal_utility_of_distance_m: params.marginal_utility_of_distance,
+                monetary_distance_cost_rate: params.monetary_distance_cost_rate,
+                daily_money_constant: params.daily_money_constant,
+                daily_utility_constant: params.daily_utility_constant,
+                constant: params.constant,
+            });
+    }
+    nested
+}
+
+/// Look up a mode's scoring parameters for a given subpopulation. Order is exact subpopulation
+/// first, then the empty-subpopulation entry, matching the routing layer's resolution in
+/// `TransitRoutingModule::resolve_routing_params`.
+fn mode_params_for<'a>(
+    mode_params: &'a BTreeMap<String, BTreeMap<String, ModeScoringParams>>,
+    subpopulation: &str,
+    mode: &str,
+) -> Option<&'a ModeScoringParams> {
+    mode_params
+        .get(subpopulation)
+        .and_then(|by_mode| by_mode.get(mode))
+        .or_else(|| mode_params.get("").and_then(|by_mode| by_mode.get(mode)))
 }
 
 /// Scores the duration of one activity like MATSim's `ActivityUtilityParameters` with priority 1:
@@ -658,7 +692,7 @@ mod tests {
         assert_approx_eq(
             -8.0,
             time_only_scorer
-                .score_trips(&person, &two_trips, params)
+                .score_trips(&person, "person", &two_trips, params)
                 .unwrap(),
         );
     }
@@ -718,7 +752,7 @@ mod tests {
         assert_approx_eq(
             trip_constants + daily_constants,
             scorer
-                .score_trips(&person, &trip_plan, agent_params)
+                .score_trips(&person, "person", &trip_plan, agent_params)
                 .unwrap(),
         );
         let activity_score = scorer
@@ -870,6 +904,7 @@ mod tests {
         constant: f64,
     ) -> ModeParameter {
         ModeParameter {
+            subpopulation: String::new(),
             mode: mode.to_string(),
             marginal_utility_of_traveling: traveling,
             marginal_utility_of_distance: distance,
@@ -980,5 +1015,56 @@ mod tests {
             (expected - actual).abs() < 1e-9,
             "expected {expected}, got {actual}"
         );
+    }
+
+    /// Regression test: when two `ModeParameter` entries share a `mode` field but live in different
+    /// subpopulations (e.g. global `rail` vs. freight-specific `rail`), the scorer must keep both
+    /// marginal utilities. A flat `BTreeMap<mode, _>` would silently overwrite one with the other
+    /// and let routing and scoring disagree on the same passenger's cost.
+    #[test]
+    fn per_subpopulation_mode_utility_wins_over_global_default() {
+        let mut global_rail = mode("rail", -2.0, 0.0, 0.0, 0.0);
+        global_rail.subpopulation = String::new();
+        let mut freight_rail = mode("rail", -20.0, 0.0, 0.0, 0.0);
+        freight_rail.subpopulation = "freight".to_string();
+        let mut scorer = make_scorer(
+            vec![("home", SECONDS_PER_DAY), ("work", SECONDS_PER_DAY)],
+            vec![global_rail, freight_rail],
+            Network::new(),
+        );
+        // `make_scorer` configures a default `person` agent_param; add a `freight` one too so
+        // `PlanScorer::score` can resolve agent_params for the second subpopulation.
+        scorer
+            .agent_params
+            .insert("freight".to_string(), scorer.agent_params["person"]);
+
+        let trip_plan = plan(vec![
+            activity("home", None, Some(0)),
+            generic_leg("rail", 3_600, None),
+            activity("work", Some(3_600), None),
+        ]);
+
+        let person_trips = scorer
+            .score_trips(
+                &Id::create("p-person"),
+                "person",
+                &trip_plan,
+                scorer.agent_params.get("person").unwrap(),
+            )
+            .unwrap();
+        let freight_trips = scorer
+            .score_trips(
+                &Id::create("p-freight"),
+                "freight",
+                &trip_plan,
+                scorer.agent_params.get("freight").unwrap(),
+            )
+            .unwrap();
+        // `person` falls back to the empty-subpopulation `rail` (-2.0 utils/h × 1 h = -2.0) and
+        // `freight` uses its own override (-20.0 utils/h × 1 h = -20.0). The 18-unit gap proves
+        // both entries survive insertion: a flat mode-keyed map would have collapsed them.
+        assert_approx_eq(-2.0, person_trips);
+        assert_approx_eq(-20.0, freight_trips);
+        assert_approx_eq(freight_trips - person_trips, -18.0);
     }
 }

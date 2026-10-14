@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vehicleDefinitions>
+  <vehicleType id="door_test">
+    <capacity><seats persons="2" /><standingRoom persons="0" /></capacity>
+    <length meter="12" /><maximumVelocity meterPerSecond="12" /><passengerCarEquivalents pce="1" />
+    <attributes><attribute name="doorOperationMode" class="java.lang.String">parallel</attribute></attributes>
+  </vehicleType>
+  <vehicle id="door_bus" type="door_test" />
+</vehicleDefinitions>

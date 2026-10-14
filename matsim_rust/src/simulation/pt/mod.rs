@@ -4,5 +4,6 @@
 
 pub(crate) mod doors;
 pub mod driver;
+pub(crate) mod feedback;
 pub mod runs;
 pub(crate) mod stops;

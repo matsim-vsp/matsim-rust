@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vehicleDefinitions>
+	<vehicleType id="pt">
+		<description>Single-seat crowding fixture vehicle</description>
+		<capacity><seats persons="1" /><standingRoom persons="0" /></capacity>
+		<length meter="15" />
+		<width meter="2.5" />
+		<maximumVelocity meterPerSecond="25" />
+		<passengerCarEquivalents pce="5.0" />
+		<networkMode networkMode="car" />
+	</vehicleType>
+	<vehicleType id="transfer">
+		<description>Transfer service vehicle</description>
+		<capacity><seats persons="10" /><standingRoom persons="0" /></capacity>
+		<length meter="15" />
+		<width meter="2.5" />
+		<maximumVelocity meterPerSecond="25" />
+		<passengerCarEquivalents pce="5.0" />
+		<networkMode networkMode="car" />
+	</vehicleType>
+	<vehicle id="tr_1" type="pt" />
+	<vehicle id="tr_2" type="pt" />
+	<vehicle id="transfer_a" type="transfer" />
+	<vehicle id="transfer_b" type="transfer" />
+</vehicleDefinitions>

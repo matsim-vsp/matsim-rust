@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+	<person id="crowd_1">
+		<plan selected="yes">
+			<activity type="h" link="11" x="1050" y="1050" end_time="07:50:00" />
+			<activity type="pt interaction" link="11" x="1050" y="1050" max_dur="00:00:00" />
+			<leg mode="pt" dep_time="07:50:00" trav_time="00:05:00">
+				<route type="default_pt" start_link="11" end_link="33" trav_time="00:05:00" distance="6100">{"transitRouteId":"direct","boardingTime":"08:00:00","transitLineId":"Reference Line","accessFacilityId":"ra","egressFacilityId":"rc"}</route>
+			</leg>
+			<activity type="pt interaction" link="33" x="3950" y="1050" max_dur="00:00:00" />
+			<activity type="w" link="33" x="3950" y="1050" />
+		</plan>
+	</person>
+	<person id="crowd_2">
+		<plan selected="yes">
+			<activity type="h" link="11" x="1050" y="1050" end_time="07:50:00" />
+			<activity type="pt interaction" link="11" x="1050" y="1050" max_dur="00:00:00" />
+			<leg mode="pt" dep_time="07:50:00" trav_time="00:05:00">
+				<route type="default_pt" start_link="11" end_link="33" trav_time="00:05:00" distance="6100">{"transitRouteId":"direct","boardingTime":"08:00:00","transitLineId":"Reference Line","accessFacilityId":"ra","egressFacilityId":"rc"}</route>
+			</leg>
+			<activity type="pt interaction" link="33" x="3950" y="1050" max_dur="00:00:00" />
+			<activity type="w" link="33" x="3950" y="1050" />
+		</plan>
+	</person>
+	<person id="transfer_a_rider">
+		<plan selected="yes">
+			<activity type="h" link="11" x="1050" y="1050" end_time="08:05:00" />
+			<activity type="pt interaction" link="11" x="1050" y="1050" max_dur="00:00:00" />
+			<leg mode="pt" dep_time="08:05:00" trav_time="00:10:00">
+				<route type="default_pt" start_link="11" end_link="12" trav_time="00:10:00" distance="2138">{"transitRouteId":"a_to_b","boardingTime":"08:05:00","transitLineId":"Reference Line","accessFacilityId":"ra","egressFacilityId":"rb"}</route>
+			</leg>
+			<activity type="pt interaction" link="12" x="2050" y="2940" max_dur="00:00:00" />
+			<activity type="w" link="12" x="2050" y="2940" />
+		</plan>
+	</person>
+	<person id="transfer_b_rider">
+		<plan selected="yes">
+			<activity type="h" link="12" x="2050" y="2940" end_time="08:20:00" />
+			<activity type="pt interaction" link="12" x="2050" y="2940" max_dur="00:00:00" />
+			<leg mode="pt" dep_time="08:20:00" trav_time="00:10:00">
+				<route type="default_pt" start_link="12" end_link="33" trav_time="00:10:00" distance="2681">{"transitRouteId":"b_to_c","boardingTime":"08:20:00","transitLineId":"Reference Line","accessFacilityId":"rb","egressFacilityId":"rc"}</route>
+			</leg>
+			<activity type="pt interaction" link="33" x="3950" y="1050" max_dur="00:00:00" />
+			<activity type="w" link="33" x="3950" y="1050" />
+		</plan>
+	</person>
+</population>

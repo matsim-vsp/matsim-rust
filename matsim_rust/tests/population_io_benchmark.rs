@@ -51,7 +51,7 @@ fn bench_population(plans_file: &str) {
     // Load everything the population depends on in the same order as Scenario::load, so that
     // links and vehicles already exist in the id store when the population is read.
     timed("ids", || id::load_from_file(&ids_path));
-    let _network = timed("network", || Network::from_file(&network_path));
+    let _network = timed("network", || Network::from_file_as_is(&network_path));
     let mut garage = timed("vehicles", || Garage::from_file(&vehicles_path));
 
     let start = Instant::now();

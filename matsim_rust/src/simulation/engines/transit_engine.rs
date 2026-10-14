@@ -58,8 +58,9 @@ impl TransitEngine {
             clock,
         };
         let runs = scenario.transit_runs.runs().iter();
-        for run in runs.filter(|run| scenario.network.get_link(run.start_link()).partition == rank)
-        {
+        for run in runs.filter(|run| {
+            !run.is_deterministic() && scenario.network.get_link(run.start_link()).partition == rank
+        }) {
             let driver =
                 SimulationAgent::new(Box::new(TransitDriver::new(run.clone(), &engine.garage)));
             engine.wait_for_departure(driver, start);

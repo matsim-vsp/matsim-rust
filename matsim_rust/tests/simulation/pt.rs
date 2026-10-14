@@ -1,3 +1,6 @@
+#[path = "../common.rs"]
+mod common;
+
 use macros::deterministic_id_test;
 use matsim_rust::external_services::routing::RoutingServiceAdapterFactory;
 use matsim_rust::external_services::{AdapterHandleBuilder, AsyncExecutor, ExternalServiceType};
@@ -110,6 +113,58 @@ fn simulated_transit_vehicles_reach_the_same_state_in_one_and_two_partitions() {
 }
 
 #[deterministic_id_test(matsim_rust)]
+fn timetable_transit_results_match_with_cross_partition_route() {
+    let run = |num_parts, output_dir: &str| {
+        let mut config = Config::from_args(CommandLineArgs::new_with_path(
+            "./tests/resources/pt_simulated/timetable_mixed.yml",
+        ));
+        config.partitioning_mut().num_parts = num_parts;
+        config.output_mut().output_dir = output_dir.into();
+        config.output_mut().analysis.enabled = true;
+        let output_dir = config.output().output_dir.clone();
+        let mut scenario = Scenario::load(config);
+        if num_parts > 1 {
+            common::force_train_boundary(&mut scenario);
+        }
+        ControllerBuilder::default_with_scenario(scenario)
+            .build()
+            .unwrap()
+            .run();
+        output_dir
+    };
+
+    let one_part = run(1, "./test_output/simulation/pt_timetable_mixed_one_part");
+    let two_parts = run(2, "./test_output/simulation/pt_timetable_mixed_two_parts");
+    compare_event_folder(one_part.join("events"), two_parts.join("events")).unwrap();
+
+    let report_tables = [
+        "transit_trips.csv",
+        "transit_stop_hourly.csv",
+        "transit_occupancy.csv",
+        "transit_journeys.csv",
+        "transit_availability.csv",
+    ];
+    for table in report_tables {
+        let single = std::fs::read(one_part.join("analysis").join(table)).unwrap();
+        let partitioned = std::fs::read(two_parts.join("analysis").join(table)).unwrap();
+        assert_eq!(single, partitioned, "{table} differs across partitions");
+    }
+
+    let before: Vec<_> = report_tables
+        .iter()
+        .map(|table| std::fs::read(one_part.join("analysis").join(table)).unwrap())
+        .collect();
+    matsim_rust::simulation::analysis::reanalyze_completed_run(&one_part, None).unwrap();
+    for (table, before) in report_tables.iter().zip(before) {
+        assert_eq!(
+            before,
+            std::fs::read(one_part.join("analysis").join(table)).unwrap(),
+            "{table} changed on reanalysis"
+        );
+    }
+}
+
+#[deterministic_id_test(matsim_rust)]
 fn pt_tutorial_transit_analysis_reports_teleported_service() {
     let mut config = Config::from_args(CommandLineArgs::new_with_path(
         "./tests/resources/pt_tutorial/pt_tutorial_config.yml",
@@ -136,8 +191,8 @@ fn pt_tutorial_transit_analysis_reports_teleported_service() {
 
     let report = output_dir.join("analysis");
     let trips = std::fs::read_to_string(report.join("transit_trips.csv")).unwrap();
-    // Person 102 waits 412 s for the 07:50 departure and rides 541 s, one second behind schedule.
-    assert!(trips.contains("\"102\",\"pt\",teleported,boarded,\"Blue Line\",\"1to3\",\"1\",\"3\",27788.000000,28200.000000,28741.000000,412.000000,541.000000,28740.000000,1.000000,\"11\",\"tr_1\""), "{trips}");
+    // Person 102 waits 413 s for the 07:50 departure and rides 540 s, one second behind schedule.
+    assert!(trips.contains("\"102\",\"pt\",teleported,boarded,\"Blue Line\",\"1to3\",\"1\",\"3\",27787.000000,28200.000000,28740.000000,413.000000,540.000000,28740.000000,0.000000,\"11\",\"tr_1\""), "{trips}");
     // The tutorial's vehicle file declares no transit vehicles, so no load factor exists.
     let availability = std::fs::read_to_string(report.join("transit_availability.csv")).unwrap();
     assert!(availability.contains("\"load_factor\",unavailable,"));

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <person id="capacity-a">
+    <plan selected="yes">
+      <activity type="h" link="11" x="1050" y="1050" end_time="07:43:07" />
+      <leg mode="pt" dep_time="07:43:07" trav_time="00:15:53">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="11" end_link="33" trav_time="00:15:53" distance="6100">{"transitRouteId":"1to3","boardingTime":"07:50:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"3"}</route>
+      </leg>
+      <activity type="w" link="33" x="3950" y="1050" />
+    </plan>
+  </person>
+  <person id="capacity-b">
+    <plan selected="yes">
+      <activity type="h" link="11" x="1050" y="1050" end_time="07:43:07" />
+      <leg mode="pt" dep_time="07:43:07" trav_time="00:15:53">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="11" end_link="33" trav_time="00:15:53" distance="6100">{"transitRouteId":"1to3","boardingTime":"07:50:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"3"}</route>
+      </leg>
+      <activity type="w" link="33" x="3950" y="1050" />
+    </plan>
+  </person>
+  <person id="train-to-bus-transfer">
+    <plan selected="yes">
+      <activity type="h" link="11" x="1050" y="1050" end_time="07:30:00" />
+      <leg mode="pt" dep_time="07:30:00" trav_time="00:09:00">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="11" end_link="33" trav_time="00:09:00" distance="6100">{"transitRouteId":"1to3","boardingTime":"07:30:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"3"}</route>
+      </leg>
+      <activity type="pt interaction" link="33" x="3950" y="1050" max_dur="00:00:00" />
+      <leg mode="pt" dep_time="07:39:00" trav_time="00:09:00">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="33" end_link="11" trav_time="00:09:00" distance="6100">{"transitRouteId":"3to1","boardingTime":"07:40:00","transitLineId":"Blue Line","accessFacilityId":"3","egressFacilityId":"1"}</route>
+      </leg>
+      <activity type="h" link="11" x="1050" y="1050" />
+    </plan>
+  </person>
+  <person id="stranded-at-end">
+    <plan selected="yes">
+      <activity type="h" link="11" x="1050" y="1050" end_time="08:20:00" />
+      <leg mode="pt" dep_time="08:20:00" trav_time="00:20:00">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="11" end_link="33" trav_time="00:20:00" distance="6100">{"transitRouteId":"1to3","boardingTime":"08:30:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"3"}</route>
+      </leg>
+      <activity type="w" link="33" x="3950" y="1050" />
+    </plan>
+  </person>
+</population>

@@ -1,0 +1,7168 @@
+{
+  "schema_version" : 3,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "d2a783051ac773d84cd46f2fc74050f35b6827f86e4b8606513cd1bb46dec675",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "population",
+      "path" : "plans.xml",
+      "sha256" : "ff826aaf987af94357bc21f9e09ea1168362daf1797043c4fc4184e3759009cd"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_vehicles",
+      "path" : "transitVehicles.xml",
+      "sha256" : "d069c3ffb98f13875876ce64d52908bf9ed6cd814cdc7f5dd3aaf2eaf9876f85"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "../../../../assets/pt_tutorial/transitschedule.xml",
+      "sha256" : "87fd74d2a0fbb20fa43e974404ea0b8f9a47bd2dbe9a9781161eb9141a85370b"
+    } ]
+  },
+  "itineraries" : [ ],
+  "trees" : [ ],
+  "events" : [ {
+    "time" : 21600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "01"
+  }, {
+    "time" : 21600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 21600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 21600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "01"
+  }, {
+    "time" : 21600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 21600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 21600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 21600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 21600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 21600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 21801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 21801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 21901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 21901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 22104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 22104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 22104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 22104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 22104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 22104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 22104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 22104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 22500.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "02"
+  }, {
+    "time" : 22500.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 22500.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 22500.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "02"
+  }, {
+    "time" : 22500.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 22500.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 22500.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 22500.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 22500.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 22500.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 22701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 22701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 22801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 22801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 23004.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 23004.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 23004.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 23004.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 23004.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 23004.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 23004.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 23004.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 23400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "03"
+  }, {
+    "time" : 23400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 23400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 23400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "03"
+  }, {
+    "time" : 23400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 23400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 23400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 23400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 23400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 23400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 23601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 23601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 23701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 23701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 23904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 23904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 23904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 23904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 23904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 23904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 23904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 23904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 24000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "04"
+  }, {
+    "time" : 24000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 24000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 24000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "04"
+  }, {
+    "time" : 24000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 24000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 24000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 24000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 24000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 24000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 24201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 24201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 24301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 24301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 24504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 24504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 24504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 24504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 24504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 24504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 24504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 24504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 24600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "05"
+  }, {
+    "time" : 24600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 24600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 24600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "05"
+  }, {
+    "time" : 24600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 24600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 24600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 24600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 24600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 24600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 24801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 24801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 24901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 24901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 25104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 25104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 25104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 25104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 25104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 25104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 25104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 25104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 25200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "06"
+  }, {
+    "time" : 25200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 25200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 25200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "06"
+  }, {
+    "time" : 25200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 25200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 25200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 25200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 25200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 25200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 25401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 25401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 25501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 25501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 25704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 25704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 25704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 25704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 25704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 25704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 25704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 25704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 25800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "07"
+  }, {
+    "time" : 25800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 25800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 25800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "07"
+  }, {
+    "time" : 25800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 25800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 25800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 25800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 25800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 25800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 26001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 26001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 26101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 26101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 26304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 26304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 26304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 26304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 26304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 26304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 26304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 26304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 26400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "08"
+  }, {
+    "time" : 26400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 26400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 26400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "08"
+  }, {
+    "time" : 26400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 26400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 26400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 26400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 26400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 26400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 26601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 26601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 26701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 26701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 26904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 26904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 26904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 26904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 26904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 26904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 26904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 26904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 27000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "09"
+  }, {
+    "time" : 27000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 27000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 27000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "09"
+  }, {
+    "time" : 27000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 27000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 27000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 27000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 27126.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "h",
+    "link" : "1112",
+    "x" : 938.0,
+    "y" : 642.0
+  }, {
+    "time" : 27126.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "1112"
+  }, {
+    "time" : 27126.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "h",
+    "link" : "1112",
+    "x" : 938.0,
+    "y" : 642.0
+  }, {
+    "time" : 27126.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "1112"
+  }, {
+    "time" : 27201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 27201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 27301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 27301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 27504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 27504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 27504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 27504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 27504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 27504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 27504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 27504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 27600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "10"
+  }, {
+    "time" : 27600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 27600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 27600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "10"
+  }, {
+    "time" : 27600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 27600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 27600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 27600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 27600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 27787.0,
+    "type" : "travelled",
+    "person" : "103",
+    "mode" : "walk",
+    "distance" : 550.0213814025778
+  }, {
+    "time" : 27787.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "walk",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "waitingForPt",
+    "person" : "103",
+    "atStop" : "1",
+    "destinationStop" : "3"
+  }, {
+    "time" : 27787.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 550.0213814025778
+  }, {
+    "time" : 27787.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 27787.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 27787.0,
+    "type" : "waitingForPt",
+    "person" : "102",
+    "atStop" : "1",
+    "destinationStop" : "3"
+  }, {
+    "time" : 27801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 27801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 27901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 27901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 28104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 28104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 28104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 28104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 28104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 28104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 28104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 28200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 28200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 28200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 28200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28201.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "103",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28203.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 3.0
+  }, {
+    "time" : 28404.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 4.0
+  }, {
+    "time" : 28404.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -36.0
+  }, {
+    "time" : 28501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 28501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 28704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 28704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 28704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 28704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28707.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -33.0
+  }, {
+    "time" : 28708.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "103",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28708.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 28708.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28708.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 28708.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 28710.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -30.0
+  }, {
+    "time" : 28710.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28710.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 28800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "12"
+  }, {
+    "time" : 28800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 28800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 28800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "12"
+  }, {
+    "time" : 28800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 28800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 28800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 28800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 28800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 28801.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "102",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 28803.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 3.0
+  }, {
+    "time" : 29004.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 4.0
+  }, {
+    "time" : 29004.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -36.0
+  }, {
+    "time" : 29101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 29101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 29287.0,
+    "type" : "travelled",
+    "person" : "103",
+    "mode" : "walk",
+    "distance" : 481.9652477098323
+  }, {
+    "time" : 29287.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "walk",
+    "link" : "3141"
+  }, {
+    "time" : 29287.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "w",
+    "link" : "3141",
+    "x" : 3619.0,
+    "y" : 1217.0
+  }, {
+    "time" : 29304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 29304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 29304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 29304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 29307.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -33.0
+  }, {
+    "time" : 29308.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "102",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 29308.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 29308.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 29308.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 29308.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 29310.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -30.0
+  }, {
+    "time" : 29310.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 29310.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 29700.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "13"
+  }, {
+    "time" : 29700.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 29700.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 29700.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "13"
+  }, {
+    "time" : 29700.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 29700.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 29700.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 29700.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 29700.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 29700.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 29887.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 481.9652477098323
+  }, {
+    "time" : 29887.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "3141"
+  }, {
+    "time" : 29887.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "w",
+    "link" : "3141",
+    "x" : 3619.0,
+    "y" : 1217.0
+  }, {
+    "time" : 29901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 29901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 30001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 30001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 30204.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 30204.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 30204.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 30204.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 30204.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 30204.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 30204.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 30204.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 30600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "14"
+  }, {
+    "time" : 30600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 30600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 30600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "14"
+  }, {
+    "time" : 30600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 30600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 30600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 30600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 30600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 30600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 30801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 30801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 30901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 30901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 31104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 31104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 31104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 31104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 31104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 31104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 31104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 31104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 32400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "15"
+  }, {
+    "time" : 32400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 32400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 32400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "15"
+  }, {
+    "time" : 32400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 32400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 32400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 32400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 32400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 32400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 32601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 32601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 32701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 32701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 32904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 32904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 32904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 32904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 32904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 32904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 32904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 32904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 34200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "16"
+  }, {
+    "time" : 34200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 34200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 34200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "16"
+  }, {
+    "time" : 34200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 34200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 34200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 34200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 34200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 34200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 34401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 34401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 34501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 34501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 34704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 34704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 34704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 34704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 34704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 34704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 34704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 34704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 36000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "17"
+  }, {
+    "time" : 36000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 36000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 36000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "17"
+  }, {
+    "time" : 36000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 36000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 36000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 36000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 36000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 36000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 36201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 36201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 36301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 36301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 36504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 36504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 36504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 36504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 36504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 36504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 36504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 36504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 37800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "18"
+  }, {
+    "time" : 37800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 37800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 37800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "18"
+  }, {
+    "time" : 37800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 37800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 37800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 37800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 37800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 37800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 38001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 38001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 38101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 38101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 38304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 38304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 38304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 38304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 38304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 38304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 38304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 38304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 39600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "19"
+  }, {
+    "time" : 39600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 39600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 39600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "19"
+  }, {
+    "time" : 39600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 39600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 39600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 39600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 39600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 39600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 39801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 39801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 39901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 39901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 40104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 40104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 40104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 40104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 40104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 40104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 40104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 40104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 43200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "20"
+  }, {
+    "time" : 43200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 43200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 43200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "20"
+  }, {
+    "time" : 43200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 43200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 43200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 43200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 43200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 43200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 43401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 43401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 43501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 43501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 43704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 43704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 43704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 43704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 43704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 43704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 43704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 43704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 46800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "21"
+  }, {
+    "time" : 46800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 46800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 46800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "21"
+  }, {
+    "time" : 46800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 46800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 46800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 46800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 46800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 46800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 47001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 47001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 47101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 47101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 47304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 47304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 47304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 47304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 47304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 47304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 47304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 47304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 50400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "22"
+  }, {
+    "time" : 50400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 50400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 50400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "22"
+  }, {
+    "time" : 50400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 50400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 50400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 50400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 50400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 50400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 50601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 50601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 50701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 50701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 50904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 50904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 50904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 50904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 50904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 50904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 50904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 50904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 54000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "23"
+  }, {
+    "time" : 54000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 54000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 54000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "23"
+  }, {
+    "time" : 54000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 54000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 54000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 54000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 54000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 54000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 54201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 54201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 54301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 54301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 54504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 54504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 54504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 54504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 54504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 54504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 54504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 54504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 55800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "24"
+  }, {
+    "time" : 55800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 55800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 55800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "24"
+  }, {
+    "time" : 55800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 55800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 55800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 55800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 55800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 55800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 56001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 56001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 56101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 56101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 56304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 56304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 56304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 56304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 56304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 56304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 56304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 56304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 57600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "25"
+  }, {
+    "time" : 57600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 57600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 57600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "25"
+  }, {
+    "time" : 57600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 57600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 57600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 57600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 57600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 57600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 57801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 57801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 57901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 57901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 58104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 58104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 58104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 58104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 58104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 58104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 58104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 58104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 58500.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "26"
+  }, {
+    "time" : 58500.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 58500.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 58500.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "26"
+  }, {
+    "time" : 58500.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 58500.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 58500.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 58500.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 58500.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 58500.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 58701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 58701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 58801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 58801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 59004.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 59004.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 59004.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 59004.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 59004.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 59004.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 59004.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 59004.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 59400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "27"
+  }, {
+    "time" : 59400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 59400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 59400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "27"
+  }, {
+    "time" : 59400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 59400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 59400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 59400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 59400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 59400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 59601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 59601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 59701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 59701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 59904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 59904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 59904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 59904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 59904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 59904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 59904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 59904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 60000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "28"
+  }, {
+    "time" : 60000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 60000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 60000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "28"
+  }, {
+    "time" : 60000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 60000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 60000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 60000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 60000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 60000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 60201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 60201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 60301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 60301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 60504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 60504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 60504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 60504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 60504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 60504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 60504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 60504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 60600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "29"
+  }, {
+    "time" : 60600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 60600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 60600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "29"
+  }, {
+    "time" : 60600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 60600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 60600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 60600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 60600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 60600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 60801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 60801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 60901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 60901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 61104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 61104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 61104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 61104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 61104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 61104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 61104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 61104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 61200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "30"
+  }, {
+    "time" : 61200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 61200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 61200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "30"
+  }, {
+    "time" : 61200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 61200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 61200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 61200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 61200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 61200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 61401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 61401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 61501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 61501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 61704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 61704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 61704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 61704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 61704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 61704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 61704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 61704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 61800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "31"
+  }, {
+    "time" : 61800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 61800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 61800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "31"
+  }, {
+    "time" : 61800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 61800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 61800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 61800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 61800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 61800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 62001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 62001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 62101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 62101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 62304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 62304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 62304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 62304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 62304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 62304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 62304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 62304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 62400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "32"
+  }, {
+    "time" : 62400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 62400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 62400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "32"
+  }, {
+    "time" : 62400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 62400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 62400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 62400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 62400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 62400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 62601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 62601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 62701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 62701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 62844.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "w",
+    "link" : "3141",
+    "x" : 3619.0,
+    "y" : 1217.0
+  }, {
+    "time" : 62844.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "3141"
+  }, {
+    "time" : 62844.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "w",
+    "link" : "3141",
+    "x" : 3619.0,
+    "y" : 1217.0
+  }, {
+    "time" : 62844.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "3141"
+  }, {
+    "time" : 62904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 62904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 62904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 62904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 62904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 62904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 62904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 62904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 63000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "33"
+  }, {
+    "time" : 63000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 63000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 63000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "33"
+  }, {
+    "time" : 63000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 63000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 63000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 63000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 63000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 63000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 63189.0,
+    "type" : "travelled",
+    "person" : "103",
+    "mode" : "walk",
+    "distance" : 287.7232176936717
+  }, {
+    "time" : 63189.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "walk",
+    "link" : "4142"
+  }, {
+    "time" : 63189.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "s",
+    "link" : "4142",
+    "x" : 3840.0,
+    "y" : 1205.0
+  }, {
+    "time" : 63189.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 287.7232176936717
+  }, {
+    "time" : 63189.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "4142"
+  }, {
+    "time" : 63189.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "s",
+    "link" : "4142",
+    "x" : 3840.0,
+    "y" : 1205.0
+  }, {
+    "time" : 63201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 63201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 63301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 63301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 63504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 63504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 63504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 63504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 63504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 63504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 63504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 63504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 63600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "34"
+  }, {
+    "time" : 63600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 63600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 63600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "34"
+  }, {
+    "time" : 63600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 63600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 63600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 63600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 63600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 63600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 63801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 63801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 63901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 63901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 64104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 64104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 64104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 64104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 64104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 64104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 64104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 64104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 64200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "35"
+  }, {
+    "time" : 64200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 64200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 64200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "35"
+  }, {
+    "time" : 64200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 64200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 64200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 64200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 64200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 64200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 64401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 64401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 64501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 64501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 64704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 64704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 64704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 64704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 64704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 64704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 64704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 64704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 64800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "36"
+  }, {
+    "time" : 64800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 64800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 64800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "36"
+  }, {
+    "time" : 64800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 64800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 64800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 64800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 64800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 64800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 65001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 65001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 65101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 65101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 65304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 65304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 65304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 65304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 65304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 65304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 65304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 65304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 65400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "37"
+  }, {
+    "time" : 65400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 65400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 65400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "37"
+  }, {
+    "time" : 65400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 65400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 65400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 65400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 65400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 65400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 65601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 65601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 65701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 65701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 65904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 65904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 65904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 65904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 65904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 65904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 65904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 65904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 66000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "38"
+  }, {
+    "time" : 66000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 66000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 66000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "38"
+  }, {
+    "time" : 66000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 66000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 66000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 66000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 66000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 66000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 66201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 66201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 66301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 66301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 66310.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "s",
+    "link" : "4142",
+    "x" : 3840.0,
+    "y" : 1205.0
+  }, {
+    "time" : 66310.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "4142"
+  }, {
+    "time" : 66310.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "s",
+    "link" : "4142",
+    "x" : 3840.0,
+    "y" : 1205.0
+  }, {
+    "time" : 66310.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "4142"
+  }, {
+    "time" : 66504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 66504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 66504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 66504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 66504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 66504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 66504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 66504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 66600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "39"
+  }, {
+    "time" : 66600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 66600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 66600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "39"
+  }, {
+    "time" : 66600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 66600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 66600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 66600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 66600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 66600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 66607.0,
+    "type" : "travelled",
+    "person" : "103",
+    "mode" : "walk",
+    "distance" : 247.08551151372677
+  }, {
+    "time" : 66607.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "walk",
+    "link" : "33"
+  }, {
+    "time" : 66607.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 66607.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 66607.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 66607.0,
+    "type" : "waitingForPt",
+    "person" : "103",
+    "atStop" : "3",
+    "destinationStop" : "1"
+  }, {
+    "time" : 66607.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 247.08551151372677
+  }, {
+    "time" : 66607.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "33"
+  }, {
+    "time" : 66607.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 66607.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "33",
+    "x" : 3950.0,
+    "y" : 1050.0
+  }, {
+    "time" : 66607.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "pt",
+    "computationalRoutingMode" : "pt",
+    "link" : "33"
+  }, {
+    "time" : 66607.0,
+    "type" : "waitingForPt",
+    "person" : "102",
+    "atStop" : "3",
+    "destinationStop" : "1"
+  }, {
+    "time" : 66801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 66801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 66901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 66901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 67104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 67104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 67104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 67104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 67104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 67104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 67104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 67104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 67200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "40"
+  }, {
+    "time" : 67200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 67200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 67200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "40"
+  }, {
+    "time" : 67200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 67200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 67200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 67200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 67200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 67201.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "103",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 67203.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 3.0
+  }, {
+    "time" : 67401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 67401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 67504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 4.0
+  }, {
+    "time" : 67504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -36.0
+  }, {
+    "time" : 67704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 67704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 67704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 67704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 67707.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -33.0
+  }, {
+    "time" : 67708.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "103",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 67708.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 67708.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 67708.0,
+    "type" : "actend",
+    "person" : "103",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 67708.0,
+    "type" : "departure",
+    "person" : "103",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 67710.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -30.0
+  }, {
+    "time" : 67710.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 67710.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 67800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "41"
+  }, {
+    "time" : 67800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 67800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 67800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "41"
+  }, {
+    "time" : 67800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 67800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 67800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 67800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 67800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 67801.0,
+    "type" : "PersonEntersPtVehicle",
+    "person" : "102",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 67803.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 3.0
+  }, {
+    "time" : 68001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 68001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 68104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 4.0
+  }, {
+    "time" : 68104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -36.0
+  }, {
+    "time" : 68304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 68304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 68304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 68304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 68307.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -33.0
+  }, {
+    "time" : 68308.0,
+    "type" : "PersonLeavesPtVehicle",
+    "person" : "102",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 68308.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 68308.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 68308.0,
+    "type" : "actend",
+    "person" : "102",
+    "actType" : "pt interaction",
+    "link" : "11",
+    "x" : 1050.0,
+    "y" : 1050.0
+  }, {
+    "time" : 68308.0,
+    "type" : "departure",
+    "person" : "102",
+    "legMode" : "walk",
+    "computationalRoutingMode" : "pt",
+    "link" : "11"
+  }, {
+    "time" : 68310.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -30.0
+  }, {
+    "time" : 68310.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 68310.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 68369.0,
+    "type" : "travelled",
+    "person" : "103",
+    "mode" : "walk",
+    "distance" : 550.0213814025778
+  }, {
+    "time" : 68369.0,
+    "type" : "arrival",
+    "person" : "103",
+    "legMode" : "walk",
+    "link" : "1112"
+  }, {
+    "time" : 68369.0,
+    "type" : "actstart",
+    "person" : "103",
+    "actType" : "h",
+    "link" : "1112",
+    "x" : 938.0,
+    "y" : 642.0
+  }, {
+    "time" : 68400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "42"
+  }, {
+    "time" : 68400.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 68400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 68400.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "42"
+  }, {
+    "time" : 68400.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 68400.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 68400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 68400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 68400.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 68400.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 68601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 68601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 68701.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 68701.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 68904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 68904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 68904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 68904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 68904.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 68904.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 68904.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 68904.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 68969.0,
+    "type" : "travelled",
+    "person" : "102",
+    "mode" : "walk",
+    "distance" : 550.0213814025778
+  }, {
+    "time" : 68969.0,
+    "type" : "arrival",
+    "person" : "102",
+    "legMode" : "walk",
+    "link" : "1112"
+  }, {
+    "time" : 68969.0,
+    "type" : "actstart",
+    "person" : "102",
+    "actType" : "h",
+    "link" : "1112",
+    "x" : 938.0,
+    "y" : 642.0
+  }, {
+    "time" : 69300.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "43"
+  }, {
+    "time" : 69300.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 69300.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 69300.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "43"
+  }, {
+    "time" : 69300.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 69300.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 69300.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 69300.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 69300.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 69300.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 69501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 69501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 69601.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 69601.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 69804.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 69804.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 69804.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 69804.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 69804.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 69804.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 69804.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 69804.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 70200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "44"
+  }, {
+    "time" : 70200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 70200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 70200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "44"
+  }, {
+    "time" : 70200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 70200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 70200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 70200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 70200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 70200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 70401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 70401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 70501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 70501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 70704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 70704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 70704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 70704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 70704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 70704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 70704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 70704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 71100.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "45"
+  }, {
+    "time" : 71100.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 71100.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 71100.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "45"
+  }, {
+    "time" : 71100.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 71100.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 71100.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 71100.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 71100.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 71100.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 71301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 71301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 71401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 71401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 71604.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 71604.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 71604.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 71604.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 71604.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 71604.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 71604.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 71604.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 72000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "46"
+  }, {
+    "time" : 72000.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 72000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 72000.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "46"
+  }, {
+    "time" : 72000.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 72000.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 72000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 72000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 72000.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 72000.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 72201.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 72201.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 72301.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 72301.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 72504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 72504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 72504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 72504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 72504.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 72504.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 72504.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 72504.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 73800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "47"
+  }, {
+    "time" : 73800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 73800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 73800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "47"
+  }, {
+    "time" : 73800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 73800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 73800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 73800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 73800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 73800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 74001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 74001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 74101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 74101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 74304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 74304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 74304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 74304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 74304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 74304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 74304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 74304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 75600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "48"
+  }, {
+    "time" : 75600.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 75600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 75600.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "48"
+  }, {
+    "time" : 75600.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 75600.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 75600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 75600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 75600.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 75600.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 75801.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 75801.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 75901.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 75901.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 76104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 76104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 76104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 76104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 76104.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 76104.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 76104.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 76104.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 79200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "49"
+  }, {
+    "time" : 79200.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 79200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 79200.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "49"
+  }, {
+    "time" : 79200.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 79200.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 79200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 79200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 79200.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 79200.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 79401.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 79401.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 79501.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 79501.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 79704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 79704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 79704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 79704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 79704.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 79704.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 79704.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 79704.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 82800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_2_1",
+    "vehicleId" : "tr_2",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "1to3",
+    "departureId" : "50"
+  }, {
+    "time" : 82800.0,
+    "type" : "departure",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "11"
+  }, {
+    "time" : 82800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 82800.0,
+    "type" : "TransitDriverStarts",
+    "driverId" : "pt_tr_1_1",
+    "vehicleId" : "tr_1",
+    "transitLineId" : "Blue Line",
+    "transitRouteId" : "3to1",
+    "departureId" : "50"
+  }, {
+    "time" : 82800.0,
+    "type" : "departure",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 82800.0,
+    "type" : "PersonEntersVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 82800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 82800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "1",
+    "delay" : 0.0
+  }, {
+    "time" : 82800.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 82800.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "3",
+    "delay" : 0.0
+  }, {
+    "time" : 83001.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : 1.0
+  }, {
+    "time" : 83001.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "2a",
+    "delay" : -39.0
+  }, {
+    "time" : 83101.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : 1.0
+  }, {
+    "time" : 83101.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "2b",
+    "delay" : -39.0
+  }, {
+    "time" : 83304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 83304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_2",
+    "facility" : "3",
+    "delay" : -36.0
+  }, {
+    "time" : 83304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_2_1",
+    "vehicle" : "tr_2"
+  }, {
+    "time" : 83304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_2_1",
+    "legMode" : "car",
+    "link" : "33"
+  }, {
+    "time" : 83304.0,
+    "type" : "VehicleArrivesAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 83304.0,
+    "type" : "VehicleDepartsAtFacility",
+    "vehicle" : "tr_1",
+    "facility" : "1",
+    "delay" : -36.0
+  }, {
+    "time" : 83304.0,
+    "type" : "PersonLeavesVehicle",
+    "person" : "pt_tr_1_1",
+    "vehicle" : "tr_1"
+  }, {
+    "time" : 83304.0,
+    "type" : "arrival",
+    "person" : "pt_tr_1_1",
+    "legMode" : "car",
+    "link" : "11"
+  } ]
+}

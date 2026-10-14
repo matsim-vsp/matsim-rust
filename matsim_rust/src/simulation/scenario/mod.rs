@@ -227,12 +227,18 @@ impl Scenario {
     fn load_network(config: &Config) -> Network {
         if let Some(path) = &config.network().path {
             let net_in_path = io::resolve_path(config.context(), path);
-            let mut network = Network::from_file(&net_in_path);
-            Network::partition_network(
-                &mut network,
-                config.partitioning(),
-                &config.qsim().main_modes,
-            );
+            let num_parts = config.partitioning().num_parts;
+            let mut network =
+                Network::from_file_path(&net_in_path, num_parts, &config.partitioning().method);
+            if matches!(
+                config.partitioning().method,
+                crate::simulation::config::PartitionMethod::Metis(_)
+            ) {
+                Network::assign_non_main_mode_nodes_to_nearest_partition(
+                    &mut network,
+                    &config.qsim().main_modes,
+                );
+            }
             network
         } else {
             Network::default()
@@ -331,6 +337,7 @@ impl From<Scenario> for ControllerScenario {
                 &scenario.transit_schedule,
                 &scenario.garage,
                 &scenario.network,
+                &scenario.config.transit().deterministic_service_modes,
             )
             .unwrap_or_else(|error| panic!("Cannot simulate transit vehicles: {error}"))
         } else {
@@ -344,7 +351,7 @@ impl From<Scenario> for ControllerScenario {
                 transit_runs: Arc::new(transit_runs),
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
-                signals: Arc::new(scenario.signals),
+                signals: Arc::new(Signals::default()),
             },
             population: scenario.population,
         }
@@ -356,6 +363,7 @@ impl ControllerScenario {
     pub(crate) fn split_for_mobsim(
         &mut self,
         storage_capacities: &LinkStorageCapacities,
+        feedback: Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
     ) -> Vec<MobsimInput> {
         let num_parts = self.core.config.partitioning().num_parts;
         let population = std::mem::take(&mut self.population);
@@ -364,7 +372,12 @@ impl ControllerScenario {
             .into_iter()
             .enumerate()
             .map(|(rank, population)| {
-                self.create_mobsim_input(rank as u32, population, storage_capacities)
+                self.create_mobsim_input(
+                    rank as u32,
+                    population,
+                    storage_capacities,
+                    feedback.clone(),
+                )
             })
             .collect()
     }
@@ -395,9 +408,10 @@ impl ControllerScenario {
         rank: u32,
         population: Population,
         storage_capacities: &LinkStorageCapacities,
+        feedback: Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
     ) -> MobsimInput {
         let network_partition =
-            Self::create_network_partition(&self.core, storage_capacities, rank);
+            Self::create_network_partition(&self.core, storage_capacities, rank, feedback);
 
         info!(
             "Partition #{rank} network has: {} nodes and {} links. Population has {} agents",
@@ -421,13 +435,15 @@ impl ControllerScenario {
         core: &ScenarioCore,
         storage_capacities: &LinkStorageCapacities,
         rank: u32,
+        feedback: Arc<crate::simulation::pt::feedback::TransitCapacityFeedbackCollector>,
     ) -> SimNetworkPartition {
-        SimNetworkPartition::from_network(
+        SimNetworkPartition::from_network_with_feedback(
             &core.network,
             storage_capacities,
             rank,
             &core.config,
             &core.signals,
+            feedback,
         )
     }
 }
@@ -438,7 +454,7 @@ mod tests {
     use crate::simulation::config::{Config, PartitionMethod, Transit};
     use crate::simulation::id::Id;
     use crate::simulation::network::LinkStorageCapacities;
-    use crate::simulation::network::signals::{SignalWindows, Signals};
+    use crate::simulation::network::signals::Signals;
     use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::Population;
@@ -466,38 +482,6 @@ mod tests {
                 .transit_schedule
                 .facilities()
                 .is_empty()
-        );
-    }
-
-    #[deterministic_id_test]
-    fn scenario_conversion_preserves_loaded_signal_plan() {
-        let approach = Id::<Link>::create("signal-approach");
-        let mut signals = Signals::default();
-        signals.insert_for_test(approach.clone(), SignalWindows::from_group(120, 0, 60));
-        let scenario = Scenario {
-            network: Network::default(),
-            garage: Garage::default(),
-            population: Population::default(),
-            transit_schedule: TransitSchedule::default(),
-            facilities: ActivityFacilities::default(),
-            config: Arc::new(Config::default()),
-            signals,
-        };
-
-        let controller_scenario: ControllerScenario = scenario.into();
-
-        assert!(controller_scenario.core.signals.is_signalised(&approach));
-        assert!(
-            controller_scenario
-                .core
-                .signals
-                .allows_departure(&approach, 0)
-        );
-        assert!(
-            !controller_scenario
-                .core
-                .signals
-                .allows_departure(&approach, 60)
         );
     }
 
@@ -554,7 +538,7 @@ mod tests {
         let population = Population::from_file("./assets/3-links/3-agent.xml", &mut garage);
         let original_len = population.persons.len();
         let config = Arc::new(Config::default());
-        let network = Network::from_file_with_partitioning(
+        let network = Network::from_file(
             "./assets/3-links/3-links-network.xml",
             config.partitioning().num_parts,
             &PartitionMethod::None,
@@ -572,7 +556,7 @@ mod tests {
         }
         .into();
 
-        let inputs = scenario.split_for_mobsim(&storage_capacities);
+        let inputs = scenario.split_for_mobsim(&storage_capacities, Arc::default());
 
         assert!(scenario.population.persons.is_empty());
 

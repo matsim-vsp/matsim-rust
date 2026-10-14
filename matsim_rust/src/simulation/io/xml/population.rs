@@ -1188,7 +1188,7 @@ mod tests {
     #[deterministic_id_test]
     fn parallel_loading_matches_sequential_loading_of_equil() {
         let setup = || {
-            Network::from_file(&PathBuf::from("./assets/equil/equil-network.xml"));
+            Network::from_file_as_is(&PathBuf::from("./assets/equil/equil-network.xml"));
             Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"))
         };
         assert_parallel_matches_sequential(

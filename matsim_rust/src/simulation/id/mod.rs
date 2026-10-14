@@ -84,7 +84,8 @@ pub fn load_from_file(file_path: &Path) {
     ID_STORE.load_from_file(file_path)
 }
 
-/// Name of the ID store a run writes into its output directory.
+/// Name of the ID store a run writes into its output directory. Readers and writers share it so a
+/// rename cannot silently stop restoring a run's mapping.
 pub const OUTPUT_FILE_NAME: &str = "output_ids.binpb";
 
 /// Returns the number of ids of all types.
@@ -111,7 +112,6 @@ impl IdResolver for CreateMissingIds {
 }
 
 /// Only looks ids up and returns `None` for ids which don't exist yet.
-#[allow(dead_code)] // Used by parallel event conversion when that input path is enabled.
 pub(crate) struct ExistingIds;
 
 impl IdResolver for ExistingIds {

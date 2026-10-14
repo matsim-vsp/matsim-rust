@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <person id="transfer-person">
+    <plan selected="yes">
+      <activity type="h" link="11" x="1050" y="1050" end_time="08:00:00" />
+      <leg mode="pt" dep_time="08:00:00" trav_time="00:10:00">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="11" end_link="12" trav_time="00:10:00" distance="2500">{"transitRouteId":"a_to_b","boardingTime":"08:00:00","transitLineId":"Reference Line","accessFacilityId":"ra","egressFacilityId":"rb"}</route>
+      </leg>
+      <activity type="pt interaction" link="12" x="2050" y="2940" max_dur="00:00:00" />
+      <leg mode="walk" dep_time="08:10:00" trav_time="00:02:31">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="generic" start_link="12" end_link="23" trav_time="00:02:31" distance="130" />
+      </leg>
+      <activity type="pt interaction" link="23" x="2150" y="2940" max_dur="00:00:00" />
+      <leg mode="pt" dep_time="08:12:31" trav_time="00:07:29">
+        <attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+        <route type="default_pt" start_link="23" end_link="33" trav_time="00:07:29" distance="3700">{"transitRouteId":"b_to_c_bus","boardingTime":"08:05:30","transitLineId":"Reference Line","accessFacilityId":"rb_platform","egressFacilityId":"rc"}</route>
+      </leg>
+      <activity type="w" link="33" x="3950" y="1050" />
+    </plan>
+  </person>
+</population>

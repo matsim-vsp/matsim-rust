@@ -1,0 +1,98 @@
+{
+  "schema_version" : 3,
+  "reference" : {
+    "implementation" : "matsim",
+    "version" : "2026.0",
+    "commit" : "c7a75ebeddc3ceb62959af046190064bf23770df",
+    "config" : "config.xml",
+    "config_sha256" : "f3b869f1b40032b4c9b4bc9f20eaa71f4e66bbca2002100133ac1773f4d8c498",
+    "seed" : 4711,
+    "start_time" : 0.0,
+    "end_time" : 86400.0,
+    "time_step_size" : 1.0,
+    "inputs" : [ {
+      "role" : "network",
+      "path" : "../../../../assets/pt_tutorial/multimodalnetwork.xml",
+      "sha256" : "cb91b78b1601cf854309738c1bbc23bd52497c443e95ec618cfbcd897b053ba2"
+    }, {
+      "role" : "vehicles",
+      "path" : "../../../../assets/pt_tutorial/vehicles.xml",
+      "sha256" : "648047f85635a3c108022b6f72df8eef25ce3dc0b74ae09d0e8ee100d49217bc"
+    }, {
+      "role" : "transit_schedule",
+      "path" : "transit_schedule.xml",
+      "sha256" : "31ec3f9a5cf878d721e3b0edfc90b969dfc8c7bca9cae85c7c1d95e147c107a0"
+    }, {
+      "role" : "routing_requests",
+      "path" : "requests.json",
+      "sha256" : "a08ea1d64367e2ebadf980fa5e048fe11d31f456825f1adbc7fab27710f8816a"
+    } ]
+  },
+  "itineraries" : [ {
+    "id" : "restricted_boarding_and_alighting",
+    "request" : {
+      "id" : "restricted_boarding_and_alighting",
+      "mode" : "pt",
+      "person" : null,
+      "departure_time" : 28800.0,
+      "from" : {
+        "link" : "11",
+        "x" : 1050.0,
+        "y" : 1050.0
+      },
+      "to" : {
+        "link" : "33",
+        "x" : 3950.0,
+        "y" : 1050.0
+      }
+    },
+    "result" : "found",
+    "legs" : [ {
+      "mode" : "walk",
+      "departure_time" : 28800.0,
+      "arrival_time" : 28800.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 28800.0,
+      "arrival_time" : 29400.0,
+      "distance" : 2400.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "a_to_b_alighting_allowed",
+        "boarding_time" : 28800.0,
+        "access_stop" : "ra",
+        "egress_stop" : "rb"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 29400.0,
+      "arrival_time" : 29400.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    }, {
+      "mode" : "pt",
+      "departure_time" : 29400.0,
+      "arrival_time" : 30360.0,
+      "distance" : 3700.0,
+      "rides" : [ {
+        "line" : "Reference Line",
+        "route" : "b_to_c_boarding_allowed",
+        "boarding_time" : 29760.0,
+        "access_stop" : "rb",
+        "egress_stop" : "rc"
+      } ]
+    }, {
+      "mode" : "walk",
+      "departure_time" : 30360.0,
+      "arrival_time" : 30360.0,
+      "distance" : 0.0,
+      "rides" : [ ]
+    } ],
+    "generalized_cost" : 6.2,
+    "arrival_time" : 30360.0
+  } ],
+  "trees" : [ ],
+  "events" : [ ]
+}

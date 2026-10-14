@@ -56,11 +56,11 @@ avoid solving borrowing problems by cloning an entire scenario or population.
 ## Toolchain and native dependencies
 
 - Use the Rust version pinned in `rust-toolchain.toml` and Rust 2024 idioms.
-- The build compiles METIS (via `metis-sys`, patched in the workspace
-  `Cargo.toml`) and protobuf (via `protobuf-src`) from bundled sources, so it
-  requires a C and C++ compiler and CMake, but no installed METIS library or
-  libclang. A compile or link failure in these crates may be an environment
-  problem, not a source-code regression.
+- The build requires the native METIS library and libclang. It also requires a C/C++
+  compiler and `cmake`, because `protobuf-src` compiles `protoc` from source; setting
+  `PROTOC` to an existing compiler skips that. A compile or link failure mentioning
+  METIS, clang, bindgen, cmake, or a missing linker may be an environment problem, not
+  a source-code regression.
 - `.cargo/config.toml` contains Apple Silicon Homebrew search paths. Do not
   generalize or replace them incidentally while working on unrelated code.
 - `matsim_rust/build.rs` compiles the `.proto` sources with the bundled
@@ -230,12 +230,8 @@ Before reporting completion:
 
 ### Issue tracker
 
-Issues and specs live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+Issues live in this repository’s GitHub Issues and are managed with `gh`. See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-Single-context: use root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.
+Use a single-context layout with root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

@@ -210,6 +210,23 @@ A separate run with `qsim.sample_size=1.0` took 15.04 seconds wall time and peak
 
 ## Routing experiment status
 
+### Issue 87 release-workload baseline (2026-10-09)
+
+The release `local_qsim` binary from this checkout ran the bundled Berlin v6.4 filtered 0.1% plans
+(5,332 people; 119,174 nodes; 283,885 links; sample size 0.001) through one fixed-plan iteration
+with one QSim and one replanning worker. To make this input bundle executable without inventing
+scoring values for its heterogeneous activity types, this workload disabled scoring. It therefore
+measures loading, QSim and output, not scoring, convergence, or production-scale parity. One warm-up
+and five measured runs completed successfully. Median wall time was 18.844 s (18.644–18.945 s),
+sampled CPU was 23.03 s, and sampled peak RSS was 1,828,716 KiB. The QSim span was 5.77 s in the
+first measured run; the remaining wall time includes startup, input preparation and output. The host
+was a 16-core AMD Ryzen Threadripper PRO 3955WX with 32 logical CPUs and a load average near 4 at
+start. The binary was built from a dirty working tree, and the runner records its binary hash and
+source revision. Linux denied hardware profiling (`perf_event_paranoid=4`), so the dominant work
+outside the QSim span is not identified. These measurements are a controlled local baseline, not a
+speedup claim or a large-scale estimate. Runner JSON and logs are under
+`/tmp/issue87-berlin-qsim-baseline/`.
+
 The five-run-per-build comparison on the bundled Berlin input used its default replanning configuration, `KeepLastSelected`. It therefore did not invoke A* and cannot measure the sparse-frontier change. Its wall-time, CPU, and RSS numbers are omitted as evidence for that change. The matched outputs only establish that those fixed-plan runs completed; they say nothing about route selection.
 
 The earlier full Berlin rerouting attempt stopped at a public-transport trip because this setup has no `pt` routing module. For a valid route-active workload, I selected 100 people from the Berlin 0.1% population whose legs use car or walk and whose explicit `routingMode` attributes are either absent or `car`. This avoids plans that look car-only by leg mode but still request PT routing.

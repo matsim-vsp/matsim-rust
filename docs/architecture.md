@@ -109,14 +109,25 @@ For mobsim, the controller splits the population into `MobsimInput`s. Each input
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive
 these inputs per iteration and return agents, which the controller materializes back into the next full population.
 
+Offline network preparation builds METIS's undirected graph from directed links: each non-self link contributes its
+weight to the unordered endpoint pair, and parallel or reverse-direction links combine into one symmetric adjacency
+weight. Precomputed computational demand is the checked sum of routed-link occurrences arriving at a node; nodes
+without observed demand retain weight 1. These corrected inputs can produce different partitions than older prepared
+networks.
+
+`partition_network --coarse-regions` opts into offline coarse-region assignment. See
+[`partition-balancing-experiment.md`](partition-balancing-experiment.md) for its workload estimates, validation rules,
+and limits.
+
 Transit vehicles are simulated when `transit.simulate_vehicles` is set, and teleported otherwise. Turning a `Scenario` into
 a `ControllerScenario` then expands the schedule into per-departure vehicle runs once, before the Mobsim threads start, and
-every partition shares them. A link belongs to the partition of its to-node, so a partition's transit engine owns exactly
-the runs whose start link it owns and drives those drivers through the network engine: transit vehicles occupy links and
-compete for capacity like every other vehicle. A
-passenger waits on the partition that owns its access stop's link, which is the same partition as every vehicle serving that
-stop, so the waiting lists never cross partitions. A passenger that rides past a partition boundary travels inside the
-vehicle's backpack, and the partition where it alights resumes the agent.
+every partition shares them. Routes whose service mode is listed in
+`transit.deterministic_service_modes` run stop-to-stop at timetable offsets; other services use the queue network engine.
+Timetable vehicles start on the partition of their first route link. Their scheduled link transitions hand the vehicle,
+driver, and riders to the next link's owner through the normal vehicle migration message. This keeps boarding queues on
+the partition that owns each stop link, and the worker that handles an alighting stop resumes the passenger there. Queue
+vehicles use the network engine and occupy links and compete for capacity like every other vehicle; timetable vehicles
+follow their scheduled stop times and do not consume network link capacity.
 
 Each worker owns a thread-local travel-time collector shared between its event buses without a cross-thread lock.
 The collector associates vehicles with the network mode of their current leg and records link observations separately
@@ -128,6 +139,22 @@ The shared router reads the snapshot without taking the submission lock; unobser
 `prepare_for_mobsim` uses the previous iteration's snapshot, or an empty snapshot for the first iteration. The workers'
 iteration-reset hooks clear the collectors before the next Mobsim. No event-file output is required for travel-time
 collection.
+
+Transit vehicle stop handling records segment occupancy and compatible passengers denied by a full vehicle in one
+shared, ordered collector. After all workers return, the controller drains that collector and atomically publishes a
+complete immutable snapshot before replanning. Transit routing adds the observed occupancy fraction times each
+scheduled segment duration and the observed failed-boarding fraction times the next scheduled headway to predicted cost.
+These costs affect route choice only; vehicle capacity remains an execution constraint in the next Mobsim. Collection
+does not write events.
+
+This feedback cost is a Rust extension rather than an exact port of MATSim 2026.0's optional
+`SwissRailRaptor` capacity constraint. That reference feature defaults off and uses observed waiting
+windows to exclude departures after failed boarding; it does not add these occupancy and headway
+costs.
+
+PT route-choice costs also apply each passenger-mode utility adjustment to in-vehicle ride time only.
+Access, transfer and egress walking, waiting, and transfer penalties remain separate components of
+the itinerary cost; a mode-specific ride utility does not reprice those components.
 
 Worker extensions can observe state moving between partitions through a fourth, thread-local
 `PartitionChangeExtensionsManager` bus alongside the simulation-event, Mobsim-lifecycle, and partition-event buses.
@@ -158,7 +185,7 @@ An empty experienced plan receives zero points from either built-in scorer.
 `simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
 `analyze_final_iteration` once, which replays the final iteration's event partitions in
 chronological order and publishes per-interval link-volume, link-speed, link-classification and
-agent-travel tables plus a self-contained HTML report under `<output_dir>/analysis`. The interval
+agent-travel tables plus an offline visual HTML report with separate SVG assets under `<output_dir>/analysis`. The interval
 width comes from
 `output.analysis.interval_seconds` (3600 by default), so the tables are hourly unless configured
 otherwise. Inputs that cannot be recovered from the event files -- the final-iteration
@@ -257,8 +284,8 @@ the table that exports it.
 
 `simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
 `analyze_final_iteration` once, which replays the final iteration's event partitions in
-chronological order and publishes per-interval link-volume and coverage tables plus a
-self-contained HTML report under `<output_dir>/analysis`. The interval width comes from
+chronological order and publishes per-interval link-volume and coverage tables plus an
+offline visual HTML report with separate SVG assets under `<output_dir>/analysis`. The interval width comes from
 `output.analysis.interval_seconds` (3600 by default), so the tables are hourly unless configured
 otherwise. Inputs that cannot be recovered from the event files -- the final-iteration
 expected-travel snapshot and the vehicle/PCE catalog -- are moved into a compact

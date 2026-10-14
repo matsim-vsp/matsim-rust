@@ -314,6 +314,15 @@ impl InternalPerson {
         &self.subpopulation
     }
 
+    /// Set the agent's subpopulation after construction. Tests that drive PT routing with
+    /// person-specific scoring rely on this: scoring parameters are keyed by subpopulation, and
+    /// the routing module resolves per-subpopulation costs from the request's person. Production
+    /// code reads the subpopulation from XML attributes and never needs this setter.
+    pub fn with_subpopulation(mut self, subpopulation: &str) -> Self {
+        self.subpopulation = Id::create(subpopulation);
+        self
+    }
+
     pub fn plan_element_at(&self, index: usize) -> Option<&InternalPlanElement> {
         self.selected_plan().unwrap().elements.get(index)
     }
@@ -476,7 +485,9 @@ impl InternalActivity {
 
     // i think this should go into the utils module rather than being here. paul, mar'26
     pub fn cmp_end_time(&self, begin: SimTime) -> SimTime {
-        if let Some(end_time) = self.end_time {
+        if self.is_interaction() {
+            begin
+        } else if let Some(end_time) = self.end_time {
             end_time
         } else if let Some(max_dur) = self.max_dur {
             begin.saturating_add(max_dur)
@@ -1314,6 +1325,27 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn interaction_activity_ends_immediately() {
+        let activity = InternalActivity::new(
+            Some(Coordinate::new_2d(0.0, 0.0)),
+            "pt interaction",
+            Id::create("1"),
+            None,
+            Some(SimTime::from_secs(60)),
+            None,
+        );
+
+        assert_eq!(
+            SimTime::default(),
+            activity.cmp_end_time(SimTime::default())
+        );
+        assert_eq!(
+            SimTime::from_secs(120),
+            activity.cmp_end_time(SimTime::from_secs(120))
+        );
+    }
+
+    #[deterministic_id_test]
     fn person_from_xml_uses_subpopulation_attribute() {
         let person = InternalPerson::from(IOPerson {
             attributes: Some(IOAttributes {
@@ -1380,7 +1412,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn from_io_1_plan() {
-        let _net = Network::from_file(&PathBuf::from("./assets/equil/equil-network.xml"));
+        let _net = Network::from_file_as_is(&PathBuf::from("./assets/equil/equil-network.xml"));
         let mut garage = Garage::from_file(&PathBuf::from("./assets/equil/equil-vehicles.xml"));
         let pop = Population::from_file(
             PathBuf::from("./assets/equil/equil-1-plan.xml"),
@@ -1428,7 +1460,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn from_io_multi_mode() {
-        let _net = Network::from_file(&PathBuf::from("./assets/3-links/3-links-network.xml"));
+        let _net = Network::from_file_as_is(&PathBuf::from("./assets/3-links/3-links-network.xml"));
         let mut garage = Garage::from_file(&PathBuf::from("./assets/3-links/vehicles.xml"));
         let pop = Population::from_file(PathBuf::from("./assets/3-links/3-agent.xml"), &mut garage);
 
@@ -1442,8 +1474,9 @@ mod tests {
                 .all(|type_id| expected_veh_types.contains(type_id.external()))
         );
 
-        // check that we have a vehicle for each mode and for each person
-        assert_eq!(9, garage.vehicles.len());
+        // check that we have a vehicle for each mode and for each person: three agents with a car,
+        // a bike and a walk leg each, plus each agent's car again under its bare person id
+        assert_eq!(12, garage.vehicles.len());
 
         // check population
         // activity types should be done as id. If id is not present this will crash

@@ -1,14 +1,14 @@
 use crate::generated;
 use crate::generated::general::Coordinate;
 use crate::generated::transit::{
-    MinimalTransferTime as WireMinimalTransferTime, TransitDeparture as WireTransitDeparture,
-    TransitLine as WireTransitLine, TransitRoute as WireTransitRoute,
-    TransitRouteStop as WireTransitRouteStop, TransitSchedule as WireTransitSchedule,
-    TransitStopFacility as WireTransitStopFacility,
+    ChainedDeparture as WireChainedDeparture, MinimalTransferTime as WireMinimalTransferTime,
+    TransitDeparture as WireTransitDeparture, TransitLine as WireTransitLine,
+    TransitRoute as WireTransitRoute, TransitRouteStop as WireTransitRouteStop,
+    TransitSchedule as WireTransitSchedule, TransitStopFacility as WireTransitStopFacility,
 };
 use crate::simulation::scenario::transit::{
-    MinimalTransferTime, TransitDeparture, TransitLine, TransitRoute, TransitRouteStop,
-    TransitSchedule, TransitStopFacility,
+    ChainedDeparture, MinimalTransferTime, TransitDeparture, TransitLine, TransitRoute,
+    TransitRouteStop, TransitSchedule, TransitStopFacility,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -107,7 +107,22 @@ impl From<&TransitDeparture> for WireTransitDeparture {
             id: departure.id.internal(),
             departure_time_ns: departure.departure_time.as_nanos(),
             vehicle_ref_id: departure.vehicle_ref_id.as_ref().map(|id| id.internal()),
+            chained_departures: departure
+                .chained_departures
+                .iter()
+                .map(WireChainedDeparture::from)
+                .collect(),
             attributes: departure.attributes.as_cloned_map(),
+        }
+    }
+}
+
+impl From<&ChainedDeparture> for WireChainedDeparture {
+    fn from(chained: &ChainedDeparture) -> Self {
+        Self {
+            transit_line_id: chained.transit_line_id.internal(),
+            transit_route_id: chained.transit_route_id.internal(),
+            departure_id: chained.departure_id.internal(),
         }
     }
 }
@@ -144,10 +159,10 @@ impl From<&MinimalTransferTime> for WireMinimalTransferTime {
 mod tests {
     use crate::generated::general::Coordinate;
     use crate::generated::transit::{
-        MinimalTransferTime as WireMinimalTransferTime, TransitDeparture as WireTransitDeparture,
-        TransitLine as WireTransitLine, TransitRoute as WireTransitRoute,
-        TransitRouteStop as WireTransitRouteStop, TransitSchedule as WireTransitSchedule,
-        TransitStopFacility as WireTransitStopFacility,
+        ChainedDeparture as WireChainedDeparture, MinimalTransferTime as WireMinimalTransferTime,
+        TransitDeparture as WireTransitDeparture, TransitLine as WireTransitLine,
+        TransitRoute as WireTransitRoute, TransitRouteStop as WireTransitRouteStop,
+        TransitSchedule as WireTransitSchedule, TransitStopFacility as WireTransitStopFacility,
     };
     use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
@@ -164,6 +179,7 @@ mod tests {
         let facility_id = Id::<TransitStopFacility>::create("facility");
         let other_facility_id = Id::<TransitStopFacility>::create("other-facility");
         let departure_id = Id::<TransitDeparture>::create("departure");
+        let chained_id = Id::<TransitDeparture>::create("chained-departure");
         let mode_id = Id::<String>::create("rail");
         let vehicle_id = Id::<String>::create("transit-vehicle");
         let link_id = Id::<Link>::create("link");
@@ -196,6 +212,11 @@ mod tests {
                         id: departure_id.internal(),
                         departure_time_ns: 4_567_890,
                         vehicle_ref_id: Some(vehicle_id.internal()),
+                        chained_departures: vec![WireChainedDeparture {
+                            transit_line_id: line_id.internal(),
+                            transit_route_id: route_id.internal(),
+                            departure_id: chained_id.internal(),
+                        }],
                         attributes: attributes.clone(),
                     }],
                     attributes: attributes.clone(),

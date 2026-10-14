@@ -24,3 +24,18 @@ mod pt;
 mod standalone_analysis;
 #[path = "simulation/three_links.rs"]
 mod three_links;
+
+fn visual_report_table(html: &str, file: &str) -> serde_json::Value {
+    let (_, data) = html
+        .split_once("<script id=\"report-data\" type=\"application/json\">")
+        .unwrap();
+    let (data, _) = data.split_once("</script>").unwrap();
+    let data: serde_json::Value = serde_json::from_str(data).unwrap();
+    data["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|table| table["file"] == file)
+        .unwrap()
+        .clone()
+}

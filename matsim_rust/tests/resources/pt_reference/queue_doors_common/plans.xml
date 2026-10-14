@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <person id="alighting-passenger"><plan selected="yes">
+    <activity type="h" link="11" x="1050" y="1050" end_time="07:49:00" />
+    <leg mode="pt" dep_time="07:49:00" trav_time="00:04:20">
+      <route type="default_pt" start_link="11" end_link="12" trav_time="00:03:20" distance="2500">{"transitRouteId":"1to3","boardingTime":"07:50:00","transitLineId":"Blue Line","accessFacilityId":"1","egressFacilityId":"2a"}</route>
+    </leg>
+    <activity type="w" link="12" x="2050" y="2940" />
+  </plan></person>
+  <person id="boarding-passenger"><plan selected="yes">
+    <activity type="h" link="12" x="2050" y="2940" end_time="07:53:00" />
+    <leg mode="pt" dep_time="07:53:00" trav_time="00:05:00">
+      <route type="default_pt" start_link="12" end_link="33" trav_time="00:05:00" distance="3600">{"transitRouteId":"1to3","boardingTime":"07:53:20","transitLineId":"Blue Line","accessFacilityId":"2a","egressFacilityId":"3"}</route>
+    </leg>
+    <activity type="w" link="33" x="3950" y="1050" />
+  </plan></person>
+</population>
