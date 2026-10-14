@@ -37,6 +37,12 @@ that is what the input format names. Opposing turns off one approach therefore s
 state, and turns from different approaches never contend, so a vehicle faces no
 turn-acceptance conflict. See `rust_qsim/src/simulation/network/signals.rs`.
 
+Each blocked attempt emits a trace event on `matsim_rust::qsim::blocked_movement` with
+the vehicle, turn, tick and receiving-link storage. When the stuck threshold is reached,
+QSim also emits one info event for the persistent block and the action taken. Enable
+`output.logging: Info` to retain those persistent-block records in the run log; a
+trace-enabled subscriber is needed to collect every blocked tick.
+
 ### General Scenario Handling
 
 Starting the simulation mostly works as in MATSim Java. All XML input files need to be converted into protobuf for

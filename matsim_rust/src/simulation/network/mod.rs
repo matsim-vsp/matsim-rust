@@ -8,3 +8,4 @@ mod stuck_timer;
 
 pub use storage_cap::LinkStorageCapacities;
 pub(crate) const STORAGE_CAPACITY_USED_IN_QSIM: &str = "storageCapacityUsedInQsim";
+pub(crate) const TRACE_QSIM_DISCHARGE: &str = "traceQsimDischarge";

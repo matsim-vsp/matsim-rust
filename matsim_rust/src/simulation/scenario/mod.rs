@@ -344,7 +344,7 @@ impl From<Scenario> for ControllerScenario {
                 transit_runs: Arc::new(transit_runs),
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
-                signals: Arc::new(Signals::default()),
+                signals: Arc::new(scenario.signals),
             },
             population: scenario.population,
         }
@@ -438,7 +438,7 @@ mod tests {
     use crate::simulation::config::{Config, PartitionMethod, Transit};
     use crate::simulation::id::Id;
     use crate::simulation::network::LinkStorageCapacities;
-    use crate::simulation::network::signals::Signals;
+    use crate::simulation::network::signals::{SignalWindows, Signals};
     use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::Population;
@@ -466,6 +466,38 @@ mod tests {
                 .transit_schedule
                 .facilities()
                 .is_empty()
+        );
+    }
+
+    #[deterministic_id_test]
+    fn scenario_conversion_preserves_loaded_signal_plan() {
+        let approach = Id::<Link>::create("signal-approach");
+        let mut signals = Signals::default();
+        signals.insert_for_test(approach.clone(), SignalWindows::from_group(120, 0, 60));
+        let scenario = Scenario {
+            network: Network::default(),
+            garage: Garage::default(),
+            population: Population::default(),
+            transit_schedule: TransitSchedule::default(),
+            facilities: ActivityFacilities::default(),
+            config: Arc::new(Config::default()),
+            signals,
+        };
+
+        let controller_scenario: ControllerScenario = scenario.into();
+
+        assert!(controller_scenario.core.signals.is_signalised(&approach));
+        assert!(
+            controller_scenario
+                .core
+                .signals
+                .allows_departure(&approach, 0)
+        );
+        assert!(
+            !controller_scenario
+                .core
+                .signals
+                .allows_departure(&approach, 60)
         );
     }
 

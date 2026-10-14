@@ -26,6 +26,7 @@ pub use transit::TransitMetadata;
 mod network_distance;
 mod noise;
 mod publication;
+pub(crate) mod spot_speed;
 
 use crate::simulation::config::{
     Accessibility, Analysis, CompressionType, EmissionsInputs, LinkLabels, NoiseInputs,
@@ -914,6 +915,7 @@ pub fn reanalyze_completed_run(
     let settings = Analysis {
         enabled: true,
         interval_seconds: interval_seconds.unwrap_or(recorded.interval_seconds),
+        car_spot_speed_sample_period_seconds: None,
         link_labels: recorded.link_labels.clone(),
         urban_boundary: recorded.urban_boundary.clone(),
 

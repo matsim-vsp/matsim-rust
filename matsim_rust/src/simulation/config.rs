@@ -691,6 +691,8 @@ pub struct Analysis {
     pub enabled: bool,
     /// Width of exported link-volume intervals in seconds.
     pub interval_seconds: u32,
+    /// Optional cadence for sampling native car speeds from QSim queue state.
+    pub car_spot_speed_sample_period_seconds: Option<u32>,
     /// Explicit per-link labels. Missing or blank labels are reported as `unknown`.
     pub link_labels: std::collections::BTreeMap<String, LinkLabels>,
     /// Optional polygon in the same coordinate system as network node coordinates.
@@ -899,6 +901,7 @@ impl Default for Analysis {
         Self {
             enabled: false,
             interval_seconds: 3600,
+            car_spot_speed_sample_period_seconds: None,
             link_labels: std::collections::BTreeMap::new(),
             urban_boundary: None,
 
@@ -2052,9 +2055,10 @@ mod tests {
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
         ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
-        Config, Controller, EdgeWeight, MetisOptions, ModeParameter, PartitionMethod, Partitioning,
-        QSim, Replanning, Routing, Scoring, SignalFilesConfig, StrategySetting, TeleportedParams,
-        TravelTimeCalculator, VertexWeight, parse_key_val,
+        Config, Controller, EdgeWeight, MetisOptions, ModeParameter, NonMainModeLinks,
+        PartitionMethod, Partitioning, QSim, Replanning, Routing, Scoring, ScoringMode,
+        SignalFilesConfig, StrategySetting, TeleportedParams, TravelTimeCalculator, VertexWeight,
+        parse_key_val,
     };
     use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
     use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
@@ -2069,6 +2073,7 @@ mod tests {
         let mut config = Config::default();
         let partitioning = Partitioning {
             num_parts: 1,
+            non_main_mode_links: NonMainModeLinks::default(),
             method: PartitionMethod::Metis(MetisOptions {
                 vertex_weight: vec![VertexWeight::InLinkCount, VertexWeight::InLinkCapacity],
                 edge_weight: EdgeWeight::Constant,
@@ -2444,6 +2449,7 @@ mod tests {
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         let expected = Scoring {
+            mode: ScoringMode::Enabled,
             write_experienced_plans: true,
             activity_params: vec![ActivityParameter {
                 activity_type: "home".to_string(),
@@ -2955,6 +2961,7 @@ modules:
         config.set_partitioning(Partitioning {
             num_parts: 1,
             method: PartitionMethod::None,
+            non_main_mode_links: NonMainModeLinks::default(),
         });
         config.set_routing(Routing {
             mode: RoutingMode::UsePlans,

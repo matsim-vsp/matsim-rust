@@ -26,6 +26,13 @@ pub enum LinkPosition {
 }
 
 #[derive(Debug)]
+pub(crate) struct CarSpotSpeedSample {
+    pub vehicle_id: u64,
+    pub link_id: String,
+    pub speed_mps: f64,
+}
+
+#[derive(Debug)]
 pub enum SimLink {
     Local(LocalLink),
     In(SplitInLink),
@@ -33,6 +40,18 @@ pub enum SimLink {
 }
 
 impl SimLink {
+    pub(super) fn append_car_spot_speed_samples(
+        &self,
+        now: Tick,
+        samples: &mut Vec<CarSpotSpeedSample>,
+    ) {
+        match self {
+            SimLink::Local(link) => link.append_car_spot_speed_samples(now, samples),
+            SimLink::In(link) => link.local_link.append_car_spot_speed_samples(now, samples),
+            SimLink::Out(_) => {}
+        }
+    }
+
     pub fn id(&self) -> &Id<Link> {
         match self {
             SimLink::Local(ll) => &ll.id,
@@ -89,6 +108,30 @@ impl SimLink {
         }
     }
 
+    pub(super) fn traces_discharge(&self) -> bool {
+        match self {
+            SimLink::Local(link) => link.storage_cap.traces_discharge(),
+            SimLink::In(link) => link.local_link.storage_cap.traces_discharge(),
+            SimLink::Out(link) => link.storage_cap.traces_discharge(),
+        }
+    }
+
+    pub(super) fn flow_remaining(&self) -> f64 {
+        match self {
+            SimLink::Local(link) => link.flow_cap.remaining_capacity(),
+            SimLink::In(link) => link.local_link.flow_cap.remaining_capacity(),
+            SimLink::Out(_) => panic!("out links have no flow cap"),
+        }
+    }
+
+    pub(super) fn flow_limited_front(&self, now: Tick) -> Option<&SimulationVehicle> {
+        match self {
+            SimLink::Local(link) => link.flow_limited_front(now),
+            SimLink::In(link) => link.local_link.flow_limited_front(now),
+            SimLink::Out(_) => None,
+        }
+    }
+
     pub(super) fn is_veh_stuck(&self, now: impl Into<Tick>) -> bool {
         let now = now.into();
         match self {
@@ -136,8 +179,7 @@ impl SimLink {
         }
     }
 
-    #[cfg(test)]
-    pub fn used_storage(&self) -> f64 {
+    pub(super) fn used_storage(&self) -> f64 {
         match self {
             SimLink::Local(ll) => ll.storage_cap.used(),
             SimLink::In(il) => il.local_link.storage_cap.used(),
@@ -145,12 +187,19 @@ impl SimLink {
         }
     }
 
-    #[cfg(test)]
-    pub fn max_storage(&self) -> f64 {
+    pub(super) fn max_storage(&self) -> f64 {
         match self {
             SimLink::Local(ll) => ll.storage_cap.max(),
             SimLink::In(il) => il.local_link.storage_cap.max(),
             SimLink::Out(ol) => ol.storage_cap.max(),
+        }
+    }
+
+    pub(super) fn traces_storage_acceptance(&self) -> bool {
+        match self {
+            SimLink::Local(ll) => ll.storage_cap.traces_acceptance(),
+            SimLink::In(il) => il.local_link.storage_cap.traces_acceptance(),
+            SimLink::Out(ol) => ol.storage_cap.traces_acceptance(),
         }
     }
 
@@ -228,6 +277,31 @@ struct VehicleQEntry {
 }
 
 impl LocalLink {
+    fn append_car_spot_speed_samples(&self, now: Tick, samples: &mut Vec<CarSpotSpeedSample>) {
+        let mut append = |vehicle: &SimulationVehicle, speed_mps: f64| {
+            let driver = vehicle.driver();
+            if driver.transit_driver().is_none() && driver.curr_leg().mode.external() == "car" {
+                samples.push(CarSpotSpeedSample {
+                    vehicle_id: vehicle.id().internal(),
+                    link_id: self.id.external().to_owned(),
+                    speed_mps,
+                });
+            }
+        };
+
+        for entry in &self.q {
+            let speed = if now < entry.earliest_exit_time {
+                self.free_speed.min(entry.vehicle.max_v())
+            } else {
+                0.0
+            };
+            append(&entry.vehicle, speed);
+        }
+        for vehicle in &self.buffer {
+            append(vehicle, 0.0);
+        }
+    }
+
     pub(crate) fn from_link(
         link: &Link,
         storage_capacity: &StorageCapacityDefinition,
@@ -621,6 +695,18 @@ impl LocalLink {
     fn has_flow_capacity_left(&self, _veh: &SimulationVehicle) -> bool {
         let buffer_cap = self.buffer.iter().map(|v| v.pce()).sum::<f64>();
         self.flow_cap.remaining_capacity() - buffer_cap > 0.0
+    }
+
+    fn flow_limited_front(&self, now: Tick) -> Option<&SimulationVehicle> {
+        if self.flow_cap.remaining_capacity() <= 0.0 {
+            if let Some(vehicle) = self.buffer.front() {
+                return Some(vehicle);
+            }
+        }
+        let buffer_pce = self.buffer.iter().map(|v| v.pce()).sum::<f64>();
+        let queued = self.q.front()?;
+        (queued.earliest_exit_time <= now && self.flow_cap.remaining_capacity() - buffer_pce <= 0.0)
+            .then_some(&queued.vehicle)
     }
 
     fn pop_veh_and_restart_stuck_timer(
