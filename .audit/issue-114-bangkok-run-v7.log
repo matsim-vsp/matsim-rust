@@ -1,0 +1,156 @@
+2026-10-16T13:05:16.009604Z  INFO matsim_rust::simulation::logging: matsim-rust version v1.0.0-301-g2baf9d6e-dirty
+2026-10-16T13:05:16.009728Z  INFO local_qsim: Started with args: LocalQSimArgs { config: CommandLineArgs { config: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/config_rust_0p1pct.yml", overrides: [("output.output_dir", "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7"), ("controller.last_iteration", "1")] }, routing_service_ready_file: None, partition_diagnostics: None }
+2026-10-16T13:05:16.010176Z  INFO matsim_rust::simulation::config: Applying overrides: [("output.output_dir", "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7"), ("controller.last_iteration", "1")]
+2026-10-16T13:05:16.010185Z  INFO matsim_rust::simulation::scenario: Start loading mod.
+2026-10-16T13:05:16.010202Z  INFO matsim_rust::simulation::io::xml: Starting to read from file: "/home/varameth/Workspaces/Transport/BKK_Output/network_multimodal_connected_capacity_patched.xml"
+2026-10-16T13:05:16.106041Z  INFO matsim_rust::simulation::io::xml: Finished reading from file: "/home/varameth/Workspaces/Transport/BKK_Output/network_multimodal_connected_capacity_patched.xml"
+2026-10-16T13:05:16.106074Z  INFO matsim_rust::simulation::io::xml::network: IONetwork:: Finished reading network. It contains 13354 nodes and 30286 links.
+2026-10-16T13:05:16.142375Z  INFO matsim_rust::simulation::io::xml: Starting to read from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/vehicles_0p1pct.xml"
+2026-10-16T13:05:16.153255Z  INFO matsim_rust::simulation::io::xml: Finished reading from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/vehicles_0p1pct.xml"
+2026-10-16T13:05:16.157750Z  INFO matsim_rust::simulation::scenario::vehicles: Created Garage from file with vehicle types: ["ARL", "BTS", "BUS_STANDARD", "MRT", "SRT_LIGHT_RED", "car_silo_default"]
+2026-10-16T13:05:16.157761Z  INFO matsim_rust::simulation::scenario::transit: Reading transit schedule from "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/scenOutput/network_calibration_2pct_instrumentation_r2_20261011/matsim/matsim-rs-input/2015/transitSchedule.xml"
+2026-10-16T13:05:16.157780Z  INFO matsim_rust::simulation::io::xml: Starting to read from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/scenOutput/network_calibration_2pct_instrumentation_r2_20261011/matsim/matsim-rs-input/2015/transitSchedule.xml"
+2026-10-16T13:05:16.441543Z  INFO matsim_rust::simulation::io::xml: Finished reading from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/scenOutput/network_calibration_2pct_instrumentation_r2_20261011/matsim/matsim-rs-input/2015/transitSchedule.xml"
+2026-10-16T13:05:16.441579Z  INFO matsim_rust::simulation::io::xml::transit: Finished reading transit schedule. It contains 16557 stops, 412 lines and 847 routes.
+2026-10-16T13:05:16.521897Z  INFO matsim_rust::simulation::scenario::transit: Finished reading transit schedule. Found 412 lines, 847 routes and 16557 facilities.
+2026-10-16T13:05:16.521928Z  INFO matsim_rust::simulation::io::xml::population: IOPopulation: Reading population from file /home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/2015.input_plans_0p1pct.xml.gz in parallel
+2026-10-16T13:05:16.555785Z  INFO matsim_rust::simulation::io::xml::population: IOPopulation: Finished reading population. Population contains 12753 persons
+2026-10-16T13:05:16.555809Z  INFO matsim_rust::simulation::io::xml::population: Sorting population by id.
+2026-10-16T13:05:16.555968Z  INFO matsim_rust::simulation::io::xml::population: Creating person ids.
+2026-10-16T13:05:16.561651Z  INFO matsim_rust::simulation::io::xml::population: Creating interaction activity types
+2026-10-16T13:05:16.570999Z  INFO matsim_rust::simulation::io::xml::population: Creating vehicle ids
+2026-10-16T13:05:16.613351Z  INFO matsim_rust::simulation::io::xml::population: Creating activity types
+2026-10-16T13:05:16.619638Z  INFO matsim_rust::simulation::io::xml::population: Creating remaining ids
+2026-10-16T13:05:16.633489Z  INFO matsim_rust::simulation::io::xml::population: Finished loading population with 12753 persons in 111.56ms (parsing: 33.88ms, sorting: 158.19µs, creating ids: 68.35ms, converting: 9.17ms).
+2026-10-16T13:05:16.638496Z  INFO matsim_rust::simulation::replanning::routing::network_converter: Converting network to forward backward graph for mode Some(car).
+2026-10-16T13:05:16.648505Z  INFO matsim_rust::simulation::replanning::routing::network_converter: Finished converting network to forward backward graph for mode Some(car).
+2026-10-16T13:05:16.741747Z  INFO matsim_rust::simulation::logging: matsim-rust version v1.0.0-301-g2baf9d6e-dirty
+2026-10-16T13:05:16.743518Z  INFO matsim_rust::simulation::controller::controller: =========== Start Iteration 0 ===========
+2026-10-16T13:05:16.743528Z  INFO matsim_rust::simulation::controller::controller: Preparing population for mobsim iteration 0
+2026-10-16T13:05:16.744450Z  INFO matsim_rust::simulation::logging: matsim-rust version v1.0.0-301-g2baf9d6e-dirty
+2026-10-16T13:05:49.843126Z  INFO matsim_rust::simulation::controller::controller: Finished preparing population for iteration 0; starting QSim
+2026-10-16T13:05:49.862784Z  INFO matsim_rust::simulation::scenario: Partition #0 network has: 13354 nodes and 30286 links. Population has 12753 agents
+2026-10-16T13:05:49.862843Z  INFO matsim_rust::simulation::controller: Mobsim worker #0 starting iteration 0. Last iteration: false
+2026-10-16T13:05:49.862962Z  INFO matsim_rust::simulation::controller: adding events writer with path: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/events/events.0.xml"
+2026-10-16T13:05:49.862972Z  INFO matsim_rust::simulation::io::xml::events: Creating file: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/events/events.0.xml"
+2026-10-16T13:05:49.875060Z  INFO matsim_rust::simulation::controller: Process #0 (0-indexed) of 1 processes has arrived at initial barrier. Waiting for other processes and potential external services to reach global barrier.
+2026-10-16T13:05:49.875301Z  INFO run{rank=0}: matsim_rust::simulation::simulation: Starting #0. Network neighbors: {}, Start time 0, End time 86400
+2026-10-16T13:05:49.875312Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 00:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 0
+2026-10-16T13:05:49.882493Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 01:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 0
+2026-10-16T13:05:49.887552Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 02:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 0
+2026-10-16T13:05:49.898351Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 03:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 2
+2026-10-16T13:05:49.997732Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 04:00; Active Nodes: 1, Active Links: 1, Vehicles on Network Partition: 13
+2026-10-16T13:05:50.157689Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 05:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 9
+2026-10-16T13:05:50.268541Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 06:00; Active Nodes: 2, Active Links: 2, Vehicles on Network Partition: 51
+2026-10-16T13:05:50.536815Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 07:00; Active Nodes: 3, Active Links: 4, Vehicles on Network Partition: 130
+2026-10-16T13:05:51.368047Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 08:00; Active Nodes: 9, Active Links: 24, Vehicles on Network Partition: 331
+2026-10-16T13:05:51.922385Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 09:00; Active Nodes: 4, Active Links: 10, Vehicles on Network Partition: 157
+2026-10-16T13:05:52.180144Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 10:00; Active Nodes: 1, Active Links: 3, Vehicles on Network Partition: 108
+2026-10-16T13:05:52.437706Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 11:00; Active Nodes: 2, Active Links: 4, Vehicles on Network Partition: 76
+2026-10-16T13:05:52.577435Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 12:00; Active Nodes: 5, Active Links: 5, Vehicles on Network Partition: 64
+2026-10-16T13:05:52.730727Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 13:00; Active Nodes: 3, Active Links: 4, Vehicles on Network Partition: 46
+2026-10-16T13:05:52.864385Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 14:00; Active Nodes: 1, Active Links: 1, Vehicles on Network Partition: 57
+2026-10-16T13:05:52.988732Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 15:00; Active Nodes: 1, Active Links: 2, Vehicles on Network Partition: 59
+2026-10-16T13:05:53.223820Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 16:00; Active Nodes: 10, Active Links: 11, Vehicles on Network Partition: 134
+2026-10-16T13:05:53.862439Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 17:00; Active Nodes: 5, Active Links: 10, Vehicles on Network Partition: 196
+2026-10-16T13:05:54.456065Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 18:00; Active Nodes: 4, Active Links: 9, Vehicles on Network Partition: 168
+2026-10-16T13:05:54.816887Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 19:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 84
+2026-10-16T13:05:55.003810Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 20:00; Active Nodes: 3, Active Links: 3, Vehicles on Network Partition: 61
+2026-10-16T13:05:55.173862Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 21:00; Active Nodes: 1, Active Links: 1, Vehicles on Network Partition: 26
+2026-10-16T13:05:55.253353Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 22:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 17
+2026-10-16T13:05:55.299267Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 23:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 14
+2026-10-16T13:05:55.319335Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 24:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 1
+2026-10-16T13:05:55.344022Z  INFO run{rank=0}: matsim_rust::simulation::simulation: close time.busy=5.47s time.idle=5.00µs
+2026-10-16T13:05:55.388072Z  INFO matsim_rust::simulation::controller::controller: Starting scoring phase for iteration 0
+2026-10-16T13:05:55.388100Z  INFO matsim_rust::simulation::controller::controller: Scoring population of 12753 persons in iteration 0
+2026-10-16T13:05:55.409633Z  INFO matsim_rust::simulation::controller::controller: Finished scoring population in iteration 0
+2026-10-16T13:05:55.411291Z  INFO matsim_rust::simulation::controller::controller: Writing experienced plans to /mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/output_experienced_plans.xml
+2026-10-16T13:05:55.642219Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/output_experienced_plans.xml"
+2026-10-16T13:05:55.960250Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/output_experienced_plans.xml"
+2026-10-16T13:05:56.231030Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/output_plans.xml"
+2026-10-16T13:05:56.548113Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/output_plans.xml"
+2026-10-16T13:05:56.593444Z  INFO matsim_rust::simulation::controller::controller: Starting replanning phase for iteration 0
+2026-10-16T13:06:01.894146Z  INFO matsim_rust::simulation::controller::controller: Ending replanning phase for iteration 0
+2026-10-16T13:06:01.894178Z  INFO matsim_rust::simulation::controller::controller: =========== End Iteration 0 ===========
+2026-10-16T13:06:01.894182Z  INFO matsim_rust::simulation::controller::controller: =========== Start Iteration 1 ===========
+2026-10-16T13:06:01.894186Z  INFO matsim_rust::simulation::controller::controller: Preparing population for mobsim iteration 1
+2026-10-16T13:06:01.898522Z  INFO matsim_rust::simulation::controller::controller: Finished preparing population for iteration 1; starting QSim
+2026-10-16T13:06:01.952665Z  INFO matsim_rust::simulation::scenario: Partition #0 network has: 13354 nodes and 30286 links. Population has 12753 agents
+2026-10-16T13:06:01.952715Z  INFO matsim_rust::simulation::controller: Mobsim worker #0 starting iteration 1. Last iteration: true
+2026-10-16T13:06:01.952727Z  INFO matsim_rust::simulation::io::xml::events: Finishing Events File.
+2026-10-16T13:06:01.952834Z  INFO matsim_rust::simulation::controller: adding events writer with path: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/events/events.0.xml"
+2026-10-16T13:06:01.952841Z  INFO matsim_rust::simulation::io::xml::events: Creating file: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/events/events.0.xml"
+2026-10-16T13:06:01.961082Z  INFO run{rank=0}: matsim_rust::simulation::simulation: Starting #0. Network neighbors: {}, Start time 0, End time 86400
+2026-10-16T13:06:01.961103Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 00:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 0
+2026-10-16T13:06:01.967581Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 01:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 0
+2026-10-16T13:06:01.971671Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 02:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 0
+2026-10-16T13:06:01.980299Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 03:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 2
+2026-10-16T13:06:02.000007Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 04:00; Active Nodes: 1, Active Links: 1, Vehicles on Network Partition: 13
+2026-10-16T13:06:02.033442Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 05:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 9
+2026-10-16T13:06:02.129037Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 06:00; Active Nodes: 2, Active Links: 2, Vehicles on Network Partition: 51
+2026-10-16T13:06:02.513259Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 07:00; Active Nodes: 2, Active Links: 3, Vehicles on Network Partition: 130
+2026-10-16T13:06:03.320867Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 08:00; Active Nodes: 8, Active Links: 23, Vehicles on Network Partition: 331
+2026-10-16T13:06:03.846463Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 09:00; Active Nodes: 4, Active Links: 10, Vehicles on Network Partition: 157
+2026-10-16T13:06:04.099036Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 10:00; Active Nodes: 2, Active Links: 3, Vehicles on Network Partition: 108
+2026-10-16T13:06:04.346342Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 11:00; Active Nodes: 2, Active Links: 4, Vehicles on Network Partition: 76
+2026-10-16T13:06:04.475945Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 12:00; Active Nodes: 5, Active Links: 5, Vehicles on Network Partition: 64
+2026-10-16T13:06:04.626290Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 13:00; Active Nodes: 5, Active Links: 6, Vehicles on Network Partition: 46
+2026-10-16T13:06:04.756761Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 14:00; Active Nodes: 1, Active Links: 1, Vehicles on Network Partition: 57
+2026-10-16T13:06:04.876067Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 15:00; Active Nodes: 2, Active Links: 3, Vehicles on Network Partition: 59
+2026-10-16T13:06:05.098299Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 16:00; Active Nodes: 9, Active Links: 13, Vehicles on Network Partition: 134
+2026-10-16T13:06:05.728188Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 17:00; Active Nodes: 5, Active Links: 8, Vehicles on Network Partition: 196
+2026-10-16T13:06:06.325586Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 18:00; Active Nodes: 4, Active Links: 10, Vehicles on Network Partition: 168
+2026-10-16T13:06:06.678672Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 19:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 84
+2026-10-16T13:06:06.869717Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 20:00; Active Nodes: 3, Active Links: 3, Vehicles on Network Partition: 61
+2026-10-16T13:06:07.038400Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 21:00; Active Nodes: 1, Active Links: 1, Vehicles on Network Partition: 26
+2026-10-16T13:06:07.117548Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 22:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 17
+2026-10-16T13:06:07.163194Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 23:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 14
+2026-10-16T13:06:07.183284Z  INFO run{rank=0}: matsim_rust::simulation::simulation: #0 of Qsim at 24:00; Active Nodes: 0, Active Links: 0, Vehicles on Network Partition: 1
+2026-10-16T13:06:07.208055Z  INFO run{rank=0}: matsim_rust::simulation::simulation: close time.busy=5.25s time.idle=5.33µs
+2026-10-16T13:06:07.255280Z  INFO matsim_rust::simulation::controller::controller: Starting scoring phase for iteration 1
+2026-10-16T13:06:07.255309Z  INFO matsim_rust::simulation::controller::controller: Scoring population of 12753 persons in iteration 1
+2026-10-16T13:06:07.276235Z  INFO matsim_rust::simulation::controller::controller: Finished scoring population in iteration 1
+2026-10-16T13:06:07.277909Z  INFO matsim_rust::simulation::controller::controller: Writing experienced plans to /mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/output_experienced_plans.xml
+2026-10-16T13:06:07.468093Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/output_experienced_plans.xml"
+2026-10-16T13:06:07.787605Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/output_experienced_plans.xml"
+2026-10-16T13:06:07.833630Z  INFO matsim_rust::simulation::controller::controller: Writing experienced plans to /mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_experienced_plans.xml
+2026-10-16T13:06:08.012974Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_experienced_plans.xml"
+2026-10-16T13:06:08.323776Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_experienced_plans.xml"
+2026-10-16T13:06:08.613203Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/output_plans.xml"
+2026-10-16T13:06:08.962894Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/output_plans.xml"
+2026-10-16T13:06:09.013157Z  INFO matsim_rust::simulation::controller::controller: =========== End Iteration 1 ===========
+2026-10-16T13:06:09.013220Z  INFO matsim_rust::simulation::controller: Mobsim worker #0 shutting down.
+2026-10-16T13:06:09.013229Z  INFO matsim_rust::simulation::io::xml::events: Finishing Events File.
+2026-10-16T13:06:09.013849Z  INFO matsim_rust::simulation::controller::controller: Writing output files:
+2026-10-16T13:06:09.013860Z  INFO matsim_rust::simulation::controller::controller:     ... Config ...
+2026-10-16T13:06:09.014461Z  INFO matsim_rust::simulation::controller::controller:     ... Network ...
+2026-10-16T13:06:09.034077Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_network.xml"
+2026-10-16T13:06:09.105824Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_network.xml"
+2026-10-16T13:06:09.111523Z  INFO matsim_rust::simulation::controller::controller:     ... Population ...
+2026-10-16T13:06:09.332518Z  INFO matsim_rust::simulation::io::xml: Starting to write file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_plans.xml"
+2026-10-16T13:06:09.666847Z  INFO matsim_rust::simulation::io::xml: Finished writing file to: "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/output_plans.xml"
+2026-10-16T13:06:09.714609Z  INFO matsim_rust::simulation::controller::controller: Copying events to main output directory
+2026-10-16T13:06:36.476695Z  INFO matsim_rust::simulation::controller::controller: Analysis report: /mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/analysis/index.html
+	Command being timed: "target/release/local_qsim --config /home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/config_rust_0p1pct.yml --set output.output_dir=/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7 --set controller.last_iteration=1"
+	User time (seconds): 1111.71
+	System time (seconds): 33.44
+	Percent of CPU this job got: 1414%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:20.94
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 3821204
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 10046918
+	Voluntary context switches: 121502
+	Involuntary context switches: 79966
+	Swaps: 0
+	File system inputs: 830600
+	File system outputs: 2914360
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

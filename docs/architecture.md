@@ -105,6 +105,13 @@ after the conversion and are resolved during preparation; code running afterward
   It connects the facilities to the network and resolves the activity locations. Both run in parallel.
 - `prepare_for_mobsim` runs before every mobsim iteration. It validates and repairs plans, e.g. by routing trips.
 
+The transit router shares immutable stop, route, departure, distance-prefix, and configured-transfer
+indexes across requests. Transfer relations retain input order within each origin stop, including
+first-match semantics for duplicate stop pairs. Request-local round frontiers and predecessor
+labels do not mutate the schedule. The simple-cost route scan can discard a later arrival reached
+with more rides when an earlier label can wait and continue at no greater cost. Mapped mode costs,
+time-dependent penalties, chains, and capacity feedback use the more general search.
+
 For mobsim, the controller splits the population into `MobsimInput`s. Each input contains a `MobsimPartition` with the
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive
 these inputs per iteration and return agents, which the controller materializes back into the next full population.

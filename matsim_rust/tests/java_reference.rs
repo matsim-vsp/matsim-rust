@@ -1499,9 +1499,8 @@ fn a_mode_to_mode_penalty_replaces_the_bus_transfer_with_the_rail_transfer() {
     );
 }
 
-/// The range profile includes both inclusive window boundaries and never repeats yesterday's
-/// schedule after the final service. The pinned Java router falls back to walking when no PT route
-/// exists; Rust reports no PT path at that boundary.
+/// The range profile includes both inclusive window boundaries and returns direct walking after
+/// the final service instead of repeating yesterday's schedule.
 #[deterministic_id_test(matsim_rust)]
 fn intermodal_person_and_stop_eligibility_match_the_pinned_reference() {
     let config = Config::from_args(CommandLineArgs::new_with_path(
@@ -2758,8 +2757,12 @@ fn range_query_matches_java_at_both_window_boundaries_and_after_final_service() 
         rides(expected).is_empty(),
         "Java must not repeat a PT departure"
     );
-    assert!(matches!(
-        calc_pt_route(&request, &router, None),
-        Value::Object(ref result) if result["result"] == "no_path"
-    ));
+    let rust = calc_pt_route(&request, &router, None);
+    assert_eq!(rust["result"], "found");
+    assert_eq!(rust["legs"][0]["mode"], "walk");
+    assert!(
+        rides(&rust).is_empty(),
+        "Rust must not repeat a PT departure"
+    );
+    assert_eq!(rust["arrival_time"], expected["arrival_time"]);
 }

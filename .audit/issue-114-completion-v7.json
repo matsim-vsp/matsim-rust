@@ -1,0 +1,56 @@
+{
+  "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.0/events/events.0.xml": {
+    "by_leg_mode": {
+      "walk": {
+        "departures": 55074,
+        "genuine_arrivals": 54914,
+        "stuck": 160
+      },
+      "car": {
+        "departures": 19193,
+        "genuine_arrivals": 19192,
+        "stuck": 1
+      },
+      "pt": {
+        "departures": 9888,
+        "genuine_arrivals": 9878,
+        "stuck": 10
+      }
+    },
+    "totals": {
+      "departures": 84155,
+      "genuine_arrivals": 83984,
+      "stuck": 171
+    },
+    "anomalies": {},
+    "genuine_completion_pct": 99.79680351731923,
+    "passes_completion_gate": true
+  },
+  "/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7/ITERS/it.1/events/events.0.xml": {
+    "by_leg_mode": {
+      "walk": {
+        "departures": 55074,
+        "genuine_arrivals": 54914,
+        "stuck": 160
+      },
+      "car": {
+        "departures": 19193,
+        "genuine_arrivals": 19192,
+        "stuck": 1
+      },
+      "pt": {
+        "departures": 9888,
+        "genuine_arrivals": 9878,
+        "stuck": 10
+      }
+    },
+    "totals": {
+      "departures": 84155,
+      "genuine_arrivals": 83984,
+      "stuck": 171
+    },
+    "anomalies": {},
+    "genuine_completion_pct": 99.79680351731923,
+    "passes_completion_gate": true
+  }
+}

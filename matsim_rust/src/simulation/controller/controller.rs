@@ -804,7 +804,8 @@ impl Controller {
             .process_event(ControllerEvent::iteration_starts(is_last_iteration));
 
         let started = Instant::now();
-        let population = self.run_mobsim_phase(iteration, is_last_iteration, mobsim_workers);
+        let population =
+            self.run_mobsim_phase(iteration, is_last_iteration, mobsim_workers, phase_seconds);
         add_phase_time(phase_seconds, "mobsim", started.elapsed());
         let started = Instant::now();
         let population =
@@ -843,14 +844,22 @@ impl Controller {
         iteration: u32,
         is_last_iteration: bool,
         mobsim_workers: &mut MobsimWorkerPool,
+        phase_seconds: &mut BTreeMap<String, f64>,
     ) -> Population {
-        info!("Starting mobsim phase for iteration {iteration}");
+        info!("Preparing population for mobsim iteration {iteration}");
 
         self.controller_events_manager
             .process_event(ControllerEvent::before_mobsim(is_last_iteration));
 
+        let preparation_started = Instant::now();
         prepare_for_mobsim(&mut self.scenario, &self.trip_router)
             .unwrap_or_else(|err| panic!("{err}: {:?}", err.issues()));
+        add_phase_time(
+            phase_seconds,
+            "mobsim_preparation",
+            preparation_started.elapsed(),
+        );
+        info!("Finished preparing population for iteration {iteration}; starting QSim");
         if is_last_iteration && self.config.output().analysis.enabled {
             self.expected_travel =
                 crate::simulation::analysis::capture_expected_travel(&self.scenario.population);
@@ -865,7 +874,9 @@ impl Controller {
             &self.link_storage_capacities,
             self.transit_capacity_feedback.clone(),
         );
+        let qsim_started = Instant::now();
         let agents = mobsim_workers.run_mobsim(iteration, is_last_iteration, inputs);
+        add_phase_time(phase_seconds, "qsim", qsim_started.elapsed());
 
         self.transit_capacity_snapshot
             .store(Arc::new(self.transit_capacity_feedback.take()));
