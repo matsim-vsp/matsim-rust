@@ -129,13 +129,21 @@ where
             Self::handle_incoming_msg(msg, &mut result, in_msgs_ref, now)
         });
 
+        if self.global_sync {
+            // Non-neighbor transfers, including zero-duration legs, must arrive in this tick.
+            comm_ref.barrier();
+            for msg in comm_ref.receive_pending() {
+                Self::handle_incoming_msg(msg, &mut result, in_msgs_ref, now);
+            }
+        }
+
         result
     }
 
     /// Returns the non-empty messages this partition received but never processed. Must be called
     /// by all partitions after their last step.
     ///
-    /// A partition only waits for messages from its neighbors, i.e. the partitions it shares a link
+    /// Without global synchronization, a partition only waits for messages from its neighbors, i.e. the partitions it shares a link
     /// with. Messages from other partitions, e.g. teleported agents, are only read if they arrive
     /// while the partition is waiting for its neighbors, and never if it has no neighbors at all.
     /// The agents in such messages are lost.
@@ -196,10 +204,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::simulation::Identifiable;
     use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
     use crate::simulation::config;
     use crate::simulation::id::Id;
-    use crate::simulation::messaging::messages::VehicleMessage;
+    use crate::simulation::messaging::messages::{TeleportationMessage, VehicleMessage};
     use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
     use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
     use crate::simulation::network::sim_network::SimNetworkPartition;
@@ -254,6 +263,35 @@ mod tests {
                 assert!(msg.vehicles().is_empty());
             }
         });
+    }
+
+    #[deterministic_id_test]
+    fn global_sync_delivers_zero_duration_teleportation_in_the_same_tick() {
+        for isolated in [false, true] {
+            execute_test(move |communicator| {
+                let mut broker = create_net_message_broker(communicator);
+                broker.global_sync = true;
+                if isolated {
+                    // Disconnected partitions have no road-neighbor messages to wait for.
+                    broker.neighbors.clear();
+                }
+                if broker.rank() == 0 {
+                    let agent = create_agent(42, vec!["6"]);
+                    broker
+                        .add_teleportation(TeleportationMessage::new(agent, SimTime::default()), 0);
+                }
+                let messages = broker.send_recv(0);
+                if broker.rank() == 3 {
+                    let arrivals: Vec<_> = messages
+                        .iter()
+                        .flat_map(|message| message.teleportations())
+                        .collect();
+                    assert_eq!(1, arrivals.len());
+                    assert_eq!(arrivals[0].end_time(), SimTime::default());
+                    assert_eq!(arrivals[0].id().external(), "42");
+                }
+            });
+        }
     }
 
     /// This test moves a vehicle from partition 0 to 2 and then to partition 3. The test involves

@@ -73,7 +73,10 @@ impl PartialPlan {
         if let Some(act) = &mut self.current_activity {
             // if the current activity is not ended, we mark it as aborted.
             act.aborted = true;
-        } else if self.current_leg.is_none() {
+        } else if let Some(leg) = self.current_leg.take() {
+            // Close the abandoned leg before collecting events for the resumed activity.
+            self.elements.push(Leg(leg.finish_incomplete()));
+        } else {
             // If neither activity nor leg is active, mark the last completed element as aborted.
             match self.elements.last_mut().unwrap() {
                 Activity(act) => act.attributes.insert("aborted", true),
@@ -578,6 +581,43 @@ mod tests {
                 "Unexpected aborted attribute on plan element {index}"
             );
         }
+    }
+
+    #[deterministic_id_test]
+    fn resumed_activity_after_an_abandoned_leg_keeps_its_details() {
+        let mut partial = PartialPlan::default();
+        finish_initial_activity(&mut partial);
+        depart(&mut partial, "car");
+        stuck(&mut partial);
+        partial.handle_event(
+            &ActivityStartEventBuilder::default()
+                .time(SimTime::from_secs(60))
+                .person(Id::create("person"))
+                .link(Id::create("end"))
+                .act_type(Id::create("car interaction"))
+                .coordinate(Coordinate::new_2d(3.0, 4.0))
+                .build()
+                .unwrap(),
+        );
+        partial.handle_event(
+            &ActivityEndEventBuilder::default()
+                .time(SimTime::from_secs(60))
+                .person(Id::create("person"))
+                .link(Id::create("end"))
+                .act_type(Id::create("car interaction"))
+                .coordinate(Coordinate::new_2d(3.0, 4.0))
+                .build()
+                .unwrap(),
+        );
+        let plan = partial.finish();
+        assert_eq!(plan.elements.len(), 3);
+        let leg = plan.elements[1].as_leg().unwrap();
+        assert_eq!(leg.attributes.get::<bool>("aborted"), Some(true));
+        assert!(leg.trav_time.is_none());
+        let activity = plan.elements[2].as_activity().unwrap();
+        assert_eq!(activity.act_type.external(), "car interaction");
+        assert_eq!(activity.link_id().external(), "end");
+        assert_eq!(activity.end_time, Some(SimTime::from_secs(60)));
     }
 
     #[deterministic_id_test]

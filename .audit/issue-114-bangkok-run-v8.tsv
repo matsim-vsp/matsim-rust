@@ -1,0 +1,13 @@
+field	value
+command	target/release/local_qsim --config /home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_1pct_issue114_20261016_141251/config_rust_1pct_vehicles_retry5.yml --set network.path=/tmp/matsim-vsp-bangkok-network.32.xml --set partitioning.num_parts=32 --set computational_setup.global_sync=true --set output.analysis.enabled=false --set output.output_dir=/mnt/Data/bangkoksilo/scenOutput/fork_bangkok_1pct_raw32_fixed_20261017
+result	completed iteration 0 through 24:00 and wrote all output files; 0 errors, 0 warnings in the log
+source	Working tree including the global_sync drain, transit activity coordinates, route link dedup, backpacking vehicle index, and abandoned-leg fixes
+population	127533 persons, 16557 stops, 412 lines, 847 routes; raw input plans with no prepared routes
+runtime	418.0 s total; 328.3 s population preparation and routing from raw plans; 66.8 s QSim busy; 2.54 us idle
+comparison	prepared-plan 32-worker run: 65.2 s QSim busy. The post-exchange barrier costs about 2.5% of the QSim phase.
+raw_plan_finding	raw plans with no prepared routes complete; preparation is 5m28s and is the dominant cost, not QSim
+global_sync_effect	the post-exchange barrier plus drain delivers cross-partition zero-duration transfers in the same tick, which the non-neighbor wait cannot deliver
+partitions	32 live qsim-* workers observed during the QSim phase
+output	/mnt/Data/bangkoksilo/scenOutput/fork_bangkok_1pct_raw32_fixed_20261017
+log	/tmp/matsim-fork-bangkok-raw32-fixed.log
+gate	this establishes that global_sync terminates on the raw 1 percent Bangkok bundle at 32 partitions; it is not a Java parity or speedup claim

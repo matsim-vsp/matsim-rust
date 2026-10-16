@@ -78,12 +78,20 @@ library's `rand()`, and without floating-point contraction (`-ffp-contract=off`)
 on every platform. Changing the fork, the seed or the METIS version changes the partitions. The state of the random
 number generator is shared by the whole process, so all calls to METIS are serialized.
 
-In every step, a partition waits for messages from its neighbors, i.e. the partitions it shares a link with. Messages
+Without global synchronization, in every step a partition waits for messages from its neighbors, i.e. the partitions it shares a link with. Messages
 from other partitions, e.g. teleported agents whose destination link lies in a partition that is not a neighbor, are
 only read if they arrive while the partition is waiting, and never if the partition has no neighbors at all. This
 happens if the network consists of components that are not connected by links and a component forms a partition of
 its own. After each mobsim run, all workers wait for each other once more and return the messages they never
 processed. If there are any, the controller panics, because the agents in them are lost.
+
+With `computational_setup.global_sync: true`, workers also synchronize after exchanging messages and drain their
+remaining incoming messages before processing arrivals. This delivers transfers from non-neighbor partitions in the
+same tick, including zero-duration walking legs between transit stops. The barrier before the exchange prevents a
+worker from sending the next tick's messages while another worker is still draining the current tick. Use this setting
+when teleported legs can cross partitions without a positive travel-time margin; the additional barrier adds runtime cost.
+Follow-on legs admitted to the next exchange retain their original event times. Their receiving queue deadline is the
+later of the nominal arrival tick and the actual send tick, matching local processing without allowing late delivery.
 
 Populations are read in parallel, both from XML and from protobuf. A reader thread splits the input into persons,
 which are parsed and converted by the rayon thread pool. The id store must stay independent of the number of threads:
