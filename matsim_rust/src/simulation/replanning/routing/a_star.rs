@@ -5,14 +5,16 @@ use crate::simulation::replanning::routing::a_star_core::{
 };
 use crate::simulation::replanning::routing::alt_landmark_data::AltLandmarkData;
 use crate::simulation::replanning::routing::cost::{Disutility, TravelDisutility, TravelTime};
-use crate::simulation::replanning::routing::graph::{GraphError, IndexableGraph, LinkIndex};
+use crate::simulation::replanning::routing::graph::{
+    GraphError, IndexableGraph, LinkIndex, NodeIndex, find_dead_ends,
+};
 use crate::simulation::replanning::routing::least_cost_path_calculator::{
     LeastCostPath, LeastCostPathCalculator, LeastCostPathRequest,
 };
 use crate::simulation::replanning::routing::network_converter::{
     convert_network_for_mode, convert_network_with_modes,
 };
-use crate::simulation::scenario::network::{Link, Network, Node};
+use crate::simulation::scenario::network::{Link, Network};
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -26,14 +28,22 @@ thread_local! {
     static SEARCH_BUFFERS: RefCell<SearchBuffers> = RefCell::new(SearchBuffers::default());
 }
 
+/// Number of nodes reached and settled by the last search of an A* router on this thread, see
+/// `AStarBuffers::reached_and_settled`.
+#[cfg(test)]
+pub(crate) fn last_search_reached_and_settled() -> (usize, usize) {
+    SEARCH_BUFFERS.with_borrow(|buffers| buffers.core.reached_and_settled())
+}
+
 /// A heuristic to be used in A*. Given a from and to-node, estimates the disutility between them.
 /// Is not allowed to overestimate disutilities. It is expected of implementations to respect this.
 /// Heuristics are in general only valid for the graph they have been created for. Therefore, the
-/// estimate method does not take a graph as input, but only a to- and from-node.
+/// estimate method does not take a graph as input, but only the indices of a to- and from-node in
+/// that graph.
 pub trait AStarHeuristic: Send + Sync {
     /// Estimate travel disutility between from-node and to-node. Never overestimates the
     /// disutility.
-    fn estimate(&self, from: Id<Node>, to: Id<Node>) -> Disutility;
+    fn estimate(&self, from: NodeIndex, to: NodeIndex) -> Disutility;
     /// Constructor for a heuristic for a given graph using a given travel disutility function as
     /// cost.
     /// Precalculates any data needed to estimate disutilities between nodes, such as landmark data
@@ -51,7 +61,7 @@ pub trait AStarHeuristic: Send + Sync {
 pub struct ZeroHeuristic;
 
 impl AStarHeuristic for ZeroHeuristic {
-    fn estimate(&self, _from: Id<Node>, _to: Id<Node>) -> Disutility {
+    fn estimate(&self, _from: NodeIndex, _to: NodeIndex) -> Disutility {
         0.
     }
     fn create(
@@ -86,7 +96,7 @@ impl AltHeuristic {
 impl AStarHeuristic for AltHeuristic {
     /// Estimate the disutility between the from- and to-node using the ALT heuristic.
     /// Uses landmarks and triangle inequality to compute a lower bound on travel disutility.
-    fn estimate(&self, from: Id<Node>, to: Id<Node>) -> Disutility {
+    fn estimate(&self, from: NodeIndex, to: NodeIndex) -> Disutility {
         /* The ALT algorithm uses two lower bounds for each Landmark:
          * given: source node S, target node T, landmark L
          * then, due to the triangle inequality:
@@ -97,19 +107,19 @@ impl AStarHeuristic for AltHeuristic {
          * go from S to T.
          */
 
-        let from_idx = self.landmark_data.node_id_to_idx()[&from];
-        let to_idx = self.landmark_data.node_id_to_idx()[&to];
+        let from_data = self.landmark_data.node_travel_disutilities(from);
+        let to_data = self.landmark_data.node_travel_disutilities(to);
 
         let mut h: f64 = 0.0;
-        for lm_travel_disutility in self.landmark_data.travel_disutilities_to_all().iter() {
-            let from_disutility = lm_travel_disutility[from_idx]; // (SL,LS)
-            let to_disutility = lm_travel_disutility[to_idx]; // (LT,TL)
-
-            if from_disutility.0.is_finite() && to_disutility.1.is_finite() {
-                h = h.max(from_disutility.0 - to_disutility.1);
+        // the landmark data of a node is (disutility from the landmark, disutility to the
+        // landmark), see `ForwardBackwardTravelDisutility`
+        for (&(ls, sl), &(lt, tl)) in from_data.iter().zip(to_data) {
+            // an infinite disutility makes the bound useless (or NaN), so it is skipped
+            if sl.is_finite() && tl.is_finite() {
+                h = h.max(sl - tl);
             }
-            if to_disutility.0.is_finite() && from_disutility.1.is_finite() {
-                h = h.max(to_disutility.0 - from_disutility.1);
+            if lt.is_finite() && ls.is_finite() {
+                h = h.max(lt - ls);
             }
         }
 
@@ -135,6 +145,8 @@ impl AStarHeuristic for AltHeuristic {
 pub struct AStar<H: AStarHeuristic> {
     graph: Box<dyn IndexableGraph>,
     heuristic: H,
+    /// dead end of each node of the graph, which searches do not expand unnecessarily
+    dead_ends: Vec<Option<NodeIndex>>,
     travel_time: Arc<dyn TravelTime>,
     travel_disutility: Arc<dyn TravelDisutility>,
 }
@@ -156,10 +168,12 @@ impl<H: AStarHeuristic> AStar<H> {
         // create heuristic based on the graph. For instance, calculate landmark data in the case
         // of AltHeuristic
         let heuristic = H::create(&graph, travel_disutility.as_ref())?;
+        let dead_ends = find_dead_ends(&graph)?;
 
         Ok(Self {
             graph: Box::new(graph),
             heuristic,
+            dead_ends,
             travel_time,
             travel_disutility,
         })
@@ -181,11 +195,13 @@ impl<H: AStarHeuristic> AStar<H> {
             .into_iter()
             .try_fold(IntMap::default(), |mut map, (mode, graph)| {
                 let heuristic = H::create(&graph, travel_disutility.as_ref())?;
+                let dead_ends = find_dead_ends(&graph)?;
                 map.insert(
                     mode,
                     Self {
                         graph: Box::new(graph),
                         heuristic,
+                        dead_ends,
                         travel_time: travel_time.clone(),
                         travel_disutility: travel_disutility.clone(),
                     },
@@ -302,6 +318,7 @@ impl<H: AStarHeuristic> AStar<H> {
                 builder
                     // set heuristic to the heuristic of the router
                     .heuristic_mode(HeuristicMode::with_heuristic(&self.heuristic))
+                    .dead_ends(Some(&self.dead_ends))
                     // set AStarActions to the Routing use case
                     .options(RoutingAStarActions::new(
                         to_node_idx,
@@ -403,11 +420,14 @@ mod tests {
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::a_star::{
         AStar, AStarHeuristic, Alt, AltHeuristic, Dijkstra, SEARCH_BUFFERS, ZeroHeuristic,
+        last_search_reached_and_settled,
     };
     use crate::simulation::replanning::routing::a_star_core::SearchBuffers;
+    use crate::simulation::replanning::routing::alt_landmark_data::AltLandmarkData;
     use crate::simulation::replanning::routing::graph::tests::{
-        get_triangle_test_network, net_to_graph,
+        get_dead_end_test_network, get_triangle_test_network, net_to_graph,
     };
+    use crate::simulation::replanning::routing::graph::{Graph, IndexableGraph};
     use crate::simulation::replanning::routing::least_cost_path_calculator::{
         LeastCostPath, LeastCostPathRequest, LeastCostPathRequestBuilder,
     };
@@ -934,8 +954,10 @@ mod tests {
         let test_pair_true_disutilities_freespeed = vec![1.0, 4.0, 2.0, 6.0];
 
         for (i, (from_str, to_str)) in test_pairs.iter().enumerate() {
-            let heuristic_estimate =
-                alt_heuristic.estimate(Id::get_from_ext(from_str), Id::get_from_ext(to_str));
+            let heuristic_estimate = alt_heuristic.estimate(
+                graph.get_node_idx_from_id(Id::get_from_ext(from_str)),
+                graph.get_node_idx_from_id(Id::get_from_ext(to_str)),
+            );
 
             // Heuristic should not be NaN
             assert!(
@@ -960,6 +982,142 @@ mod tests {
                 "Heuristic estimate should always be lower or equal to the true distance"
             );
         }
+    }
+
+    /// The links of a graph as (from-node, to-node, min disutility), and the min disutilities
+    /// between all pairs of nodes, calculated with Floyd-Warshall
+    fn links_and_all_pairs_disutilities(
+        graph: &dyn IndexableGraph,
+        cost: &dyn TravelDisutility,
+    ) -> (Vec<(usize, usize, Disutility)>, Vec<Vec<Disutility>>) {
+        let n = graph.num_nodes();
+        let mut links = Vec::new();
+        for u in 0..n {
+            for edge in graph.outgoing_edges_as_idx(u) {
+                let v = graph.get_end_node_as_idx(edge).unwrap();
+                let link = graph.get_link_from_idx(edge).unwrap();
+                links.push((u, v, cost.get_link_min_travel_disutility(link)));
+            }
+        }
+        let mut d = vec![vec![f64::INFINITY; n]; n];
+        for (u, row) in d.iter_mut().enumerate() {
+            row[u] = 0.0;
+        }
+        for &(u, v, w) in &links {
+            d[u][v] = d[u][v].min(w);
+        }
+        for k in 0..n {
+            for i in 0..n {
+                for j in 0..n {
+                    d[i][j] = d[i][j].min(d[i][k] + d[k][j]);
+                }
+            }
+        }
+        (links, d)
+    }
+
+    /// Test that the ALT heuristic is a consistent lower bound on a directed network for every
+    /// choice of the landmark: for all nodes u and t, h(u, t) <= d(u, t), and for every link
+    /// (u, v) with weight w, h(u, t) <= w + h(v, t). In equil, the disutility from a node to a
+    /// landmark mostly differs from the one in the opposite direction.
+    #[deterministic_id_test]
+    fn test_alt_heuristic_consistent_on_directed_network() {
+        let network = load_network("./assets/equil/equil-network.xml");
+        let graph = net_to_graph(&network);
+        let cost = FreeOrMaxSpeedTravelTimeAndDisutility;
+        let n = graph.num_nodes();
+        let (links, d) = links_and_all_pairs_disutilities(&graph, &cost);
+
+        for landmark in 0..n {
+            let heuristic = AltHeuristic {
+                landmark_data: AltLandmarkData::from_graph_with_landmarks(
+                    &graph,
+                    &cost,
+                    vec![landmark],
+                )
+                .unwrap(),
+            };
+            for t in 0..n {
+                for u in (0..n).filter(|&u| d[u][t].is_finite()) {
+                    let h = heuristic.estimate(u, t);
+                    assert!(
+                        h <= d[u][t] + 1e-9,
+                        "landmark {landmark}: h({u}, {t}) = {h} > d({u}, {t}) = {}",
+                        d[u][t]
+                    );
+                }
+                for &(u, v, w) in links.iter().filter(|&&(_, v, _)| d[v][t].is_finite()) {
+                    let h_u = heuristic.estimate(u, t);
+                    let h_v = heuristic.estimate(v, t);
+                    assert!(
+                        h_u <= w + h_v + 1e-9,
+                        "landmark {landmark}: h({u}, {t}) = {h_u} > {w} + h({v}, {t}) = {h_v}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Test that searches find the least cost paths between all pairs of links of a network with
+    /// a dead end, also if the path starts or ends in the dead end.
+    #[deterministic_id_test]
+    fn test_routing_with_dead_ends_for_all_link_pairs() {
+        let network = Arc::new(get_dead_end_test_network());
+        let travel_cost = Arc::new(FreeSpeedTravelTimeAndDisutility {});
+        let graph = net_to_graph(&network);
+        let (_, d) = links_and_all_pairs_disutilities(&graph, travel_cost.as_ref());
+
+        let alt = Alt::new(
+            network.clone(),
+            None,
+            travel_cost.clone(),
+            travel_cost.clone(),
+        )
+        .unwrap();
+        let dijkstra =
+            Dijkstra::new(network.clone(), None, travel_cost.clone(), travel_cost).unwrap();
+        let mut links: Vec<&Link> = network.links();
+        links.sort_by_key(|link| link.id.clone());
+        for from in &links {
+            for to in &links {
+                let expected = d[graph.get_node_idx_from_id(from.to.clone())]
+                    [graph.get_node_idx_from_id(to.from.clone())];
+                let request = LeastCostPathRequestBuilder::default()
+                    .from(from.id.clone())
+                    .to(to.id.clone())
+                    .build()
+                    .unwrap();
+                for result in [
+                    alt.calc_least_cost_path(request.clone()),
+                    dijkstra.calc_least_cost_path(request.clone()),
+                ] {
+                    let actual = result.map_or(f64::INFINITY, |path| path.travel_disutility);
+                    assert_eq!(actual, expected, "from {} to {}", from.id, to.id);
+                }
+            }
+        }
+    }
+
+    /// Test that a search does not expand a dead end that contains neither the from- nor the
+    /// to-node: from b to d, Dijkstra settles e, but does not reach f and g behind it.
+    #[deterministic_id_test]
+    fn test_dead_end_is_not_expanded() {
+        let network = Arc::new(get_dead_end_test_network());
+        let travel_cost = Arc::new(FreeSpeedTravelTimeAndDisutility {});
+        let dijkstra = Dijkstra::new(network, None, travel_cost.clone(), travel_cost).unwrap();
+
+        let path = dijkstra
+            .calc_least_cost_path(lcp_request("ab", "da"))
+            .unwrap();
+        assert_eq!(path.travel_disutility, 20.0);
+        // b, a, c, d and e, but not f and g
+        assert_eq!(last_search_reached_and_settled(), (5, 5));
+
+        // a search into the dead end expands it
+        let path = dijkstra
+            .calc_least_cost_path(lcp_request("ab", "fg"))
+            .unwrap();
+        assert_eq!(path.travel_disutility, 2.0);
     }
 
     fn load_network(path: &str) -> Arc<Network> {

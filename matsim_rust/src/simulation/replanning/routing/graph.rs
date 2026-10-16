@@ -51,7 +51,8 @@ pub trait IndexableGraph: Graph {
     fn get_link_id_from_idx(&self, idx: LinkIndex) -> Result<Id<Link>, GraphError>;
     fn get_node_from_idx(&self, idx: NodeIndex) -> Result<&Node, GraphError>;
     fn get_link_from_idx(&self, idx: LinkIndex) -> Result<&Link, GraphError>;
-    fn outgoing_edges_as_idx(&self, node: NodeIndex) -> Vec<LinkIndex>;
+    /// The outgoing edges of a node are stored next to each other, so they are a range of indices
+    fn outgoing_edges_as_idx(&self, node: NodeIndex) -> Range<LinkIndex>;
     fn incoming_edges_as_idx(&self, node: NodeIndex) -> Vec<LinkIndex>;
     fn get_end_node_as_idx(&self, edge: LinkIndex) -> Result<NodeIndex, GraphError>;
     fn get_start_node_as_idx(&self, edge: LinkIndex) -> Result<NodeIndex, GraphError>;
@@ -376,11 +377,19 @@ impl IndexableGraph for ForwardBackwardRoutingGraph {
         self.node(self.get_node_id_from_idx(idx)?)
     }
     fn get_link_from_idx(&self, idx: LinkIndex) -> Result<&Link, GraphError> {
-        // uses method from Graph trait to map link id to link
-        self.edge(self.get_link_id_from_idx(idx)?)
+        // maps the link index to the link id and looks the link up in the network. The id is
+        // borrowed instead of cloned, since a clone changes the reference count of the id, which
+        // all routing threads share.
+        let link_id = self
+            .forward_link_id_by_index
+            .get(idx)
+            .ok_or(GraphError::LinkIndexNotFound(idx))?;
+        self.links_by_link_ids()
+            .get(link_id)
+            .ok_or_else(|| GraphError::LinkIdNotFound(link_id.clone()))
     }
-    fn outgoing_edges_as_idx(&self, node: NodeIndex) -> Vec<LinkIndex> {
-        (self.forward_first_out()[node]..self.forward_first_out()[node + 1]).collect()
+    fn outgoing_edges_as_idx(&self, node: NodeIndex) -> Range<LinkIndex> {
+        self.forward_first_out()[node]..self.forward_first_out()[node + 1]
     }
     fn incoming_edges_as_idx(&self, node: NodeIndex) -> Vec<LinkIndex> {
         // Get the link ids from backward structure
@@ -417,16 +426,94 @@ impl IndexableGraph for ForwardBackwardRoutingGraph {
     }
 }
 
+/// Finds the dead ends of a graph, like MATSim's `SpeedyALTData`: sets of nodes that are connected
+/// to the rest of the graph through a single node, so that a path entering a dead end has to leave
+/// it through the node where it entered. Such a path is never cheaper than the path without the
+/// detour, so one-to-one searches need to expand a dead end only if it contains the from- or the
+/// to-node.
+///
+/// The dead-end nodes are the nodes outside the 2-core of the graph without link directions,
+/// i.e., the nodes that are removed by repeatedly removing nodes with at most one neighbour. Each
+/// connected set of such nodes is a tree attached to the rest of the graph by at most one pair of
+/// neighbours. MATSim finds its dead ends by following chains of nodes with a single neighbour
+/// instead, which differs in details, e.g., at loops and for connected components that are trees.
+///
+/// Returns the dead end of each node, identified by its smallest node index, or None for nodes that
+/// are not in a dead end.
+pub(crate) fn find_dead_ends(
+    graph: &dyn IndexableGraph,
+) -> Result<Vec<Option<NodeIndex>>, GraphError> {
+    let num_nodes = graph.num_nodes();
+
+    // distinct neighbours of each node, ignoring link directions and loops
+    let mut neighbours: Vec<Vec<NodeIndex>> = Vec::with_capacity(num_nodes);
+    for node in 0..num_nodes {
+        let mut adjacent = Vec::new();
+        for edge in graph.outgoing_edges_as_idx(node) {
+            adjacent.push(graph.get_end_node_as_idx(edge)?);
+        }
+        for edge in graph.incoming_edges_as_idx(node) {
+            adjacent.push(graph.get_start_node_as_idx(edge)?);
+        }
+        adjacent.retain(|&neighbour| neighbour != node);
+        adjacent.sort_unstable();
+        adjacent.dedup();
+        neighbours.push(adjacent);
+    }
+
+    // repeatedly remove nodes with at most one neighbour that is not removed yet. The 2-core does
+    // not depend on the order of removal.
+    let mut degree: Vec<usize> = neighbours.iter().map(Vec::len).collect();
+    let mut removed = vec![false; num_nodes];
+    let mut stack: Vec<NodeIndex> = (0..num_nodes).filter(|&node| degree[node] <= 1).collect();
+    while let Some(node) = stack.pop() {
+        if removed[node] {
+            continue;
+        }
+        removed[node] = true;
+        for &neighbour in &neighbours[node] {
+            if !removed[neighbour] {
+                degree[neighbour] -= 1;
+                if degree[neighbour] == 1 {
+                    stack.push(neighbour);
+                }
+            }
+        }
+    }
+
+    // label each connected set of removed nodes with its smallest node index
+    let mut dead_ends = vec![None; num_nodes];
+    for first in 0..num_nodes {
+        if !removed[first] || dead_ends[first].is_some() {
+            continue;
+        }
+        dead_ends[first] = Some(first);
+        stack.push(first);
+        while let Some(node) = stack.pop() {
+            for &neighbour in &neighbours[node] {
+                if removed[neighbour] && dead_ends[neighbour].is_none() {
+                    dead_ends[neighbour] = Some(first);
+                    stack.push(neighbour);
+                }
+            }
+        }
+    }
+    Ok(dead_ends)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::graph::{CsrGraph, ForwardBackwardRoutingGraph};
-    use crate::simulation::replanning::routing::graph::{Graph, GraphError, IndexableGraph};
+    use crate::simulation::replanning::routing::graph::{
+        Graph, GraphError, IndexableGraph, find_dead_ends,
+    };
     use crate::simulation::replanning::routing::network_converter;
-    use crate::simulation::scenario::network::{Network, Node};
+    use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::network::{Link, Network, Node};
     use macros::deterministic_id_test;
-    use nohash_hasher::IntMap;
+    use nohash_hasher::{IntMap, IntSet};
     use std::sync::Arc;
 
     pub fn get_triangle_test_network() -> Network {
@@ -439,6 +526,84 @@ pub(crate) mod tests {
 
     pub fn net_to_graph(network: &Network) -> ForwardBackwardRoutingGraph {
         network_converter::convert_network_for_mode(Arc::new(network.clone()), None)
+    }
+
+    /// A ring a-b-c-d-a with links in both directions and length 10, and a dead end attached to
+    /// b: b-e and e-f in both directions, f -> g and h -> f, all with length 1. Node c has a loop
+    /// and node i has no links. The freespeed of all links is 1. Node a has index 0, b index 1,
+    /// and so on.
+    pub fn get_dead_end_test_network() -> Network {
+        let mut network = Network::new();
+        for (i, id) in ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+            .iter()
+            .enumerate()
+        {
+            network.add_node(Node::new(
+                Id::create(id),
+                Coordinate::new_2d(i as f64, 0.0),
+                0,
+                1,
+            ));
+        }
+        let mut add_link = |from: &str, to: &str, length: f64| {
+            network.add_link(Link::new(
+                Id::create(&format!("{from}{to}")),
+                Id::get_from_ext(from),
+                Id::get_from_ext(to),
+                length,
+                1.0,
+                1.0,
+                1.0,
+                IntSet::default(),
+                0,
+            ));
+        };
+        for (from, to) in [("a", "b"), ("b", "c"), ("c", "d"), ("d", "a")] {
+            add_link(from, to, 10.0);
+            add_link(to, from, 10.0);
+        }
+        add_link("c", "c", 10.0);
+        for (from, to) in [("b", "e"), ("e", "f")] {
+            add_link(from, to, 1.0);
+            add_link(to, from, 1.0);
+        }
+        add_link("f", "g", 1.0);
+        add_link("h", "f", 1.0);
+        network
+    }
+
+    /// Test that the nodes outside the ring are dead ends, labelled with their smallest index.
+    #[deterministic_id_test]
+    fn test_find_dead_ends() {
+        let graph = net_to_graph(&get_dead_end_test_network());
+        let dead_end = Some(graph.get_node_idx_from_id(Id::get_from_ext("e")));
+        let isolated = Some(graph.get_node_idx_from_id(Id::get_from_ext("i")));
+        let expected: Vec<_> = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+            .iter()
+            .map(|id| match *id {
+                "e" | "f" | "g" | "h" => dead_end,
+                "i" => isolated,
+                _ => None,
+            })
+            .collect();
+        let dead_ends = find_dead_ends(&graph).unwrap();
+        let actual: Vec<_> = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+            .iter()
+            .map(|id| dead_ends[graph.get_node_idx_from_id(Id::get_from_ext(id))])
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    /// Test that a graph whose nodes are all on cycles has no dead ends, and that a node without
+    /// links is one.
+    #[deterministic_id_test]
+    fn test_find_dead_ends_triangle() {
+        let graph = net_to_graph(&get_triangle_test_network());
+        // node 0 has no links, nodes 1, 2 and 3 form a triangle
+        assert_eq!(
+            find_dead_ends(&graph).unwrap(),
+            vec![Some(0), None, None, None]
+        );
     }
 
     #[deterministic_id_test]
@@ -514,10 +679,10 @@ pub(crate) mod tests {
             outgoing_ids.len(),
             "outgoing_edges_as_idx and outgoing_edges should have same length"
         );
-        for (i, index) in outgoing_indices.iter().enumerate() {
+        for (i, index) in outgoing_indices.enumerate() {
             // Check whether the link id associated with each LinkIndex returned from
             // outgoing_edges_as_idx() matches the link ids returned from outgoing_edges()
-            assert_eq!(graph.get_link_id(*index).unwrap(), outgoing_ids[i]);
+            assert_eq!(graph.get_link_id(index).unwrap(), outgoing_ids[i]);
         }
     }
 
@@ -672,8 +837,8 @@ pub(crate) mod tests {
         // For all outgoing edges, get_end_node_as_idx should not panic, since they are all valid (exist in the graph)
         for node_idx in 0..graph.num_nodes() {
             let outgoing_edge_indices = graph.outgoing_edges_as_idx(node_idx);
-            for (j, edge_idx) in outgoing_edge_indices.iter().enumerate() {
-                let end_node = graph.get_end_node_as_idx(*edge_idx).unwrap(); // Should not panic
+            for (j, edge_idx) in outgoing_edge_indices.enumerate() {
+                let end_node = graph.get_end_node_as_idx(edge_idx).unwrap(); // Should not panic
                 assert_eq!(
                     end_node, true_end_node_indices[node_idx][j],
                     "End node is incorrect, expected {}, got {}",

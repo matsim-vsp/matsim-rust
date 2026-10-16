@@ -10,10 +10,10 @@
     <event time="29401" type="PersonEntersVehicle" person="1" vehicle="1_car"/>
     <event time="29401" type="vehicle enters traffic" person="1" link="1" vehicle="1_car" networkMode="car" relativePosition="1"/>
     <event time="29402" type="left link" link="1" vehicle="1_car"/>
-    <event time="29402" type="entered link" link="10" vehicle="1_car"/>
-    <event time="29762" type="left link" link="10" vehicle="1_car"/>
-    <event time="29762" type="entered link" link="19" vehicle="1_car"/>
-    <event time="29942" type="left link" link="19" vehicle="1_car"/>
+    <event time="29402" type="entered link" link="2" vehicle="1_car"/>
+    <event time="29762" type="left link" link="2" vehicle="1_car"/>
+    <event time="29762" type="entered link" link="11" vehicle="1_car"/>
+    <event time="29942" type="left link" link="11" vehicle="1_car"/>
     <event time="29942" type="entered link" link="20" vehicle="1_car"/>
     <event time="30301" type="vehicle leaves traffic" person="1" link="20" vehicle="1_car" networkMode="car" relativePosition="1"/>
     <event time="30301" type="PersonLeavesVehicle" person="1" vehicle="1_car"/>
