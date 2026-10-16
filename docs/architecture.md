@@ -180,6 +180,51 @@ Scoring uses the public `PlanScorer` trait and reads only the experienced plan. 
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
 
+### Link Dynamics
+
+A link consists of a queue, a buffer, a waiting list for departing vehicles and, for transit, a stop bay. A vehicle may
+leave the queue after its free-speed travel time, but not before the next tick. Vehicles that end their leg leave the
+queue without using flow capacity; all others move into the buffer if the link has flow capacity left. Departing
+vehicles move from the waiting list into the buffer before vehicles from the queue. Transit vehicles serve stops at
+their route links and dwell in the stop bay when the stop does not block the lane. The node at the end of the link takes
+vehicles from the buffer in FIFO order if the next link has storage capacity left or the front vehicle is stuck.
+
+As in MATSim's QSim (`QueueWithBuffer` with the fast capacity update), a vehicle consumes flow capacity when it enters
+the buffer (see `Flowcap`). It may enter as long as the accumulated capacity is positive, so the capacity can become
+negative. The capacity grows with the flow capacity per second, but at most to one tick of capacity minus the PCE of the
+vehicles that are still in the buffer. Thus, a vehicle that is blocked in the buffer holds the capacity it has
+consumed, and the headway of the next vehicle counts from the moment the blocked vehicle leaves. Every vehicle in the
+buffer may leave it; nodes do not check the flow capacity.
+
+If a headway is a whole number of ticks, which is common for sampled scenarios (e.g. 800 veh/h at 0.1 % gives one
+vehicle per 4500 s), the exact capacity reaches exactly 0 in some tick. Floating-point rounding leaves a tiny residue
+instead, whose sign depends on whether the capacity was accumulated tick by tick or at once after the link was inactive,
+which in turn depends on the partitioning. Therefore, "positive" means larger than a margin of `1e-10`, as in DSim.
+This reproduces the result of QSim's rule with exact arithmetic.
+
+Until October 2026, the capacity was consumed when a vehicle left the buffer. A vehicle could enter the buffer if the
+remaining capacity exceeded the PCE of the vehicles in the buffer, and the node only took it if the remaining capacity
+exceeded `1e-10`. Both formulations are equivalent, but floating-point rounding can change single decisions.
+
+A link whose waiting list and buffer are empty, whose flow capacity is full and whose first vehicle is not due yet
+sleeps until that vehicle is due (`LocalLink::fall_asleep`): moving it would change nothing, because a full capacity
+stays exactly full. A departure wakes it up earlier; a vehicle entering the queue does not. Because the set of active
+links therefore changes more often, the vehicles that end their leg are sorted by link id before they are handed to the
+activity engine, so that the order of the agents does not depend on the order of the active links. The order of events
+within a time step still depends on it. It is deterministic for a single partition; with several partitions, the order
+in which messages from other partitions arrive already varies between runs.
+
+The link dynamics deviate from QSim in the following points:
+
+- QSim accumulates capacity only when it checks whether a vehicle may enter the buffer, and resets its update time to
+  the previous time step whenever a vehicle leaves the buffer; capacity not accumulated until then is lost. The Rust
+  link accumulates capacity in every tick in which it holds a vehicle.
+- QSim admits a vehicle into the buffer if the accumulated capacity is larger than 0, Rust if it is larger than
+  `1e-10`.
+- There is no `pcuThresholdForFlowCapacityEasing` and no flow efficiency. A vehicle consumes exactly its PCE.
+- A vehicle stays in the queue for at least one tick, so that a link behaves the same whether or not it is split
+  between partitions (see `LegEngine::do_step`).
+
 ### Final-Iteration Analysis
 
 `simulation::analysis` owns the final-iteration report. After a successful run, the controller calls
