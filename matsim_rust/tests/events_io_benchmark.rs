@@ -1,11 +1,18 @@
-//! Benchmarks for reading event files. They need event files of a Berlin v7.1 1pct run, which are
-//! not part of the repository, and are therefore ignored by default. First generate the event files
-//! (this runs one iteration of the simulation with 4 partitions), then run the benchmarks in release
-//! mode:
+//! Benchmarks for reading and writing event files. The reading benchmarks need event files of a
+//! Berlin v7.1 1pct run, which are not part of the repository, and are therefore ignored by default.
+//! First generate the event files (this runs one iteration of the simulation with 4 partitions),
+//! then run the benchmarks in release mode:
 //!
 //! ```shell
 //! cargo test -p matsim-rust --release --test events_io_benchmark generate -- --ignored --nocapture --test-threads=1
 //! cargo test -p matsim-rust --release --test events_io_benchmark read -- --ignored --nocapture --test-threads=1
+//! ```
+//!
+//! `write_synthetic_events` measures writing events in all formats. It needs no input files and is
+//! ignored by default as well:
+//!
+//! ```shell
+//! cargo test -p matsim-rust --release --test events_io_benchmark write_synthetic_events -- --ignored --nocapture --test-threads=1
 //! ```
 //!
 //! `read_events_reproduces_files` checks that reading the generated files reproduces them exactly,
@@ -19,14 +26,23 @@ use flate2::read::GzDecoder;
 use macros::deterministic_id_test;
 use matsim_rust::simulation::config::{CompressionType, Config, OverwriteFiles, WriteEvents};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
-use matsim_rust::simulation::events::EventsManager;
 use matsim_rust::simulation::events::utils::{
     convert_proto_to_xml_events, read_events, read_partitioned_events,
 };
+use matsim_rust::simulation::events::{
+    ActivityEndEventBuilder, ActivityStartEventBuilder, EventTrait, EventsManager,
+    LinkEnterEventBuilder, LinkLeaveEventBuilder, PersonArrivalEventBuilder,
+    PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder, PersonLeavesVehicleEventBuilder,
+    PersonStuckEventBuilder, PtTeleportationArrivalEventBuilder, TeleportationArrivalEventBuilder,
+    VehicleEntersTrafficEventBuilder, VehicleLeavesTrafficEventBuilder,
+};
 use matsim_rust::simulation::id;
+use matsim_rust::simulation::id::Id;
+use matsim_rust::simulation::io::proto::proto_events::ProtoEventsWriter;
 use matsim_rust::simulation::io::xml::events::XmlEventsWriter;
-use matsim_rust::simulation::scenario::Scenario;
+use matsim_rust::simulation::scenario::{Coordinate, Scenario};
 use matsim_rust::simulation::scoring::OnlyTravelTimeDependentScoring;
+use matsim_rust::simulation::time::SimTime;
 use std::cell::Cell;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -37,6 +53,13 @@ use std::time::Instant;
 const CONFIG_ENV: &str = "MATSIM_RUST_BERLIN_V71_1PCT_CONFIG";
 const EVENTS_DIR_ENV: &str = "MATSIM_RUST_BERLIN_V71_1PCT_EVENTS_DIR";
 const NUM_PARTS: u32 = 4;
+/// Number of events written by `write_synthetic_events`.
+const SYNTHETIC_EVENTS: usize = 2_000_000;
+/// Number of synthetic events per time step, so that the proto writer groups the events into time
+/// steps similar to a simulation run.
+const SYNTHETIC_EVENTS_PER_TIME_STEP: usize = 300;
+/// Number of links of a synthetic car trip. Link events then make up about 70% of the events.
+const SYNTHETIC_TRIP_LINKS: usize = 10;
 
 #[deterministic_id_test(matsim_rust)]
 #[ignore = "generates the input of the event benchmarks, needs the Berlin v7.1 1pct input"]
@@ -152,6 +175,227 @@ fn read_events_reproduces_files() {
     XmlEventsWriter::register_fn(rewritten.clone())(&mut manager);
     read_events(&mut manager, &xml).unwrap();
     assert_same_lines(&xml, &rewritten);
+}
+
+#[deterministic_id_test(matsim_rust)]
+#[ignore = "benchmark, writes synthetic events"]
+fn write_synthetic_events() {
+    let events = timed("create synthetic events", synthetic_events);
+    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("test_output/benchmarks/write_synthetic_events");
+    std::fs::create_dir_all(&folder).unwrap();
+
+    for extension in ["xml", "xml.gz", "xml.zst", "binpb"] {
+        let path = folder.join(format!("events.{extension}"));
+        let mut manager = EventsManager::new();
+        if extension == "binpb" {
+            ProtoEventsWriter::register_fn(path.clone())(&mut manager);
+        } else {
+            XmlEventsWriter::register_fn(path.clone())(&mut manager);
+        }
+
+        let start = Instant::now();
+        for event in &events {
+            manager.process_event(event.as_ref());
+        }
+        manager.finish();
+        report(&format!("write {extension}"), start, events.len() as u64);
+        println!("{path:?}: {:.1} MB", file_size(&path) as f64 / 1e6);
+    }
+}
+
+/// Creates events of car, walk and pt trips, which resemble the events of a simulation run. The
+/// events only depend on their index, so that each run writes the same files.
+fn synthetic_events() -> Vec<Box<dyn EventTrait>> {
+    const ACT_TYPES: [&str; 5] = [
+        "home_86400",
+        "work_28800",
+        "leisure_7200",
+        "shopping_3600",
+        "other_1800",
+    ];
+
+    // Most time steps have integral times. Every tenth one has a fractional part, as with
+    // simulation steps shorter than one second.
+    let time = |index: usize| {
+        let step = (index / SYNTHETIC_EVENTS_PER_TIME_STEP) as u64;
+        let fraction = if step % 10 == 9 { 250_000_000 } else { 0 };
+        SimTime::from_nanos(step * 1_000_000_000 + fraction)
+    };
+
+    let mut events: Vec<Box<dyn EventTrait>> = Vec::with_capacity(SYNTHETIC_EVENTS + 64);
+    let mut trip = 0;
+    while events.len() < SYNTHETIC_EVENTS {
+        let person = format!("person_{:06}", (trip * 7919) % 100_000);
+        let vehicle = format!("{person}_car");
+        let link = |i: usize| format!("link_{:05}", (trip * 31 + i * 17) % 50_000);
+        let act_type = |i: usize| ACT_TYPES[(trip + i) % ACT_TYPES.len()];
+        let coordinate = |i: usize| {
+            Coordinate::new_2d(
+                4_580_000.0 + ((trip * 37 + i) % 100_000) as f64 * 0.731,
+                5_810_000.0 + ((trip * 53 + i) % 100_000) as f64 * 0.457,
+            )
+        };
+        let (leg_mode, num_links) = match trip % 8 {
+            6 => ("walk", 0),
+            7 => ("pt", 0),
+            _ => ("car", SYNTHETIC_TRIP_LINKS),
+        };
+        let end_link = link(num_links);
+
+        let t = time(events.len());
+        events.push(Box::new(
+            ActivityEndEventBuilder::default()
+                .time(t)
+                .person(Id::create(&person))
+                .link(Id::create(&link(0)))
+                .act_type(Id::create(act_type(0)))
+                .coordinate(coordinate(0))
+                .build()
+                .unwrap(),
+        ));
+        let t = time(events.len());
+        events.push(Box::new(
+            PersonDepartureEventBuilder::default()
+                .time(t)
+                .person(Id::create(&person))
+                .link(Id::create(&link(0)))
+                .leg_mode(Id::create(leg_mode))
+                .routing_mode(Id::create(leg_mode))
+                .build()
+                .unwrap(),
+        ));
+
+        match leg_mode {
+            "car" => {
+                let t = time(events.len());
+                events.push(Box::new(
+                    PersonEntersVehicleEventBuilder::default()
+                        .time(t)
+                        .person(Id::create(&person))
+                        .vehicle(Id::create(&vehicle))
+                        .build()
+                        .unwrap(),
+                ));
+                let t = time(events.len());
+                events.push(Box::new(
+                    VehicleEntersTrafficEventBuilder::default()
+                        .time(t)
+                        .person(Id::create(&person))
+                        .link(Id::create(&link(0)))
+                        .vehicle(Id::create(&vehicle))
+                        .network_mode(Id::create("car"))
+                        .build()
+                        .unwrap(),
+                ));
+                for i in 1..=num_links {
+                    let t = time(events.len());
+                    events.push(Box::new(
+                        LinkLeaveEventBuilder::default()
+                            .time(t)
+                            .link(Id::create(&link(i - 1)))
+                            .vehicle(Id::create(&vehicle))
+                            .build()
+                            .unwrap(),
+                    ));
+                    let t = time(events.len());
+                    events.push(Box::new(
+                        LinkEnterEventBuilder::default()
+                            .time(t)
+                            .link(Id::create(&link(i)))
+                            .vehicle(Id::create(&vehicle))
+                            .build()
+                            .unwrap(),
+                    ));
+                }
+                let t = time(events.len());
+                events.push(Box::new(
+                    VehicleLeavesTrafficEventBuilder::default()
+                        .time(t)
+                        .person(Id::create(&person))
+                        .link(Id::create(&end_link))
+                        .vehicle(Id::create(&vehicle))
+                        .network_mode(Id::create("car"))
+                        .build()
+                        .unwrap(),
+                ));
+                let t = time(events.len());
+                events.push(Box::new(
+                    PersonLeavesVehicleEventBuilder::default()
+                        .time(t)
+                        .person(Id::create(&person))
+                        .vehicle(Id::create(&vehicle))
+                        .build()
+                        .unwrap(),
+                ));
+            }
+            "walk" => {
+                let t = time(events.len());
+                events.push(Box::new(
+                    TeleportationArrivalEventBuilder::default()
+                        .time(t)
+                        .person(Id::create(&person))
+                        .mode(Id::create("walk"))
+                        .distance(100.0 + (trip % 1000) as f64 * 1.37)
+                        .build()
+                        .unwrap(),
+                ));
+            }
+            _ => {
+                let t = time(events.len());
+                events.push(Box::new(
+                    PtTeleportationArrivalEventBuilder::default()
+                        .time(t)
+                        .person(Id::create(&person))
+                        .distance(1000.0 + (trip % 1000) as f64 * 7.13)
+                        .mode(Id::create("pt"))
+                        .route(Id::create(&format!("route_{}", trip % 97)))
+                        .line(Id::create(&format!("line_{}", trip % 31)))
+                        .boarding_time(t)
+                        .access_facility(Id::create(&format!("stop_{}", trip % 503)))
+                        .egress_facility(Id::create(&format!("stop_{}", (trip + 7) % 503)))
+                        .build()
+                        .unwrap(),
+                ));
+            }
+        }
+
+        let t = time(events.len());
+        events.push(Box::new(
+            PersonArrivalEventBuilder::default()
+                .time(t)
+                .person(Id::create(&person))
+                .link(Id::create(&end_link))
+                .leg_mode(Id::create(leg_mode))
+                .build()
+                .unwrap(),
+        ));
+        let t = time(events.len());
+        events.push(Box::new(
+            ActivityStartEventBuilder::default()
+                .time(t)
+                .person(Id::create(&person))
+                .link(Id::create(&end_link))
+                .act_type(Id::create(act_type(1)))
+                .coordinate(coordinate(1))
+                .build()
+                .unwrap(),
+        ));
+
+        // A few agents get stuck, with and without the optional attributes.
+        if trip % 500 == 499 {
+            let mut stuck = PersonStuckEventBuilder::default();
+            stuck.time(time(events.len())).person(Id::create(&person));
+            if trip % 1000 == 999 {
+                stuck
+                    .link(Some(Id::create(&end_link)))
+                    .leg_mode(Some(Id::create(leg_mode)));
+            }
+            events.push(Box::new(stuck.build().unwrap()));
+        }
+        trip += 1;
+    }
+    events
 }
 
 fn assert_same_lines(expected: &Path, actual: &Path) {
