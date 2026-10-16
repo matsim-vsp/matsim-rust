@@ -35,14 +35,19 @@ pub(crate) fn prepare_for_mobsim(
         facilities: &scenario.core.facilities,
         config: scenario.core.config.as_ref(),
     };
+    let dispatch = tracing::dispatcher::get_default(Clone::clone);
 
     let issues: Vec<_> = scenario
         .population
         .persons
         .par_iter_mut()
         .flat_map(|(_, person)| {
-            prepare_person(person, |person, plan| {
-                prepare_plan(&context, person, plan, trip_router)
+            tracing::dispatcher::with_default(&dispatch, || {
+                prepare_person(person, |person, plan| {
+                    tracing::dispatcher::with_default(&dispatch, || {
+                        prepare_plan(&context, person, plan, trip_router)
+                    })
+                })
             })
         })
         .collect();

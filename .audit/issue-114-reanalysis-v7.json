@@ -1,0 +1,19 @@
+{
+  "checked_csvs": [
+    "journey_summary.csv",
+    "journeys.csv",
+    "legs.csv",
+    "transit_availability.csv",
+    "transit_journeys.csv",
+    "transit_line_summary.csv",
+    "transit_occupancy.csv",
+    "transit_outcomes.csv",
+    "transit_stop_hourly.csv",
+    "transit_trips.csv",
+    "transit_validation_matches.csv",
+    "transit_validation_summary.csv",
+    "transit_validation_unmatched.csv"
+  ],
+  "changed": [],
+  "manifest_status": "complete"
+}

@@ -1,0 +1,12 @@
+field	value	evidence
+acceptance	Each raw PT public-routing query <= 1.0 s; this raw PT journey passed five repeats	User-selected threshold; raw regression assertion
+command	rtk env MATSIM_RUST_BKK_CONFIG=/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/config_rust_0p1pct.yml PROTOC=/usr/bin/protoc RUSTFLAGS='-D warnings' cargo test --release --locked -p matsim-rust --lib simulation::replanning::routing::route_proposal_tests::raw_bangkok_pt_journey_stays_within_one_second -- --ignored --exact --nocapture --test-threads=1	.audit/issue-114-raw-journey-test-post-precheck.txt
+raw_person	11460713; selected-plan home-to-work, planned PT, 06:00	Population input SHA256 568085e114c26d0fc47d8a8de21f172c0c802214f5706c703294fa5893989809
+result	PT via rail_BTS Silom / rail_BTS Silom_dir1_shape915_route; board rail_3974__46317_r at 22451 s; alight rail_5274__46312_r	Public TripRouter::calc_route result in test output
+measurements	0.236244170, 0.236426975, 0.236326045, 0.235829829, 0.236796834 s; worst 0.236796834 s	Timer covers five TripRouter::calc_route calls; warm-up excluded
+config	config_rust_0p1pct.yml SHA256 a40aa17e829bceeeca637a7fc653280191ce0f53c0381ceeff8fc0f7e6a3b218; seed 4711	No config overrides
+network	SHA256 7c23526bf49e905e49cf36b45ca6050c809936f7fc1cbf66015afa5aef33df4a	Raw configured network
+vehicles	SHA256 e446bde5ad207c23d44774a129f1baf97212f5d610a6bdc663a285315af2ef00	Raw configured vehicles
+schedule	SHA256 9c8cdf2a2635997171effd9e9e58a1a366851ed92412d9eeec0956bfe81b8ee3; 412 lines, 847 routes, 16557 stops	Raw configured timetable
+build	HEAD 2baf9d6e3919d0c3cd13c448d4b0e9fa3c71de23 plus dirty worktree; Rust 1.94.0; release test executable SHA256 80d9feee611a22d1fb1bb00e6b71789c90f66659ea48a0287e82f5078b77cb17	AMD Ryzen Threadripper PRO 3955WX; x86_64
+scope	This raw journey meets the budget. Sampled concurrent spans for other persons were above 1 s, so the overall raw-query budget remains open.	Profile file /tmp/issue114-profile-100-output-v2/instrument/routing_process_controller.csv was collected before the profile run was interrupted; not a completed run or isolated latency benchmark.

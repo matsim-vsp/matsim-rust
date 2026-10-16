@@ -1,0 +1,30 @@
+
+running 1 test
+test simulation::replanning::routing::route_proposal_tests::raw_bangkok_pt_journey_stays_within_one_second ... 2026-10-16T13:04:59.672749Z  INFO matsim_rust::simulation::logging: matsim-rust version v1.0.0-301-g2baf9d6e-dirty
+2026-10-16T13:04:59.673307Z  INFO matsim_rust::simulation::scenario: Start loading mod.
+2026-10-16T13:04:59.673325Z  INFO matsim_rust::simulation::io::xml: Starting to read from file: "/home/varameth/Workspaces/Transport/BKK_Output/network_multimodal_connected_capacity_patched.xml"
+2026-10-16T13:04:59.770153Z  INFO matsim_rust::simulation::io::xml: Finished reading from file: "/home/varameth/Workspaces/Transport/BKK_Output/network_multimodal_connected_capacity_patched.xml"
+2026-10-16T13:04:59.770183Z  INFO matsim_rust::simulation::io::xml::network: IONetwork:: Finished reading network. It contains 13354 nodes and 30286 links.
+2026-10-16T13:04:59.808388Z  INFO matsim_rust::simulation::io::xml: Starting to read from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/vehicles_0p1pct.xml"
+2026-10-16T13:04:59.818957Z  INFO matsim_rust::simulation::io::xml: Finished reading from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/vehicles_0p1pct.xml"
+2026-10-16T13:04:59.823410Z  INFO matsim_rust::simulation::scenario::vehicles: Created Garage from file with vehicle types: ["ARL", "BTS", "BUS_STANDARD", "MRT", "SRT_LIGHT_RED", "car_silo_default"]
+2026-10-16T13:04:59.823418Z  INFO matsim_rust::simulation::scenario::transit: Reading transit schedule from "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/scenOutput/network_calibration_2pct_instrumentation_r2_20261011/matsim/matsim-rs-input/2015/transitSchedule.xml"
+2026-10-16T13:04:59.823431Z  INFO matsim_rust::simulation::io::xml: Starting to read from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/scenOutput/network_calibration_2pct_instrumentation_r2_20261011/matsim/matsim-rs-input/2015/transitSchedule.xml"
+2026-10-16T13:05:00.107466Z  INFO matsim_rust::simulation::io::xml: Finished reading from file: "/home/varameth/Workspaces/SILO_Simulation/BKK_CASE/scenOutput/network_calibration_2pct_instrumentation_r2_20261011/matsim/matsim-rs-input/2015/transitSchedule.xml"
+2026-10-16T13:05:00.107495Z  INFO matsim_rust::simulation::io::xml::transit: Finished reading transit schedule. It contains 16557 stops, 412 lines and 847 routes.
+2026-10-16T13:05:00.185336Z  INFO matsim_rust::simulation::scenario::transit: Finished reading transit schedule. Found 412 lines, 847 routes and 16557 facilities.
+2026-10-16T13:05:00.185385Z  INFO matsim_rust::simulation::io::xml::population: IOPopulation: Reading population from file /home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/2015.input_plans_0p1pct.xml.gz in parallel
+2026-10-16T13:05:00.217791Z  INFO matsim_rust::simulation::io::xml::population: IOPopulation: Finished reading population. Population contains 12753 persons
+2026-10-16T13:05:00.217821Z  INFO matsim_rust::simulation::io::xml::population: Sorting population by id.
+2026-10-16T13:05:00.217993Z  INFO matsim_rust::simulation::io::xml::population: Creating person ids.
+2026-10-16T13:05:00.223851Z  INFO matsim_rust::simulation::io::xml::population: Creating interaction activity types
+2026-10-16T13:05:00.232909Z  INFO matsim_rust::simulation::io::xml::population: Creating vehicle ids
+2026-10-16T13:05:00.280790Z  INFO matsim_rust::simulation::io::xml::population: Creating activity types
+2026-10-16T13:05:00.286822Z  INFO matsim_rust::simulation::io::xml::population: Creating remaining ids
+2026-10-16T13:05:00.305700Z  INFO matsim_rust::simulation::io::xml::population: Finished loading population with 12753 persons in 120.31ms (parsing: 32.44ms, sorting: 172.18µs, creating ids: 73.73ms, converting: 13.98ms).
+raw person 10044972 PT segments: []
+raw PT TripRouter timings: [0.073856509, 0.068087647, 0.068681507, 0.068275401, 0.068172657]; worst=0.073857s
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 796 filtered out; finished in 1.15s
+

@@ -305,13 +305,14 @@ A response without a `failure_category` key comes from an older `local_qsim`, no
 version. Clients degrade those to `service_error`, which hides which failures are ordinary
 `no_path` answers, so check the binary's build when every failure looks the same.
 
-For `pt` requests that no transit line connects, the transit router falls back to the car router
-when one is configured, but only for a passenger whose `ownsCar` person attribute is `true` and
-who has a car to drive. Anyone else, and any request without a person, reports the no-path error.
-Set `transit.personless_car_fallback: true` to restore the legacy behavior for personless
-zone-to-zone queries. See `matsim_rust/tests/resources/equil/equil-config-silo-routing.yml` for a
-minimal config used by the integration test. Its network adds an unreachable `island` link to the
-equil network, so the tests can produce a `no_path` answer.
+For `pt` requests without a transit itinerary, the router returns direct walking when both ends
+have nearby transit stops. If either end has no nearby stop, it falls back to the car router when
+one is configured, but only for a passenger whose `ownsCar` person attribute is `true` and who has
+a car to drive. Anyone else, and any request without a person, reports the no-path error. Set
+`transit.personless_car_fallback: true` to restore the legacy behavior for personless zone-to-zone
+queries. See `matsim_rust/tests/resources/equil/equil-config-silo-routing.yml` for a minimal config
+used by the integration test. Its network adds an unreachable `island` link to the equil network,
+so the tests can produce a `no_path` answer.
 
 ## Analyze simulation results
 

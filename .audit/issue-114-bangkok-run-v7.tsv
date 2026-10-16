@@ -1,0 +1,16 @@
+field	value
+command	rtk /usr/bin/time -v target/release/local_qsim --config /home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_0p1pct_20261016/config_rust_0p1pct.yml --set output.output_dir=/mnt/Data/bangkoksilo/scenOutput/baseline_0p1pct_20261016_issue114_rust_v7 --set controller.last_iteration=1
+result	completed iterations 0 and 1 through 24:00, exit 0
+source	Final source including the empty-feedback early return
+binary_sha256	453793f626d8869223426575010628cb7b01b8a330d34fa6bb8b2f02f8267fa1
+inputs	unchanged hashes/config/seed from issue-114-raw-journey-run-v4.tsv; only output and last_iteration overrides
+runtime	80.94 s total; 53.086 s simulation; 33.104 s population preparation; 10.824 s QSim; 5.301 s replanning; 26.448 s analysis
+max_rss	3821204 KiB from /usr/bin/time -v
+reRoute	1310 persons acquired a second plan; 261 selected new plans contain PT; original innovation fraction 1.0
+leg_accounting	both iterations: 84155 departures, 83984 genuine arrivals, 171 stuck; no unmatched events; by mode in issue-114-completion-v7.json
+journey_accounting	final iteration: 25833 completed / 26024 planned journeys = 99.266%; includes 20 not-departed journeys in denominator
+journeys_by_mode	car: 19187 completed, 14 stuck, 3 not_departed; walk: 2412 completed, 141 stuck, 10 not_departed; pt: 4234 completed, 16 stuck, 7 not_departed
+stuck_timing	{"at_day_end": 171}
+gate	global >=95% genuine completion met; walking-only journeys are below 95% and remain visible; this is not an execution-parity or Java speedup claim
+source_sha256	497533759d20b76a17ec0ce5c36b5bec3515f0a0dd27fbe37c1035f6119e7f34 routing/mod.rs
+output_equivalence	iterations 0 and 1 event files and final output_plans.xml have identical SHA256 to v6; same seed and inputs, with only the empty-feedback shortcut added

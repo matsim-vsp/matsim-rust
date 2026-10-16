@@ -1,0 +1,10 @@
+field	value
+command	rtk python3 .audit/issue-114-check-raw.py target/release/deps/matsim_rust-2f085a64c97cead8
+fixture	original raw Bangkok 0.1% config and inputs from issue-114-raw-journey-run-v4.tsv; no overrides
+selection	11460713 plus ten slowest distinct PT travelers in the incomplete concurrent 100-person profile
+measurement	one warmup excluded, five public calc_route calls each; actual outcomes consumed and complete itineraries repeat exactly
+result	55/55 timed calls passed <=1s; worst 0.122114851s
+build_sha256	b7932662d8b2dc12aec84375efe6b14041a08bef84e875ac84ac94596807163b
+limitations	first planned PT trip per selected traveler; no all-population or return-trip assertion; no controlled Java/Rust speedup claim
+host	AMD Ryzen Threadripper PRO 3955WX, 32 logical CPUs; initial load 8.39/8.49/8.78; samples run serially after compilation
+build_features	release test executable with http, locked dependencies and warnings denied; includes empty-feedback shortcut

@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Debug, Parser)]
 #[command(about = "Create a zone-to-zone PT skim using matsim-rs timetable routing")]
@@ -23,6 +24,8 @@ struct Args {
     walk_speed_mps: f64,
     #[arg(long, default_value_t = 1.0)]
     walk_distance_factor: f64,
+    #[arg(long)]
+    timing_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,18 +54,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = &router;
     let zones_ref = &zones;
 
-    let rows: Vec<_> = zones
+    let results: Vec<_> = zones
         .par_iter()
-        .flat_map_iter(|(origin_id, origin)| {
+        .map(|(origin_id, origin)| {
             let destinations: Vec<_> = zones_ref
                 .iter()
+                .filter(|(destination_id, _)| origin_id != destination_id)
                 .map(|(_, coordinate)| coordinate.clone())
                 .collect();
+            let started = Instant::now();
             let results = router.skim_results_from_origin(origin, &destinations, departure);
-            zones_ref
+            let elapsed = started.elapsed().as_secs_f64();
+            let rows = zones_ref
                 .iter()
+                .filter(|(destination_id, _)| origin_id != destination_id)
                 .zip(results)
-                .filter(move |((destination_id, _), _)| origin_id != destination_id)
                 .map(move |((destination_id, _), result)| {
                     (
                         origin_id,
@@ -71,19 +77,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         result.travel_time.map(|time| time.as_secs_f64() / 60.0),
                     )
                 })
+                .collect::<Vec<_>>();
+            (origin_id, elapsed, rows)
         })
         .collect();
 
     let mut writer = csv::Writer::from_path(&args.output)?;
     writer.write_record(["origin", "destination", "outcome", "travel_time_minutes"])?;
-    for (origin, destination, outcome, minutes) in rows {
-        writer.write_record([
-            origin,
-            destination,
-            outcome,
-            &minutes.map_or_else(String::new, |minutes| minutes.to_string()),
-        ])?;
+    for (_, _, rows) in &results {
+        for (origin, destination, outcome, minutes) in rows {
+            writer.write_record([
+                origin.as_str(),
+                destination.as_str(),
+                *outcome,
+                &minutes.map_or_else(String::new, |minutes| minutes.to_string()),
+            ])?;
+        }
     }
     writer.flush()?;
+    if let Some(path) = args.timing_output {
+        let mut writer = csv::Writer::from_path(path)?;
+        writer.write_record(["origin", "search_seconds", "destination_count"])?;
+        for (origin, elapsed, rows) in results {
+            writer.write_record([origin, &elapsed.to_string(), &rows.len().to_string()])?;
+        }
+        writer.flush()?;
+    }
     Ok(())
 }
