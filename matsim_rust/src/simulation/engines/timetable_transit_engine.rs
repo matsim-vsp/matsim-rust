@@ -110,8 +110,11 @@ impl TimetableTransitEngine {
             let RunLeg::Service { departure_time, .. } = &run.legs[0] else {
                 unreachable!("timetable services have no deadheads")
             };
-            let driver =
-                SimulationAgent::new(Box::new(TransitDriver::new(run.clone(), &engine.garage)));
+            let driver = SimulationAgent::new(Box::new(TransitDriver::new(
+                run.clone(),
+                &engine.garage,
+                &engine.network,
+            )));
             engine.waiting_drivers.add_with_order(
                 driver,
                 start.max(*departure_time),

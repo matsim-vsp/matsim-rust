@@ -307,8 +307,9 @@ fn service_route(
     if route.network_route.is_empty() {
         return Err(format!("The {} has no network route.", describe()));
     }
-    let link_lengths = route
-        .network_route
+    let mut links = route.network_route.clone();
+    links.dedup();
+    let link_lengths = links
         .iter()
         .map(|id| {
             network
@@ -373,7 +374,7 @@ fn service_route(
         deterministic: deterministic_service_modes
             .iter()
             .any(|mode| mode == route.transport_mode.external()),
-        links: route.network_route.clone(),
+        links,
         link_lengths,
         stops,
     })
@@ -590,6 +591,29 @@ mod tests {
             length("23") + length("33"),
             route.ride_distance(&link("12"), &link("33"))
         );
+    }
+
+    #[deterministic_id_test]
+    fn consecutive_duplicate_route_links_are_traversed_once_and_keep_stops() {
+        let (mut schedule, garage, network) = pt_tutorial();
+        let line = schedule
+            .lines_mut()
+            .get_mut(&Id::get_from_ext("Blue Line"))
+            .unwrap();
+        let route = line.routes.get_mut(&Id::get_from_ext("1to3")).unwrap();
+        let original_link_count = route.network_route.len();
+        let original_stop_count = route.stops.len();
+        route
+            .network_route
+            .insert(1, route.network_route[0].clone());
+
+        let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
+        let RunLeg::Service { route, .. } = &runs.runs()[0].legs[0] else {
+            panic!()
+        };
+        assert_eq!(original_link_count, route.links.len());
+        assert_eq!(original_stop_count, route.stops.len());
+        assert!(route.links.windows(2).all(|pair| pair[0] != pair[1]));
     }
 
     #[deterministic_id_test]

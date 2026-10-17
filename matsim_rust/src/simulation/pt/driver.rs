@@ -19,7 +19,8 @@ use crate::simulation::pt::doors::Doors;
 use crate::simulation::pt::feedback::TransitSegment;
 use crate::simulation::pt::runs::{RunLeg, VehicleRun};
 use crate::simulation::pt::stops::{TransitStops, WaitingPassenger};
-use crate::simulation::scenario::network::Link;
+use crate::simulation::scenario::Coordinate;
+use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPerson,
     InternalPlanElement, InternalRoute,
@@ -70,7 +71,7 @@ pub struct TransitDriver {
 }
 
 impl TransitDriver {
-    pub(crate) fn new(run: Arc<VehicleRun>, garage: &Garage) -> Self {
+    pub(crate) fn new(run: Arc<VehicleRun>, garage: &Garage, network: &Network) -> Self {
         let vehicle_type = &garage.vehicle_types[&garage.vehicles[&run.vehicle].vehicle_type];
         let capacity = vehicle_type
             .capacity
@@ -80,7 +81,9 @@ impl TransitDriver {
         let mut elements = Vec::with_capacity(2 * run.legs.len() + 1);
         for leg in &run.legs {
             let links = leg.links();
-            elements.push(InternalPlanElement::Activity(transit_activity(&links[0])));
+            elements.push(InternalPlanElement::Activity(transit_activity(
+                &links[0], network,
+            )));
             let route = InternalNetworkRoute::new(
                 InternalGenericRoute::new(
                     links[0].clone(),
@@ -102,6 +105,7 @@ impl TransitDriver {
         let last = run.legs.last().unwrap().links();
         elements.push(InternalPlanElement::Activity(transit_activity(
             &last[last.len() - 1],
+            network,
         )));
 
         let RunLeg::Service { departure_time, .. } = &run.legs[0] else {
@@ -203,8 +207,20 @@ impl TransitDriver {
     }
 }
 
-fn transit_activity(link: &Id<Link>) -> InternalActivity {
-    InternalActivity::new(None, TRANSIT_ACTIVITY_TYPE, link.clone(), None, None, None)
+fn transit_activity(link_id: &Id<Link>, network: &Network) -> InternalActivity {
+    let link = network.get_link(link_id);
+    let coord = Coordinate::middle(
+        &network.get_node(&link.from).coord,
+        &network.get_node(&link.to).coord,
+    );
+    InternalActivity::new(
+        Some(coord),
+        TRANSIT_ACTIVITY_TYPE,
+        link_id.clone(),
+        None,
+        None,
+        None,
+    )
 }
 
 /// Seconds the vehicle still has to stand at the stop before it may leave, zero when the stop
@@ -540,12 +556,19 @@ mod tests {
         let network =
             Network::from_file_as_is(&PathBuf::from("./assets/pt_tutorial/multimodalnetwork.xml"));
         let runs = TransitVehicleRuns::build(&schedule, &garage, &network, &[]).unwrap();
-        TransitDriver::new(runs.runs()[0].clone(), &garage)
+        TransitDriver::new(runs.runs()[0].clone(), &garage, &network)
     }
 
     #[deterministic_id_test]
     fn driver_follows_its_run_leg_by_leg() {
         let mut driver = tutorial_driver();
+        assert!(
+            driver
+                .elements
+                .iter()
+                .filter_map(InternalPlanElement::as_activity)
+                .all(|activity| activity.coord.is_some())
+        );
         assert_eq!(SimulationAgentState::ACTIVITY, driver.state());
         assert_eq!(
             SimTime::from_secs(21600),

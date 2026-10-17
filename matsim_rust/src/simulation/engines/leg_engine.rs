@@ -218,8 +218,13 @@ impl<C: SimCommunicator> LegEngine<C> {
                         attachments,
                         &context,
                     );
-                self.teleportation_engine
-                    .receive_remote_agent(now, teleportation.into(), from, to);
+                self.teleportation_engine.receive_remote_agent(
+                    now,
+                    msg.time(),
+                    teleportation.into(),
+                    from,
+                    to,
+                );
             }
         }
 

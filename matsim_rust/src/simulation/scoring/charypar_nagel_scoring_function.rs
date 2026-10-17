@@ -242,6 +242,10 @@ impl CharyparNagelScoringFunction {
         {
             let mut seen_modes_in_trip = BTreeSet::new();
             for (leg_index, leg) in trip.legs(&plan.elements).enumerate() {
+                // An abandoned leg has no arrival; the plan's abort penalty accounts for it.
+                if leg.attributes.get::<bool>("aborted") == Some(true) {
+                    continue;
+                }
                 score += self.score_leg(
                     person_id,
                     subpopulation,
@@ -633,6 +637,48 @@ mod tests {
         assert_eq!(
             scorer.score(&person, "person", &InternalPlan::default()),
             Ok(0.0)
+        );
+    }
+
+    #[deterministic_id_test]
+    fn scores_resumed_trips_without_inventing_travel_for_abandoned_legs() {
+        let scorer = make_scorer(
+            vec![("home", SECONDS_PER_DAY), ("work", SECONDS_PER_DAY)],
+            vec![
+                mode("walk", -6.0, 0.0, 0.0, 0.0),
+                mode("car", -6.0, -1.0, 0.0, 10.0),
+            ],
+            Network::new(),
+        );
+        let mut abandoned = generic_leg("car", 0, None);
+        let InternalPlanElement::Leg(leg) = &mut abandoned else {
+            unreachable!()
+        };
+        leg.trav_time = None;
+        leg.route = None;
+        leg.attributes.insert("aborted", true);
+        let resumed = plan(vec![
+            activity("home", None, Some(0)),
+            generic_leg("walk", 600, None),
+            activity("car interaction", Some(600), Some(600)),
+            abandoned,
+            activity("car interaction", Some(1200), Some(1200)),
+            generic_leg("walk", 600, None),
+            activity("work", Some(1800), None),
+        ]);
+        let person = Id::create("person");
+        let params = scorer.agent_params.get("person").unwrap();
+        assert_approx_eq(
+            -2.0,
+            scorer
+                .score_trips(&person, "person", &resumed, params)
+                .unwrap(),
+        );
+        assert!(
+            scorer
+                .score(&person, "person", &resumed)
+                .unwrap()
+                .is_finite()
         );
     }
 

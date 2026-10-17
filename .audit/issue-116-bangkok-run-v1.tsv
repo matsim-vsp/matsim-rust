@@ -1,0 +1,17 @@
+field	value
+purpose	Re-run the raw 1 percent Bangkok bundle at 32 partitions after issue 116 landed, and compare against the pre-issue-116 run of the same branch.
+merge	Local a7f0cb05 had never been pushed; PR #115 merged only 482e34be. Merged origin/main (4d7d9cce, containing c81c0c0e Replace generic transit heap fallback) into t3/implement-issue-114 as 85e7b2c4. Merge was clean: issue 116 touched only the transit routing module, and the global_sync drain from a7f0cb05 was retained.
+post_merge_state	find_paths_for_destinations_heap and supports_marked_route_scan both have zero remaining references; the generic fallback is gone.
+command	/usr/bin/time -v ./target/release/local_qsim --config /home/varameth/Workspaces/SILO_Simulation/BKK_CASE/analysis/baseline_1pct_issue114_20261016_141251/config_rust_1pct_vehicles_retry5.yml --set network.path=/tmp/matsim-vsp-bangkok-network.32.xml --set partitioning.num_parts=32 --set computational_setup.global_sync=true --set output.analysis.enabled=false --set output.output_dir=/mnt/Data/bangkoksilo/scenOutput/rust32_issue116_20261017
+build	PROTOC=/usr/bin/protoc RUSTFLAGS="-D warnings" cargo build --release --locked; clean. Embedded version v1.0.0-307-g85e7b2c4, not dirty.
+result	completed iteration 0 through 24:00; exit status 0; 0 errors, warnings or panics
+runtime	463.40 s wall clock; 375.91 s population preparation and routing; 76.74 s QSim to End Iteration
+resources	2599 percent average CPU; 5869636 KiB max RSS (5.6 GiB)
+comparison_pre116	v9 same branch before issue 116: 441.62 s total, 346.82 s preparation, 81.59 s QSim. Issue 116 is about 4.9 percent slower overall here, driven by preparation.
+noise_floor	Two pre-issue-116 runs of identical code measured 418.0 s and 441.6 s total, a 5.6 percent spread, and 66.8 s versus 81.6 s QSim, a 22 percent spread. One post-issue-116 sample cannot separate a small regression from run-to-run variance on a shared machine.
+no_speedup_explanation	The Bangkok config sets no transfer penalty, passenger mode mapping, intermodal access and egress, range query, transit route selector, chained departure or capacity feedback. Every condition that selected the old fallback was absent, so this bundle was already on the round-based engine before issue 116. Removing the fallback is therefore a no-op for this scenario.
+routing_proof	output_plans.xml is byte identical between the pre- and post-issue-116 runs (md5 54fd36055347a0b4053ac0940943c743). Issue 116 changed no chosen route for this bundle.
+output_stability	output_experienced_plans.xml differs, but solely in the order of child elements inside attributes, for example routingMode before aborted versus aborted before routingMode. InternalAttributes wraps a std HashMap<String, Value> with default RandomState, so serialization order varies per process. Plan content is unchanged; byte-for-byte plan comparison is not currently reproducible.
+aborted_leg_finding	762896 legs, 127533 persons and 173375 aborted legs, all identical to the pre-issue-116 run. The multi-partition abandoned-leg defect is untouched by issue 116 and remains a separate open defect.
+conclusion	Issue 116 delivers the coverage and consolidation goal, not a speedup for default configurations. The roughly 9x per-person routing gap against Java on this bundle is therefore still unexplained by the fallback and needs separate profiling of prepare_plan to attribute to transit search, car routing or per-trip overhead.
+output	/mnt/Data/bangkoksilo/scenOutput/rust32_issue116_20261017

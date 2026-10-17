@@ -1,0 +1,14 @@
+field	value
+question	After issue 116 removed the generic heap fallback, where does population preparation time actually go: transit search, network routing, or per-trip overhead?
+method	Added two opt-in hotpath blocks around the routing call inside trip routing, labelled by whether the trip mode is a configured transit mode, then profiled the 0.1 percent Bangkok bundle. hotpath measures are no-ops unless the hotpath feature is enabled, so the release build without that feature is unaffected.
+build	PROTOC=/usr/bin/protoc cargo build --release --locked --features hotpath, at 85e7b2c4 plus the two measurement blocks
+population	12753 persons, 16557 transit stops, 412 lines, 847 routes
+transit	prepare.route.transit: 6351 calls, 176.15 ms average, 699.92 ms P95, 1118.75 s cumulative CPU, 2695.52 percent CPU, about 27 cores
+network	prepare.route.network: 19673 calls, 311.31 us average, 1.37 ms P95, 6.12 s cumulative CPU
+ratio_transit_to_network	1118.75 / 6.12 = 183x more CPU for transit than for car and walk routing combined. Per call the ratio is 176.15 ms / 311.31 us = 566x.
+per_person	Transit search costs 1118.75 / 12753 = 87.7 ms of CPU per person, for about 0.5 transit trips per person.
+prep_total	prepare_for_mobsim 35.90 s wall, 86.49 percent of a 41.50 s run. Transit search accounts for effectively all of it; network routing is about 0.6 percent of preparation.
+conclusion	The Java gap is entirely the public transport route search. Car and walk network routing is already fast at roughly 311 us per request. This holds after issue 116, so removing the heap fallback did not address it and the remaining gap is inside the round-based transit search itself.
+java_context	Java's whole PrepareForSim phase was 37.9 s wall for 125685 persons against Rust's 375.9 s wall for 127533 at 32 partitions. Rust now attributes essentially all of that to transit itinerary search.
+note	The 176 ms average is CPU time under parallel preparation, not wall time per request. The earlier 122 ms figure was a serially measured single request, and is consistent with it.
+output	Profile table in /tmp/opencode/hot01-116.log

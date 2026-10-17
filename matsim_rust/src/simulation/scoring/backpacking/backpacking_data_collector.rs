@@ -23,6 +23,8 @@ pub struct BackpackingDataCollector {
     transit_runs: Arc<TransitVehicleRuns>,
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
+    // Stuck events identify a person, so keep the reverse index for constant-time cleanup.
+    person_id2vehicle_id: IntMap<Id<InternalPerson>, Id<InternalVehicle>>,
 }
 
 impl BackpackingDataCollector {
@@ -35,6 +37,7 @@ impl BackpackingDataCollector {
             transit_runs,
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
+            person_id2vehicle_id: Default::default(),
         }
     }
 
@@ -45,12 +48,17 @@ impl BackpackingDataCollector {
                 .insert(person.clone(), Backpack::new(person.clone()));
         }
         self.vehicle_id2person_ids.clear();
+        self.person_id2vehicle_id.clear();
     }
 
     pub(crate) fn person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
         if self.transit_runs.is_driver(&event.person) {
             return;
         }
+        let previous = self
+            .person_id2vehicle_id
+            .insert(event.person.clone(), event.vehicle.clone());
+        assert!(previous.is_none() || previous.as_ref() == Some(&event.vehicle));
         self.vehicle_id2person_ids
             .entry(event.vehicle.clone())
             .or_default()
@@ -61,16 +69,23 @@ impl BackpackingDataCollector {
         if self.transit_runs.is_driver(&event.person) {
             return;
         }
+        self.remove_vehicle_membership(&event.person);
+    }
+
+    fn remove_vehicle_membership(&mut self, person: &Id<InternalPerson>) {
+        let Some(vehicle) = self.person_id2vehicle_id.remove(person) else {
+            return;
+        };
         let remove_vehicle = self
             .vehicle_id2person_ids
-            .get_mut(&event.vehicle)
+            .get_mut(&vehicle)
             .map(|persons| {
-                persons.remove(&event.person);
+                persons.remove(person);
                 persons.is_empty()
             })
             .unwrap_or(false);
         if remove_vehicle {
-            self.vehicle_id2person_ids.remove(&event.vehicle);
+            self.vehicle_id2person_ids.remove(&vehicle);
         }
     }
 
@@ -128,12 +143,18 @@ impl BackpackingDataCollector {
                 })
                 .handle_event(event);
         }
+        if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
+            self.remove_vehicle_membership(&event.person);
+        }
     }
 
     pub(crate) fn send(&mut self, entity: PartitionChangeEntity<'_>) -> BackpackingAttachment {
         let person_ids = self.person_ids(entity);
         if let PartitionChangeEntity::Vehicle(vehicle) = entity {
             self.vehicle_id2person_ids.remove(vehicle.id());
+            for person in &person_ids {
+                self.person_id2vehicle_id.remove(person);
+            }
         }
 
         let backpacks = person_ids
@@ -178,6 +199,15 @@ impl BackpackingDataCollector {
                 "A backpack for arriving person {} is already present.",
                 expected_id.external()
             );
+            if let PartitionChangeEntity::Vehicle(vehicle) = entity {
+                let previous = self
+                    .person_id2vehicle_id
+                    .insert(expected_id.clone(), vehicle.id().clone());
+                assert!(
+                    previous.is_none(),
+                    "Arriving person already occupies a vehicle."
+                );
+            }
         }
 
         if let PartitionChangeEntity::Vehicle(vehicle) = entity {
@@ -221,10 +251,52 @@ impl BackpackingDataCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::events::{
+        PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
+        PersonLeavesVehicleEventBuilder, PersonStuckEventBuilder,
+    };
     use crate::simulation::scenario::vehicles::InternalVehicle;
+    use crate::simulation::time::SimTime;
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils::create_agent;
     use macros::deterministic_id_test;
+
+    #[deterministic_id_test]
+    fn abandoning_a_leg_removes_the_persons_vehicle_mapping() {
+        let person = Id::create("stranded-driver");
+        let vehicle = Id::create("reusable-car");
+        let mut collector = BackpackingDataCollector::new(
+            vec![person.clone()],
+            Arc::new(TransitVehicleRuns::default()),
+        );
+        collector.reset_iteration();
+        collector.handle_event(
+            &PersonDepartureEventBuilder::default()
+                .time(SimTime::default())
+                .person(person.clone())
+                .link(Id::create("link"))
+                .leg_mode(Id::create("car"))
+                .routing_mode(Id::create("car"))
+                .build()
+                .unwrap(),
+        );
+        collector.person_enters_vehicle(
+            &PersonEntersVehicleEventBuilder::default()
+                .time(SimTime::default())
+                .person(person.clone())
+                .vehicle(vehicle)
+                .build()
+                .unwrap(),
+        );
+        collector.handle_event(
+            &PersonStuckEventBuilder::default()
+                .time(SimTime::from_secs(300))
+                .person(person)
+                .build()
+                .unwrap(),
+        );
+        assert!(collector.vehicle_id2person_ids.is_empty());
+    }
 
     #[deterministic_id_test]
     fn migrates_driver_and_passenger_and_rebuilds_vehicle_mapping() {
@@ -257,10 +329,25 @@ mod tests {
             BackpackingDataCollector::new(Vec::new(), Arc::new(TransitVehicleRuns::default()));
         arriving.receive(PartitionChangeEntity::Vehicle(&vehicle), attachment);
         assert_eq!(arriving.person_id2backpack.len(), 2);
-        let expected: IntSet<_> = [driver_id, passenger_id].into_iter().collect();
+        let expected: IntSet<_> = [driver_id.clone(), passenger_id.clone()]
+            .into_iter()
+            .collect();
         assert_eq!(
             arriving.vehicle_id2person_ids.get(vehicle.id()).unwrap(),
             &expected
         );
+        assert_eq!(2, arriving.person_id2vehicle_id.len());
+        for person in [driver_id, passenger_id] {
+            arriving.person_leaves_vehicle(
+                &PersonLeavesVehicleEventBuilder::default()
+                    .time(SimTime::default())
+                    .person(person.clone())
+                    .vehicle(vehicle.id().clone())
+                    .build()
+                    .unwrap(),
+            );
+            assert!(!arriving.person_id2vehicle_id.contains_key(&person));
+        }
+        assert!(arriving.vehicle_id2person_ids.is_empty());
     }
 }
