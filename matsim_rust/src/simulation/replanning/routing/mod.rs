@@ -21,9 +21,7 @@ use arc_swap::ArcSwap;
 use derive_builder::Builder;
 use nohash_hasher::IntMap;
 use rand::RngExt;
-use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::collections::BinaryHeap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::mem::size_of;
@@ -543,6 +541,17 @@ struct BoardingCandidate {
     state_id: u64,
     transfer_distance: f64,
     transfer_time: Duration,
+}
+
+#[derive(Clone, Copy)]
+struct ActiveBoarding {
+    state_id: u64,
+    board_index: usize,
+    departure_index: usize,
+    transfer_distance: f64,
+    transfer_time: Duration,
+    chained_continuation: bool,
+    base_departure: SimTime,
 }
 
 /// One ride in a transit vehicle from boarding to alighting.
@@ -2009,8 +2018,12 @@ impl TransitRoutingModule {
         )
     }
 
-    fn supports_monotone_destination_bound(&self) -> bool {
-        !self.use_passenger_mode_mapping
+    fn supports_monotone_objective(
+        &self,
+        capacity_feedback: &BTreeMap<TransitSegment, TransitSegmentObservation>,
+    ) -> bool {
+        capacity_feedback.is_empty()
+            && !self.use_passenger_mode_mapping
             && self.transfer_penalty.by_transport_mode.is_empty()
             && self.transfer_penalty.per_travel_time_hour == 0.0
             && self
@@ -2524,24 +2537,497 @@ impl TransitRoutingModule {
         {
             return Vec::new();
         }
-        if self.supports_marked_route_scan(capacity_feedback) {
-            self.find_paths_for_destinations_marked_routes(
-                destinations,
-                egress_stops_by_destination,
-                departure_time,
-                access_stops,
-                routing_params,
-            )
-        } else {
-            self.find_paths_for_destinations_heap(
-                destinations,
-                egress_stops_by_destination,
-                departure_time,
-                access_stops,
-                routing_params,
-                capacity_feedback,
-            )
+        debug_assert_eq!(destinations.len(), egress_stops_by_destination.len());
+
+        let mut egress_by_stop: HashMap<Id<TransitStopFacility>, Vec<(usize, usize)>> =
+            HashMap::new();
+        for (destination_index, egress_stops) in egress_stops_by_destination.iter().enumerate() {
+            for (egress_index, egress) in egress_stops.iter().enumerate() {
+                egress_by_stop
+                    .entry(egress.stop.clone())
+                    .or_default()
+                    .push((destination_index, egress_index));
+            }
         }
+        let targets_with_egress = egress_stops_by_destination
+            .iter()
+            .enumerate()
+            .filter_map(|(index, egress_stops)| (!egress_stops.is_empty()).then_some(index))
+            .collect::<Vec<_>>();
+        let mut states: HashMap<(Id<TransitStopFacility>, usize), Vec<u64>> = HashMap::new();
+        let mut state_arena = Vec::<TransitPathState>::new();
+        let mut rounds = vec![Vec::<u64>::new(); RAPTOR_MAX_TRANSFERS + 2];
+        let mut next_state_id = 0;
+        for access in access_stops {
+            let arrival = departure_time.saturating_add(access.time);
+            let state = TransitPathState {
+                state_id: next_state_id,
+                stop: access.stop.clone(),
+                parent_state_id: None,
+                ride: None,
+                ride_count: 0,
+                arrival,
+                cost: self.cost_equivalent_seconds_with_feedback(
+                    arrival,
+                    &[],
+                    departure_time,
+                    routing_params,
+                    capacity_feedback,
+                ),
+                transfer_penalty_seconds: 0.0,
+                transfer_count: 0,
+                first_vehicle_arrival_at_board: None,
+                access_distance: access.distance,
+                access_route: access.route.clone(),
+                access_time: access.time,
+            };
+            let labels = states.entry((access.stop.clone(), 0)).or_default();
+            if labels
+                .iter()
+                .all(|old| state.arrival < state_arena[*old as usize].arrival)
+            {
+                rounds[0].push(next_state_id);
+                state_arena.push(state);
+                labels.clear();
+                labels.push(next_state_id);
+                next_state_id += 1;
+            }
+        }
+
+        let mut candidates = Vec::new();
+        let mut best_destination_cost = vec![f64::INFINITY; destinations.len()];
+        let mut first_destination_round = vec![None; destinations.len()];
+        let monotone_bound = self.supports_monotone_objective(capacity_feedback);
+        for rides_used in 0..rounds.len() {
+            let mut current_round_states = std::mem::take(&mut rounds[rides_used]);
+            while !current_round_states.is_empty() {
+                let mut marked = Vec::new();
+                for state_id in current_round_states.drain(..) {
+                    let Some(current) = state_arena.get(state_id as usize) else {
+                        continue;
+                    };
+                    if !states
+                        .get(&(current.stop.clone(), rides_used))
+                        .is_some_and(|labels| labels.contains(&state_id))
+                    {
+                        continue;
+                    }
+                    let stop_id = current.stop.clone();
+                    if (current.ride_count > 0
+                        || self.leg_only_handling != IntermodalLegOnlyHandling::Forbid)
+                        && let Some(egresses) = egress_by_stop.get(&stop_id)
+                    {
+                        let facility = self.schedule.get_facility(&stop_id);
+                        for (destination_index, egress_index) in egresses {
+                            if monotone_bound && current.ride_count > 0 {
+                                let first_round = first_destination_round[*destination_index]
+                                    .get_or_insert(rides_used);
+                                if rides_used > *first_round + 2 {
+                                    continue;
+                                }
+                            }
+                            let egress =
+                                &egress_stops_by_destination[*destination_index][*egress_index];
+                            let egress_distance = Coordinate::euclidean_distance(
+                                &facility.coord,
+                                &destinations[*destination_index],
+                            );
+                            let full_cost = current.cost + egress.time.as_secs_f64();
+                            if monotone_bound && current.ride_count > 0 {
+                                best_destination_cost[*destination_index] =
+                                    best_destination_cost[*destination_index].min(full_cost);
+                            }
+                            candidates.push((
+                                *destination_index,
+                                TransitPath {
+                                    stop: stop_id.clone(),
+                                    departure: departure_time,
+                                    arrival: current.arrival.saturating_add(egress.time),
+                                    access_distance: current.access_distance,
+                                    egress_distance,
+                                    rides: reconstruct_transit_rides(
+                                        current.state_id,
+                                        &state_arena,
+                                    ),
+                                    access_route: current.access_route.clone(),
+                                    egress_route: egress.route.clone(),
+                                    access_time: current.access_time,
+                                },
+                            ));
+                        }
+                    }
+
+                    let bounds_exhausted = monotone_bound
+                        && targets_with_egress.iter().all(|index| {
+                            best_destination_cost[*index].is_finite()
+                                && (current.cost > best_destination_cost[*index]
+                                    || first_destination_round[*index]
+                                        .is_some_and(|first| rides_used >= first + 2))
+                        });
+                    if bounds_exhausted || rides_used >= RAPTOR_MAX_TRANSFERS + 1 {
+                        continue;
+                    }
+
+                    let mut boarding_stops = vec![(stop_id.clone(), 0.0)];
+                    if current.ride_count > 0 {
+                        boarding_stops.extend(self.nearby_transfer_stops(&stop_id));
+                    }
+                    for (boarding_stop, transfer_distance) in boarding_stops {
+                        let Some(route_refs) = self.routes_by_stop.get(&boarding_stop) else {
+                            continue;
+                        };
+                        let transfer_time = if current.ride_count > 0 {
+                            self.transfer_time(&stop_id, &boarding_stop, transfer_distance)
+                        } else {
+                            Duration::ZERO
+                        };
+                        for route_ref in route_refs {
+                            let route = self
+                                .schedule
+                                .get_line(&route_ref.line_id)
+                                .routes
+                                .get(&route_ref.route_id)
+                                .expect("route index references a scheduled route");
+                            let chained_targets = chained_departures_from(
+                                &self.schedule,
+                                current.ride.as_ref(),
+                                &boarding_stop,
+                            );
+                            let can_continue_route = chained_targets.is_some_and(|targets| {
+                                targets.iter().any(|target| {
+                                    target.transit_line_id == route_ref.line_id
+                                        && target.transit_route_id == route_ref.route_id
+                                })
+                            });
+                            if (!route.stops[route_ref.stop_index].allow_boarding
+                                && !can_continue_route)
+                                || route_ref.stop_index + 1 >= route.stops.len()
+                            {
+                                continue;
+                            }
+                            marked.push(BoardingCandidate {
+                                line_id: route_ref.line_id.clone(),
+                                route_id: route_ref.route_id.clone(),
+                                stop_index: route_ref.stop_index,
+                                state_id,
+                                transfer_distance,
+                                transfer_time,
+                            });
+                        }
+                    }
+                }
+
+                if marked.is_empty() {
+                    break;
+                }
+
+                marked.sort_by(|left, right| {
+                    (
+                        left.line_id.external(),
+                        left.route_id.external(),
+                        left.stop_index,
+                        left.state_id,
+                    )
+                        .cmp(&(
+                            right.line_id.external(),
+                            right.route_id.external(),
+                            right.stop_index,
+                            right.state_id,
+                        ))
+                });
+                let mut marked_start = 0;
+                while marked_start < marked.len() {
+                    let line_id = marked[marked_start].line_id.clone();
+                    let route_id = marked[marked_start].route_id.clone();
+                    let mut marked_end = marked_start + 1;
+                    while marked_end < marked.len()
+                        && marked[marked_end].line_id == line_id
+                        && marked[marked_end].route_id == route_id
+                    {
+                        marked_end += 1;
+                    }
+                    let line = self.schedule.get_line(&line_id);
+                    let route = &line.routes[&route_id];
+                    let departure_indices =
+                        &self.departures_by_route[&(line_id.clone(), route_id.clone())];
+                    let distance_prefix =
+                        &self.distance_prefix_by_route[&(line_id.clone(), route_id.clone())];
+                    if !departure_indices.is_empty() {
+                        let mut candidate_index = marked_start;
+                        let mut active = Vec::<ActiveBoarding>::new();
+                        for stop_index in 0..route.stops.len() {
+                            if stop_index > 0 {
+                                let alight_stop = &route.stops[stop_index];
+                                for candidate in active.iter().copied() {
+                                    if alight_stop.allow_alighting {
+                                        let current = &state_arena[candidate.state_id as usize];
+                                        let departure =
+                                            &route.departures[candidate.departure_index];
+                                        let board_stop = &route.stops[candidate.board_index];
+                                        let board_offset =
+                                            board_stop.departure_offset.unwrap_or_default();
+                                        let board_arrival_offset = board_stop
+                                            .arrival_offset
+                                            .or(board_stop.departure_offset)
+                                            .unwrap_or_default();
+                                        let arrival_offset = alight_stop
+                                            .arrival_offset
+                                            .or(alight_stop.departure_offset)
+                                            .unwrap_or_default();
+                                        let boarding_time =
+                                            departure.departure_time.saturating_add(board_offset);
+                                        let stop_arrival =
+                                            departure.departure_time.saturating_add(arrival_offset);
+                                        if stop_arrival >= boarding_time {
+                                            let ride = Ride {
+                                                line: line.id.clone(),
+                                                route: route.id.clone(),
+                                                departure: departure.id.clone(),
+                                                board_index: candidate.board_index,
+                                                alight_index: stop_index,
+                                                board: board_stop.facility_id.clone(),
+                                                alight: alight_stop.facility_id.clone(),
+                                                boarding_time,
+                                                vehicle_arrival_at_board: departure
+                                                    .departure_time
+                                                    .saturating_add(board_arrival_offset),
+                                                alighting_time: stop_arrival,
+                                                distance: distance_prefix[stop_index]
+                                                    - distance_prefix[candidate.board_index],
+                                                transport_mode: route
+                                                    .transport_mode
+                                                    .external()
+                                                    .to_owned(),
+                                                passenger_mode: if self.use_passenger_mode_mapping {
+                                                    self.passenger_modes
+                                                        .get(route.transport_mode.external())
+                                                        .cloned()
+                                                        .unwrap_or_else(|| {
+                                                            self.mode.external().to_owned()
+                                                        })
+                                                } else {
+                                                    self.mode.external().to_owned()
+                                                },
+                                                transfer_before: (!candidate.chained_continuation)
+                                                    .then(|| {
+                                                        (current.ride_count > 0).then_some((
+                                                            candidate.transfer_distance,
+                                                            (candidate.transfer_distance
+                                                                * self.walk_distance_factor)
+                                                                .ceil(),
+                                                            candidate.transfer_time,
+                                                        ))
+                                                    })
+                                                    .flatten(),
+                                                chained_from_previous: candidate
+                                                    .chained_continuation,
+                                            };
+                                            let (cost, transfer_penalty_seconds, transfer_count) =
+                                                self.cost_after_ride(
+                                                    current,
+                                                    &ride,
+                                                    stop_arrival,
+                                                    routing_params,
+                                                    capacity_feedback,
+                                                );
+                                            #[cfg(test)]
+                                            {
+                                                let mut rides = reconstruct_transit_rides(
+                                                    current.state_id,
+                                                    &state_arena,
+                                                );
+                                                rides.push(ride.clone());
+                                                let expected = self
+                                                    .cost_equivalent_seconds_with_feedback(
+                                                        stop_arrival,
+                                                        &rides,
+                                                        departure_time,
+                                                        routing_params,
+                                                        capacity_feedback,
+                                                    );
+                                                assert!(
+                                                    (cost - expected).abs() < 1e-8,
+                                                    "incremental transit cost {cost} differs from full cost {expected}"
+                                                );
+                                            }
+                                            let next_stop = alight_stop.facility_id.clone();
+                                            let next_rides_used = rides_used
+                                                + usize::from(
+                                                    current.ride_count == 0
+                                                        || !candidate.chained_continuation,
+                                                );
+                                            if monotone_bound
+                                                && (1..next_rides_used).any(|previous_round| {
+                                                    states
+                                                        .get(&(next_stop.clone(), previous_round))
+                                                        .is_some_and(|labels| {
+                                                            labels.iter().any(|old| {
+                                                                let old =
+                                                                    &state_arena[*old as usize];
+                                                                old.arrival <= stop_arrival
+                                                                    && old.cost
+                                                                        + stop_arrival
+                                                                            .duration_since(
+                                                                                old.arrival,
+                                                                            )
+                                                                            .as_secs_f64()
+                                                                        <= cost
+                                                            })
+                                                        })
+                                                })
+                                            {
+                                                continue;
+                                            }
+                                            let labels = states
+                                                .entry((next_stop.clone(), next_rides_used))
+                                                .or_default();
+                                            if !labels.iter().any(|old| {
+                                                let old = &state_arena[*old as usize];
+                                                old.arrival <= stop_arrival && old.cost <= cost
+                                            }) {
+                                                labels.retain(|old| {
+                                                    let old = &state_arena[*old as usize];
+                                                    !(stop_arrival <= old.arrival
+                                                        && cost <= old.cost)
+                                                });
+                                                let first_vehicle_arrival_at_board = current
+                                                    .first_vehicle_arrival_at_board
+                                                    .or(Some(ride.vehicle_arrival_at_board));
+                                                let new_state_id = next_state_id;
+                                                state_arena.push(TransitPathState {
+                                                    state_id: new_state_id,
+                                                    stop: next_stop.clone(),
+                                                    parent_state_id: Some(current.state_id),
+                                                    ride: Some(ride),
+                                                    ride_count: current.ride_count + 1,
+                                                    arrival: stop_arrival,
+                                                    cost,
+                                                    transfer_penalty_seconds,
+                                                    transfer_count,
+                                                    first_vehicle_arrival_at_board,
+                                                    access_distance: current.access_distance,
+                                                    access_route: current.access_route.clone(),
+                                                    access_time: current.access_time,
+                                                });
+                                                labels.push(new_state_id);
+                                                next_state_id += 1;
+                                                if next_rides_used == rides_used {
+                                                    current_round_states.push(new_state_id);
+                                                } else if next_rides_used < rounds.len() {
+                                                    rounds[next_rides_used].push(new_state_id);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            while candidate_index < marked_end
+                                && marked[candidate_index].stop_index == stop_index
+                            {
+                                let candidate = &marked[candidate_index];
+                                let current = &state_arena[candidate.state_id as usize];
+                                let board_stop = &route.stops[stop_index];
+                                let board_offset = board_stop.departure_offset.unwrap_or_default();
+                                let chained_targets = chained_departures_from(
+                                    &self.schedule,
+                                    current.ride.as_ref(),
+                                    &board_stop.facility_id,
+                                );
+                                let can_continue_route = chained_targets.is_some_and(|targets| {
+                                    targets.iter().any(|target| {
+                                        target.transit_line_id == line_id
+                                            && target.transit_route_id == route_id
+                                    })
+                                });
+                                if !board_stop.allow_boarding && !can_continue_route {
+                                    candidate_index += 1;
+                                    continue;
+                                }
+                                let can_skip_dominated_departures = capacity_feedback.is_empty()
+                                    && route
+                                        .departures
+                                        .iter()
+                                        .all(|departure| departure.chained_departures.is_empty())
+                                    && (current.ride_count == 0
+                                        || self.transfer_penalty.per_travel_time_hour >= 0.0);
+                                let first_boardable_time =
+                                    current.arrival.saturating_add(if can_continue_route {
+                                        Duration::ZERO
+                                    } else {
+                                        candidate.transfer_time
+                                    });
+                                let first_departure = departure_indices.partition_point(|index| {
+                                    route.departures[*index]
+                                        .departure_time
+                                        .saturating_add(board_offset)
+                                        < first_boardable_time
+                                });
+                                let mut earliest_selected_time = None;
+                                for &dep_idx in &departure_indices[first_departure..] {
+                                    let departure = &route.departures[dep_idx];
+                                    let chained_continuation =
+                                        chained_targets.is_some_and(|targets| {
+                                            targets.iter().any(|target| {
+                                                target.transit_line_id == line_id
+                                                    && target.transit_route_id == route_id
+                                                    && target.departure_id == departure.id
+                                            })
+                                        });
+                                    if !board_stop.allow_boarding && !chained_continuation {
+                                        continue;
+                                    }
+                                    let connection_time = if chained_continuation {
+                                        Duration::ZERO
+                                    } else {
+                                        candidate.transfer_time
+                                    };
+                                    let boarding_time =
+                                        departure.departure_time.saturating_add(board_offset);
+                                    if boarding_time
+                                        < current.arrival.saturating_add(connection_time)
+                                    {
+                                        continue;
+                                    }
+                                    if can_skip_dominated_departures {
+                                        match earliest_selected_time {
+                                            Some(time) if boarding_time > time => break,
+                                            Some(time) if boarding_time < time => {
+                                                earliest_selected_time = Some(boarding_time);
+                                            }
+                                            None => earliest_selected_time = Some(boarding_time),
+                                            _ => {}
+                                        }
+                                    }
+                                    let dominated = can_skip_dominated_departures
+                                        && active.iter().any(|existing| {
+                                            existing.base_departure <= departure.departure_time
+                                                && route.stops[existing.board_index]
+                                                    .departure_offset
+                                                    .unwrap_or_default()
+                                                    <= board_offset
+                                        });
+                                    if !dominated {
+                                        active.push(ActiveBoarding {
+                                            state_id: candidate.state_id,
+                                            board_index: stop_index,
+                                            departure_index: dep_idx,
+                                            transfer_distance: candidate.transfer_distance,
+                                            transfer_time: candidate.transfer_time,
+                                            chained_continuation,
+                                            base_departure: departure.departure_time,
+                                        });
+                                    }
+                                }
+                                candidate_index += 1;
+                            }
+                        }
+                    }
+                    marked_start = marked_end;
+                }
+            }
+        }
+        candidates
     }
 
     fn may_reach_any_egress(
@@ -2603,795 +3089,7 @@ impl TransitRoutingModule {
         }
         false
     }
-
-    fn supports_marked_route_scan(
-        &self,
-        capacity_feedback: &BTreeMap<TransitSegment, TransitSegmentObservation>,
-    ) -> bool {
-        capacity_feedback.is_empty()
-            && !self.has_chained_departures
-            && !self.use_passenger_mode_mapping
-            && self.transfer_penalty.by_transport_mode.is_empty()
-            && self.transfer_penalty.per_travel_time_hour == 0.0
-            && self
-                .transfer_penalty
-                .clip(self.transfer_penalty.base_cost())
-                >= 0.0
-            && self.intermodal_access_egress.is_empty()
-            && self.leg_only_handling == IntermodalLegOnlyHandling::Forbid
-            && self.range_query_settings.is_empty()
-            && self.route_selector_settings.as_slice() == [TransitRouteSelectorSettings::default()]
-    }
-
-    fn find_paths_for_destinations_marked_routes(
-        &self,
-        destinations: &[Coordinate],
-        egress_stops_by_destination: &[Vec<FeederStop>],
-        departure_time: SimTime,
-        access_stops: &[FeederStop],
-        routing_params: &ResolvedRoutingParams,
-    ) -> Vec<(usize, TransitPath)> {
-        debug_assert_eq!(destinations.len(), egress_stops_by_destination.len());
-
-        let mut egress_by_stop: HashMap<Id<TransitStopFacility>, Vec<(usize, usize)>> =
-            HashMap::new();
-        for (destination_index, egress_stops) in egress_stops_by_destination.iter().enumerate() {
-            for (egress_index, egress) in egress_stops.iter().enumerate() {
-                egress_by_stop
-                    .entry(egress.stop.clone())
-                    .or_default()
-                    .push((destination_index, egress_index));
-            }
-        }
-        let targets_with_egress = egress_stops_by_destination
-            .iter()
-            .enumerate()
-            .filter_map(|(index, egress_stops)| (!egress_stops.is_empty()).then_some(index))
-            .collect::<Vec<_>>();
-        let mut states: HashMap<(Id<TransitStopFacility>, usize), Vec<u64>> = HashMap::new();
-        let mut state_arena = Vec::<TransitPathState>::new();
-        let mut rounds = vec![Vec::<u64>::new(); RAPTOR_MAX_TRANSFERS + 2];
-        let mut next_state_id = 0;
-        for access in access_stops {
-            let arrival = departure_time.saturating_add(access.time);
-            let state = TransitPathState {
-                state_id: next_state_id,
-                stop: access.stop.clone(),
-                parent_state_id: None,
-                ride: None,
-                ride_count: 0,
-                arrival,
-                cost: self.cost_equivalent_seconds_with_feedback(
-                    arrival,
-                    &[],
-                    departure_time,
-                    routing_params,
-                    &BTreeMap::new(),
-                ),
-                transfer_penalty_seconds: 0.0,
-                transfer_count: 0,
-                first_vehicle_arrival_at_board: None,
-                access_distance: access.distance,
-                access_route: access.route.clone(),
-                access_time: access.time,
-            };
-            let labels = states.entry((access.stop.clone(), 0)).or_default();
-            if labels
-                .iter()
-                .all(|old| state.arrival < state_arena[*old as usize].arrival)
-            {
-                rounds[0].push(next_state_id);
-                state_arena.push(state);
-                labels.clear();
-                labels.push(next_state_id);
-                next_state_id += 1;
-            }
-        }
-
-        let mut candidates = Vec::new();
-        let mut best_destination_cost = vec![f64::INFINITY; destinations.len()];
-        let mut first_destination_round = vec![None; destinations.len()];
-        let monotone_bound = self.supports_monotone_destination_bound();
-        let mut next_state_id = state_arena.len() as u64;
-        for rides_used in 0..rounds.len() {
-            let mut marked = Vec::new();
-            for state_id in std::mem::take(&mut rounds[rides_used]) {
-                let Some(current) = state_arena.get(state_id as usize) else {
-                    continue;
-                };
-                if !states
-                    .get(&(current.stop.clone(), rides_used))
-                    .is_some_and(|labels| labels.contains(&state_id))
-                {
-                    continue;
-                }
-                let stop_id = current.stop.clone();
-                if current.ride_count > 0
-                    && let Some(egresses) = egress_by_stop.get(&stop_id)
-                {
-                    let facility = self.schedule.get_facility(&stop_id);
-                    for (destination_index, egress_index) in egresses {
-                        if monotone_bound && current.ride_count > 0 {
-                            let first_round = first_destination_round[*destination_index]
-                                .get_or_insert(rides_used);
-                            if rides_used > *first_round + 2 {
-                                continue;
-                            }
-                        }
-                        let egress =
-                            &egress_stops_by_destination[*destination_index][*egress_index];
-                        let egress_distance = Coordinate::euclidean_distance(
-                            &facility.coord,
-                            &destinations[*destination_index],
-                        );
-                        let full_cost = current.cost + egress.time.as_secs_f64();
-                        if monotone_bound && current.ride_count > 0 {
-                            best_destination_cost[*destination_index] =
-                                best_destination_cost[*destination_index].min(full_cost);
-                        }
-                        candidates.push((
-                            *destination_index,
-                            TransitPath {
-                                stop: stop_id.clone(),
-                                departure: departure_time,
-                                arrival: current.arrival.saturating_add(egress.time),
-                                access_distance: current.access_distance,
-                                egress_distance,
-                                rides: reconstruct_transit_rides(current.state_id, &state_arena),
-                                access_route: current.access_route.clone(),
-                                egress_route: egress.route.clone(),
-                                access_time: current.access_time,
-                            },
-                        ));
-                    }
-                }
-
-                let bounds_exhausted = monotone_bound
-                    && targets_with_egress.iter().all(|index| {
-                        best_destination_cost[*index].is_finite()
-                            && (current.cost > best_destination_cost[*index]
-                                || first_destination_round[*index]
-                                    .is_some_and(|first| rides_used >= first + 2))
-                    });
-                if bounds_exhausted || rides_used >= RAPTOR_MAX_TRANSFERS + 1 {
-                    continue;
-                }
-
-                let mut boarding_stops = vec![(stop_id.clone(), 0.0)];
-                if current.ride_count > 0 {
-                    boarding_stops.extend(self.nearby_transfer_stops(&stop_id));
-                }
-                for (boarding_stop, transfer_distance) in boarding_stops {
-                    let Some(route_refs) = self.routes_by_stop.get(&boarding_stop) else {
-                        continue;
-                    };
-                    let transfer_time = if current.ride_count > 0 {
-                        self.transfer_time(&stop_id, &boarding_stop, transfer_distance)
-                    } else {
-                        Duration::ZERO
-                    };
-                    for route_ref in route_refs {
-                        let route = self
-                            .schedule
-                            .get_line(&route_ref.line_id)
-                            .routes
-                            .get(&route_ref.route_id)
-                            .expect("route index references a scheduled route");
-                        if !route.stops[route_ref.stop_index].allow_boarding
-                            || route_ref.stop_index + 1 >= route.stops.len()
-                        {
-                            continue;
-                        }
-                        marked.push(BoardingCandidate {
-                            line_id: route_ref.line_id.clone(),
-                            route_id: route_ref.route_id.clone(),
-                            stop_index: route_ref.stop_index,
-                            state_id,
-                            transfer_distance,
-                            transfer_time,
-                        });
-                    }
-                }
-            }
-
-            marked.sort_by(|left, right| {
-                (
-                    left.line_id.external(),
-                    left.route_id.external(),
-                    left.stop_index,
-                    left.state_id,
-                )
-                    .cmp(&(
-                        right.line_id.external(),
-                        right.route_id.external(),
-                        right.stop_index,
-                        right.state_id,
-                    ))
-            });
-            let mut marked_start = 0;
-            while marked_start < marked.len() {
-                let line_id = marked[marked_start].line_id.clone();
-                let route_id = marked[marked_start].route_id.clone();
-                let mut marked_end = marked_start + 1;
-                while marked_end < marked.len()
-                    && marked[marked_end].line_id == line_id
-                    && marked[marked_end].route_id == route_id
-                {
-                    marked_end += 1;
-                }
-                let line = self.schedule.get_line(&line_id);
-                let route = &line.routes[&route_id];
-                let departure_indices =
-                    &self.departures_by_route[&(line_id.clone(), route_id.clone())];
-                let distance_prefix =
-                    &self.distance_prefix_by_route[&(line_id.clone(), route_id.clone())];
-                if !departure_indices.is_empty() {
-                    let mut candidate_index = marked_start;
-                    let mut active = Vec::<(u64, usize, usize, f64, Duration, SimTime)>::new();
-                    for stop_index in 0..route.stops.len() {
-                        if stop_index > 0 {
-                            let alight_stop = &route.stops[stop_index];
-                            for (
-                                state_id,
-                                board_index,
-                                departure_index,
-                                transfer_distance,
-                                transfer_time,
-                                _,
-                            ) in active.iter().copied()
-                            {
-                                if alight_stop.allow_alighting {
-                                    let current = &state_arena[state_id as usize];
-                                    let departure = &route.departures[departure_index];
-                                    let board_stop = &route.stops[board_index];
-                                    let board_offset =
-                                        board_stop.departure_offset.unwrap_or_default();
-                                    let board_arrival_offset = board_stop
-                                        .arrival_offset
-                                        .or(board_stop.departure_offset)
-                                        .unwrap_or_default();
-                                    let arrival_offset = alight_stop
-                                        .arrival_offset
-                                        .or(alight_stop.departure_offset)
-                                        .unwrap_or_default();
-                                    let boarding_time =
-                                        departure.departure_time.saturating_add(board_offset);
-                                    let stop_arrival =
-                                        departure.departure_time.saturating_add(arrival_offset);
-                                    if stop_arrival >= boarding_time {
-                                        let ride = Ride {
-                                            line: line.id.clone(),
-                                            route: route.id.clone(),
-                                            departure: departure.id.clone(),
-                                            board_index,
-                                            alight_index: stop_index,
-                                            board: board_stop.facility_id.clone(),
-                                            alight: alight_stop.facility_id.clone(),
-                                            boarding_time,
-                                            vehicle_arrival_at_board: departure
-                                                .departure_time
-                                                .saturating_add(board_arrival_offset),
-                                            alighting_time: stop_arrival,
-                                            distance: distance_prefix[stop_index]
-                                                - distance_prefix[board_index],
-                                            transport_mode: route
-                                                .transport_mode
-                                                .external()
-                                                .to_owned(),
-                                            passenger_mode: self.mode.external().to_owned(),
-                                            transfer_before: (current.ride_count > 0).then_some((
-                                                transfer_distance,
-                                                (transfer_distance * self.walk_distance_factor)
-                                                    .ceil(),
-                                                transfer_time,
-                                            )),
-                                            chained_from_previous: false,
-                                        };
-                                        let (cost, transfer_penalty_seconds, transfer_count) = self
-                                            .cost_after_ride(
-                                                current,
-                                                &ride,
-                                                stop_arrival,
-                                                routing_params,
-                                                &BTreeMap::new(),
-                                            );
-                                        let next_stop = alight_stop.facility_id.clone();
-                                        let next_rides_used = rides_used + 1;
-                                        // With constant transfer costs, an earlier arrival using fewer
-                                        // rides can wait for every continuation of this candidate.
-                                        if (1..next_rides_used).any(|previous_round| {
-                                            states
-                                                .get(&(next_stop.clone(), previous_round))
-                                                .is_some_and(|labels| {
-                                                    labels.iter().any(|old| {
-                                                        let old = &state_arena[*old as usize];
-                                                        old.arrival <= stop_arrival
-                                                            && old.cost
-                                                                + stop_arrival
-                                                                    .duration_since(old.arrival)
-                                                                    .as_secs_f64()
-                                                                <= cost
-                                                    })
-                                                })
-                                        }) {
-                                            continue;
-                                        }
-                                        let labels = states
-                                            .entry((next_stop.clone(), next_rides_used))
-                                            .or_default();
-                                        if !labels.iter().any(|old| {
-                                            let old = &state_arena[*old as usize];
-                                            old.arrival <= stop_arrival && old.cost <= cost
-                                        }) {
-                                            labels.retain(|old| {
-                                                let old = &state_arena[*old as usize];
-                                                !(stop_arrival <= old.arrival && cost <= old.cost)
-                                            });
-                                            let first_vehicle_arrival_at_board = current
-                                                .first_vehicle_arrival_at_board
-                                                .or(Some(ride.vehicle_arrival_at_board));
-                                            state_arena.push(TransitPathState {
-                                                state_id: next_state_id,
-                                                stop: next_stop.clone(),
-                                                parent_state_id: Some(current.state_id),
-                                                ride: Some(ride),
-                                                ride_count: current.ride_count + 1,
-                                                arrival: stop_arrival,
-                                                cost,
-                                                transfer_penalty_seconds,
-                                                transfer_count,
-                                                first_vehicle_arrival_at_board,
-                                                access_distance: current.access_distance,
-                                                access_route: current.access_route.clone(),
-                                                access_time: current.access_time,
-                                            });
-                                            rounds[next_rides_used].push(next_state_id);
-                                            labels.push(next_state_id);
-                                            next_state_id += 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        while candidate_index < marked_end
-                            && marked[candidate_index].stop_index == stop_index
-                        {
-                            let candidate = &marked[candidate_index];
-                            let current = &state_arena[candidate.state_id as usize];
-                            let board_stop = &route.stops[stop_index];
-                            let board_offset = board_stop.departure_offset.unwrap_or_default();
-                            let ready = current.arrival.saturating_add(candidate.transfer_time);
-                            let first_departure = departure_indices.partition_point(|index| {
-                                route.departures[*index]
-                                    .departure_time
-                                    .saturating_add(board_offset)
-                                    < ready
-                            });
-                            if let Some(&departure_index) = departure_indices.get(first_departure) {
-                                let base_departure =
-                                    route.departures[departure_index].departure_time;
-                                // This scan has equal time weights and a constant charge per round.
-                                // An earlier service already boarded at an earlier offset dominates.
-                                if !active.iter().any(|(_, board_index, _, _, _, earlier)| {
-                                    *earlier <= base_departure
-                                        && route.stops[*board_index]
-                                            .departure_offset
-                                            .unwrap_or_default()
-                                            <= board_offset
-                                }) {
-                                    active.push((
-                                        candidate.state_id,
-                                        stop_index,
-                                        departure_index,
-                                        candidate.transfer_distance,
-                                        candidate.transfer_time,
-                                        base_departure,
-                                    ));
-                                }
-                            }
-                            candidate_index += 1;
-                        }
-                    }
-                }
-                marked_start = marked_end;
-            }
-        }
-        candidates
-    }
-
-    fn find_paths_for_destinations_heap(
-        &self,
-        destinations: &[Coordinate],
-        egress_stops_by_destination: &[Vec<FeederStop>],
-        departure_time: SimTime,
-        access_stops: &[FeederStop],
-        routing_params: &ResolvedRoutingParams,
-        capacity_feedback: &BTreeMap<TransitSegment, TransitSegmentObservation>,
-    ) -> Vec<(usize, TransitPath)> {
-        debug_assert_eq!(destinations.len(), egress_stops_by_destination.len());
-        let mut egress_by_stop: HashMap<Id<TransitStopFacility>, Vec<(usize, usize)>> =
-            HashMap::new();
-        for (destination_index, egress_stops) in egress_stops_by_destination.iter().enumerate() {
-            for (egress_index, egress) in egress_stops.iter().enumerate() {
-                egress_by_stop
-                    .entry(egress.stop.clone())
-                    .or_default()
-                    .push((destination_index, egress_index));
-            }
-        }
-        let targets_with_egress = egress_stops_by_destination
-            .iter()
-            .enumerate()
-            .filter_map(|(index, egress_stops)| (!egress_stops.is_empty()).then_some(index))
-            .collect::<Vec<_>>();
-        let mut states: HashMap<(Id<TransitStopFacility>, usize), Vec<u64>> = HashMap::new();
-        let mut state_arena: Vec<TransitPathState> = Vec::new();
-        let mut rounds: Vec<BinaryHeap<_>> = (0..=RAPTOR_MAX_TRANSFERS + 1)
-            .map(|_| BinaryHeap::new())
-            .collect();
-        let mut next_state_id = 0;
-        for access in access_stops {
-            let stop_id = &access.stop;
-            let state = TransitPathState {
-                state_id: next_state_id,
-                stop: stop_id.clone(),
-                parent_state_id: None,
-                ride: None,
-                ride_count: 0,
-                arrival: departure_time.saturating_add(access.time),
-                cost: self.cost_equivalent_seconds_with_feedback(
-                    departure_time.saturating_add(access.time),
-                    &[],
-                    departure_time,
-                    routing_params,
-                    capacity_feedback,
-                ),
-                transfer_penalty_seconds: 0.0,
-                transfer_count: 0,
-                first_vehicle_arrival_at_board: None,
-                access_distance: access.distance,
-                access_route: access.route.clone(),
-                access_time: access.time,
-            };
-            let key = (stop_id.clone(), 0);
-            let labels = states.entry(key).or_default();
-            if labels
-                .iter()
-                .all(|old| state.arrival < state_arena[*old as usize].arrival)
-            {
-                rounds[0].push(Reverse((state.arrival, 0, stop_id.clone(), next_state_id)));
-                state_arena.push(state);
-                labels.clear();
-                labels.push(next_state_id);
-                next_state_id += 1;
-            }
-        }
-
-        let mut candidates = Vec::new();
-        let mut best_destination_cost = vec![f64::INFINITY; destinations.len()];
-        // MATSim 2026 keeps scanning two additional transfer rounds after the first destination.
-        // Rust only uses that cutoff when its objective is monotone; mapped mode utilities and
-        // signed transfer penalties can make a later round cheaper.
-        let mut first_destination_round = vec![None; destinations.len()];
-        let monotone_bound = self.supports_monotone_destination_bound();
-        for round in 0..rounds.len() {
-            while let Some(Reverse((arrival, rides_used, stop_id, state_id))) = rounds[round].pop()
-            {
-                let state_is_active = states
-                    .get(&(stop_id.clone(), rides_used))
-                    .is_some_and(|labels| labels.contains(&state_id));
-                let Some(current) = state_is_active.then(|| state_arena[state_id as usize].clone())
-                else {
-                    continue;
-                };
-                if current.arrival != arrival {
-                    continue;
-                }
-
-                if current.ride_count > 0
-                    || self.leg_only_handling != IntermodalLegOnlyHandling::Forbid
-                {
-                    if let Some(egresses) = egress_by_stop.get(&stop_id) {
-                        let facility = self.schedule.get_facility(&stop_id);
-                        for (destination_index, egress_index) in egresses {
-                            if monotone_bound && current.ride_count > 0 {
-                                let first_round = first_destination_round[*destination_index]
-                                    .get_or_insert(rides_used);
-                                if rides_used > *first_round + 2 {
-                                    continue;
-                                }
-                            }
-                            let egress =
-                                &egress_stops_by_destination[*destination_index][*egress_index];
-                            let egress_distance = Coordinate::euclidean_distance(
-                                &facility.coord,
-                                &destinations[*destination_index],
-                            );
-                            let full_cost = current.cost + egress.time.as_secs_f64();
-                            if monotone_bound && current.ride_count > 0 {
-                                best_destination_cost[*destination_index] =
-                                    best_destination_cost[*destination_index].min(full_cost);
-                            }
-                            candidates.push((
-                                *destination_index,
-                                TransitPath {
-                                    stop: stop_id.clone(),
-                                    departure: departure_time,
-                                    arrival: arrival.saturating_add(egress.time),
-                                    access_distance: current.access_distance,
-                                    egress_distance,
-                                    rides: reconstruct_transit_rides(
-                                        current.state_id,
-                                        &state_arena,
-                                    ),
-                                    access_route: current.access_route.clone(),
-                                    egress_route: egress.route.clone(),
-                                    access_time: current.access_time,
-                                },
-                            ));
-                        }
-                    }
-                }
-
-                let destination_bounds_exhausted = targets_with_egress.iter().all(|index| {
-                    best_destination_cost[*index].is_finite()
-                        && (current.cost > best_destination_cost[*index]
-                            || first_destination_round[*index]
-                                .is_some_and(|first| rides_used >= first + 2))
-                });
-                if monotone_bound && destination_bounds_exhausted {
-                    continue;
-                }
-
-                if rides_used >= RAPTOR_MAX_TRANSFERS + 1 {
-                    continue;
-                }
-                let mut boarding_stops = vec![(
-                    stop_id.clone(),
-                    0.0,
-                    (current.ride_count > 0).then(|| self.transfer_time(&stop_id, &stop_id, 0.0)),
-                )];
-                if current.ride_count > 0 {
-                    boarding_stops.extend(self.nearby_transfer_stops(&stop_id).into_iter().map(
-                        |(id, distance)| {
-                            let time = self.transfer_time(&stop_id, &id, distance);
-                            (id, distance, Some(time))
-                        },
-                    ));
-                }
-                for (boarding_stop, transfer_distance, transfer_time) in boarding_stops {
-                    let Some(route_refs) = self.routes_by_stop.get(&boarding_stop) else {
-                        continue;
-                    };
-                    for route_ref in route_refs {
-                        let line = self.schedule.get_line(&route_ref.line_id);
-                        let route = line.routes.get(&route_ref.route_id).unwrap();
-                        let board_stop = &route.stops[route_ref.stop_index];
-                        let chained_targets = chained_departures_from(
-                            &self.schedule,
-                            current.ride.as_ref(),
-                            &boarding_stop,
-                        );
-                        let board_offset = board_stop.departure_offset.unwrap_or_default();
-                        let board_arrival_offset = board_stop
-                            .arrival_offset
-                            .or(board_stop.departure_offset)
-                            .unwrap_or_default();
-                        // Identical stop offsets make later departures dominated unless chains or capacity costs distinguish them.
-                        let can_skip_dominated_departures = capacity_feedback.is_empty()
-                            && route
-                                .departures
-                                .iter()
-                                .all(|departure| departure.chained_departures.is_empty())
-                            && (current.ride_count == 0
-                                || self.transfer_penalty.per_travel_time_hour >= 0.0);
-                        let can_continue_route = chained_targets.is_some_and(|targets| {
-                            targets.iter().any(|target| {
-                                target.transit_line_id == route_ref.line_id
-                                    && target.transit_route_id == route_ref.route_id
-                            })
-                        });
-                        let first_boardable_time = arrival.saturating_add(if can_continue_route {
-                            Duration::ZERO
-                        } else {
-                            transfer_time.unwrap_or_default()
-                        });
-                        let departure_indices = &self.departures_by_route
-                            [&(route_ref.line_id.clone(), route_ref.route_id.clone())];
-                        let first_departure = departure_indices.partition_point(|index| {
-                            route.departures[*index]
-                                .departure_time
-                                .saturating_add(board_offset)
-                                < first_boardable_time
-                        });
-                        let mut selected_departures = Vec::new();
-                        let mut earliest_selected_time = None;
-                        for index in departure_indices[first_departure..].iter() {
-                            let departure = &route.departures[*index];
-                            let chained_continuation = chained_targets.is_some_and(|targets| {
-                                targets.iter().any(|target| {
-                                    target.transit_line_id == route_ref.line_id
-                                        && target.transit_route_id == route_ref.route_id
-                                        && target.departure_id == departure.id
-                                })
-                            });
-                            if !board_stop.allow_boarding && !chained_continuation {
-                                continue;
-                            }
-                            let connection_time = if chained_continuation {
-                                Duration::ZERO
-                            } else {
-                                transfer_time.unwrap_or_default()
-                            };
-                            let boarding_time =
-                                departure.departure_time.saturating_add(board_offset);
-                            if boarding_time < arrival.saturating_add(connection_time) {
-                                continue;
-                            }
-                            if can_skip_dominated_departures {
-                                match earliest_selected_time {
-                                    Some(time) if boarding_time > time => break,
-                                    Some(time) if boarding_time < time => {
-                                        selected_departures.clear();
-                                        earliest_selected_time = Some(boarding_time);
-                                    }
-                                    None => earliest_selected_time = Some(boarding_time),
-                                    _ => {}
-                                }
-                            }
-                            selected_departures.push((departure, chained_continuation));
-                        }
-                        for (alight_index, alight_stop) in route
-                            .stops
-                            .iter()
-                            .enumerate()
-                            .skip(route_ref.stop_index + 1)
-                        {
-                            if !alight_stop.allow_alighting {
-                                continue;
-                            }
-                            let arrival_offset = alight_stop
-                                .arrival_offset
-                                .or(alight_stop.departure_offset)
-                                .unwrap_or_default();
-                            for (departure, chained_continuation) in &selected_departures {
-                                let connection_time = if *chained_continuation {
-                                    Duration::ZERO
-                                } else {
-                                    transfer_time.unwrap_or_default()
-                                };
-                                let earliest_boarding = arrival.saturating_add(connection_time);
-                                let boarding_time =
-                                    departure.departure_time.saturating_add(board_offset);
-                                if boarding_time < earliest_boarding {
-                                    continue;
-                                }
-                                let stop_arrival =
-                                    departure.departure_time.saturating_add(arrival_offset);
-                                if stop_arrival < boarding_time {
-                                    continue;
-                                }
-                                let distance_prefix = &self.distance_prefix_by_route
-                                    [&(route_ref.line_id.clone(), route_ref.route_id.clone())];
-                                let ride_distance = distance_prefix[alight_index]
-                                    - distance_prefix[route_ref.stop_index];
-                                let ride = Ride {
-                                    line: line.id.clone(),
-                                    route: route.id.clone(),
-                                    departure: departure.id.clone(),
-                                    board_index: route_ref.stop_index,
-                                    alight_index,
-                                    board: boarding_stop.clone(),
-                                    alight: alight_stop.facility_id.clone(),
-                                    boarding_time,
-                                    vehicle_arrival_at_board: departure
-                                        .departure_time
-                                        .saturating_add(board_arrival_offset),
-                                    alighting_time: stop_arrival,
-                                    distance: ride_distance,
-                                    transport_mode: route.transport_mode.external().to_owned(),
-                                    passenger_mode: if self.use_passenger_mode_mapping {
-                                        self.passenger_modes
-                                            .get(route.transport_mode.external())
-                                            .cloned()
-                                            .unwrap_or_else(|| self.mode.external().to_owned())
-                                    } else {
-                                        self.mode.external().to_owned()
-                                    },
-                                    transfer_before: (!*chained_continuation)
-                                        .then_some(transfer_time)
-                                        .flatten()
-                                        .map(|transfer_time| {
-                                            (
-                                                transfer_distance,
-                                                (transfer_distance * self.walk_distance_factor)
-                                                    .ceil(),
-                                                transfer_time,
-                                            )
-                                        }),
-                                    chained_from_previous: *chained_continuation,
-                                };
-                                let (candidate_cost, transfer_penalty_seconds, transfer_count) =
-                                    self.cost_after_ride(
-                                        &current,
-                                        &ride,
-                                        stop_arrival,
-                                        routing_params,
-                                        capacity_feedback,
-                                    );
-                                #[cfg(test)]
-                                {
-                                    let mut rides =
-                                        reconstruct_transit_rides(current.state_id, &state_arena);
-                                    rides.push(ride.clone());
-                                    let expected = self.cost_equivalent_seconds_with_feedback(
-                                        stop_arrival,
-                                        &rides,
-                                        departure_time,
-                                        routing_params,
-                                        capacity_feedback,
-                                    );
-                                    assert!(
-                                        (candidate_cost - expected).abs() < 1e-8,
-                                        "incremental transit cost {candidate_cost} differs from full cost {expected}"
-                                    );
-                                }
-                                let next_stop = alight_stop.facility_id.clone();
-                                let next_rides_used = rides_used
-                                    + usize::from(
-                                        current.ride_count == 0 || !*chained_continuation,
-                                    );
-                                let key = (next_stop.clone(), next_rides_used);
-                                let labels = states.entry(key).or_default();
-                                if labels.iter().any(|old| {
-                                    let old = &state_arena[*old as usize];
-                                    old.arrival <= stop_arrival && old.cost <= candidate_cost
-                                }) {
-                                    continue;
-                                }
-                                labels.retain(|old| {
-                                    let old_state = &state_arena[*old as usize];
-                                    !(stop_arrival <= old_state.arrival
-                                        && candidate_cost <= old_state.cost)
-                                });
-                                let first_vehicle_arrival_at_board = current
-                                    .first_vehicle_arrival_at_board
-                                    .or(Some(ride.vehicle_arrival_at_board));
-                                let candidate_state = TransitPathState {
-                                    state_id: next_state_id,
-                                    stop: next_stop.clone(),
-                                    parent_state_id: Some(current.state_id),
-                                    ride: Some(ride),
-                                    ride_count: current.ride_count + 1,
-                                    arrival: stop_arrival,
-                                    cost: candidate_cost,
-                                    transfer_penalty_seconds,
-                                    transfer_count,
-                                    first_vehicle_arrival_at_board,
-                                    access_distance: current.access_distance,
-                                    access_route: current.access_route.clone(),
-                                    access_time: current.access_time,
-                                };
-                                rounds[next_rides_used].push(Reverse((
-                                    stop_arrival,
-                                    next_rides_used,
-                                    next_stop,
-                                    next_state_id,
-                                )));
-                                state_arena.push(candidate_state);
-                                labels.push(next_state_id);
-                                next_state_id += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        candidates
-    }
 }
-
 fn chained_departures_from<'a>(
     schedule: &'a TransitSchedule,
     previous: Option<&Ride>,
@@ -4066,14 +3764,7 @@ mod route_proposal_tests {
             router.walk_feeders(&[(Id::create("rc"), 0.0)]),
         ];
         let params = router.resolve_routing_params("");
-        let marked = router.find_paths_for_destinations_marked_routes(
-            &destinations,
-            &egress,
-            departure,
-            &access,
-            &params,
-        );
-        let heap = router.find_paths_for_destinations_heap(
+        let paths = router.find_paths_for_destinations(
             &destinations,
             &egress,
             departure,
@@ -4092,20 +3783,11 @@ mod route_proposal_tests {
                     .select_best_path_from_candidates(&paths, departure, &params, &BTreeMap::new())
                     .unwrap()
             };
-            let actual = best(&marked);
-            let expected = best(&heap);
-            assert_eq!(actual.arrival, expected.arrival);
-            assert_eq!(actual.rides.len(), expected.rides.len());
-            for (actual, expected) in actual.rides.iter().zip(&expected.rides) {
-                assert_eq!(actual.route, expected.route);
-                assert_eq!(actual.departure, expected.departure);
-                assert_eq!(actual.board, expected.board);
-                assert_eq!(actual.alight, expected.alight);
-            }
+            let actual = best(&paths);
             assert_eq!(actual.rides.len(), destination + 1);
         }
         assert!(
-            marked
+            paths
                 .iter()
                 .all(|(destination, path)| path.rides.len() == destination + 1)
         );
@@ -4206,21 +3888,6 @@ mod route_proposal_tests {
             &params,
             &feedback,
         );
-        let marked = router.find_paths_for_destinations_marked_routes(
-            &destinations,
-            &egress,
-            departure,
-            &access,
-            &params,
-        );
-        let heap = router.find_paths_for_destinations_heap(
-            &destinations,
-            &egress,
-            departure,
-            &access,
-            &params,
-            &feedback,
-        );
         let selected_signature = |paths: &[(usize, super::TransitPath)], destination| {
             let candidates = paths
                 .iter()
@@ -4241,7 +3908,6 @@ mod route_proposal_tests {
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(selected_signature(&marked, 0), selected_signature(&heap, 0));
         let single = router.find_paths_with_feeders(
             &destinations[0],
             departure,
@@ -4249,6 +3915,15 @@ mod route_proposal_tests {
             &egress[0],
             &params,
             &feedback,
+        );
+        let single_paths = single
+            .iter()
+            .cloned()
+            .map(|path| (0, path))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected_signature(&shared, 0),
+            selected_signature(&single_paths, 0)
         );
 
         assert!(
