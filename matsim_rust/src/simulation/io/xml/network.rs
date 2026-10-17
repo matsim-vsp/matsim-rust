@@ -429,4 +429,40 @@ mod tests {
 
         assert_eq!(None, network.nodes.nodes.first().unwrap().attributes);
     }
+
+    #[deterministic_id_test]
+    fn link_attributes_written_to_xml_file_in_ascending_order() {
+        let mut network = Network::new();
+        let from = Node::new(Id::create("from"), Coordinate::default(), 0, 1);
+        let to = Node::new(Id::create("to"), Coordinate::default(), 0, 1);
+        let link_id = Id::create("link");
+        let link = Link::new_with_default(link_id.clone(), &from, &to);
+        network.add_node(from);
+        network.add_node(to);
+        network.add_link(link);
+
+        let mut link_attributes = InternalAttributes::default();
+        // Insert attributes in non-alphabetical order
+        link_attributes.insert("toll", 50i64);
+        link_attributes.insert("capacity_factor", 1.5f64);
+        link_attributes.insert("allowed_modes", "car,bus");
+
+        let mut overrides = LinkAttributeOverrides::default();
+        overrides.insert(link_id, link_attributes);
+
+        let io_network = to_io_network(&network, &overrides);
+        let output_folder = get_output_folder("link_attributes_order");
+        fs::create_dir_all(&output_folder).unwrap();
+        let path = output_folder.join("network.xml");
+        io_network.to_file(&path);
+
+        let content = fs::read_to_string(&path).unwrap();
+
+        let link_xml = &content[content.find("<link id=\"link\"").unwrap()..];
+        let pos_allowed = link_xml.find("name=\"allowed_modes\"").unwrap();
+        let pos_cap = link_xml.find("name=\"capacity_factor\"").unwrap();
+        let pos_toll = link_xml.find("name=\"toll\"").unwrap();
+        assert!(pos_allowed < pos_cap);
+        assert!(pos_cap < pos_toll);
+    }
 }
