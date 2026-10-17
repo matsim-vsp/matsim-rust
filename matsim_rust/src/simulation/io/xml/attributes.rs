@@ -65,7 +65,7 @@ impl IOAttributes {
     }
 
     pub(crate) fn from_internal_none_if_empty(attrs: &InternalAttributes) -> Option<IOAttributes> {
-        if attrs.attributes.is_empty() {
+        if attrs.is_empty() {
             None
         } else {
             Some(IOAttributes::from(attrs))
