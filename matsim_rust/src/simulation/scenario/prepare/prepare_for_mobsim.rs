@@ -158,7 +158,26 @@ pub(crate) fn route_trip(
         .vehicle(vehicle)
         .build()
         .expect("all required routing request fields are set");
-    Ok(trip_router.calc_route(mode, request)?)
+    // Split preparation time between transit search and network routing, so a slow run can be
+    // attributed to the right engine. No-op unless the `hotpath` feature is enabled.
+    let is_transit = context
+        .config
+        .transit()
+        .transit_modes
+        .iter()
+        .any(|transit_mode| transit_mode == mode.external());
+    let routed = if is_transit {
+        hotpath::measure_block!(
+            "prepare.route.transit",
+            trip_router.calc_route(mode, request)
+        )
+    } else {
+        hotpath::measure_block!(
+            "prepare.route.network",
+            trip_router.calc_route(mode, request)
+        )
+    };
+    Ok(routed?)
 }
 
 /// Each activity takes place at a facility. Activities without a facility are routed via a link
