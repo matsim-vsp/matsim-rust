@@ -1267,4 +1267,58 @@ mod tests {
             IOPopulation::from_file_parallel(&path)
         );
     }
+
+    #[deterministic_id_test]
+    fn plan_attributes_serialize_to_fixed_byte_sequence_in_ascending_order() {
+        let path = PathBuf::from(
+            "./test_output/simulation/io/xml/population/plan_attributes_order/plans.xml",
+        );
+        create_dir_all(path.parent().unwrap()).unwrap();
+
+        let mut plan = InternalPlan {
+            selected: true,
+            ..Default::default()
+        };
+        // Insert attributes in deliberately unordered sequence
+        plan.attributes.insert("score_details", "custom");
+        plan.attributes.insert("routingMode", "pt");
+        plan.attributes.insert("cost", 42.5f64);
+        plan.attributes.insert("aborted", false);
+
+        let person = InternalPerson::new(Id::create("person_1"), plan);
+        let mut population = Population::new();
+        population.persons.insert(person.id().clone(), person);
+
+        let io_pop = IOPopulation::from(&population);
+        io_pop.to_file(&path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+
+        let expected = "<!DOCTYPE population SYSTEM \"https://www.matsim.org/files/dtd/population_v6.dtd\">\n\n<population>\n    <person id=\"person_1\">\n        <attributes>\n            <attribute name=\"subpopulation\" class=\"java.lang.String\">person</attribute>\n        </attributes>\n        <plan selected=\"yes\">\n            <attributes>\n                <attribute name=\"aborted\" class=\"java.lang.Boolean\">false</attribute>\n                <attribute name=\"cost\" class=\"java.lang.Double\">42.5</attribute>\n                <attribute name=\"routingMode\" class=\"java.lang.String\">pt</attribute>\n                <attribute name=\"score_details\" class=\"java.lang.String\">custom</attribute>\n            </attributes></plan>\n    </person>\n</population>";
+
+        assert_eq!(content, expected);
+
+        // Different insertion order produces the exact same byte sequence
+        let path2 = PathBuf::from(
+            "./test_output/simulation/io/xml/population/plan_attributes_order/plans2.xml",
+        );
+        let mut plan2 = InternalPlan {
+            selected: true,
+            ..Default::default()
+        };
+        plan2.attributes.insert("aborted", false);
+        plan2.attributes.insert("score_details", "custom");
+        plan2.attributes.insert("cost", 42.5f64);
+        plan2.attributes.insert("routingMode", "pt");
+
+        let person2 = InternalPerson::new(Id::create("person_1"), plan2);
+        let mut population2 = Population::new();
+        population2.persons.insert(person2.id().clone(), person2);
+
+        let io_pop2 = IOPopulation::from(&population2);
+        io_pop2.to_file(&path2);
+
+        let content2 = std::fs::read_to_string(&path2).unwrap();
+        assert_eq!(content, content2);
+    }
 }

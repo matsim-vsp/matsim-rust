@@ -212,3 +212,40 @@ fn check_route_integrity(leg: &InternalLeg, network: &Network) {
         );
     }
 }
+
+#[deterministic_id_test(matsim_rust)]
+fn experienced_plans_are_byte_identical_across_independent_simulation_runs() {
+    let mut config1 = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/equil/equil-config-1-scoring.yml",
+    ));
+    config1.output_mut().output_dir = "./test_output/simulation/determinism_run1".into();
+    let dir1 = io::resolve_path(config1.context(), &config1.output().output_dir);
+
+    let mut config2 = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/equil/equil-config-1-scoring.yml",
+    ));
+    config2.output_mut().output_dir = "./test_output/simulation/determinism_run2".into();
+    let dir2 = io::resolve_path(config2.context(), &config2.output().output_dir);
+
+    run_config_and_load(config1);
+    run_config_and_load(config2);
+
+    let file1 = dir1.join("output_experienced_plans.xml.zst");
+    let file2 = dir2.join("output_experienced_plans.xml.zst");
+
+    let bytes1 = std::fs::read(&file1).unwrap();
+    let bytes2 = std::fs::read(&file2).unwrap();
+    assert_eq!(bytes1, bytes2);
+
+    let it_file1 = dir1
+        .join("ITERS")
+        .join("it.1")
+        .join("output_experienced_plans.xml.zst");
+    let it_file2 = dir2
+        .join("ITERS")
+        .join("it.1")
+        .join("output_experienced_plans.xml.zst");
+    let it_bytes1 = std::fs::read(&it_file1).unwrap();
+    let it_bytes2 = std::fs::read(&it_file2).unwrap();
+    assert_eq!(it_bytes1, it_bytes2);
+}
