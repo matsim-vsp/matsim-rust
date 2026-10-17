@@ -216,29 +216,6 @@ impl From<&HashMap<String, AttributeValue>> for InternalAttributes {
     }
 }
 
-impl From<&BTreeMap<String, AttributeValue>> for InternalAttributes {
-    fn from(value: &BTreeMap<String, AttributeValue>) -> Self {
-        let mut res = InternalAttributes::default();
-        for (key, value) in value {
-            match value.r#type.as_ref().unwrap() {
-                Type::IntValue(i) => {
-                    res.insert(key, i);
-                }
-                Type::StringValue(s) => {
-                    res.insert(key, s);
-                }
-                Type::DoubleValue(d) => {
-                    res.insert(key, d);
-                }
-                Type::BoolValue(b) => {
-                    res.insert(key, b);
-                }
-            };
-        }
-        res
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{AttributeValue, InternalAttributes};
