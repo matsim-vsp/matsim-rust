@@ -1,3 +1,5 @@
+#[path = "simulation/abandoned_legs.rs"]
+mod abandoned_legs;
 #[path = "simulation/accessibility_analysis.rs"]
 mod accessibility_analysis;
 #[path = "simulation/automatic_analysis.rs"]
