@@ -41,6 +41,7 @@ impl Backpack {
         &self.person_id
     }
 
+    #[hotpath::measure]
     pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
         if let Some(e) = Self::relevant_event_for_scoring(event) {
             self.events.push(e);
@@ -50,6 +51,7 @@ impl Backpack {
         self.backpack_plan.handle_event(event);
     }
 
+    #[hotpath::measure]
     pub(crate) fn finish(mut self) -> PersonExperience {
         PersonExperience {
             dummy_person: InternalPerson::new(self.person_id, self.backpack_plan.finish()),

@@ -31,6 +31,7 @@ impl BackpackingDataCollector {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn reset_iteration(&mut self) {
         self.person_id2backpack.clear();
         for person in &self.home_person_ids {
@@ -40,6 +41,7 @@ impl BackpackingDataCollector {
         self.vehicle_id2person_ids.clear();
     }
 
+    #[hotpath::measure]
     pub(crate) fn person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
         self.vehicle_id2person_ids
             .entry(event.vehicle.clone())
@@ -47,6 +49,7 @@ impl BackpackingDataCollector {
             .insert(event.person.clone());
     }
 
+    #[hotpath::measure]
     pub(crate) fn person_leaves_vehicle(&mut self, event: &PersonLeavesVehicleEvent) {
         let remove_vehicle = self
             .vehicle_id2person_ids
@@ -62,6 +65,7 @@ impl BackpackingDataCollector {
     }
 
     /// Forwards simulation events to all backpacks affected by that event.
+    #[hotpath::measure]
     pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
         let affected_persons = if let Some(event) = event.as_any().downcast_ref::<LinkEnterEvent>()
         {
@@ -114,6 +118,7 @@ impl BackpackingDataCollector {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn send(&mut self, entity: PartitionChangeEntity<'_>) -> BackpackingAttachment {
         let person_ids = Self::person_ids(entity);
         if let PartitionChangeEntity::Vehicle(vehicle) = entity {
@@ -136,6 +141,7 @@ impl BackpackingDataCollector {
         BackpackingAttachment { backpacks }
     }
 
+    #[hotpath::measure]
     pub(crate) fn receive(
         &mut self,
         entity: PartitionChangeEntity<'_>,
@@ -187,6 +193,7 @@ impl BackpackingDataCollector {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn finish(&mut self) -> IntMap<Id<InternalPerson>, PersonExperience> {
         self.person_id2backpack
             .drain()
