@@ -1565,6 +1565,11 @@ pub struct MetisOptions {
     pub iteration_number: u32,
     #[serde(default = "bool_value_false")]
     pub contiguous: bool,
+    /// Makes METIS try to minimize the maximum number of neighbors of a partition (`MinConn`, only
+    /// for k-way partitioning). Every partition exchanges a message with each neighbor in every
+    /// time step, so the partition with the most neighbors tends to set the pace.
+    #[serde(default = "bool_value_false")]
+    pub min_conn: bool,
 }
 
 #[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize)]
@@ -1589,6 +1594,7 @@ impl Default for MetisOptions {
             imbalance_factor: 0.03,
             iteration_number: 10,
             contiguous: true,
+            min_conn: false,
         }
     }
 }
@@ -1624,6 +1630,11 @@ impl MetisOptions {
 
     pub fn set_contiguous(mut self, contiguous: bool) -> Self {
         self.contiguous = contiguous;
+        self
+    }
+
+    pub fn set_min_conn(mut self, min_conn: bool) -> Self {
+        self.min_conn = min_conn;
         self
     }
 }
@@ -1690,6 +1701,7 @@ mod tests {
                 imbalance_factor: 1.02,
                 iteration_number: 100,
                 contiguous: true,
+                min_conn: true,
             }),
             non_main_mode_links: NonMainModeLinks::Include,
         };
@@ -1739,6 +1751,7 @@ mod tests {
                 imbalance_factor: 1.02,
                 iteration_number: 100,
                 contiguous: true,
+                min_conn: true,
             })
         );
         assert_eq!(
@@ -1887,6 +1900,7 @@ mod tests {
                 imbalance_factor: 1.1,
                 iteration_number: 100,
                 contiguous: false,
+                min_conn: false,
             })
         );
     }

@@ -34,7 +34,9 @@ links are partitioned. With `Include`, all nodes and links are partitioned regar
 October 2026. `Network::from_file_with_partitioning` always partitions all nodes and links. `contiguous: true` requires a connected
 graph, i.e. a connected main-mode network with `AssignAfterPartitioningToNearest`. Networks with separate components,
 e.g. transit stop nodes with only a loop link or a transit network that is not connected to the road network, need
-`contiguous: false` with `Include`. Before October 2026, the graph was built from the
+`contiguous: false` with `Include`. `min_conn: true` sets METIS's `MinConn` option, which tries to minimize the
+maximum number of neighbors of a partition (k-way only; it moves vertices at weak interfaces, i.e. interfaces with a
+small edge weight, and stops once the maximum is below 1.4 times the mean). Before October 2026, the graph was built from the
 directed links, with every incoming link turned into a loop. Network files partitioned with that version were computed
 from an invalid graph and should be partitioned again.
 
@@ -44,7 +46,11 @@ library's `rand()`, and without floating-point contraction (`-ffp-contract=off`)
 on every platform. Changing the fork, the seed or the METIS version changes the partitions. The state of the random
 number generator is shared by the whole process, so all calls to METIS are serialized.
 
-In every step, a partition waits for messages from its neighbors, i.e. the partitions it shares a link with. Messages
+In every step, a partition waits for messages from its neighbors, i.e. the partitions it shares a link with that can
+carry vehicles. Links that allow modes, but none of the `qsim.main_modes`, e.g. the links of a transit network whose
+vehicles are teleported, do not make partitions neighbors, unless a partition has no other links to other partitions
+(`SimNetworkPartition::find_neighbors`). Since every partition exchanges a message with each neighbor in every step,
+the partition with the most neighbors tends to set the pace of all. Messages
 from other partitions, e.g. teleported agents whose destination link lies in a partition that is not a neighbor, are
 only read if they arrive while the partition is waiting, and never if the partition has no neighbors at all. This
 happens if the network consists of components that are not connected by links and a component forms a partition of

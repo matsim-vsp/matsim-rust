@@ -40,6 +40,7 @@ fn main() {
                 imbalance_factor: 0.03,
                 iteration_number: 10,
                 contiguous: true,
+                min_conn: false,
             }),
         );
         let config = Config::default();
