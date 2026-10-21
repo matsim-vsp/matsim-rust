@@ -82,6 +82,7 @@ pub fn partition_subnetwork(
     .set_option(metis::option::UFactor(options.ufactor() as Idx))
     .set_option(metis::option::Seed(4711))
     .set_option(metis::option::Contig(options.contiguous))
+    .set_option(metis::option::MinConn(options.min_conn))
     .set_adjwgt(&metis_graph.adjwgt);
 
     if !metis_graph.vwgt.is_empty() {
@@ -309,7 +310,7 @@ mod tests {
     use macros::deterministic_id_test;
     use metis::Idx;
     use nohash_hasher::IntMap;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[deterministic_id_test]
     fn simple_graph() {
@@ -424,6 +425,31 @@ mod tests {
             .set_contiguous(false)
     }
 
+    #[deterministic_id_test]
+    fn min_conn_does_not_increase_the_maximum_number_of_neighbors() {
+        let network = andorra_network();
+        let max_neighbors = |options: &MetisOptions| {
+            let partitions = partition(&network, 16, options);
+            assert_eq!(network.nodes().len(), partitions.len());
+            let mut neighbors: BTreeMap<Idx, BTreeSet<Idx>> = BTreeMap::new();
+            for link in network.links() {
+                let (from, to) = (partitions[&link.from], partitions[&link.to]);
+                if from != to {
+                    neighbors.entry(from).or_default().insert(to);
+                    neighbors.entry(to).or_default().insert(from);
+                }
+            }
+            neighbors.values().map(BTreeSet::len).max().unwrap()
+        };
+
+        let without = max_neighbors(&andorra_options().set_min_conn(false));
+        let with = max_neighbors(&andorra_options());
+        assert!(
+            with <= without,
+            "max. neighbors with MinConn: {with}, without: {without}"
+        );
+    }
+
     /// The partition of each node by external id, independent of the internal ids.
     fn partitions_by_name(partitions: &IntMap<Id<Node>, Idx>) -> BTreeMap<String, Idx> {
         partitions
@@ -457,18 +483,18 @@ mod tests {
 
         assert_eq!(
             BTreeMap::from([
-                (0, 314),
-                (1, 276),
-                (2, 305),
+                (0, 313),
+                (1, 274),
+                (2, 306),
                 (3, 270),
                 (4, 272),
-                (5, 274),
+                (5, 276),
                 (6, 276),
                 (7, 272)
             ]),
             nodes_per_partition
         );
-        assert_eq!(517_327_694_060_400_677, hash);
+        assert_eq!(11496732953477376671, hash);
     }
 
     /// METIS calls are serialized, so that concurrent calls do not draw random numbers from each
@@ -638,7 +664,7 @@ mod tests {
             &PartitionMethod::Metis(
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::InLinkCapacity)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -655,7 +681,7 @@ mod tests {
             &PartitionMethod::Metis(
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::InLinkCount)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -673,7 +699,7 @@ mod tests {
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::InLinkCapacity)
                     .add_vertex_weight(VertexWeight::InLinkCount)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -690,7 +716,7 @@ mod tests {
             &PartitionMethod::Metis(
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::Constant)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -708,7 +734,7 @@ mod tests {
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::Constant)
                     .add_vertex_weight(VertexWeight::InLinkCount)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_iteration_number(100)
                     .set_contiguous(false),
             ),

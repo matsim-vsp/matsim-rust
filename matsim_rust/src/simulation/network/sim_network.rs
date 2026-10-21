@@ -92,6 +92,8 @@ pub struct SimNetworkPartition {
     candidates: Vec<Candidate>,
     veh_counter: usize,
     partition: u32,
+    // See `find_neighbors`.
+    neighbors: IntSet<u32>,
     clock: SimClock,
 }
 
@@ -164,7 +166,71 @@ impl SimNetworkPartition {
             .map(|n| (n.id.clone(), Self::create_sim_node(n, base_seed)))
             .collect();
 
-        SimNetworkPartition::build(sim_nodes, sim_links, partition, clock)
+        let neighbors = Self::find_neighbors(
+            global_network,
+            &link_ids,
+            partition,
+            &qsim_config.main_modes,
+        );
+        SimNetworkPartition::build(sim_nodes, sim_links, partition, neighbors, clock)
+    }
+
+    /// The partitions on the other side of the split links of this partition that can carry
+    /// vehicles. A partition exchanges a message with each of them in every time step and waits
+    /// for theirs.
+    ///
+    /// A split link that allows modes, but none of `main_modes`, carries no vehicles, e.g. a link
+    /// of a transit network whose vehicles are teleported. It does not make the partitions on its
+    /// two sides neighbors. Links without any mode, and all links if there are no main modes, do.
+    /// If no split link of this partition can carry vehicles, all of them count, so that the
+    /// partition still waits for others and reads their messages (e.g. teleported agents) during
+    /// the simulation, see [`NetMessageBroker::take_unprocessed_messages`].
+    ///
+    /// [`NetMessageBroker::take_unprocessed_messages`]: crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker::take_unprocessed_messages
+    fn find_neighbors(
+        global_network: &Network,
+        link_ids: &[&Id<Link>],
+        partition: u32,
+        main_modes: &[String],
+    ) -> IntSet<u32> {
+        // Only look up the mode ids. A main mode without an id is allowed on no link.
+        let main_modes: IntSet<Id<String>> = main_modes
+            .iter()
+            .filter_map(|mode| Id::try_get_from_ext(mode))
+            .collect();
+        let carries_vehicles = |link: &Link| {
+            main_modes.is_empty()
+                || link.modes.is_empty()
+                || link.modes.iter().any(|mode| main_modes.contains(mode))
+        };
+        let neighbor = |link: &Link| {
+            let from_part = global_network.get_node(&link.from).partition;
+            let to_part = global_network.get_node(&link.to).partition;
+            match (from_part == partition, to_part == partition) {
+                (true, false) => Some(to_part),
+                (false, true) => Some(from_part),
+                _ => None,
+            }
+        };
+
+        let split_links: Vec<&Link> = link_ids
+            .iter()
+            .map(|id| global_network.get_link(id))
+            .filter(|link| neighbor(link).is_some())
+            .collect();
+        let neighbors: IntSet<u32> = split_links
+            .iter()
+            .filter(|link| carries_vehicles(link))
+            .filter_map(|link| neighbor(link))
+            .collect();
+        if neighbors.is_empty() {
+            split_links
+                .iter()
+                .filter_map(|link| neighbor(link))
+                .collect()
+        } else {
+            neighbors
+        }
     }
 
     #[cfg(test)]
@@ -222,6 +288,7 @@ impl SimNetworkPartition {
         nodes: IntMap<Id<Node>, SimNode>,
         links: IntMap<Id<Link>, SimLink>,
         partition: u32,
+        neighbors: IntSet<u32>,
         clock: SimClock,
     ) -> Self {
         Self {
@@ -233,6 +300,7 @@ impl SimNetworkPartition {
             candidates: Vec::new(),
             veh_counter: 0,
             partition,
+            neighbors,
             clock,
         }
     }
@@ -241,18 +309,9 @@ impl SimNetworkPartition {
         self.partition
     }
 
+    /// The partitions this partition exchanges vehicles with, see [`Self::find_neighbors`].
     pub fn neighbors(&self) -> IntSet<u32> {
-        let distinct_partitions: IntSet<u32> = self
-            .links
-            .values()
-            .filter(|link| match link {
-                SimLink::Local(_) => false,
-                SimLink::In(_) => true,
-                SimLink::Out(_) => true,
-            })
-            .map(|link| link.neighbor_part())
-            .collect();
-        distinct_partitions
+        self.neighbors.clone()
     }
 
     pub fn active_nodes(&self) -> usize {
@@ -776,6 +835,7 @@ mod tests {
     use crate::test_utils;
     use assert_approx_eq::assert_approx_eq;
     use macros::deterministic_id_test;
+    use nohash_hasher::IntSet;
     use rand::{RngExt, SeedableRng};
     use rand_xoshiro::Xoshiro256PlusPlus;
     use std::cell::RefCell;
@@ -1958,6 +2018,45 @@ mod tests {
         assert!(neighbors.contains(&2));
         assert!(neighbors.contains(&3));
         assert!(!neighbors.contains(&4));
+    }
+
+    #[deterministic_id_test]
+    fn neighbors_only_over_links_with_a_main_mode() {
+        let mut net = Network::new();
+        let node = Node::new(Id::create("node"), Coordinate::default(), 0, 1);
+        let car_node = Node::new(Id::create("car-node"), Coordinate::default(), 1, 1);
+        let pt_node = Node::new(Id::create("pt-node"), Coordinate::default(), 2, 1);
+        let other_node = Node::new(Id::create("other-node"), Coordinate::default(), 3, 1);
+
+        let mut car_link = Link::new_with_default(Id::create("car-link"), &car_node, &node);
+        car_link.modes = IntSet::from_iter([Id::create("car"), Id::create("bike")]);
+        let mut pt_link = Link::new_with_default(Id::create("pt-link"), &node, &pt_node);
+        pt_link.modes = IntSet::from_iter([Id::create("pt")]);
+        let link_without_modes =
+            Link::new_with_default(Id::create("link-without-modes"), &other_node, &node);
+
+        net.add_node(node);
+        net.add_node(car_node);
+        net.add_node(pt_node);
+        net.add_node(other_node);
+        net.add_link(car_link);
+        net.add_link(pt_link);
+        net.add_link(link_without_modes);
+
+        // main modes: car
+        let config = test_utils::config();
+        let sim_net = SimNetworkPartition::from_network_for_test(&net, 0, &config);
+        assert_eq!(IntSet::from_iter([1, 3]), sim_net.neighbors());
+
+        // a partition whose split links carry no vehicles keeps them as neighbors
+        let pt_net = SimNetworkPartition::from_network_for_test(&net, 2, &config);
+        assert_eq!(IntSet::from_iter([0]), pt_net.neighbors());
+
+        // without main modes, every split link counts
+        let mut config = test_utils::config();
+        config.qsim_mut().main_modes = vec![];
+        let sim_net = SimNetworkPartition::from_network_for_test(&net, 0, &config);
+        assert_eq!(IntSet::from_iter([1, 2, 3]), sim_net.neighbors());
     }
 
     fn create_three_node_sim_network_with_partition(

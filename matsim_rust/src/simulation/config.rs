@@ -1559,12 +1559,17 @@ pub struct MetisOptions {
     pub vertex_weight: Vec<VertexWeight>,
     #[serde(default = "edge_weight_constant")]
     pub edge_weight: EdgeWeight,
-    #[serde(default = "f32_value_0_03")]
+    /// The largest weight of a partition relative to the mean weight of all partitions, as METIS's load imbalance:
+    /// 1.03 allows partitions 3 % heavier than the mean. Must be at least 1.
+    #[serde(default = "f32_value_1_03")]
     pub imbalance_factor: f32,
     #[serde(default = "u32_value_100")]
     pub iteration_number: u32,
     #[serde(default = "bool_value_false")]
     pub contiguous: bool,
+    /// Makes METIS try to minimize the maximum number of neighbors of a partition.
+    #[serde(default = "bool_value_true")]
+    pub min_conn: bool,
 }
 
 #[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize)]
@@ -1586,9 +1591,10 @@ impl Default for MetisOptions {
         MetisOptions {
             vertex_weight: vec![],
             edge_weight: EdgeWeight::Constant,
-            imbalance_factor: 0.03,
+            imbalance_factor: 1.03,
             iteration_number: 10,
             contiguous: true,
+            min_conn: true,
         }
     }
 }
@@ -1614,22 +1620,29 @@ impl MetisOptions {
         self
     }
 
+    /// METIS's `ufactor`: the allowed excess over the mean weight in thousandths, at least 1.
     pub fn ufactor(&self) -> usize {
-        let val = (self.imbalance_factor * 1000.) as usize;
-        if val == 0 {
-            return 1;
-        };
-        val
+        assert!(
+            self.imbalance_factor >= 1.,
+            "imbalance_factor must be at least 1, e.g. 1.03 to allow partitions 3 % heavier than the mean, but is {}",
+            self.imbalance_factor
+        );
+        (((self.imbalance_factor - 1.) * 1000.).round() as usize).max(1)
     }
 
     pub fn set_contiguous(mut self, contiguous: bool) -> Self {
         self.contiguous = contiguous;
         self
     }
+
+    pub fn set_min_conn(mut self, min_conn: bool) -> Self {
+        self.min_conn = min_conn;
+        self
+    }
 }
 
-fn f32_value_0_03() -> f32 {
-    0.03
+fn f32_value_1_03() -> f32 {
+    1.03
 }
 
 fn f64_value_1_0() -> f64 {
@@ -1646,6 +1659,10 @@ fn u32_value_100() -> u32 {
 
 fn bool_value_false() -> bool {
     false
+}
+
+fn bool_value_true() -> bool {
+    true
 }
 
 fn default_vertex_weight() -> Vec<VertexWeight> {
@@ -1690,6 +1707,7 @@ mod tests {
                 imbalance_factor: 1.02,
                 iteration_number: 100,
                 contiguous: true,
+                min_conn: true,
             }),
             non_main_mode_links: NonMainModeLinks::Include,
         };
@@ -1739,6 +1757,7 @@ mod tests {
                 imbalance_factor: 1.02,
                 iteration_number: 100,
                 contiguous: true,
+                min_conn: true,
             })
         );
         assert_eq!(
@@ -1887,6 +1906,7 @@ mod tests {
                 imbalance_factor: 1.1,
                 iteration_number: 100,
                 contiguous: false,
+                min_conn: true,
             })
         );
     }
@@ -2204,36 +2224,24 @@ mod tests {
 
     #[test]
     fn test_imbalance_factor() {
-        assert_eq!(
-            MetisOptions::default().set_imbalance_factor(0.03).ufactor(),
-            30
-        );
-        assert_eq!(
+        let ufactor = |factor| {
             MetisOptions::default()
-                .set_imbalance_factor(0.001)
-                .ufactor(),
-            1
-        );
-        assert_eq!(
-            MetisOptions::default()
-                .set_imbalance_factor(0.00001)
-                .ufactor(),
-            1
-        );
-        assert_eq!(
-            MetisOptions::default()
-                .set_imbalance_factor(0.00000)
-                .ufactor(),
-            1
-        );
-        assert_eq!(
-            MetisOptions::default().set_imbalance_factor(-1.).ufactor(),
-            1
-        );
-        assert_eq!(
-            MetisOptions::default().set_imbalance_factor(1.1).ufactor(),
-            1100
-        );
+                .set_imbalance_factor(factor)
+                .ufactor()
+        };
+        assert_eq!(30, MetisOptions::default().ufactor());
+        assert_eq!(30, ufactor(1.03));
+        assert_eq!(100, ufactor(1.1));
+        assert_eq!(1100, ufactor(2.1));
+        assert_eq!(1, ufactor(1.001));
+        assert_eq!(1, ufactor(1.0001));
+        assert_eq!(1, ufactor(1.));
+    }
+
+    #[test]
+    #[should_panic(expected = "imbalance_factor must be at least 1")]
+    fn imbalance_factor_below_one_is_rejected() {
+        MetisOptions::default().set_imbalance_factor(0.03).ufactor();
     }
 
     fn write_temp_config(yaml: &str) -> NamedTempFile {
