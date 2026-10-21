@@ -1560,18 +1560,15 @@ pub struct MetisOptions {
     #[serde(default = "edge_weight_constant")]
     pub edge_weight: EdgeWeight,
     /// The largest weight of a partition relative to the mean weight of all partitions, as METIS's load imbalance:
-    /// 1.03 allows partitions 3 % heavier than the mean. Must be at least 1. Before October 2026, the value was the
-    /// allowed excess itself (0.03 for 3 %), so that the common 1.1 allowed partitions 2.1 times as heavy as the mean.
+    /// 1.03 allows partitions 3 % heavier than the mean. Must be at least 1.
     #[serde(default = "f32_value_1_03")]
     pub imbalance_factor: f32,
     #[serde(default = "u32_value_100")]
     pub iteration_number: u32,
     #[serde(default = "bool_value_false")]
     pub contiguous: bool,
-    /// Makes METIS try to minimize the maximum number of neighbors of a partition (`MinConn`, only
-    /// for k-way partitioning). Every partition exchanges a message with each neighbor in every
-    /// time step, so the partition with the most neighbors tends to set the pace.
-    #[serde(default = "bool_value_false")]
+    /// Makes METIS try to minimize the maximum number of neighbors of a partition.
+    #[serde(default = "bool_value_true")]
     pub min_conn: bool,
 }
 
@@ -1597,7 +1594,7 @@ impl Default for MetisOptions {
             imbalance_factor: 1.03,
             iteration_number: 10,
             contiguous: true,
-            min_conn: false,
+            min_conn: true,
         }
     }
 }
@@ -1662,6 +1659,10 @@ fn u32_value_100() -> u32 {
 
 fn bool_value_false() -> bool {
     false
+}
+
+fn bool_value_true() -> bool {
+    true
 }
 
 fn default_vertex_weight() -> Vec<VertexWeight> {

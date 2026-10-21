@@ -442,8 +442,8 @@ mod tests {
             neighbors.values().map(BTreeSet::len).max().unwrap()
         };
 
-        let without = max_neighbors(&andorra_options());
-        let with = max_neighbors(&andorra_options().set_min_conn(true));
+        let without = max_neighbors(&andorra_options().set_min_conn(false));
+        let with = max_neighbors(&andorra_options());
         assert!(
             with <= without,
             "max. neighbors with MinConn: {with}, without: {without}"
