@@ -1906,7 +1906,7 @@ mod tests {
                 imbalance_factor: 1.1,
                 iteration_number: 100,
                 contiguous: false,
-                min_conn: false,
+                min_conn: true,
             })
         );
     }

@@ -483,18 +483,18 @@ mod tests {
 
         assert_eq!(
             BTreeMap::from([
-                (0, 314),
-                (1, 276),
-                (2, 305),
+                (0, 313),
+                (1, 274),
+                (2, 306),
                 (3, 270),
                 (4, 272),
-                (5, 274),
+                (5, 276),
                 (6, 276),
                 (7, 272)
             ]),
             nodes_per_partition
         );
-        assert_eq!(517_327_694_060_400_677, hash);
+        assert_eq!(11496732953477376671, hash);
     }
 
     /// METIS calls are serialized, so that concurrent calls do not draw random numbers from each
