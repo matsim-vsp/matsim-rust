@@ -13,7 +13,7 @@ use crate::simulation::engines::timetable_transit_engine::TimetableTransitEngine
 use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::{
     PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
-    PersonLeavesVehicleEventBuilder,
+    PersonLeavesVehicleEventBuilder, PersonStuckEventBuilder,
 };
 use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::InternalSyncMessage;
@@ -332,7 +332,9 @@ impl<C: SimCommunicator> LegEngine<C> {
         let now_time = self.clock.tick_to_time(now);
         let mut ret_agents = Vec::with_capacity(agents.len());
         for agent in agents {
-            self.publish_person_arrival(now_time, &agent);
+            if agent.curr_leg().infeasible_trip_reason().is_none() {
+                self.publish_person_arrival(now_time, &agent);
+            }
             ret_agents.push(agent);
         }
         ret_agents
@@ -373,6 +375,23 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .build()
                 .unwrap(),
         );
+
+        if let Some(reason) = leg.infeasible_trip_reason() {
+            self.comp_env.events_manager_borrow_mut().process_event(
+                &PersonStuckEventBuilder::default()
+                    .time(event_time)
+                    .person(agent.id().clone())
+                    .link(Some(route.start_link().clone()))
+                    .leg_mode(Some(leg.mode.clone()))
+                    .reason(Some(reason))
+                    .build()
+                    .unwrap(),
+            );
+            // Use the existing partition handoff to resume at the next activity. The marker
+            // suppresses both travelled and arrival events; no vehicle performs this trip.
+            self.pass_to_teleportation(now, event_time, agent);
+            return;
+        }
 
         match self.find_responsible_engine(&agent) {
             Leg => self.pass_to_leg(now, event_time, agent, true),

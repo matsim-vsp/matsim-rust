@@ -3,7 +3,7 @@ use crate::simulation::config::Config;
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::utils::calc_distance;
 use crate::simulation::replanning::routing::{
-    Facility, RoutingError, RoutingRequestBuilder, TripRouter,
+    Facility, RoutingError, RoutingRequestBuilder, TripRouter, walking_travel_time,
 };
 use crate::simulation::scenario::ControllerScenario;
 use crate::simulation::scenario::facilities::ActivityFacilities;
@@ -120,9 +120,65 @@ fn check_and_adapt_trip(
         return Ok(());
     };
 
-    let new_elements = route_trip(context, person, &working_plan, span, &mode, trip_router)?;
+    let new_elements = match route_trip(context, person, working_plan, span, &mode, trip_router) {
+        Ok(elements) => elements,
+        Err(error)
+            if context.config.routing().discard_infeasible_trips && is_infeasible_route(&error) =>
+        {
+            let walk = Id::get_from_ext("walk");
+            let fallback =
+                if mode != walk && context.config.routing().max_walk_duration_seconds.is_some() {
+                    match route_trip(context, person, working_plan, span, &walk, trip_router) {
+                        Ok(elements) => Some(elements),
+                        Err(error) if is_infeasible_route(&error) => None,
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    None
+                };
+            if let Some(elements) = fallback {
+                tracing::warn!(person = %person.id(), trip_index, original_mode = %mode,
+                    "Replaced infeasible trip with a bounded direct walk");
+                elements
+            } else {
+                tracing::warn!(person = %person.id(), trip_index, reason = %error,
+                    "Trip will be abandoned without an arrival event");
+                let origin = span.origin(&working_plan.elements);
+                let destination = span.destination(&working_plan.elements);
+                // This route carries the next activity's partition, not a performed journey.
+                let route = InternalRoute::Generic(InternalGenericRoute::new(
+                    origin.link_id().clone(),
+                    destination.link_id().clone(),
+                    Some(std::time::Duration::ZERO),
+                    Some(0.0),
+                    None,
+                ));
+                let mut leg = InternalLeg::new(
+                    route,
+                    mode.external(),
+                    mode.external(),
+                    std::time::Duration::ZERO,
+                    None,
+                );
+                leg.attributes
+                    .insert(InternalLeg::INFEASIBLE_TRIP_REASON, error.to_string());
+                vec![InternalPlanElement::Leg(leg)]
+            }
+        }
+        Err(error) => return Err(error),
+    };
+
     span.replace_trip_elements(&mut working_plan.to_mut().elements, new_elements);
     Ok(())
+}
+
+fn is_infeasible_route(error: &TripPreparationError) -> bool {
+    matches!(
+        error,
+        TripPreparationError::Routing(
+            RoutingError::NoPath { .. } | RoutingError::WalkingLimitExceeded { .. }
+        )
+    )
 }
 
 pub(crate) fn route_trip(
@@ -277,6 +333,25 @@ fn trip_is_valid(
     mode: &Id<String>,
     legs: &[&InternalLeg],
 ) -> bool {
+    if !context.config.routing().network_access_egress
+        && is_network_mode(context, mode)
+        && (legs.len() != 1 || legs[0].mode != *mode)
+    {
+        return false;
+    }
+    // Retry previously abandoned trips against this iteration's routing conditions.
+    if legs
+        .iter()
+        .any(|leg| leg.infeasible_trip_reason().is_some())
+    {
+        return false;
+    }
+    if let Some(maximum) = context.config.routing().max_walk_duration_seconds
+        && !walking_travel_time(span.trip_elements(elements))
+            .is_ok_and(|walking| walking <= std::time::Duration::from_secs(maximum))
+    {
+        return false;
+    }
     let any_leg_wrong_routing_mode = legs
         .iter()
         .any(|leg| leg.routing_mode.as_ref() != Some(mode));
@@ -548,6 +623,40 @@ mod tests {
         assert_eq!(
             Some(travel_time),
             legs[0].route.as_ref().unwrap().as_generic().trav_time()
+        );
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_rechecks_already_routed_plans_in_use_plans_mode() {
+        let duration = Duration::from_secs(3601);
+        let plan = routed_plan("walk", Some(duration), Some(duration));
+        let person_id = Id::create("long-walker");
+        let mut config = Config::default();
+        config.routing_mut().max_walk_duration_seconds = Some(3600);
+        let mut scenario = scenario_with_parts(
+            sequential_network(2, None),
+            Garage::default(),
+            Population {
+                persons: IntMap::from_iter([(
+                    person_id.clone(),
+                    InternalPerson::new(person_id.clone(), plan.clone()),
+                )]),
+            },
+            config,
+        );
+        let error = prepare_for_mobsim(&mut scenario, &empty_router()).unwrap_err();
+        assert_eq!(error.issues().len(), 1);
+        assert_eq!(error.issues()[0].person_id, "long-walker");
+        assert!(
+            error.issues()[0]
+                .message
+                .contains("No routing module found")
+        );
+        assert_eq!(
+            scenario.population.persons[&person_id]
+                .selected_plan()
+                .unwrap(),
+            &plan
         );
     }
 

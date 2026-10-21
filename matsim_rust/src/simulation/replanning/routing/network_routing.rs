@@ -35,6 +35,17 @@ impl RoutingModule for NetworkRoutingModule {
         let access_link = request.from.modal_link(&self.mode).clone();
         let egress_link = request.to.modal_link(&self.mode).clone();
 
+        if !self.scenario.config.routing().network_access_egress {
+            self.network_leg(
+                &request,
+                &access_link,
+                &egress_link,
+                request.departure_time,
+                &mut result,
+            )?;
+            return Ok(result);
+        }
+
         // ====== route access leg
         let mut now = self.access_routing(&request, &access_link, &mut result)?;
 

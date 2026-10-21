@@ -787,6 +787,12 @@ impl InternalPtRoute {
 }
 
 impl InternalLeg {
+    pub(crate) const INFEASIBLE_TRIP_REASON: &str = "matsim-rust:infeasibleTripReason";
+
+    pub(crate) fn infeasible_trip_reason(&self) -> Option<String> {
+        self.attributes.get(Self::INFEASIBLE_TRIP_REASON)
+    }
+
     pub fn new(
         route: InternalRoute,
         mode: &str,

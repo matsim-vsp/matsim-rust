@@ -543,7 +543,13 @@ impl ControllerBuilder {
                 config.transit().route_selector_settings.clone(),
                 config.computational_setup().random_seed,
             )
-            .with_transfer_penalty(config.transit().transfer_penalty.clone());
+            .with_transfer_penalty(config.transit().transfer_penalty.clone())
+            .with_max_walk_duration(
+                config
+                    .routing()
+                    .max_walk_duration_seconds
+                    .map(std::time::Duration::from_secs),
+            );
             if config.transit().use_intermodal_access_egress {
                 if config.transit().intermodal_access_egress.is_empty() {
                     return Err("transit.use_intermodal_access_egress requires at least one transit.intermodal_access_egress entry".to_owned());
@@ -599,7 +605,12 @@ impl ControllerBuilder {
             routers.insert(mode, Arc::new(transit_router));
         }
 
-        Ok(TripRouter::new(routers))
+        Ok(TripRouter::new(routers).with_max_walk_duration(
+            config
+                .routing()
+                .max_walk_duration_seconds
+                .map(std::time::Duration::from_secs),
+        ))
     }
 }
 

@@ -1422,10 +1422,20 @@ register_override!("output.analysis.person_cost_attribute", |config, value| {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Routing {
     pub mode: RoutingMode,
+    /// Maximum total walking time per trip, including access, transfers and egress.
+    /// Absent preserves MATSim's unrestricted walking behavior.
+    #[serde(default)]
+    pub max_walk_duration_seconds: Option<u64>,
+    /// Try a bounded direct walk after a routing failure, then abandon only that trip.
+    #[serde(default)]
+    pub discard_infeasible_trips: bool,
     #[serde(default)]
     pub network_modes: Vec<String>,
     #[serde(default = "default_access_egress_mode")]
     pub access_egress_mode: String,
+    /// Include access/egress legs around network trips. Disable for link-to-link driving.
+    #[serde(default = "default_network_access_egress")]
+    pub network_access_egress: bool,
     #[serde(
         default = "default_teleported_mode_params",
         deserialize_with = "deserialize_teleported_mode_params"
@@ -1442,6 +1452,10 @@ pub struct TeleportedParams {
 
 fn default_access_egress_mode() -> String {
     "walk".to_string()
+}
+
+fn default_network_access_egress() -> bool {
+    true
 }
 
 fn default_walk_teleported_params() -> TeleportedParams {
@@ -1488,12 +1502,27 @@ register_override!("routing.mode", |config, value| {
     };
 });
 
+register_override!("routing.max_walk_duration_seconds", |config, value| {
+    config.routing_mut().max_walk_duration_seconds = Some(value.parse().unwrap());
+});
+
+register_override!("routing.discard_infeasible_trips", |config, value| {
+    config.routing_mut().discard_infeasible_trips = value.parse().unwrap();
+});
+
+register_override!("routing.network_access_egress", |config, value| {
+    config.routing_mut().network_access_egress = value.parse().unwrap();
+});
+
 impl Default for Routing {
     fn default() -> Self {
         Routing {
             mode: RoutingMode::UsePlans,
+            max_walk_duration_seconds: None,
+            discard_infeasible_trips: false,
             network_modes: Vec::new(),
             access_egress_mode: default_access_egress_mode(),
+            network_access_egress: true,
             teleported_mode_params: default_teleported_mode_params(),
         }
     }
@@ -3650,8 +3679,11 @@ modules:
         });
         config.set_routing(Routing {
             mode: RoutingMode::UsePlans,
+            max_walk_duration_seconds: None,
+            discard_infeasible_trips: false,
             network_modes: Vec::new(),
             access_egress_mode: "walk".to_string(),
+            network_access_egress: true,
             teleported_mode_params: vec![TeleportedParams {
                 mode: "walk".to_string(),
                 beeline_distance_factor: 1.3,
@@ -3666,6 +3698,21 @@ modules:
         let mut config = base_config();
         config.apply_overrides(&[("network.path".to_string(), "new_net".to_string())]);
         assert_eq!(config.network().path, Some(PathBuf::from("new_net")));
+    }
+
+    #[test]
+    fn walk_limit_config_and_override_preserve_the_optional_default() {
+        let mut config = Config::default();
+        assert_eq!(config.routing().max_walk_duration_seconds, None);
+        config.apply_overrides(&[(
+            "routing.max_walk_duration_seconds".to_owned(),
+            "3600".to_owned(),
+        )]);
+        assert_eq!(config.routing().max_walk_duration_seconds, Some(3600));
+        let yaml = "modules:\n  routing:\n    type: Routing\n    mode: UsePlans\n    max_walk_duration_seconds: 3600\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.routing().max_walk_duration_seconds, Some(3600));
+        assert!(serde_yaml::from_str::<Config>(&yaml.replace("3600", "-1")).is_err());
     }
 
     #[test]

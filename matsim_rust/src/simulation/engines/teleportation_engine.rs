@@ -161,6 +161,15 @@ impl TeleportationEngine {
     pub fn do_step(&mut self, now: Tick) -> Vec<SimulationAgent> {
         let mut teleportation_agents = self.queue.pop(self.clock.tick_to_time(now));
         for teleporting_agent in &mut teleportation_agents {
+            if teleporting_agent
+                .agent
+                .curr_leg()
+                .infeasible_trip_reason()
+                .is_some()
+            {
+                teleporting_agent.agent.mark_stuck();
+                continue;
+            }
             let agent = teleporting_agent.agent();
 
             match agent.curr_leg().route.as_ref().unwrap() {

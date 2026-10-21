@@ -203,7 +203,9 @@ fn route(router: &TripRouter, population: &Population, request: RouteRequest) ->
         Ok(elements) => elements,
         Err(error) => {
             let category = match error {
-                RoutingError::NoPath { .. } => "no_path",
+                RoutingError::NoPath { .. } | RoutingError::WalkingLimitExceeded { .. } => {
+                    "no_path"
+                }
                 RoutingError::MissingModule { .. } | RoutingError::Unsupported { .. } => {
                     "invalid_request"
                 }

@@ -45,6 +45,7 @@ pub mod utils;
 pub struct TripRouter {
     modules: IntMap<Id<String>, Arc<dyn RoutingModule>>,
     route_proposals: Arc<ArcSwap<RouteProposalTable>>,
+    max_walk_duration: Option<Duration>,
 }
 
 const ROUTE_PROPOSAL_MAX_ENTRIES: usize = 4096;
@@ -55,6 +56,7 @@ impl Default for TripRouter {
         Self {
             modules: IntMap::default(),
             route_proposals: Arc::new(ArcSwap::from_pointee(RouteProposalTable::default())),
+            max_walk_duration: None,
         }
     }
 }
@@ -64,7 +66,13 @@ impl TripRouter {
         Self {
             modules,
             route_proposals: Arc::new(ArcSwap::from_pointee(RouteProposalTable::default())),
+            max_walk_duration: None,
         }
+    }
+
+    pub(crate) fn with_max_walk_duration(mut self, maximum: Option<Duration>) -> Self {
+        self.max_walk_duration = maximum;
+        self
     }
 
     pub fn has_module(&self, mode: &Id<String>) -> bool {
@@ -98,6 +106,17 @@ impl TripRouter {
                 mode: mode.external().to_string(),
             })?
             .calc_route(request)?;
+
+        if let Some(maximum) = self.max_walk_duration {
+            let walking = walking_travel_time(&elements)?;
+            if walking > maximum {
+                return Err(RoutingError::WalkingLimitExceeded {
+                    mode: mode.external().to_owned(),
+                    walking,
+                    maximum,
+                });
+            }
+        }
 
         for element in &mut elements {
             if let InternalPlanElement::Leg(leg) = element {
@@ -259,6 +278,12 @@ pub enum RoutingError {
         mode: String,
         from: String,
         to: String,
+    },
+    #[error("No feasible {mode} route: total walking time {walking:?} exceeds limit {maximum:?}")]
+    WalkingLimitExceeded {
+        mode: String,
+        walking: Duration,
+        maximum: Duration,
     },
     #[error("Routing for mode {mode} produced elements without a determinable end time")]
     MissingEndTime { mode: String },
@@ -481,6 +506,7 @@ pub struct TransitRoutingModule {
     cell_size: f64,
     walk_speed: f64,
     walk_distance_factor: f64,
+    max_walk_duration: Option<Duration>,
     garage: Arc<Garage>,
     fallback: Option<Arc<dyn RoutingModule>>,
     transfer_construction: TransferConstruction,
@@ -608,6 +634,7 @@ struct TransitPathState {
     access_distance: f64,
     access_route: Option<Arc<Vec<InternalPlanElement>>>,
     access_time: Duration,
+    walking_time: Duration,
 }
 
 fn reconstruct_transit_rides(state_id: u64, states: &[TransitPathState]) -> Vec<Ride> {
@@ -848,13 +875,16 @@ impl RoutingModule for TransitRoutingModule {
             )
         };
         let Some(path) = best else {
-            if !access_stops.is_empty() && !egress_stops.is_empty() {
+            if !access_stops.is_empty()
+                && !egress_stops.is_empty()
+                && self.walking_allowed(direct_walk_time)
+            {
                 return Ok(vec![direct_walk()]);
             }
-            // With no nearby transit stops, SILO expects a car trip instead of teleporting across the city on foot.
+            // When transit and permitted walking cannot connect the endpoints, try a car trip.
             // But a car trip is only a legitimate answer for an agent that declares owning one
             // and has a car to drive. Everyone else gets the no-path outcome, which the caller
-            // turns into a walking trip.
+            // must report as an infeasible trip.
             if let Some(fallback) = &self.fallback
                 && self.permits_car_fallback(&request)?
             {
@@ -880,13 +910,14 @@ impl RoutingModule for TransitRoutingModule {
                 mode: self.mode.external().to_string(),
             });
         };
-        if direct_walk_time.as_secs_f64()
-            < self.path_cost_equivalent_seconds_with_feedback(
-                &path,
-                request.departure_time,
-                &routing_params,
-                &capacity_feedback,
-            )
+        if self.walking_allowed(direct_walk_time)
+            && direct_walk_time.as_secs_f64()
+                < self.path_cost_equivalent_seconds_with_feedback(
+                    &path,
+                    request.departure_time,
+                    &routing_params,
+                    &capacity_feedback,
+                )
         {
             return Ok(vec![direct_walk()]);
         }
@@ -899,6 +930,63 @@ impl RoutingModule for TransitRoutingModule {
 }
 
 impl TransitRoutingModule {
+    pub(crate) fn with_max_walk_duration(mut self, maximum: Option<Duration>) -> Self {
+        self.max_walk_duration = maximum;
+        self
+    }
+
+    fn walking_allowed(&self, duration: Duration) -> bool {
+        self.max_walk_duration
+            .is_none_or(|maximum| duration <= maximum)
+    }
+
+    fn walking_after_boarding(
+        &self,
+        state: &TransitPathState,
+        transfer_time: Duration,
+        chained: bool,
+        walking_budget: Option<Duration>,
+    ) -> Duration {
+        if walking_budget.is_none() {
+            return Duration::ZERO;
+        }
+        if state.ride_count == 0 || chained {
+            state.walking_time
+        } else {
+            state
+                .walking_time
+                .saturating_add(transfer_time.saturating_sub(RAPTOR_TRANSFER_WALK_MARGIN))
+        }
+    }
+
+    fn feeder_walking_time(&self, feeder: &FeederStop) -> Duration {
+        if self.max_walk_duration.is_none() {
+            return Duration::ZERO;
+        }
+        feeder.route.as_ref().map_or_else(
+            || self.walk_time(feeder.distance),
+            |route| walking_travel_time(route).expect("feeder walking times were validated"),
+        )
+    }
+
+    fn path_walking_time(&self, path: &TransitPath) -> Duration {
+        let feeder_time = |route: &Option<Arc<Vec<InternalPlanElement>>>, distance| {
+            route.as_ref().map_or_else(
+                || self.walk_time(distance),
+                |route| walking_travel_time(route).expect("feeder walking times were validated"),
+            )
+        };
+        let mut walking = feeder_time(&path.access_route, path.access_distance)
+            .saturating_add(feeder_time(&path.egress_route, path.egress_distance));
+        for ride in &path.rides {
+            if let Some((_, _, duration)) = ride.transfer_before {
+                walking =
+                    walking.saturating_add(duration.saturating_sub(RAPTOR_TRANSFER_WALK_MARGIN));
+            }
+        }
+        walking
+    }
+
     pub(crate) fn with_capacity_feedback_snapshot(
         mut self,
         snapshot: Arc<ArcSwap<BTreeMap<TransitSegment, TransitSegmentObservation>>>,
@@ -1039,6 +1127,9 @@ impl TransitRoutingModule {
                     Err(RoutingError::NoPath { .. }) => continue,
                     Err(error) => return Err(error),
                 };
+                if self.max_walk_duration.is_some() {
+                    walking_travel_time(&route)?;
+                }
                 let feeder_time = plan_travel_time(&route);
                 if feeder_link != actual_link || !connector_time.is_zero() {
                     let connector = InternalPlanElement::Leg(InternalLeg::new(
@@ -1084,7 +1175,13 @@ impl TransitRoutingModule {
                     disutility,
                     route: Some(Arc::new(route)),
                 };
-                if self.mode_selection == IntermodalModeSelection::LeastCostPerStop {
+                if !self.walking_allowed(self.feeder_walking_time(&candidate)) {
+                    continue;
+                }
+                // With a walking budget, retain feeder modes for joint access/egress selection.
+                if self.mode_selection == IntermodalModeSelection::LeastCostPerStop
+                    && self.max_walk_duration.is_none()
+                {
                     if let Some(index) = selected
                         .iter()
                         .position(|old: &FeederStop| old.stop == candidate.stop)
@@ -1474,6 +1571,7 @@ impl TransitRoutingModule {
             cell_size: Self::CELL_SIZE,
             walk_speed: walk_speed.max(0.1),
             walk_distance_factor,
+            max_walk_duration: None,
             garage,
             fallback,
             transfer_construction,
@@ -2419,6 +2517,30 @@ impl TransitRoutingModule {
         routing_params: &ResolvedRoutingParams,
         capacity_feedback: &BTreeMap<TransitSegment, TransitSegmentObservation>,
     ) -> Option<TransitPath> {
+        // A feasible unconstrained optimum is already optimal under the walking limit.
+        // Avoid carrying a third search resource for ordinary trips on large timetables.
+        let candidates = self
+            .search_paths_for_destinations(
+                std::slice::from_ref(destination),
+                &[egress_stops.to_vec()],
+                departure_time,
+                access_stops,
+                routing_params,
+                capacity_feedback,
+                None,
+            )
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect::<Vec<_>>();
+        let best = self.select_best_path_from_candidates(
+            &candidates,
+            departure_time,
+            routing_params,
+            capacity_feedback,
+        )?;
+        if self.max_walk_duration.is_none() || self.walking_allowed(self.path_walking_time(&best)) {
+            return Some(best);
+        }
         let candidates = self.find_paths_with_feeders(
             destination,
             departure_time,
@@ -2532,6 +2654,27 @@ impl TransitRoutingModule {
         routing_params: &ResolvedRoutingParams,
         capacity_feedback: &BTreeMap<TransitSegment, TransitSegmentObservation>,
     ) -> Vec<(usize, TransitPath)> {
+        self.search_paths_for_destinations(
+            destinations,
+            egress_stops_by_destination,
+            departure_time,
+            access_stops,
+            routing_params,
+            capacity_feedback,
+            self.max_walk_duration,
+        )
+    }
+
+    fn search_paths_for_destinations(
+        &self,
+        destinations: &[Coordinate],
+        egress_stops_by_destination: &[Vec<FeederStop>],
+        departure_time: SimTime,
+        access_stops: &[FeederStop],
+        routing_params: &ResolvedRoutingParams,
+        capacity_feedback: &BTreeMap<TransitSegment, TransitSegmentObservation>,
+        walking_budget: Option<Duration>,
+    ) -> Vec<(usize, TransitPath)> {
         if self.leg_only_handling == IntermodalLegOnlyHandling::Forbid
             && !self.may_reach_any_egress(access_stops, egress_stops_by_destination)
         {
@@ -2559,6 +2702,14 @@ impl TransitRoutingModule {
         let mut rounds = vec![Vec::<u64>::new(); RAPTOR_MAX_TRANSFERS + 2];
         let mut next_state_id = 0;
         for access in access_stops {
+            let walking_time = if walking_budget.is_some() {
+                self.feeder_walking_time(access)
+            } else {
+                Duration::ZERO
+            };
+            if walking_budget.is_some_and(|maximum| walking_time > maximum) {
+                continue;
+            }
             let arrival = departure_time.saturating_add(access.time);
             let state = TransitPathState {
                 state_id: next_state_id,
@@ -2580,15 +2731,34 @@ impl TransitRoutingModule {
                 access_distance: access.distance,
                 access_route: access.route.clone(),
                 access_time: access.time,
+                walking_time,
             };
             let labels = states.entry((access.stop.clone(), 0)).or_default();
-            if labels
-                .iter()
-                .all(|old| state.arrival < state_arena[*old as usize].arrival)
-            {
+            let keep = if walking_budget.is_some() {
+                !labels.iter().any(|old| {
+                    let old = &state_arena[*old as usize];
+                    old.arrival <= state.arrival
+                        && old.cost <= state.cost
+                        && old.walking_time <= state.walking_time
+                })
+            } else {
+                labels
+                    .iter()
+                    .all(|old| state.arrival < state_arena[*old as usize].arrival)
+            };
+            if keep {
+                if walking_budget.is_some() {
+                    labels.retain(|old| {
+                        let old = &state_arena[*old as usize];
+                        !(state.arrival <= old.arrival
+                            && state.cost <= old.cost
+                            && state.walking_time <= old.walking_time)
+                    });
+                } else {
+                    labels.clear();
+                }
                 rounds[0].push(next_state_id);
                 state_arena.push(state);
-                labels.clear();
                 labels.push(next_state_id);
                 next_state_id += 1;
             }
@@ -2597,7 +2767,8 @@ impl TransitRoutingModule {
         let mut candidates = Vec::new();
         let mut best_destination_cost = vec![f64::INFINITY; destinations.len()];
         let mut first_destination_round = vec![None; destinations.len()];
-        let monotone_bound = self.supports_monotone_objective(capacity_feedback);
+        let monotone_bound =
+            walking_budget.is_none() && self.supports_monotone_objective(capacity_feedback);
         for rides_used in 0..rounds.len() {
             let mut current_round_states = std::mem::take(&mut rounds[rides_used]);
             while !current_round_states.is_empty() {
@@ -2628,6 +2799,14 @@ impl TransitRoutingModule {
                             }
                             let egress =
                                 &egress_stops_by_destination[*destination_index][*egress_index];
+                            if walking_budget.is_some_and(|maximum| {
+                                current
+                                    .walking_time
+                                    .saturating_add(self.feeder_walking_time(egress))
+                                    > maximum
+                            }) {
+                                continue;
+                            }
                             let egress_distance = Coordinate::euclidean_distance(
                                 &facility.coord,
                                 &destinations[*destination_index],
@@ -2830,6 +3009,17 @@ impl TransitRoutingModule {
                                                     routing_params,
                                                     capacity_feedback,
                                                 );
+                                            let walking_time = self.walking_after_boarding(
+                                                current,
+                                                candidate.transfer_time,
+                                                candidate.chained_continuation,
+                                                walking_budget,
+                                            );
+                                            if walking_budget
+                                                .is_some_and(|maximum| walking_time > maximum)
+                                            {
+                                                continue;
+                                            }
                                             #[cfg(test)]
                                             {
                                                 let mut rides = reconstruct_transit_rides(
@@ -2883,12 +3073,15 @@ impl TransitRoutingModule {
                                                 .or_default();
                                             if !labels.iter().any(|old| {
                                                 let old = &state_arena[*old as usize];
-                                                old.arrival <= stop_arrival && old.cost <= cost
+                                                old.arrival <= stop_arrival
+                                                    && old.cost <= cost
+                                                    && old.walking_time <= walking_time
                                             }) {
                                                 labels.retain(|old| {
                                                     let old = &state_arena[*old as usize];
                                                     !(stop_arrival <= old.arrival
-                                                        && cost <= old.cost)
+                                                        && cost <= old.cost
+                                                        && walking_time <= old.walking_time)
                                                 });
                                                 let first_vehicle_arrival_at_board = current
                                                     .first_vehicle_arrival_at_board
@@ -2908,6 +3101,7 @@ impl TransitRoutingModule {
                                                     access_distance: current.access_distance,
                                                     access_route: current.access_route.clone(),
                                                     access_time: current.access_time,
+                                                    walking_time,
                                                 });
                                                 labels.push(new_state_id);
                                                 next_state_id += 1;
@@ -2999,6 +3193,12 @@ impl TransitRoutingModule {
                                             _ => {}
                                         }
                                     }
+                                    let walking_time = self.walking_after_boarding(
+                                        current,
+                                        candidate.transfer_time,
+                                        chained_continuation,
+                                        walking_budget,
+                                    );
                                     let dominated = can_skip_dominated_departures
                                         && active.iter().any(|existing| {
                                             existing.base_departure <= departure.departure_time
@@ -3006,6 +3206,12 @@ impl TransitRoutingModule {
                                                     .departure_offset
                                                     .unwrap_or_default()
                                                     <= board_offset
+                                                && self.walking_after_boarding(
+                                                    &state_arena[existing.state_id as usize],
+                                                    existing.transfer_time,
+                                                    existing.chained_continuation,
+                                                    walking_budget,
+                                                ) <= walking_time
                                         });
                                     if !dominated {
                                         active.push(ActiveBoarding {
@@ -3181,6 +3387,27 @@ fn plan_travel_time(elements: &[InternalPlanElement]) -> Duration {
             InternalPlanElement::Activity(activity) => activity.max_dur.unwrap_or_default(),
         })
         .sum()
+}
+
+pub(crate) fn walking_travel_time(
+    elements: &[InternalPlanElement],
+) -> Result<Duration, RoutingError> {
+    elements.iter().try_fold(Duration::ZERO, |total, element| {
+        let Some(leg) = element.as_leg().filter(|leg| leg.mode.external() == "walk") else {
+            return Ok(total);
+        };
+        let duration = leg
+            .trav_time
+            .or_else(|| {
+                leg.route
+                    .as_ref()
+                    .and_then(|route| route.as_generic().trav_time())
+            })
+            .ok_or_else(|| RoutingError::MissingEndTime {
+                mode: "walk".to_owned(),
+            })?;
+        Ok(total.saturating_add(duration))
+    })
 }
 
 fn route_disutility(elements: &[InternalPlanElement], utilities: &BTreeMap<String, f64>) -> f64 {
@@ -3415,6 +3642,13 @@ mod route_proposal_tests {
         TransitSchedule::from_file(
             "./tests/resources/pt_reference/routing_direct_vs_transfer/transit_schedule.xml"
                 .as_ref(),
+        )
+    }
+
+    fn reference_trip_endpoints() -> (Facility<'static>, Facility<'static>) {
+        (
+            Facility::new_link_wrapper(Coordinate::new_2d(1050.0, 1050.0), Id::create("11")),
+            Facility::new_link_wrapper(Coordinate::new_2d(3950.0, 1050.0), Id::create("33")),
         )
     }
 
@@ -5127,6 +5361,170 @@ mod route_proposal_tests {
             elements.as_slice(),
             [InternalPlanElement::Leg(leg)] if leg.mode.external() == "walk"
         ));
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_accepts_one_hour_and_rejects_a_longer_direct_walk() {
+        let walk = Id::create("walk");
+        let module: Arc<dyn RoutingModule> =
+            Arc::new(TeleportationRoutingModule::new(walk.clone(), 1.0, 1.0));
+        let router = TripRouter::new(IntMap::from_iter([(walk.clone(), module)]));
+        let from = Facility::new_link_wrapper(Coordinate::new_2d(0.0, 0.0), Id::create("11"));
+        let at_limit =
+            Facility::new_link_wrapper(Coordinate::new_2d(3600.0, 0.0), Id::create("33"));
+        let beyond = Facility::new_link_wrapper(Coordinate::new_2d(3600.1, 0.0), Id::create("33"));
+        assert!(
+            router
+                .calc_route(&walk, request(&from, &beyond, None))
+                .is_ok()
+        );
+        let router = router.with_max_walk_duration(Some(Duration::from_secs(3600)));
+        assert!(
+            router
+                .calc_route(&walk, request(&from, &at_limit, None))
+                .is_ok()
+        );
+        assert!(matches!(
+            router.calc_route(&walk, request(&from, &beyond, None)),
+            Err(RoutingError::WalkingLimitExceeded { .. })
+        ));
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_rejects_long_pt_fallback_when_services_are_unavailable() {
+        let mut schedule = reference_schedule();
+        for line in schedule.lines_mut().values_mut() {
+            for route in line.routes.values_mut() {
+                route.departures.clear();
+            }
+        }
+        let router = reference_router(schedule, 0.5);
+        let (from, to) = reference_trip_endpoints();
+        let legacy = router.calc_route(request(&from, &to, None)).unwrap();
+        assert!(super::walking_travel_time(&legacy).unwrap() > Duration::from_secs(3600));
+        let router = router.with_max_walk_duration(Some(Duration::from_secs(3600)));
+        assert_no_path(router.calc_route(request(&from, &to, None)));
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_keeps_transit_when_a_faster_direct_walk_is_too_long() {
+        let router = reference_router(reference_schedule(), 0.5)
+            .with_max_walk_duration(Some(Duration::from_secs(3600)));
+        let (from, to) = reference_trip_endpoints();
+        let elements = router.calc_route(request(&from, &to, None)).unwrap();
+        assert!(elements.iter().any(|element| {
+            element
+                .as_leg()
+                .is_some_and(|leg| matches!(leg.route, Some(InternalRoute::Pt(_))))
+        }));
+        assert!(super::walking_travel_time(&elements).unwrap() <= Duration::from_secs(3600));
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_counts_transfer_walking_before_selecting_a_path() {
+        let (from, to) = reference_trip_endpoints();
+        for (limit, expected_rides) in [(54, 1), (55, 2)] {
+            let router = reference_router(reference_schedule(), 1.0)
+                .with_max_walk_duration(Some(Duration::from_secs(limit)));
+            let request = RoutingRequestBuilder::default()
+                .from(&from)
+                .to(&to)
+                .departure_time(SimTime::from_secs(8 * 3600))
+                .build()
+                .unwrap();
+            let elements = router.calc_route(request).unwrap();
+            let rides = elements
+                .iter()
+                .filter_map(InternalPlanElement::as_leg)
+                .filter(|leg| matches!(leg.route, Some(InternalRoute::Pt(_))))
+                .count();
+            assert_eq!(rides, expected_rides);
+            assert!(super::walking_travel_time(&elements).unwrap() <= Duration::from_secs(limit));
+        }
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_preserves_a_later_feeder_with_less_walking() {
+        let router = reference_router(reference_schedule(), 1.0)
+            .with_max_walk_duration(Some(Duration::from_secs(350)));
+        let motorized_feeder = InternalPlanElement::Leg(InternalLeg::new(
+            InternalRoute::Generic(InternalGenericRoute::new(
+                Id::create("11"),
+                Id::create("11"),
+                Some(Duration::from_secs(400)),
+                Some(300.0),
+                None,
+            )),
+            "ride",
+            "pt",
+            Duration::from_secs(400),
+            Some(SimTime::from_secs(0)),
+        ));
+        let access = [
+            super::FeederStop {
+                stop: Id::create("ra"),
+                distance: 300.0,
+                time: Duration::from_secs(300),
+                disutility: 0.0,
+                route: None,
+            },
+            super::FeederStop {
+                stop: Id::create("ra"),
+                distance: 300.0,
+                time: Duration::from_secs(400),
+                disutility: 0.0,
+                route: Some(Arc::new(vec![motorized_feeder])),
+            },
+        ];
+        let egress = [super::FeederStop {
+            stop: Id::create("rc"),
+            distance: 100.0,
+            time: Duration::from_secs(100),
+            disutility: 0.0,
+            route: None,
+        }];
+        let path = router
+            .find_best_path_with_feeders(
+                &Coordinate::new_2d(4050.0, 1050.0),
+                SimTime::from_secs(0),
+                &access,
+                &egress,
+                &router.resolve_routing_params(""),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        assert!(
+            path.access_route.is_some(),
+            "the earlier walking feeder exceeds the combined budget"
+        );
+    }
+
+    #[deterministic_id_test]
+    fn walk_limit_sums_multiple_legs_and_excludes_motorized_time() {
+        let make_leg = |mode, seconds| {
+            InternalPlanElement::Leg(InternalLeg::new(
+                InternalRoute::Generic(InternalGenericRoute::new(
+                    Id::create("11"),
+                    Id::create("33"),
+                    Some(Duration::from_secs(seconds)),
+                    Some(1.0),
+                    None,
+                )),
+                mode,
+                "pt",
+                Duration::from_secs(seconds),
+                None,
+            ))
+        };
+        let elements = vec![
+            make_leg("walk", 2000),
+            make_leg("bus", 7200),
+            make_leg("walk", 2000),
+        ];
+        assert_eq!(
+            super::walking_travel_time(&elements).unwrap(),
+            Duration::from_secs(4000)
+        );
     }
 
     #[deterministic_id_test]

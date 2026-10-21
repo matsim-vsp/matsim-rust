@@ -314,6 +314,31 @@ queries. See `matsim_rust/tests/resources/equil/equil-config-silo-routing.yml` f
 used by the integration test. Its network adds an unreachable `island` link to the equil network,
 so the tests can produce a `no_path` answer.
 
+Set `routing.network_access_egress: false` for direct link-to-link network trips, including car.
+These trips contain only the driving leg, without walking legs or interaction activities.
+PT retains its access, transfer and egress walking. Existing network trips with access/egress
+legs are rerouted during preparation. The setting defaults to true for existing configurations.
+Disabling access/egress does not repair activity coordinates far outside road coverage; driving
+starts and ends at the selected road links.
+
+Set `routing.max_walk_duration_seconds: 3600` to limit a trip to one hour of total walking.
+The optional limit counts access, transfers and egress together, for every routing mode. It
+also rechecks already routed plans in `UsePlans` mode. Transit search keeps walking time as a
+separate resource so an earlier path with too much walking cannot discard a feasible alternative.
+An over-limit direct walk cannot replace a transit itinerary. Existing scheduled bus connections
+can still provide access to rail; the limit does not create taxi or motorcycle services.
+When no permitted itinerary or eligible car fallback exists, routing returns `no_path` rather
+than an hours-long walk. By default, population preparation stops and reports the affected person,
+plan and trip. Set `routing.discard_infeasible_trips: true` to try a direct walk within the configured
+walking limit after `no_path` or a walking-limit failure. A successful fallback changes the trip's
+routing mode to `walk`. If that also fails, preparation retains a marked abandoned trip and logs
+the person, trip and reason. QSim emits departure and `stuckAndAbort` events for it, without an
+arrival or `travelled` event, then resumes at the following activity. This explicitly advances
+the person's schedule without a performed journey; it does not delete the person or count the
+discarded trip as completed. Marked trips are retried during the next population preparation.
+Other input and routing errors still stop preparation. The discard policy defaults to false;
+omit the walking limit to retain unrestricted walking.
+
 ## Analyze simulation results
 
 Enable `output.analysis.enabled` in the config's Output module to write a
