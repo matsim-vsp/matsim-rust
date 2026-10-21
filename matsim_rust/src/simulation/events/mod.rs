@@ -113,6 +113,7 @@ impl EventsManager {
         }
     }
 
+    #[hotpath::measure]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn process_event(&mut self, event: &dyn EventTrait) {
         let tid = event.as_any().type_id();

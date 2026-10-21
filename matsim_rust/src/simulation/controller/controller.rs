@@ -180,8 +180,12 @@ impl ControllerBuilder {
                 }
             }
         }
+        let bin_size = self
+            .scenario
+            .config
+            .travel_time_calculator()
+            .bin_duration(self.scenario.config.qsim().ticks_per_second)?;
         let num_parts = self.scenario.config.partitioning().num_parts;
-        let bin_size = self.scenario.config.travel_time_calculator().bin_size;
         let end_time = self.scenario.config.qsim().end_time;
 
         // create a barrier for the number of partitions, if not provided
@@ -230,7 +234,7 @@ impl ControllerBuilder {
 
         let global_ttc = Arc::new(GlobalTravelTimeCalculator::new(
             num_parts as usize,
-            Duration::from_secs(u64::from(config.travel_time_calculator().bin_size)),
+            bin_size,
             Duration::from_secs(u64::from(config.qsim().end_time)),
         ));
         let router = Self::create_trip_router(
@@ -245,7 +249,7 @@ impl ControllerBuilder {
             let global_ttc = global_ttc.clone();
             let travel_time_collector = move || {
                 Rc::new(RefCell::new(PartitionTravelTimeCollector::new(
-                    Duration::from_secs(u64::from(bin_size)),
+                    bin_size,
                     Duration::from_secs(u64::from(end_time)),
                 )))
             };
@@ -918,7 +922,7 @@ impl Controller {
             "Scoring population of {} persons in iteration {iteration}",
             population.persons.len()
         );
-        scoring_pool.score_population(&mut experienced_plans, &mut population);
+        scoring_pool.score_population(&mut experienced_plans, &mut population, iteration);
         info!("Finished scoring population in iteration {iteration}");
 
         if self.config.scoring().write_experienced_plans

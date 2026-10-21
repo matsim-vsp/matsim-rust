@@ -15,6 +15,7 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tracing::{Level, info, warn};
 
 pub const DEFAULT_RANDOM_SEED: u64 = 4711;
@@ -1589,6 +1590,7 @@ pub struct Scoring {
     pub activity_params: Vec<ActivityParameter>,
     pub mode_params: Vec<ModeParameter>,
     pub agent_params: Vec<AgentParameter>,
+    pub fraction_of_iterations_to_start_score_msa: Option<f64>,
 }
 
 register_override!("scoring.write_experienced_plans", |config, value| {
@@ -1701,6 +1703,7 @@ impl Default for Scoring {
                 ModeParameter::default_for_mode("bike"),
             ],
             agent_params: vec![AgentParameter::default()],
+            fraction_of_iterations_to_start_score_msa: None,
         }
     }
 }
@@ -1716,6 +1719,15 @@ register_override!("scoring.mode", |config, value| {
 register_override!("scoring.write_experienced_plans", |config, value| {
     config.scoring_mut().write_experienced_plans = value.parse().unwrap();
 });
+
+register_override!(
+    "scoring.fraction_of_iterations_to_start_score_msa",
+    |config, value| {
+        config
+            .scoring_mut()
+            .fraction_of_iterations_to_start_score_msa = Some(value.parse().unwrap());
+    }
+);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActivityParameter {
@@ -1851,22 +1863,61 @@ impl SignalFilesConfig {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct TravelTimeCalculator {
-    /// Width of a travel-time interval in seconds.
-    pub bin_size: u32,
+    /// Width of a travel-time interval in seconds. Like MATSim's `travelTimeBinSize`, fractions
+    /// such as `0.5` are allowed. The width must be a whole multiple of the tick
+    /// length (`1 / qsim.ticks_per_second`), so that bin boundaries coincide with tick boundaries.
+    pub bin_size: f64,
 }
 
 impl TravelTimeCalculator {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.bin_size == 0 {
-            return Err("travel_time_calculator.bin_size must be greater than 0".to_string());
+    /// Validates `bin_size` against the tick length and returns it as an exact duration.
+    pub fn bin_duration(&self, ticks_per_second: u32) -> Result<Duration, String> {
+        if !self.bin_size.is_finite() || self.bin_size <= 0.0 {
+            return Err(format!(
+                "travel_time_calculator.bin_size must be finite and greater than 0, got {}",
+                self.bin_size
+            ));
         }
-        Ok(())
+        if ticks_per_second == 0 {
+            return Err("qsim.ticks_per_second must be greater than 0".to_string());
+        }
+
+        let ticks = self.bin_size * f64::from(ticks_per_second);
+        let whole_ticks = ticks.round();
+        // Decimal inputs such as 0.1 are not exactly representable in binary. Parsing and the
+        // multiplication with an integer each round by at most half an ULP, so a few ULPs of
+        // relative tolerance accept those values without accepting a genuine fraction of a tick.
+        if whole_ticks < 1.0 || (ticks - whole_ticks).abs() > 4.0 * f64::EPSILON * whole_ticks {
+            return Err(format!(
+                "travel_time_calculator.bin_size ({} s) must be a whole multiple of the tick length (1/{} s)",
+                self.bin_size, ticks_per_second
+            ));
+        }
+
+        // Compute the width from the integer tick count, so it carries no binary rounding error.
+        // Every tick count that yields a representable width converts exactly to u128; larger
+        // values saturate and are rejected by the range check.
+        let tick_nanos = (whole_ticks as u128).saturating_mul(1_000_000_000);
+        let ticks_per_second = u128::from(ticks_per_second);
+        let nanos = u64::try_from(tick_nanos / ticks_per_second).map_err(|_| {
+            format!(
+                "travel_time_calculator.bin_size ({} s) exceeds the supported time range",
+                self.bin_size
+            )
+        })?;
+        if tick_nanos % ticks_per_second != 0 {
+            return Err(format!(
+                "travel_time_calculator.bin_size ({} s) cannot be represented in whole nanoseconds with qsim.ticks_per_second = {}",
+                self.bin_size, ticks_per_second
+            ));
+        }
+        Ok(Duration::from_nanos(nanos))
     }
 }
 
 impl Default for TravelTimeCalculator {
     fn default() -> Self {
-        Self { bin_size: 900 }
+        Self { bin_size: 900.0 }
     }
 }
 
@@ -2528,6 +2579,7 @@ mod tests {
         KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME,
     };
     use std::io::Write;
+    use std::time::Duration;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -2925,6 +2977,7 @@ mod tests {
                 waiting: -3.0
                 marginal_utility_of_money: 2.0
                 aborted_plan_score: -24.0
+            fraction_of_iterations_to_start_score_msa: 0.75
         "#;
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
@@ -2954,6 +3007,7 @@ mod tests {
                 marginal_utility_of_money: 2.0,
                 aborted_plan_score: -24.0,
             }],
+            fraction_of_iterations_to_start_score_msa: Some(0.75),
         };
         assert_eq!(config.scoring(), &expected);
 
@@ -3689,6 +3743,47 @@ modules:
     }
 
     #[test]
+    fn override_fraction_of_iterations_to_start_score_msa() {
+        let mut config = base_config();
+        assert_eq!(
+            config.scoring().fraction_of_iterations_to_start_score_msa,
+            None
+        );
+
+        config.apply_overrides(&[(
+            "scoring.fraction_of_iterations_to_start_score_msa".to_string(),
+            "0.9".to_string(),
+        )]);
+
+        assert_eq!(
+            config.scoring().fraction_of_iterations_to_start_score_msa,
+            Some(0.9)
+        );
+    }
+
+    #[test]
+    fn override_write_events() {
+        let mut config = base_config();
+        assert_eq!(config.output().write_events, WriteEvents::None);
+
+        config.apply_overrides(&[("output.write_events".to_string(), "File".to_string())]);
+        assert_eq!(config.output().write_events, WriteEvents::File);
+
+        config.apply_overrides(&[("output.write_events".to_string(), "none".to_string())]);
+        assert_eq!(config.output().write_events, WriteEvents::None);
+    }
+
+    #[test]
+    fn override_partitioning_method() {
+        let mut config = base_config();
+        config.partitioning_mut().method = PartitionMethod::Metis(MetisOptions::default());
+
+        config.apply_overrides(&[("partitioning.method".to_string(), "none".to_string())]);
+
+        assert_eq!(config.partitioning().method, PartitionMethod::None);
+    }
+
+    #[test]
     fn override_routing_mode() {
         let mut config = base_config();
         config.apply_overrides(&[("routing.mode".to_string(), "ad-hoc".to_string())]);
@@ -3714,7 +3809,28 @@ modules:
     bin_size: 300
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
-        assert_eq!(300, config.travel_time_calculator().bin_size);
+        // Integer values from existing configs remain valid seconds.
+        assert_eq!(300.0, config.travel_time_calculator().bin_size);
+
+        let serialized = serde_yaml::to_string(&config).expect("failed to serialize config");
+        let roundtrip: Config =
+            serde_yaml::from_str(&serialized).expect("failed to deserialize roundtrip config");
+        assert_eq!(
+            config.travel_time_calculator(),
+            roundtrip.travel_time_calculator()
+        );
+    }
+
+    #[test]
+    fn travel_time_calculator_yaml_roundtrip_preserves_fractional_bin_size() {
+        let yaml = r#"
+modules:
+  travel_time_calculator:
+    type: TravelTimeCalculator
+    bin_size: 0.5
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
+        assert_eq!(0.5, config.travel_time_calculator().bin_size);
 
         let serialized = serde_yaml::to_string(&config).expect("failed to serialize config");
         let roundtrip: Config =
@@ -3734,18 +3850,124 @@ modules:
         )]);
 
         assert_eq!(
-            &TravelTimeCalculator { bin_size: 60 },
+            &TravelTimeCalculator { bin_size: 60.0 },
+            config.travel_time_calculator()
+        );
+
+        config.apply_overrides(&[(
+            "travel_time_calculator.bin_size".to_string(),
+            "0.25".to_string(),
+        )]);
+
+        assert_eq!(
+            &TravelTimeCalculator { bin_size: 0.25 },
             config.travel_time_calculator()
         );
     }
 
     #[test]
-    fn travel_time_calculator_rejects_zero_bin_size() {
-        let calculator = TravelTimeCalculator { bin_size: 0 };
+    fn travel_time_calculator_default_bin_size_is_independent_of_ticks() {
+        let calculator = TravelTimeCalculator::default();
+
+        assert_eq!(Ok(Duration::from_secs(900)), calculator.bin_duration(1));
+        assert_eq!(Ok(Duration::from_secs(900)), calculator.bin_duration(10));
+    }
+
+    #[test]
+    fn travel_time_calculator_accepts_whole_multiples_of_the_tick_length() {
+        for (bin_size, ticks_per_second, expected) in [
+            (900.0, 1, Duration::from_secs(900)),
+            (0.5, 2, Duration::from_millis(500)),
+            (0.5, 10, Duration::from_millis(500)),
+            // Not exactly representable in binary, but exactly one or several ticks.
+            (0.1, 10, Duration::from_millis(100)),
+            (0.3, 10, Duration::from_millis(300)),
+            (0.7, 10, Duration::from_millis(700)),
+            (2.5, 4, Duration::from_millis(2500)),
+            // The tick length of 1/3 s has no exact nanosecond value, but whole seconds do.
+            (1.0, 3, Duration::from_secs(1)),
+        ] {
+            let calculator = TravelTimeCalculator { bin_size };
+            assert_eq!(
+                Ok(expected),
+                calculator.bin_duration(ticks_per_second),
+                "bin_size {bin_size} with {ticks_per_second} ticks per second"
+            );
+        }
+    }
+
+    #[test]
+    fn travel_time_calculator_rejects_fractions_of_a_tick() {
+        for (bin_size, ticks_per_second) in [(0.5, 1), (900.5, 1), (0.25, 10), (0.05, 10)] {
+            let calculator = TravelTimeCalculator { bin_size };
+            assert_eq!(
+                Err(format!(
+                    "travel_time_calculator.bin_size ({bin_size} s) must be a whole multiple of the tick length (1/{ticks_per_second} s)"
+                )),
+                calculator.bin_duration(ticks_per_second)
+            );
+        }
+    }
+
+    #[test]
+    fn travel_time_calculator_rejects_bins_without_exact_nanosecond_width() {
+        let calculator = TravelTimeCalculator {
+            bin_size: 1.0 / 3.0,
+        };
 
         assert_eq!(
-            Err("travel_time_calculator.bin_size must be greater than 0".to_string()),
-            calculator.validate()
+            Err(format!(
+                "travel_time_calculator.bin_size ({} s) cannot be represented in whole nanoseconds with qsim.ticks_per_second = 3",
+                1.0 / 3.0
+            )),
+            calculator.bin_duration(3)
+        );
+    }
+
+    #[test]
+    fn travel_time_calculator_rejects_zero_bin_size() {
+        let calculator = TravelTimeCalculator { bin_size: 0.0 };
+
+        assert_eq!(
+            Err(
+                "travel_time_calculator.bin_size must be finite and greater than 0, got 0"
+                    .to_string()
+            ),
+            calculator.bin_duration(1)
+        );
+    }
+
+    #[test]
+    fn travel_time_calculator_rejects_negative_and_non_finite_bin_sizes() {
+        for bin_size in [-900.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let calculator = TravelTimeCalculator { bin_size };
+            assert_eq!(
+                Err(format!(
+                    "travel_time_calculator.bin_size must be finite and greater than 0, got {bin_size}"
+                )),
+                calculator.bin_duration(1)
+            );
+        }
+    }
+
+    #[test]
+    fn travel_time_calculator_rejects_bins_beyond_the_simulation_time_range() {
+        for (bin_size, ticks_per_second) in [(1e11, 1), (1e30, 7), (f64::MAX, u32::MAX)] {
+            let calculator = TravelTimeCalculator { bin_size };
+            assert_eq!(
+                Err(format!(
+                    "travel_time_calculator.bin_size ({bin_size} s) exceeds the supported time range"
+                )),
+                calculator.bin_duration(ticks_per_second)
+            );
+        }
+    }
+
+    #[test]
+    fn travel_time_calculator_rejects_zero_ticks_per_second() {
+        assert_eq!(
+            Err("qsim.ticks_per_second must be greater than 0".to_string()),
+            TravelTimeCalculator::default().bin_duration(0)
         );
     }
 

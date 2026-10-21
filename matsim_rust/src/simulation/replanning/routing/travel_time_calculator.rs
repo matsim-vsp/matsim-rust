@@ -562,10 +562,10 @@ pub(crate) mod test {
         collector: &mut PartitionTravelTimeCollector,
         vehicle: &Id<InternalVehicle>,
         link: &Id<Link>,
-        time: u64,
+        time: SimTime,
     ) {
         collector.process_link_enter_event(&LinkEnterEvent {
-            time: SimTime::from_secs(time),
+            time,
             vehicle: vehicle.clone(),
             link: link.clone(),
             attributes: InternalAttributes::default(),
@@ -576,10 +576,10 @@ pub(crate) mod test {
         collector: &mut PartitionTravelTimeCollector,
         vehicle: &Id<InternalVehicle>,
         link: &Id<Link>,
-        time: u64,
+        time: SimTime,
     ) {
         collector.process_link_leave_event(&LinkLeaveEvent {
-            time: SimTime::from_secs(time),
+            time,
             vehicle: vehicle.clone(),
             link: link.clone(),
             attributes: InternalAttributes::default(),
@@ -593,6 +593,24 @@ pub(crate) mod test {
         vehicle: &Id<InternalVehicle>,
         enter: u64,
         leave: u64,
+    ) {
+        observe_at(
+            collector,
+            mode,
+            link,
+            vehicle,
+            SimTime::from_secs(enter),
+            SimTime::from_secs(leave),
+        );
+    }
+
+    fn observe_at(
+        collector: &mut PartitionTravelTimeCollector,
+        mode: &Id<String>,
+        link: &Id<Link>,
+        vehicle: &Id<InternalVehicle>,
+        enter: SimTime,
+        leave: SimTime,
     ) {
         enter_traffic(collector, vehicle, link, mode);
         link_enter(collector, vehicle, link, enter);
@@ -651,7 +669,12 @@ pub(crate) mod test {
         let global = global(1, 10, 25);
 
         // No local link enter: the leave must be ignored.
-        link_leave(&mut collector, &Id::create("unknown"), &link.id, 5);
+        link_leave(
+            &mut collector,
+            &Id::create("unknown"),
+            &link.id,
+            SimTime::from_secs(5),
+        );
         observe(&mut collector, &car, &link.id, &Id::create("v1"), 2, 4); // bin 0, 2s
         observe(&mut collector, &car, &link.id, &Id::create("v2"), 3, 7); // bin 0, 4s
         observe(&mut collector, &car, &link.id, &Id::create("v3"), 99, 104); // las bin, 5s
@@ -706,6 +729,63 @@ pub(crate) mod test {
             assert_eq!(
                 Duration::from_secs(expected),
                 lookup(&global, &car, &link, time)
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn sub_second_bins_use_enter_slot_and_cascade_by_bin_size() {
+        // Freespeed travel time is 100 m / 800 m/s = 0.125 s. All values are binary fractions,
+        // so the expected durations are exact.
+        let link = link("sub-second", 100.0, 800.0);
+        let net = network(&[link.clone()]);
+        let car = Id::create("car");
+        let bin_size = Duration::from_millis(500);
+        let max_time = Duration::from_secs(2);
+        let mut collector = PartitionTravelTimeCollector::new(bin_size, max_time);
+        let global = GlobalTravelTimeCalculator::new(1, bin_size, max_time);
+
+        // Entering at 0.25 s belongs to bin 0, entering exactly at 0.5 s to bin 1.
+        observe_at(
+            &mut collector,
+            &car,
+            &link.id,
+            &Id::create("v1"),
+            SimTime::from_millis(250),
+            SimTime::from_millis(1500),
+        );
+        observe_at(
+            &mut collector,
+            &car,
+            &link.id,
+            &Id::create("v2"),
+            SimTime::from_millis(500),
+            SimTime::from_millis(750),
+        );
+        submit_collector(&global, 0, 0, &mut collector, &net);
+
+        // Bin 1 observed 0.25 s, but may drop at most one bin size below bin 0's 1.25 s. The
+        // empty bins then decay by 0.5 s per bin until they reach freespeed.
+        for (millis, expected) in [
+            (0, 1250),
+            (499, 1250),
+            (500, 750),
+            (999, 750),
+            (1000, 250),
+            (1500, 125),
+            (2000, 125),
+            (99_000, 125),
+        ] {
+            assert_eq!(
+                Duration::from_millis(expected),
+                global.get_link_travel_time(
+                    &car,
+                    &link,
+                    SimTime::from_millis(millis),
+                    None,
+                    TravelTimeGetter::Average,
+                ),
+                "lookup at {millis} ms"
             );
         }
     }
@@ -861,7 +941,7 @@ pub(crate) mod test {
         let vehicle = vehicle("v1", 20.0);
         let mut collector = collector(10, 100);
         enter_traffic(&mut collector, &vehicle.id, &link.id, &car);
-        link_enter(&mut collector, &vehicle.id, &link.id, 0);
+        link_enter(&mut collector, &vehicle.id, &link.id, SimTime::from_secs(0));
         collector.process_vehicle_leaves_traffic_event(&VehicleLeavesTrafficEvent {
             time: SimTime::from_secs(2),
             vehicle: vehicle.id.clone(),
@@ -871,7 +951,7 @@ pub(crate) mod test {
             relative_position: 1.0,
             attributes: InternalAttributes::default(),
         });
-        link_leave(&mut collector, &vehicle.id, &link.id, 5);
+        link_leave(&mut collector, &vehicle.id, &link.id, SimTime::from_secs(5));
         assert!(collector.finish(&net).is_empty());
     }
 
@@ -884,7 +964,7 @@ pub(crate) mod test {
         let vehicle = Id::create("vehicle");
         let mut collector = collector(10, 100);
         enter_traffic(&mut collector, &vehicle, &link.id, &car);
-        link_enter(&mut collector, &vehicle, &link.id, 0);
+        link_enter(&mut collector, &vehicle, &link.id, SimTime::from_secs(0));
 
         // vehicle changes mode while on the link, which should panic
         enter_traffic(&mut collector, &vehicle, &link.id, &walk);
@@ -909,7 +989,7 @@ pub(crate) mod test {
             &mut collector(10, 100),
             &Id::create("unknown-vehicle"),
             &link.id,
-            0,
+            SimTime::from_secs(0),
         );
     }
 

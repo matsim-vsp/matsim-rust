@@ -112,6 +112,8 @@ after the conversion and are resolved during preparation; code running afterward
 - `prepare_for_sim` runs once on the loaded `Scenario`, before the controller shares it, e.g. with the routing modules.
   It connects the facilities to the network and resolves the activity locations. Both run in parallel.
 - `prepare_for_mobsim` runs before every mobsim iteration. It validates and repairs plans, e.g. by routing trips.
+  As in MATSim, trips with a mode of `qsim.main_modes` or `routing.network_modes` are routed with the vehicle
+  `<person>_<mode>`; vehicles referenced by the routes of the old trip are not reused.
 
 The transit router shares immutable stop, route, departure, distance-prefix, and configured-transfer
 indexes across requests. Transfer relations retain input order within each origin stop, including
@@ -180,16 +182,24 @@ it does not inspect or clone their contents.
 
 Experienced-plan collection uses this migration bus. Each worker creates one `BackpackingEngine` in an
 `Rc<RefCell<_>>`; its backpacks move with vehicles and teleporting agents and keep both their partial plans and any
-future scoring events. At `BeforeCleanup`, every worker converts the backpacks currently on that partition into one
-partial population and sends it to the controller over a dedicated backchannel before publishing its normal worker
-result. Consequently, all partial populations are available when the controller emits `AfterMobsim`. The scoring
+future scoring events. The engine subscribes only to the event types that change a partial plan, so that other events,
+e.g. link leave events, don't reach it. At `BeforeCleanup`, every worker converts the backpacks currently on that
+partition into one partial population and sends it to the controller over a dedicated backchannel before publishing its
+normal worker result. Consequently, all partial populations are available when the controller emits `AfterMobsim`. The scoring
 module verifies iteration and rank and merges the populations deterministically by person ID. The controller then
-scores each reconstructed experienced plan and copies the result to exactly the selected original plan. Experienced
-plans receive the same score and are written only when `scoring.write_experienced_plans` and the configured plan
-writing interval allow it. Collection and scoring always run, even when experienced-plan output is disabled, so
-replanning can consume the updated selected-plan scores. The only exception is `scoring.mode: Disabled`: the controller
-then registers no backpacking engines, collects no experienced plans, and sets the score of each selected plan to
-`None`. Backpacks do not return to an initial or "home" partition.
+scores each reconstructed experienced plan and passes the result to the score assigner, a port of MATSim's
+`NewScoreAssignerImpl` with an implicit learning rate of 1. It updates exactly the selected original plan: the new
+score replaces the old one until the iteration given by `scoring.fraction_of_iterations_to_start_score_msa`, and from
+then on the plan's score is the method-of-successive-averages (MSA) mean of the scores it received since that
+iteration. A plan without a score takes the new score without counting it as an MSA contribution. The MSA counter is
+in-memory state of each plan. A plan copied during replanning restarts the counter at zero, so its first MSA
+contribution replaces any copied score, and a restart from output plans resets all counters, as in MATSim. Without the
+setting, MSA never starts. Experienced plans receive the raw score and are written only when
+`scoring.write_experienced_plans` and the configured plan writing interval allow it. Collection and scoring always
+run, even when experienced-plan output is disabled, so replanning can consume the updated selected-plan scores. The
+only exception is `scoring.mode: Disabled`: the controller then registers no backpacking engines, collects no
+experienced plans, and sets the score of each selected plan to `None`. Backpacks do not return to an initial or "home"
+partition.
 Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.

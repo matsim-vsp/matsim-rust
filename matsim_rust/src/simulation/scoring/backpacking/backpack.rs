@@ -15,7 +15,8 @@ pub(crate) struct Backpack {
 
 #[allow(dead_code)]
 pub(crate) struct PersonExperience {
-    dummy_person: InternalPerson,
+    person_id: Id<InternalPerson>,
+    plan: InternalPlan,
     events: Vec<Box<dyn EventTrait>>,
 }
 
@@ -28,31 +29,20 @@ impl Backpack {
         }
     }
 
-    fn relevant_event_for_scoring(_: &dyn EventTrait) -> Option<Box<dyn EventTrait>> {
-        /*
-        Keep scoring-only events in the backpack so they migrate with the affected person.
-        Additional event types can be added here without coupling them to partial-plan creation.
-        (aleks May'26)
-         */
-        None
-    }
-
     pub(crate) fn person_id(&self) -> &Id<InternalPerson> {
         &self.person_id
     }
 
-    pub(crate) fn handle_event(&mut self, event: &dyn EventTrait) {
-        if let Some(e) = Self::relevant_event_for_scoring(event) {
-            self.events.push(e);
-            return;
-        }
-
-        self.backpack_plan.handle_event(event);
+    /// The partial plan, which the backpacking engine updates with the typed events it subscribes to.
+    pub(crate) fn partial_plan_mut(&mut self) -> &mut PartialPlan {
+        &mut self.backpack_plan
     }
 
+    #[hotpath::measure]
     pub(crate) fn finish(mut self) -> PersonExperience {
         PersonExperience {
-            dummy_person: InternalPerson::new(self.person_id, self.backpack_plan.finish()),
+            person_id: self.person_id,
+            plan: self.backpack_plan.finish(),
             events: std::mem::take(&mut self.events),
         }
     }
@@ -60,11 +50,11 @@ impl Backpack {
 
 impl PersonExperience {
     pub(crate) fn plan(&self) -> &InternalPlan {
-        self.dummy_person.selected_plan().unwrap()
+        &self.plan
     }
 
     pub(crate) fn plan_mut(&mut self) -> &mut InternalPlan {
-        self.dummy_person.selected_plan_mut()
+        &mut self.plan
     }
 
     #[allow(dead_code)]
@@ -72,10 +62,13 @@ impl PersonExperience {
         &self.events
     }
 
+    /// Creates the person only now, i.e. when the experienced plans are written after the mobsim,
+    /// so that the mobsim doesn't look up the default subpopulation for every person.
     pub(crate) fn convert_to_person(mut self, original: &InternalPerson) -> InternalPerson {
-        self.dummy_person.copy_metadata_from(original);
-        self.plan_mut().attributes = original.selected_plan().unwrap().attributes.clone();
-        self.dummy_person
+        self.plan.attributes = original.selected_plan().unwrap().attributes.clone();
+        let mut person = InternalPerson::new(self.person_id, self.plan);
+        person.copy_metadata_from(original);
+        person
     }
 }
 
@@ -109,7 +102,7 @@ mod tests {
             .unwrap(),
         );
         let mut backpack = Backpack::new(original.id().clone());
-        backpack.handle_event(
+        backpack.partial_plan_mut().activity_end(
             &ActivityEndEventBuilder::default()
                 .time(SimTime::from_secs(10))
                 .person(original.id().clone())
@@ -155,7 +148,7 @@ mod tests {
         let person = Id::create("person");
         let link = Id::create("link");
         let mut backpack = Backpack::new(person.clone());
-        backpack.handle_event(
+        backpack.partial_plan_mut().activity_end(
             &ActivityEndEventBuilder::default()
                 .time(SimTime::from_secs(10))
                 .person(person.clone())
@@ -165,7 +158,7 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        backpack.handle_event(
+        backpack.partial_plan_mut().person_stuck(
             &PersonStuckEventBuilder::default()
                 .time(SimTime::from_secs(20))
                 .person(person)

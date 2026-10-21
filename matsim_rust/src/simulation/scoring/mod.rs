@@ -20,12 +20,14 @@ mod charypar_nagel_scoring_function;
 mod only_travel_time_dependent_scoring;
 pub mod partial_plans;
 mod plan_scorer;
+mod score_assigner;
 
 use crate::simulation::id::Id;
 use crate::simulation::scoring::backpacking::backpack::PersonExperience;
 pub use charypar_nagel_scoring_function::CharyparNagelScoringFunction;
 pub use only_travel_time_dependent_scoring::OnlyTravelTimeDependentScoring;
 pub use plan_scorer::PlanScorer;
+pub(crate) use score_assigner::ScoreAssigner;
 
 pub type WorkerListenerRegistrations = IntMap<QSimId, Vec<Box<WorkerListenerRegisterFunction>>>;
 
@@ -188,10 +190,13 @@ pub(crate) fn create_registrations(
 }
 
 /// Performs multithreaded scoring of the population. Rayon pool is started in the controller.
+/// Experienced plans receive the raw score; `assigner` assigns it to the selected plans.
 pub(crate) fn score_population(
     experiences: &mut [PersonExperiences],
     population: &mut Population,
     plan_scorer: &dyn PlanScorer,
+    iteration: u32,
+    assigner: &ScoreAssigner,
 ) {
     let scores: Vec<_> = experiences
         .par_iter_mut()
@@ -215,11 +220,11 @@ pub(crate) fn score_population(
 
     // setting the person scores in a separate loop to avoid mutable borrow issues
     for (person_id, score) in scores {
-        population
+        let selected_plan = population
             .persons
             .get_mut(&person_id)
             .unwrap()
-            .selected_plan_mut()
-            .score = Some(score);
+            .selected_plan_mut();
+        assigner.assign(iteration, selected_plan, score);
     }
 }

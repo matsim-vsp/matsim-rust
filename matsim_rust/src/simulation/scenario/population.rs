@@ -273,6 +273,8 @@ pub struct InternalPlan {
     pub selected: bool,
     pub elements: Vec<InternalPlanElement>,
     pub attributes: InternalAttributes,
+    /// Number of scores averaged since MSA started. Field lives only in memory, and is neither written to nor read from plan files.
+    pub(crate) msa_contributions: u32,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -363,6 +365,9 @@ impl InternalPerson {
         // Add the new plan and mark it as selected
         let mut new_plan = plan;
         new_plan.selected = true;
+        // An added plan is a new plan instance in MATSim's sense. A copy keeps its score, as with
+        // `copyFromTo`, but starts without score MSA contributions.
+        new_plan.msa_contributions = 0;
         self.plans.push(new_plan);
         self.plans().len() - 1
     }
@@ -388,6 +393,7 @@ impl Default for InternalPlan {
             score: None,
             selected: true,
             elements: Vec::new(),
+            msa_contributions: 0,
         }
     }
 }
@@ -1187,6 +1193,7 @@ impl FromIOPerson<IOPlan> for InternalPlan {
                 .into_iter()
                 .map(|p| InternalPlanElement::from_io(p, id.clone()))
                 .collect(),
+            ..Default::default()
         }
     }
 }
@@ -1225,6 +1232,7 @@ impl From<Plan> for InternalPlan {
             score: plan.score,
             selected: plan.selected,
             elements,
+            ..Default::default()
         }
     }
 }
@@ -1239,7 +1247,8 @@ mod tests {
     use crate::simulation::scenario::facilities::ActivityFacility;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
-        FromIOPerson, InternalActivity, InternalLeg, InternalPerson, InternalRoute, Population,
+        FromIOPerson, InternalActivity, InternalLeg, InternalPerson, InternalPlan, InternalRoute,
+        Population,
     };
     use crate::simulation::scenario::vehicles::Garage;
     use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -1408,6 +1417,28 @@ mod tests {
             ],
             route.as_network().unwrap().route
         );
+    }
+
+    #[deterministic_id_test]
+    fn add_new_plan_as_selected_resets_msa_contributions_and_keeps_score() {
+        let original = InternalPlan {
+            score: Some(12.5),
+            msa_contributions: 4,
+            ..Default::default()
+        };
+        let mut person = InternalPerson::new(Id::create("1"), original);
+
+        let copy = person.selected_plan().unwrap().clone();
+        let copy_index = person.add_new_plan_as_selected(copy);
+
+        let plans = person.plans();
+        assert_eq!(1, copy_index);
+        assert!(!plans[0].selected);
+        assert_eq!(Some(12.5), plans[0].score);
+        assert_eq!(4, plans[0].msa_contributions);
+        assert!(plans[1].selected);
+        assert_eq!(Some(12.5), plans[1].score);
+        assert_eq!(0, plans[1].msa_contributions);
     }
 
     #[deterministic_id_test]

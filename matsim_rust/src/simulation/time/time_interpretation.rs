@@ -261,14 +261,13 @@ mod tests {
     #[deterministic_id_test]
     fn activity_end_time_along_plan_uses_previous_elements_to_compute_start() {
         let plan = InternalPlan {
-            score: None,
-            selected: true,
             elements: vec![
                 InternalPlanElement::Activity(activity(Some(SimTime::from_secs(5)), None)),
                 InternalPlanElement::Leg(leg(Some(Duration::from_secs(7)), None)),
                 InternalPlanElement::Activity(activity(None, Some(Duration::from_secs(3)))),
             ],
-            attributes: Default::default(),
+            selected: true,
+            ..Default::default()
         };
         let target = plan.elements[2].as_activity().unwrap();
 
@@ -282,14 +281,13 @@ mod tests {
     fn activity_end_time_along_plan_uses_configured_simulation_start() {
         let time_interpretation = TimeInterpretation::new(SimTime::from_secs(10));
         let plan = InternalPlan {
-            score: None,
-            selected: true,
             elements: vec![
                 InternalPlanElement::Activity(activity(None, Some(Duration::from_secs(5)))),
                 InternalPlanElement::Leg(leg(Some(Duration::from_secs(7)), None)),
                 InternalPlanElement::Activity(activity(None, Some(Duration::from_secs(3)))),
             ],
-            attributes: Default::default(),
+            selected: true,
+            ..Default::default()
         };
         let target = plan.elements[2].as_activity().unwrap();
 
@@ -302,13 +300,12 @@ mod tests {
     #[deterministic_id_test]
     fn activity_end_time_along_plan_returns_none_for_activity_not_in_plan() {
         let plan = InternalPlan {
-            score: None,
-            selected: true,
             elements: vec![InternalPlanElement::Activity(activity(
                 Some(SimTime::from_secs(5)),
                 None,
             ))],
-            attributes: Default::default(),
+            selected: true,
+            ..Default::default()
         };
         let outside_activity = activity(Some(SimTime::from_secs(10)), None);
 

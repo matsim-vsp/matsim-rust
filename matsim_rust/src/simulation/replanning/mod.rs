@@ -1154,10 +1154,9 @@ mod tests {
 
     fn plan(score: Option<f64>, selected: bool) -> InternalPlan {
         InternalPlan {
-            attributes: Default::default(),
             score,
             selected,
-            elements: Vec::new(),
+            ..Default::default()
         }
     }
 

@@ -1172,7 +1172,7 @@ mod tests {
         let expected = [
             (1, "<event time=\"1\" type=\"actend\" person=\"a & b\" link=\"l\"1\" x=\"1\" y=\"2\" actType=\"home <3>\"/>\n"),
             (2, "<event time=\"2\" type=\"travelled\" person=\"c\" distance=\"10\" mode=\"walk\"/>\n"),
-            (3, "<event time=\"3\" type=\"stuckAndAbort\" person=\"d\" link=\"l2\" legMode=\"car\" reason=\"first\nsecond A\"/>\n"),
+            (3, "<event time=\"3\" type=\"stuckAndAbort\" person=\"d\" link=\"l2\" legMode=\"car\" reason=\"first second A\"/>\n"),
         ]
         .map(|(secs, event)| (SimTime::from_secs(secs), event.to_string()));
         assert_eq!(expected.to_vec(), read_with_reader(&path));

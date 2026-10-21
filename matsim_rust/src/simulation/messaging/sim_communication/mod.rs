@@ -2,6 +2,7 @@ use crate::simulation::messaging::messages::InternalSyncMessage;
 use crate::simulation::time::Tick;
 use nohash_hasher::{IntMap, IntSet};
 
+pub mod barrier;
 pub mod local_communicator;
 pub mod message_broker;
 

@@ -21,7 +21,7 @@ use crate::simulation::replanning::{ReplanningStrategy, StrategyManager, replan_
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::{MobsimInput, ScenarioCore};
 use crate::simulation::scoring::{
-    CharyparNagelScoringFunction, PersonExperiences, PlanScorer, score_population,
+    CharyparNagelScoringFunction, PersonExperiences, PlanScorer, ScoreAssigner, score_population,
 };
 use crate::simulation::simulation::{Simulation, SimulationBuilder};
 use crate::simulation::{Identifiable, io, logging};
@@ -614,6 +614,7 @@ pub(crate) struct ReplanningPool {
 pub(crate) struct ScoringPool {
     pool: Option<rayon::ThreadPool>,
     plan_scorer: Box<dyn PlanScorer>,
+    score_assigner: ScoreAssigner,
 }
 
 impl ReplanningPool {
@@ -726,6 +727,7 @@ impl ScoringPool {
                     scenario_core.network.clone(),
                 ))
             }),
+            score_assigner: ScoreAssigner::from_config(scenario_core.config.as_ref()),
         }
     }
 
@@ -734,12 +736,27 @@ impl ScoringPool {
         &self,
         experienced_plans: &mut [PersonExperiences],
         population: &mut Population,
+        iteration: u32,
     ) {
+        let plan_scorer = self.plan_scorer.as_ref();
+        let assigner = &self.score_assigner;
         match &self.pool {
             Some(pool) => pool.install(|| {
-                score_population(experienced_plans, population, self.plan_scorer.as_ref())
+                score_population(
+                    experienced_plans,
+                    population,
+                    plan_scorer,
+                    iteration,
+                    assigner,
+                )
             }),
-            None => score_population(experienced_plans, population, self.plan_scorer.as_ref()),
+            None => score_population(
+                experienced_plans,
+                population,
+                plan_scorer,
+                iteration,
+                assigner,
+            ),
         }
     }
 }

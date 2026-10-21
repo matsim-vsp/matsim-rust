@@ -1,22 +1,26 @@
 use macros::deterministic_id_test;
 use matsim_rust::simulation::config::{CommandLineArgs, Config, ScoringMode};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
+use matsim_rust::simulation::id::Id;
 use matsim_rust::simulation::io;
 use matsim_rust::simulation::scenario::Scenario;
 use matsim_rust::simulation::scenario::network::Network;
 use matsim_rust::simulation::scenario::population::{
-    InternalLeg, InternalPlan, InternalPlanElement, InternalRoute, Population,
+    InternalLeg, InternalPerson, InternalPlan, InternalPlanElement, InternalRoute, Population,
 };
 use matsim_rust::simulation::scenario::vehicles::Garage;
-use matsim_rust::simulation::scoring::OnlyTravelTimeDependentScoring;
+use matsim_rust::simulation::scoring::{OnlyTravelTimeDependentScoring, PlanScorer};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 // This is just a regression test to ensure backpacking produces experienced plans.
 #[deterministic_id_test(matsim_rust)]
 fn backpacking_produces_partition_independent_experienced_plans() {
     let single = run_and_load("./tests/resources/equil/equil-config-1-scoring.yml");
     let partitioned = run_and_load("./tests/resources/equil/equil-config-2-scoring.yml");
-    let network = Network::from_file_as_is(Path::new("./assets/equil/equil-network.xml"));
+    let network = Network::from_file(Path::new("./assets/equil/equil-network.xml"));
 
     assert!(!single.persons.is_empty());
     assert_eq!(single, partitioned);
@@ -24,6 +28,33 @@ fn backpacking_produces_partition_independent_experienced_plans() {
     for person in single.persons.values() {
         assert_eq!(person.plans().len(), 1);
         check_plan_integrity(&person.plans()[0], &network);
+    }
+}
+
+/// Compares the experienced plans of all 100 equil agents with a stored reference, so that changes
+/// to the event handling of backpacking can't alter the reconstructed plans or their scores
+/// unnoticed. After an intended change of the result, replace the reference with the decompressed
+/// `test_output/simulation/scoring_reference_1/output_experienced_plans.xml.zst`.
+#[deterministic_id_test(matsim_rust)]
+fn full_equil_population_matches_reference_experienced_plans() {
+    let mut experienced = Vec::new();
+    for parts in [1, 2] {
+        let mut config = Config::from_args(CommandLineArgs::new_with_path(format!(
+            "./tests/resources/equil/equil-config-{parts}-scoring.yml"
+        )));
+        config.population_mut().path = Some("./assets/equil/equil-plans.xml.gz".into());
+        config.output_mut().output_dir =
+            format!("./test_output/simulation/scoring_reference_{parts}").into();
+        experienced.push(run_config_and_load(config));
+    }
+    // Load the reference after the runs, so that it doesn't change the order in which ids are created.
+    let expected = load_population(&PathBuf::from(
+        "./tests/resources/equil/expected_experienced_plans.xml",
+    ));
+
+    assert_eq!(expected.persons.len(), 100);
+    for population in experienced {
+        assert_eq!(population, expected);
     }
 }
 
@@ -93,6 +124,68 @@ fn disabled_scoring_skips_backpacking_and_clears_scores() {
             .join("output_experienced_plans.xml.zst"),
     ] {
         assert!(!file.exists(), "Unexpected {}", file.display());
+    }
+}
+
+/// Scores each person with the number of times it was scored before, which is the iteration index
+/// when the first iteration is 0.
+#[derive(Default)]
+struct ScoringCountScorer {
+    counts: Mutex<HashMap<String, u32>>,
+}
+
+impl PlanScorer for ScoringCountScorer {
+    fn score(
+        &self,
+        person_id: &Id<InternalPerson>,
+        _subpopulation: &str,
+        _experienced_plan: &InternalPlan,
+    ) -> Result<f64, String> {
+        let mut counts = self.counts.lock().unwrap();
+        let count = counts.entry(person_id.external().to_string()).or_default();
+        let score = f64::from(*count);
+        *count += 1;
+        Ok(score)
+    }
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn score_msa_averages_selected_plan_scores_but_not_experienced_scores() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/equil/equil-config-1-scoring.yml",
+    ));
+    config.controller_mut().last_iteration = 2;
+    // MSA starts in iteration (2 - 0) * 0.5 + 0 = 1.
+    config
+        .scoring_mut()
+        .fraction_of_iterations_to_start_score_msa = Some(0.5);
+    config.output_mut().output_dir = "./test_output/simulation/scoring_msa".into();
+    let output_dir = io::resolve_path(config.context(), &config.output().output_dir);
+    let scenario = Scenario::load(config);
+    ControllerBuilder::default_with_scenario(scenario)
+        .scoring_function(Box::new(ScoringCountScorer::default()))
+        .build()
+        .unwrap()
+        .run();
+
+    let experienced = load_population(&output_dir.join("output_experienced_plans.xml.zst"));
+    let selected = load_population(&output_dir.join("output_plans.xml.zst"));
+    assert!(!selected.persons.is_empty());
+    for (person_id, person) in &selected.persons {
+        // Iteration 0 replaces the input score with 0. MSA then averages the scores 1 and 2 of
+        // iterations 1 and 2; the first MSA contribution discards the score of iteration 0.
+        assert_eq!(Some(1.5), person.selected_plan().unwrap().score);
+        // Experienced plans keep the raw score of the last iteration.
+        assert_eq!(
+            Some(2.0),
+            experienced
+                .persons
+                .get(person_id)
+                .unwrap()
+                .selected_plan()
+                .unwrap()
+                .score
+        );
     }
 }
 
@@ -177,7 +270,11 @@ fn check_plan_integrity(plan: &InternalPlan, network: &Network) {
                     .trav_time
                     .unwrap_or_else(|| panic!("Leg at element {index} has no travel time"));
                 assert_eq!(
-                    Some(departure.saturating_add(travel_time)),
+                    Some(
+                        departure
+                            .saturating_add(travel_time)
+                            .saturating_add(Duration::from_secs(1))
+                    ),
                     activity.start_time,
                     "Leg/activity times differ at element {index}"
                 );
@@ -211,41 +308,4 @@ fn check_route_integrity(leg: &InternalLeg, network: &Network) {
             pair[1]
         );
     }
-}
-
-#[deterministic_id_test(matsim_rust)]
-fn experienced_plans_are_byte_identical_across_independent_simulation_runs() {
-    let mut config1 = Config::from_args(CommandLineArgs::new_with_path(
-        "./tests/resources/equil/equil-config-1-scoring.yml",
-    ));
-    config1.output_mut().output_dir = "./test_output/simulation/determinism_run1".into();
-    let dir1 = io::resolve_path(config1.context(), &config1.output().output_dir);
-
-    let mut config2 = Config::from_args(CommandLineArgs::new_with_path(
-        "./tests/resources/equil/equil-config-1-scoring.yml",
-    ));
-    config2.output_mut().output_dir = "./test_output/simulation/determinism_run2".into();
-    let dir2 = io::resolve_path(config2.context(), &config2.output().output_dir);
-
-    run_config_and_load(config1);
-    run_config_and_load(config2);
-
-    let file1 = dir1.join("output_experienced_plans.xml.zst");
-    let file2 = dir2.join("output_experienced_plans.xml.zst");
-
-    let bytes1 = std::fs::read(&file1).unwrap();
-    let bytes2 = std::fs::read(&file2).unwrap();
-    assert_eq!(bytes1, bytes2);
-
-    let it_file1 = dir1
-        .join("ITERS")
-        .join("it.1")
-        .join("output_experienced_plans.xml.zst");
-    let it_file2 = dir2
-        .join("ITERS")
-        .join("it.1")
-        .join("output_experienced_plans.xml.zst");
-    let it_bytes1 = std::fs::read(&it_file1).unwrap();
-    let it_bytes2 = std::fs::read(&it_file2).unwrap();
-    assert_eq!(it_bytes1, it_bytes2);
 }

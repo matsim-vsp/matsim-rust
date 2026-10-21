@@ -9,6 +9,7 @@ use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use derive_builder::Builder;
+use itertools::Either;
 use ordered_float::OrderedFloat;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -95,6 +96,14 @@ impl AStarBuffers {
             self.closed.resize(num_nodes, false);
         }
     }
+
+    /// Number of nodes reached (disutility below infinity) and settled (popped from the queue) by
+    /// the last search. Only valid until the next `prepare`.
+    #[cfg(test)]
+    pub(crate) fn reached_and_settled(&self) -> (usize, usize) {
+        let settled = self.touched.iter().filter(|&&n| self.closed[n]).count();
+        (self.touched.len(), settled)
+    }
 }
 
 /// Per-node state of the routing use case (see `RoutingAStarActions`), with the same invariant as
@@ -139,19 +148,6 @@ pub(crate) enum AStarCoreResult {
     /// time. The parent links (the link from which the algorithm arrived at the node) are tracked
     /// in the `RoutingBuffers`.
     SingleDisutil(Disutility, Duration),
-    /// A previously validated candidate that beats every remaining lower-bound estimate. The
-    /// search stopped on the candidate instead of on a settled to-node, so the candidate decided
-    /// this result rather than merely bounding it.
-    SingleDisutilWithPath(Disutility, Duration, Vec<crate::simulation::id::Id<Link>>),
-}
-
-/// A route which was validated before the search, with its cost. The search stops as soon as the
-/// queue's smallest remaining estimate exceeds `travel_disutility`, because no cheaper path can
-/// then be found.
-pub(crate) struct CandidateRoute {
-    pub(crate) path: Vec<crate::simulation::id::Id<Link>>,
-    pub(crate) travel_time: Duration,
-    pub(crate) travel_disutility: Disutility,
 }
 
 /// Implementations of this trait represent different use cases of `a_star_core`.
@@ -412,6 +408,11 @@ pub(crate) struct AStarRequest<'a, H: AStarHeuristic, O: AStarActions> {
     vehicle: Option<&'a InternalVehicle>,
     #[builder(default)]
     backward: bool, // if true, uses the incoming edges (backward graph) when looking for neighbours
+    /// The dead end of each node (see `graph::find_dead_ends`). If given, nodes in dead ends that
+    /// contain neither the from- nor the to-node are not expanded. Ignored without a to-node,
+    /// since then the disutilities to all nodes are needed.
+    #[builder(default)]
+    dead_ends: Option<&'a [Option<NodeIndex>]>,
 }
 
 impl<'a, H: AStarHeuristic, O: AStarActions> AStarRequestBuilder<'a, H, O> {
@@ -446,8 +447,6 @@ impl<'a, H: AStarHeuristic, O: AStarActions> AStarRequestBuilder<'a, H, O> {
 pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
     mut request: AStarRequest<H, O>,
     buffers: &mut AStarBuffers,
-    mut nodes_expanded: Option<&mut usize>,
-    candidate: Option<CandidateRoute>,
 ) -> Result<AStarCoreResult, GraphError> {
     let number_of_nodes = request.graph.num_nodes();
 
@@ -472,25 +471,20 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
         .options
         .set_arrival_time_opt(from_node, request.departure_time);
 
+    // the dead ends of the from- and to-node, which have to be expanded
+    let to_node = request.options.get_to_node_opt();
+    let dead_ends = request.dead_ends.filter(|_| to_node.is_some());
+    let (from_dead_end, to_dead_end) = dead_ends.map_or((None, None), |dead_ends| {
+        (dead_ends[from_node], to_node.and_then(|to| dead_ends[to]))
+    });
+
     // MAIN LOOP of A* search
-    while let Some((priority, Reverse(current_id))) = queue.pop() {
+    while let Some((_, Reverse(current_id))) = queue.pop() {
         // skip outdated entries: the node was already popped with a smaller priority
         if closed[current_id] {
             continue;
         }
         closed[current_id] = true;
-
-        // The candidate was validated before the search, so it is a real route. Once the smallest
-        // remaining estimate exceeds its cost, nothing cheaper can be found.
-        if let Some(candidate) = candidate.as_ref()
-            && priority.0.0.0 > candidate.travel_disutility
-        {
-            return Ok(AStarCoreResult::SingleDisutilWithPath(
-                candidate.travel_disutility,
-                candidate.travel_time,
-                candidate.path.clone(),
-            ));
-        }
 
         // disutility from "from"-node to the current_id node
         let current_disutility = disutilities[current_id];
@@ -536,16 +530,23 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
             ));
         }
 
-        if let Some(nodes_expanded) = &mut nodes_expanded {
-            **nodes_expanded += 1;
+        // Do not expand dead ends that contain neither the from- nor the to-node: a path through
+        // such a dead end leaves it through the node where it entered, so it is never cheaper
+        // than the path without this detour.
+        if let Some(dead_ends) = dead_ends {
+            let dead_end = dead_ends[current_id];
+            if dead_end.is_some() && dead_end != from_dead_end && dead_end != to_dead_end {
+                continue;
+            }
         }
 
         // if request.backward=true, we consider the incoming edges, to consider paths from
-        // other nodes to the "from"-node
+        // other nodes to the "from"-node. Only the outgoing edges, which routing uses, are
+        // available without allocation.
         let neighbour_edges = if request.backward {
-            request.graph.incoming_edges_as_idx(current_id)
+            Either::Left(request.graph.incoming_edges_as_idx(current_id).into_iter())
         } else {
-            request.graph.outgoing_edges_as_idx(current_id)
+            Either::Right(request.graph.outgoing_edges_as_idx(current_id))
         };
 
         // go through all neighbours of the current node. If the disutility to get there is smaller
@@ -607,9 +608,7 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
                                 provided in AStarOptions.",
                         );
 
-                        let to_node_id = request.graph.get_node_id_from_idx(to_node_idx)?;
-
-                        h.estimate(request.graph.get_node_id_from_idx(neighbour)?, to_node_id)
+                        h.estimate(neighbour, to_node_idx)
                     }
                     HeuristicMode::WithoutHeuristic => {
                         // This collapses A* to pure Dijkstra.
@@ -628,16 +627,6 @@ pub(crate) fn a_star_core<H: AStarHeuristic, O: AStarActions>(
                 request.options.set_parent_link_opt(neighbour, i)
             }
         }
-    }
-
-    // The queue drained without settling the target, so a validated candidate is still the best
-    // known route.
-    if let Some(candidate) = candidate {
-        return Ok(AStarCoreResult::SingleDisutilWithPath(
-            candidate.travel_disutility,
-            candidate.travel_time,
-            candidate.path,
-        ));
     }
 
     Ok(request.options.build_result(

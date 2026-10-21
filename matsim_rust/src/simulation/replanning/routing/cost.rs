@@ -516,6 +516,7 @@ mod tests {
                     ..AgentParameter::default()
                 },
             ],
+            ..Default::default()
         });
         config
     }

@@ -129,21 +129,13 @@ where
             Self::handle_incoming_msg(msg, &mut result, in_msgs_ref, now)
         });
 
-        if self.global_sync {
-            // Non-neighbor transfers, including zero-duration legs, must arrive in this tick.
-            comm_ref.barrier();
-            for msg in comm_ref.receive_pending() {
-                Self::handle_incoming_msg(msg, &mut result, in_msgs_ref, now);
-            }
-        }
-
         result
     }
 
     /// Returns the non-empty messages this partition received but never processed. Must be called
     /// by all partitions after their last step.
     ///
-    /// Without global synchronization, a partition only waits for messages from its neighbors, i.e. the partitions it shares a link
+    /// A partition only waits for messages from its neighbors, i.e. the partitions it shares a link
     /// with. Messages from other partitions, e.g. teleported agents, are only read if they arrive
     /// while the partition is waiting for its neighbors, and never if it has no neighbors at all.
     /// The agents in such messages are lost.
@@ -204,11 +196,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::simulation::Identifiable;
     use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
     use crate::simulation::config;
     use crate::simulation::id::Id;
-    use crate::simulation::messaging::messages::{TeleportationMessage, VehicleMessage};
+    use crate::simulation::messaging::messages::VehicleMessage;
     use crate::simulation::messaging::sim_communication::local_communicator::ChannelSimCommunicator;
     use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
     use crate::simulation::network::sim_network::SimNetworkPartition;
@@ -219,6 +210,7 @@ mod tests {
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils::create_agent;
     use macros::deterministic_id_test;
+    use std::panic::{self, AssertUnwindSafe};
     use std::rc::Rc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -228,27 +220,19 @@ mod tests {
     fn send_recv_empty_msgs() {
         let sends = Arc::new(AtomicUsize::new(0));
 
-        execute_test(move |communicator| {
-            let mut broker = create_net_message_broker(communicator);
-
-            sends.fetch_add(1, Ordering::SeqCst);
+        execute_test(move |broker| {
+            sends.fetch_add(1, Ordering::Relaxed);
             let result = broker.send_recv(0);
 
-            // A rank only returns once it has received a message from every one of its
-            // neighbours, and a neighbour sends only after entering send_recv. So by
-            // the time this rank returns, this rank and each of its neighbours must
-            // have bumped the counter. The bound is therefore per-rank rather than a
-            // fixed total: rank 3 waits on rank 2 alone and may legitimately return
-            // while ranks 0 and 1 have not entered send_recv yet, so a single fixed
-            // threshold across all ranks cannot hold.
-            let expected_sends = broker.neighbors.len() + 1;
+            // all threads block on receive until their neighbors have sent, and every thread
+            // increases the send count before it sends. Therefore, the send count is at least the
+            // number of neighbors plus one, i.e., 3 for 0 and 1, 4 for 2 and only 2 for 3, which
+            // can move on before 0 and 1 have increased the send count. Most of the time it is 4.
             assert!(
-                expected_sends <= sends.load(Ordering::SeqCst),
-                "# {} Failed on send count of {}, expected at least {} for {} neighbors",
+                broker.neighbors.len() + 1 <= sends.load(Ordering::Relaxed),
+                "# {} Failed on send count of {}",
                 broker.rank(),
-                sends.load(Ordering::SeqCst),
-                expected_sends,
-                broker.neighbors.len()
+                sends.load(Ordering::Relaxed)
             );
 
             // the different partitions expect varying numbers of sync messags.
@@ -265,42 +249,11 @@ mod tests {
         });
     }
 
-    #[deterministic_id_test]
-    fn global_sync_delivers_zero_duration_teleportation_in_the_same_tick() {
-        for isolated in [false, true] {
-            execute_test(move |communicator| {
-                let mut broker = create_net_message_broker(communicator);
-                broker.global_sync = true;
-                if isolated {
-                    // Disconnected partitions have no road-neighbor messages to wait for.
-                    broker.neighbors.clear();
-                }
-                if broker.rank() == 0 {
-                    let agent = create_agent(42, vec!["6"]);
-                    broker
-                        .add_teleportation(TeleportationMessage::new(agent, SimTime::default()), 0);
-                }
-                let messages = broker.send_recv(0);
-                if broker.rank() == 3 {
-                    let arrivals: Vec<_> = messages
-                        .iter()
-                        .flat_map(|message| message.teleportations())
-                        .collect();
-                    assert_eq!(1, arrivals.len());
-                    assert_eq!(arrivals[0].end_time(), SimTime::default());
-                    assert_eq!(arrivals[0].id().external(), "42");
-                }
-            });
-        }
-    }
-
     /// This test moves a vehicle from partition 0 to 2 and then to partition 3. The test involves
     /// Two send_recv steps.
     #[deterministic_id_test]
     fn send_recv_local_vehicle_msg() {
-        execute_test(|communicator| {
-            let mut broker = create_net_message_broker(communicator);
-
+        execute_test(|broker| {
             // place vehicle into partition 0
             if broker.rank() == 0 {
                 let agent = create_agent(0, vec!["2", "6"]);
@@ -353,9 +306,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn send_recv_remote_message() {
-        execute_test(|communicator| {
-            let mut broker = create_net_message_broker(communicator);
-
+        execute_test(|broker| {
             // place vehicle into partition 0 with a future timestamp
             if broker.rank() == 0 {
                 let agent = create_agent(0, vec!["6"]);
@@ -386,9 +337,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn send_recv_local_and_remote_msg() {
-        execute_test(|communicator| {
-            let mut broker = create_net_message_broker(communicator);
-
+        execute_test(|broker| {
             if broker.rank() == 0 {
                 // place vehicle into partition 0 with a future timestamp with remote destination
                 let agent = create_agent(0, vec!["6"]);
@@ -452,7 +401,9 @@ mod tests {
 
         assert_eq!(partition.get_node_ids().len(), 1);
 
-        if rank == 0 || rank == 1 {
+        if rank == 0 {
+            assert_eq!(partition.get_link_ids().len(), 2);
+        } else if rank == 1 {
             assert_eq!(partition.get_link_ids().len(), 2);
         } else if rank == 2 {
             assert_eq!(partition.get_link_ids().len(), 3);
@@ -469,8 +420,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn send_recv_storage_cap() {
-        execute_test(|communicator| {
-            let mut broker = create_net_message_broker(communicator);
+        execute_test(|broker| {
             // add a storage cap message for link 4, which connects parts 1 -> 2
             if broker.rank() == 2 {
                 broker.add_cap_update(
@@ -498,9 +448,13 @@ mod tests {
         });
     }
 
+    /// Runs the test in one thread per partition, with the message broker of the partition.
+    /// Afterwards, all partitions wait for each other, as in a simulation, so that no partition
+    /// drops its channel while another one still sends to it, e.g. a message to a partition that is
+    /// not a neighbor.
     fn execute_test<F>(test: F)
     where
-        F: Fn(ChannelSimCommunicator) + Send + Sync + 'static,
+        F: Fn(&mut NetMessageBroker<ChannelSimCommunicator>) + Send + Sync + 'static,
     {
         let network = create_network();
         let communicators = ChannelSimCommunicator::create_n_2_n(network.nodes().len() as u32);
@@ -511,7 +465,15 @@ mod tests {
 
         for c in communicators {
             let cloned_test_ref = test_ref.clone();
-            let handle = thread::spawn(move || cloned_test_ref(c));
+            let handle = thread::spawn(move || {
+                let mut broker = create_net_message_broker(c);
+                let result = panic::catch_unwind(AssertUnwindSafe(|| cloned_test_ref(&mut broker)));
+                // a failing partition still waits, so that the others do not wait forever
+                broker.take_unprocessed_messages();
+                if let Err(payload) = result {
+                    panic::resume_unwind(payload);
+                }
+            });
             join_handles.push(handle)
         }
 
