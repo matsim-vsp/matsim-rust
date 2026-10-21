@@ -664,7 +664,7 @@ mod tests {
             &PartitionMethod::Metis(
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::InLinkCapacity)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -681,7 +681,7 @@ mod tests {
             &PartitionMethod::Metis(
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::InLinkCount)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -699,7 +699,7 @@ mod tests {
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::InLinkCapacity)
                     .add_vertex_weight(VertexWeight::InLinkCount)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -716,7 +716,7 @@ mod tests {
             &PartitionMethod::Metis(
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::Constant)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_contiguous(false),
             ),
         );
@@ -734,7 +734,7 @@ mod tests {
                 MetisOptions::default()
                     .add_vertex_weight(VertexWeight::Constant)
                     .add_vertex_weight(VertexWeight::InLinkCount)
-                    .set_imbalance_factor(0.)
+                    .set_imbalance_factor(1.)
                     .set_iteration_number(100)
                     .set_contiguous(false),
             ),

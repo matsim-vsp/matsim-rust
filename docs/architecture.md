@@ -34,7 +34,9 @@ links are partitioned. With `Include`, all nodes and links are partitioned regar
 October 2026. `Network::from_file_with_partitioning` always partitions all nodes and links. `contiguous: true` requires a connected
 graph, i.e. a connected main-mode network with `AssignAfterPartitioningToNearest`. Networks with separate components,
 e.g. transit stop nodes with only a loop link or a transit network that is not connected to the road network, need
-`contiguous: false` with `Include`. `min_conn: true` sets METIS's `MinConn` option, which tries to minimize the
+`contiguous: false` with `Include`. `imbalance_factor` is METIS's load imbalance, the largest allowed partition
+weight relative to the mean (1.03 = 3 %); before October 2026 it was the excess itself, so that 1.1 allowed partitions
+2.1 times as heavy as the mean. `min_conn: true` sets METIS's `MinConn` option, which tries to minimize the
 maximum number of neighbors of a partition (k-way only; it moves vertices at weak interfaces, i.e. interfaces with a
 small edge weight, and stops once the maximum is below 1.4 times the mean). Before October 2026, the graph was built from the
 directed links, with every incoming link turned into a loop. Network files partitioned with that version were computed

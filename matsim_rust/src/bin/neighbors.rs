@@ -37,7 +37,7 @@ fn main() {
             &PartitionMethod::Metis(MetisOptions {
                 vertex_weight: vec![VertexWeight::PreComputed],
                 edge_weight: EdgeWeight::Capacity,
-                imbalance_factor: 0.03,
+                imbalance_factor: 1.03,
                 iteration_number: 10,
                 contiguous: true,
                 min_conn: false,
