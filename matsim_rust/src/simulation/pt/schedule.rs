@@ -176,6 +176,17 @@ impl TransitSimSchedule {
         self.routes.is_empty()
     }
 
+    /// Finds a route by the external ids of its line and route. The routes are sorted by these
+    /// ids, so this is a binary search without hashing.
+    pub fn find_route(&self, line: &str, route: &str) -> Option<&SimTransitRoute> {
+        self.routes
+            .binary_search_by(|candidate| {
+                (candidate.line.external(), candidate.route.external()).cmp(&(line, route))
+            })
+            .ok()
+            .map(|index| &self.routes[index])
+    }
+
     /// Scheduled time at which the departure arrives at its last stop.
     fn scheduled_end(&self, departure: &SimDeparture) -> SimTime {
         let last_stop = self.routes[departure.route]

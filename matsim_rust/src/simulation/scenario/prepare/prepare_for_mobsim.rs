@@ -1,6 +1,7 @@
 use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
-use crate::simulation::config::Config;
+use crate::simulation::config::{Config, TransitSimulation};
 use crate::simulation::id::Id;
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::replanning::routing::utils::calc_distance;
 use crate::simulation::replanning::routing::{
     Facility, RoutingError, RoutingRequestBuilder, TripRouter,
@@ -10,7 +11,7 @@ use crate::simulation::scenario::facilities::ActivityFacilities;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
-    InternalPlanElement, InternalRoute,
+    InternalPlanElement, InternalPtRoute, InternalRoute,
 };
 use crate::simulation::scenario::trip_structure_utils::{
     TripSpan, get_trip_spans_default, identify_main_mode,
@@ -33,6 +34,7 @@ pub(crate) fn prepare_for_mobsim(
         network: &scenario.core.network,
         garage: &scenario.core.garage,
         facilities: &scenario.core.facilities,
+        transit_sim_schedule: &scenario.core.transit_sim_schedule,
         config: scenario.core.config.as_ref(),
     };
 
@@ -54,6 +56,8 @@ pub struct PrepareForMobsimContext<'a> {
     pub network: &'a Network,
     pub garage: &'a Garage,
     pub facilities: &'a ActivityFacilities,
+    /// Empty unless transit is simulated schedule based.
+    pub transit_sim_schedule: &'a TransitSimSchedule,
     pub config: &'a Config,
 }
 
@@ -295,6 +299,17 @@ fn trip_is_valid(
             return false;
         }
 
+        // Schedule-based transit derives the travel times of transit legs, like QSim derives
+        // them for main-mode legs.
+        if is_transit_passenger_mode(context, &leg.mode) {
+            if let InternalRoute::Pt(pt_route) = route
+                && !pt_route_is_valid(context.transit_sim_schedule, pt_route)
+            {
+                return false;
+            }
+            continue;
+        }
+
         // QSim derives travel times for main-mode legs. All other legs need a travel time,
         // which is present on both leg and route after synchronization above.
         if !is_network_mode(context, &leg.mode)
@@ -365,6 +380,42 @@ fn network_route_is_valid(
         .collect::<Vec<_>>();
     links.iter().all(|link| link.contains_mode(mode))
         && links.windows(2).all(|pair| pair[0].to == pair[1].from)
+}
+
+/// Checks a transit route against the schedule: its line and route exist, the access stop and a
+/// later egress stop are on the route, and the route starts and ends at the links of these stops.
+fn pt_route_is_valid(schedule: &TransitSimSchedule, route: &InternalPtRoute) -> bool {
+    let description = &route.description;
+    let Some(transit_route) =
+        schedule.find_route(&description.transit_line_id, &description.transit_route_id)
+    else {
+        return false;
+    };
+    let stops = &transit_route.stops;
+    let Some(access) = stops
+        .iter()
+        .position(|stop| stop.facility.external() == description.access_facility_id)
+    else {
+        return false;
+    };
+    let Some(egress) = stops[access + 1..]
+        .iter()
+        .position(|stop| stop.facility.external() == description.egress_facility_id)
+        .map(|offset| access + 1 + offset)
+    else {
+        return false;
+    };
+    stops[access].link == *route.start_link() && stops[egress].link == *route.end_link()
+}
+
+/// Whether legs of `mode` ride transit vehicles of the schedule-based transit simulation.
+fn is_transit_passenger_mode(context: &PrepareForMobsimContext<'_>, mode: &Id<String>) -> bool {
+    let transit = context.config.transit();
+    transit.simulation == TransitSimulation::ScheduleBased
+        && transit
+            .passenger_modes
+            .iter()
+            .any(|candidate| candidate == mode.external())
 }
 
 /// Returns the vehicle a trip with routing `mode` is routed with: the vehicle `<person>_<mode>`
@@ -1408,5 +1459,148 @@ mod tests {
     #[test]
     fn trip_router_is_send_and_sync() {
         assert_send_sync::<TripRouter>();
+    }
+
+    mod transit {
+        use super::super::{prepare_for_mobsim, pt_route_is_valid};
+        use crate::simulation::config::{Config, Transit, TransitSimulation};
+        use crate::simulation::pt::schedule::TransitSimSchedule;
+        use crate::simulation::replanning::routing::TripRouter;
+        use crate::simulation::scenario::network::Network;
+        use crate::simulation::scenario::population::{InternalPtRoute, Population};
+        use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
+        use crate::simulation::scenario::transit::TransitSchedule;
+        use crate::simulation::scenario::vehicles::Garage;
+        use crate::simulation::scenario::{ControllerScenario, Scenario};
+        use crate::test_utils::create_pt_agent;
+        use macros::deterministic_id_test;
+        use std::path::{Path, PathBuf};
+
+        fn tutorial_config(simulation: TransitSimulation) -> Config {
+            let mut config = Config::default();
+            config.network_mut().path = Some("./assets/pt_tutorial/multimodalnetwork.xml".into());
+            config.population_mut().path = Some("./assets/pt_tutorial/plans_1.xml.gz".into());
+            config.vehicles_mut().path = Some("./assets/pt_tutorial/vehicles.xml".into());
+            config.set_transit(Transit {
+                schedule_path: Some("./assets/pt_tutorial/transitschedule.xml".into()),
+                vehicles_path: Some("./assets/pt_tutorial/transitVehicles.xml".into()),
+                simulation,
+                ..Transit::default()
+            });
+            config
+        }
+
+        /// The tutorial population, whose transit legs lack travel times.
+        fn tutorial_without_transit_travel_times(
+            simulation: TransitSimulation,
+        ) -> ControllerScenario {
+            let mut scenario = Scenario::load(tutorial_config(simulation));
+            prepare_for_sim(&mut scenario).unwrap();
+            for person in scenario.population.persons.values_mut() {
+                for leg in person.selected_plan_mut().legs_mut() {
+                    if leg.mode.external() == "pt" {
+                        leg.trav_time = None;
+                        leg.route
+                            .as_mut()
+                            .unwrap()
+                            .as_generic_mut()
+                            .set_trav_time(None);
+                    }
+                }
+            }
+            scenario.into()
+        }
+
+        #[deterministic_id_test]
+        fn schedule_based_transit_legs_need_no_travel_time() {
+            let mut scenario =
+                tutorial_without_transit_travel_times(TransitSimulation::ScheduleBased);
+
+            // Without routing modules, any trip needing routing would fail.
+            prepare_for_mobsim(&mut scenario, &TripRouter::default()).unwrap();
+        }
+
+        #[deterministic_id_test]
+        fn teleported_transit_legs_still_need_travel_time() {
+            let mut scenario = tutorial_without_transit_travel_times(TransitSimulation::Teleported);
+
+            assert!(prepare_for_mobsim(&mut scenario, &TripRouter::default()).is_err());
+        }
+
+        fn tutorial_schedule() -> TransitSimSchedule {
+            let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
+            let schedule =
+                TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
+            let garage =
+                Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+            TransitSimSchedule::build(&schedule, &network, &garage, &Population::default())
+        }
+
+        fn pt_route(
+            line: &str,
+            route: &str,
+            access: &str,
+            egress: &str,
+            start: &str,
+            end: &str,
+        ) -> InternalPtRoute {
+            let agent = create_pt_agent(1, line, route, access, egress, start, end);
+            let person = agent.into_person().unwrap();
+            person.selected_plan().unwrap().legs()[0]
+                .route
+                .as_ref()
+                .unwrap()
+                .as_pt()
+                .unwrap()
+                .clone()
+        }
+
+        #[deterministic_id_test]
+        fn pt_route_matches_schedule() {
+            let schedule = tutorial_schedule();
+
+            assert!(pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to3", "1", "3", "11", "33")
+            ));
+            assert!(pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to3", "2a", "3", "12", "33")
+            ));
+        }
+
+        #[deterministic_id_test]
+        fn pt_route_with_wrong_order_links_or_ids_is_invalid() {
+            let schedule = tutorial_schedule();
+
+            // Egress before access.
+            assert!(!pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to3", "3", "1", "33", "11")
+            ));
+            // Access equals egress.
+            assert!(!pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to3", "1", "1", "11", "11")
+            ));
+            // Start link differs from the link of the access stop.
+            assert!(!pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to3", "1", "3", "12", "33")
+            ));
+            // Stop 2b is only served by route 3to1.
+            assert!(!pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to3", "1", "2b", "11", "32")
+            ));
+            assert!(!pt_route_is_valid(
+                &schedule,
+                &pt_route("Red Line", "1to3", "1", "3", "11", "33")
+            ));
+            assert!(!pt_route_is_valid(
+                &schedule,
+                &pt_route("Blue Line", "1to2", "1", "3", "11", "33")
+            ));
+        }
     }
 }
