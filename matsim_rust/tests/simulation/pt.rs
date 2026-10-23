@@ -4,10 +4,15 @@ use matsim_rust::external_services::{AdapterHandleBuilder, AsyncExecutor, Extern
 use matsim_rust::simulation::config::{CommandLineArgs, Config};
 use matsim_rust::simulation::controller::ExternalServices;
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
-use matsim_rust::simulation::events::utils::compare_event_folder;
+use matsim_rust::simulation::events::EventsManager;
+use matsim_rust::simulation::events::utils::{compare_event_folder, read_events};
+use matsim_rust::simulation::id::Id;
 use matsim_rust::simulation::population::agent_source::PreplanningHorizonAgentSource;
 use matsim_rust::simulation::scenario::Scenario;
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::{Arc, Barrier};
 
 #[deterministic_id_test(matsim_rust)]
@@ -27,6 +32,64 @@ fn pt_tutorial_matches_expected_events() {
         output_dir.join("events"),
     )
     .unwrap();
+}
+
+/// Runs `pt_tutorial` with schedule-based transit and returns the events folder.
+fn run_schedule_based(num_parts: u32, run: &str) -> PathBuf {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/pt_tutorial/pt_tutorial_schedule_based_config.yml",
+    ));
+    config.partitioning_mut().num_parts = num_parts;
+    // Without a main mode, all transit links would be put into one partition.
+    config.qsim_mut().main_modes.push("train".to_string());
+    let output_dir = PathBuf::from(format!(
+        "./test_output/simulation/pt_tutorial_schedule_based_{num_parts}_{run}"
+    ));
+    config.output_mut().output_dir = output_dir.clone();
+
+    let scenario = Scenario::load(config);
+    if num_parts == 2 {
+        // The vehicles cross partitions between the first and the last stop.
+        let partition = |link: &str| scenario.network.get_link(&Id::create(link)).partition;
+        assert_ne!(partition("11"), partition("33"));
+    }
+    let controller = ControllerBuilder::default_with_scenario(scenario)
+        .build()
+        .unwrap();
+    controller.run();
+    output_dir.join("events")
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn pt_tutorial_schedule_based_is_reproducible_and_independent_of_partitioning() {
+    let single = run_schedule_based(1, "a");
+    let single_again = run_schedule_based(1, "b");
+    let two_parts = run_schedule_based(2, "a");
+
+    let types = Rc::new(RefCell::new(BTreeSet::new()));
+    let collected = types.clone();
+    let mut events = EventsManager::new();
+    events.on_any(move |event| {
+        collected.borrow_mut().insert(event.type_());
+    });
+    read_events(&mut events, single.join("events.0.binpb")).unwrap();
+    for expected in [
+        "TransitDriverStarts",
+        "waitingForPt",
+        "VehicleArrivesAtFacility",
+        "VehicleDepartsAtFacility",
+        "PersonEntersVehicle",
+    ] {
+        assert!(
+            types.borrow().contains(expected),
+            "Missing {expected} events"
+        );
+    }
+    assert!(!types.borrow().contains("travelled with pt"));
+    assert!(!types.borrow().contains("stuckAndAbort"));
+
+    compare_event_folder(&single, &single_again).unwrap();
+    compare_event_folder(&single, &two_parts).unwrap();
 }
 
 #[deterministic_id_test(matsim_rust)]
