@@ -44,7 +44,7 @@ Bisher werden ÖV-Legs teleportiert. Der Fahrplan wird zwar geladen (`ScenarioCo
 
 ## Ablauf im Tick T
 
-In `LegEngine::do_step`, nach `send_recv` und der Teleportation:
+In `LegEngine::do_step`, nach den Netzbewegungen und vor `send_recv` (so werden Fahrzeuge zu anderen Partitionen noch im selben Schritt gesendet, auch im letzten; empfangene Fahrzeuge kommen frühestens im nächsten Tick an):
 
 1. **Fahrten starten**, deren erster Halt lokal liegt: `TransitDriverStarts`, `departure` und `PersonEntersVehicle` (Fahrer), danach die Ankunft am ersten Halt.
 2. **Fällige Ankünfte:**
@@ -210,7 +210,7 @@ Zustand pro Partition (alles dicht, keine Hash-Lookups im heißen Pfad):
 - Fahrplanzeiten in **einer** Funktion: Ankunft = max(Abfahrt + arrival_offset, vorige Abfahrt + 1 Tick),
   Abfahrt = max(Ankunft, Abfahrt + departure_offset) – hier hängt später das Störungsmodell.
 
-Ablauf in `LegEngine::do_step` nach `send_recv`-Schleife und Teleportation (`leg_engine.rs:163`):
+Ablauf in `LegEngine::do_step` vor `send_recv` (umgesetzt; ursprünglich danach geplant, siehe oben). Empfangene Fahrzeuge reiht die `send_recv`-Schleife ein:
 1. Empfangene `TransitVehicleMessage`s in die Ankunfts-Queue (nach Attachments/Partition-Events).
 2. Fahrten starten: `TransitDriverStarts`, `departure` (Fahrer, Modus der Route, ohne Routing-Modus),
    `PersonEntersVehicle` (Fahrer), dann Ankunft am ersten Halt einreihen.

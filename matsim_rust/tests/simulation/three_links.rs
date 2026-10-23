@@ -55,7 +55,7 @@ fn three_links_two_parts_match_expected_events() {
 /// connects both partitions, so partition 1 never reads the message with the teleported agent.
 #[deterministic_id_test(matsim_rust)]
 #[should_panic(
-    expected = "1 unprocessed messages between partitions (from, to) {(0, 1)}. 1 teleported agents are lost"
+    expected = "1 unprocessed messages between partitions (from, to) {(0, 1)}. 1 teleported agents and transit passengers are lost"
 )]
 fn teleportation_between_disconnected_partitions_panics() {
     let config_args = CommandLineArgs::new_with_path(

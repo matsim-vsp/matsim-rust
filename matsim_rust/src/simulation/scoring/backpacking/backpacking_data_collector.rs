@@ -147,7 +147,9 @@ impl BackpackingDataCollector {
     #[hotpath::measure]
     pub(crate) fn send(&mut self, entity: PartitionChangeEntity<'_>) -> BackpackingAttachment {
         let person_ids = Self::person_ids(entity);
-        if let PartitionChangeEntity::Vehicle(vehicle) = entity {
+        if let PartitionChangeEntity::Vehicle(vehicle)
+        | PartitionChangeEntity::TransitVehicle(vehicle) = entity
+        {
             self.vehicle_id2person_ids.remove(vehicle.id());
         }
 
@@ -196,7 +198,11 @@ impl BackpackingDataCollector {
             );
         }
 
-        if let PartitionChangeEntity::Vehicle(vehicle) = entity {
+        if let PartitionChangeEntity::Vehicle(vehicle) | PartitionChangeEntity::TransitVehicle(vehicle) =
+            entity
+            // A transit vehicle may travel without passengers.
+            && !expected_person_ids.is_empty()
+        {
             let persons = expected_person_ids.into_iter().collect();
             let previous = self
                 .vehicle_id2person_ids
@@ -216,6 +222,13 @@ impl BackpackingDataCollector {
                 .cloned()
                 .collect(),
             PartitionChangeEntity::TeleportationAgent(agent) => vec![agent.id().clone()],
+            // The driver of a transit vehicle is no agent and has no backpack.
+            PartitionChangeEntity::TransitVehicle(vehicle) => vehicle
+                .passengers()
+                .iter()
+                .map(Identifiable::id)
+                .cloned()
+                .collect(),
         }
     }
 
@@ -269,5 +282,39 @@ mod tests {
             arriving.vehicle_id2person_ids.get(vehicle.id()).unwrap(),
             &expected
         );
+    }
+
+    #[deterministic_id_test]
+    fn migrates_only_passengers_of_transit_vehicle() {
+        let passenger = create_agent(2, vec!["destination"]);
+        let passenger_id = passenger.id().clone();
+        let mut vehicle = SimulationVehicle::new_transit(InternalVehicle::new(11, 0, 1.0, 1.0));
+        vehicle.add_passenger(passenger);
+        let mut departing = BackpackingDataCollector::new(vec![passenger_id.clone()]);
+        departing.reset_iteration();
+        departing.vehicle_id2person_ids.insert(
+            vehicle.id().clone(),
+            [passenger_id.clone()].into_iter().collect(),
+        );
+
+        let attachment = departing.send(PartitionChangeEntity::TransitVehicle(&vehicle));
+        assert!(departing.person_id2backpack.is_empty());
+        assert!(departing.vehicle_id2person_ids.is_empty());
+
+        let mut arriving = BackpackingDataCollector::new(Vec::new());
+        arriving.receive(PartitionChangeEntity::TransitVehicle(&vehicle), attachment);
+        assert_eq!(arriving.person_id2backpack.len(), 1);
+        let expected: IntSet<_> = [passenger_id].into_iter().collect();
+        assert_eq!(
+            arriving.vehicle_id2person_ids.get(vehicle.id()).unwrap(),
+            &expected
+        );
+
+        // An empty transit vehicle carries no backpacks and creates no mapping.
+        let empty = SimulationVehicle::new_transit(InternalVehicle::new(12, 0, 1.0, 1.0));
+        let attachment = arriving.send(PartitionChangeEntity::TransitVehicle(&empty));
+        let mut other = BackpackingDataCollector::new(Vec::new());
+        other.receive(PartitionChangeEntity::TransitVehicle(&empty), attachment);
+        assert!(other.vehicle_id2person_ids.is_empty());
     }
 }

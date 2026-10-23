@@ -35,7 +35,7 @@ fn emit_partition_leave_events_for_vehicle(
     }
 }
 
-fn emit_partition_leave_events_for_agent(
+pub(crate) fn emit_partition_leave_events_for_agent(
     comp_env: &mut ThreadLocalComputationalEnvironment,
     agent: &SimulationAgent,
     to: u32,
@@ -74,7 +74,7 @@ fn emit_partition_enter_events_for_vehicle(
     }
 }
 
-fn emit_partition_enter_events_for_agent(
+pub(crate) fn emit_partition_enter_events_for_agent(
     comp_env: &mut ThreadLocalComputationalEnvironment,
     agent: &SimulationAgent,
     from: u32,

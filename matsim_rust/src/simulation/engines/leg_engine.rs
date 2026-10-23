@@ -1,10 +1,12 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
-use crate::simulation::config::QSim;
+use crate::simulation::config::{QSim, Transit, TransitSimulation};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
-use crate::simulation::engines::leg_engine::ResponsibleEngine::{Leg, Teleportation};
+use crate::simulation::engines::leg_engine::ResponsibleEngine::{
+    Leg, Teleportation, TransitPassenger,
+};
 use crate::simulation::engines::network_engine::NetworkEngine;
 use crate::simulation::engines::teleportation_engine::TeleportationEngine;
 use crate::simulation::events::{
@@ -19,6 +21,8 @@ use crate::simulation::messaging::partition_change::{
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::network::sim_network::SimNetworkPartition;
+use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::pt::transit_engine::TransitEngine;
 use crate::simulation::scenario::population::InternalRoute;
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::{SimClock, SimTime, Tick};
@@ -30,11 +34,15 @@ use tracing::instrument;
 enum ResponsibleEngine {
     Leg,
     Teleportation,
+    TransitPassenger,
 }
 
 pub struct LegEngine<C: SimCommunicator> {
     teleportation_engine: TeleportationEngine,
     network_engine: NetworkEngine,
+    transit_engine: TransitEngine,
+    /// Leg modes which ride transit vehicles. Empty unless transit is simulated schedule based.
+    transit_passenger_modes: IntSet<Id<String>>,
     garage: Arc<Garage>,
     net_message_broker: NetMessageBroker<C>,
     departure_handler: VehicularDepartureHandler,
@@ -49,6 +57,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         garage: Arc<Garage>,
         net_message_broker: NetMessageBroker<C>,
         config: &QSim,
+        transit: TransitContext<'_>,
         comp_env: ThreadLocalComputationalEnvironment,
     ) -> Self {
         let clock = SimClock::new(config.ticks_per_second);
@@ -63,9 +72,30 @@ impl<C: SimCommunicator> LegEngine<C> {
             main_modes: main_modes.clone(),
         };
 
+        // Only modes with existing ids can occur in legs. Looking them up instead of creating them
+        // keeps the ids independent of the order in which partitions start.
+        let transit_passenger_modes = match transit.config.simulation {
+            TransitSimulation::Teleported => IntSet::default(),
+            TransitSimulation::ScheduleBased => transit
+                .config
+                .passenger_modes
+                .iter()
+                .filter_map(|mode| Id::<String>::try_get_from_ext(mode))
+                .collect(),
+        };
+        let transit_engine = TransitEngine::new(
+            transit.schedule,
+            transit.garage,
+            net_message_broker.rank(),
+            comp_env.clone(),
+            clock,
+        );
+
         LegEngine {
             teleportation_engine: TeleportationEngine::new(comp_env.clone(), clock),
             network_engine: NetworkEngine::new(network, comp_env.clone(), clock),
+            transit_engine,
+            transit_passenger_modes,
             garage,
             net_message_broker,
             departure_handler,
@@ -80,6 +110,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             .drain()
             .into_iter()
             .chain(self.teleportation_engine.drain())
+            .chain(self.transit_engine.drain())
             .collect()
     }
 
@@ -115,6 +146,15 @@ impl<C: SimCommunicator> LegEngine<C> {
         let network_vehicles = self
             .network_engine
             .move_links(now, &mut self.net_message_broker);
+
+        // Transit runs before the exchange, so that vehicles leaving for another partition are
+        // sent in this step, also in the last one. They need at least one tick to their next stop,
+        // so the receiving partition handles their arrival in a later step, like a local one.
+        let transit_passengers = self.transit_engine.do_step(now);
+        for (to, transit_vehicle) in self.transit_engine.take_outgoing() {
+            self.net_message_broker
+                .add_transit_vehicle(transit_vehicle, to, now);
+        }
 
         let sync_messages = self.send_recv(now);
 
@@ -158,6 +198,19 @@ impl<C: SimCommunicator> LegEngine<C> {
                 self.teleportation_engine
                     .receive_remote_agent(now, teleportation.into(), from, to);
             }
+
+            for transit_vehicle in msg.take_transit_vehicles() {
+                let (run, arrival, attachments) = transit_vehicle.into_parts();
+                self.comp_env
+                    .partition_migration_extensions_manager_borrow_mut()
+                    .receive(
+                        PartitionChangeEntity::TransitVehicle(&run.vehicle),
+                        attachments,
+                        &context,
+                    );
+                self.transit_engine
+                    .receive_remote_vehicle(now, run, arrival, from);
+            }
         }
 
         let teleported_vehicles = self.teleportation_engine.do_step(now);
@@ -165,6 +218,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         let mut agents = vec![];
         agents.extend(self.publish_vehicular_end_events(now, network_vehicles));
         agents.extend(self.publish_teleported_end_events(now, teleported_vehicles));
+        agents.extend(self.publish_teleported_end_events(now, transit_passengers));
         agents
     }
 
@@ -279,11 +333,18 @@ impl<C: SimCommunicator> LegEngine<C> {
         match self.find_responsible_engine(&agent) {
             Leg => self.pass_to_leg(now, agent, true),
             Teleportation => self.pass_to_teleportation(now, agent),
+            TransitPassenger => self.transit_engine.receive_agent(agent),
         }
     }
 
     fn find_responsible_engine(&self, agent: &SimulationAgent) -> ResponsibleEngine {
         let leg = agent.curr_leg();
+
+        if self.transit_passenger_modes.contains(&leg.mode)
+            && matches!(leg.route, Some(InternalRoute::Pt(_)))
+        {
+            return TransitPassenger;
+        }
 
         // If mode of leg is not main mode, teleport vehicle in every case
         if !self.main_modes.contains(&leg.mode) {
@@ -331,6 +392,13 @@ impl<C: SimCommunicator> LegEngine<C> {
     pub fn network(&self) -> &SimNetworkPartition {
         &self.network_engine.network
     }
+}
+
+/// What the leg engine needs for schedule-based transit.
+pub struct TransitContext<'a> {
+    pub schedule: Arc<TransitSimSchedule>,
+    pub garage: Arc<Garage>,
+    pub config: &'a Transit,
 }
 
 struct VehicularDepartureHandler {

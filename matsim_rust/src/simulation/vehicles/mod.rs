@@ -27,6 +27,36 @@ impl SimulationVehicle {
         }
     }
 
+    /// Creates a vehicle of schedule-based transit. It has no driver, because the transit engine
+    /// moves it.
+    pub fn new_transit(vehicle: InternalVehicle) -> Self {
+        Self::new(vehicle, None, Vec::new())
+    }
+
+    pub fn add_passenger(&mut self, passenger: SimulationAgent) {
+        self.passengers.push(passenger);
+    }
+
+    /// Removes and returns the passengers for which `alights` is true, keeping the order of both
+    /// the remaining and the removed passengers.
+    pub fn take_passengers_where(
+        &mut self,
+        mut alights: impl FnMut(&SimulationAgent) -> bool,
+    ) -> Vec<SimulationAgent> {
+        if !self.passengers.iter().any(&mut alights) {
+            return Vec::new();
+        }
+        let (alighting, staying) = std::mem::take(&mut self.passengers)
+            .into_iter()
+            .partition(|passenger| alights(passenger));
+        self.passengers = staying;
+        alighting
+    }
+
+    pub fn into_passengers(self) -> Vec<SimulationAgent> {
+        self.passengers
+    }
+
     #[cfg(test)]
     pub fn from_parts(
         id: u64,
@@ -106,5 +136,37 @@ impl EnvironmentalEventObserver for SimulationVehicle {
 impl Identifiable<InternalVehicle> for SimulationVehicle {
     fn id(&self) -> &Id<InternalVehicle> {
         self.id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SimulationVehicle;
+    use crate::simulation::Identifiable;
+    use crate::simulation::scenario::vehicles::InternalVehicle;
+    use crate::test_utils::create_agent;
+    use macros::deterministic_id_test;
+
+    #[deterministic_id_test]
+    fn take_passengers_where_keeps_order_of_both_groups() {
+        let mut vehicle = SimulationVehicle::new_transit(InternalVehicle::new(1, 0, 1.0, 1.0));
+        for id in 1..=5 {
+            vehicle.add_passenger(create_agent(id, vec!["destination"]));
+        }
+
+        let alighting = vehicle.take_passengers_where(|p| p.id().external() != "3");
+        let ids = |agents: &[_]| -> Vec<String> {
+            agents
+                .iter()
+                .map(|a: &crate::simulation::agents::agent::SimulationAgent| {
+                    a.id().external().to_owned()
+                })
+                .collect()
+        };
+
+        assert_eq!(vec!["1", "2", "4", "5"], ids(&alighting));
+        assert_eq!(vec!["3"], ids(vehicle.passengers()));
+        assert!(vehicle.take_passengers_where(|_| false).is_empty());
+        assert_eq!(1, vehicle.into_passengers().len());
     }
 }
