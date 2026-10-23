@@ -6,6 +6,7 @@ use crate::simulation::agents::{
     AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic, SimulationAgentState,
 };
 use crate::simulation::id::Id;
+use crate::simulation::pt::passenger::TransitPassengerLogic;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{InternalActivity, InternalLeg, InternalPerson};
 use crate::simulation::time::SimTime;
@@ -91,6 +92,9 @@ impl SimulationAgentLogic for SimulationAgent {
     }
     fn wakeup_time(&self, now: SimTime) -> SimTime {
         self.logic.wakeup_time(now)
+    }
+    fn as_transit_passenger(&self) -> Option<&dyn TransitPassengerLogic> {
+        self.logic.as_transit_passenger()
     }
 
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
