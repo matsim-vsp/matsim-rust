@@ -1,7 +1,7 @@
 use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::{
-    InternalSyncMessage, TeleportationMessage, VehicleMessage,
+    InternalSyncMessage, TeleportationMessage, TransitVehicleMessage, VehicleMessage,
 };
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::network::sim_network::{SimNetworkPartition, StorageUpdate};
@@ -87,6 +87,23 @@ where
             .entry(partition)
             .or_insert_with(|| InternalSyncMessage::new(now, rank, partition));
         message.add_teleportation(teleportation_message);
+    }
+
+    /// Sends a transit vehicle to partition `to`, which is known from the schedule, so that no
+    /// link needs to be looked up.
+    pub(crate) fn add_transit_vehicle(
+        &mut self,
+        transit_vehicle: TransitVehicleMessage,
+        to: u32,
+        now: impl Into<Tick>,
+    ) {
+        let now = now.into();
+        let rank = self.rank();
+        let message = self
+            .out_messages
+            .entry(to)
+            .or_insert_with(|| InternalSyncMessage::new(now, rank, to));
+        message.add_transit_vehicle(transit_vehicle);
     }
 
     pub fn add_cap_update(&mut self, cap: StorageUpdate, now: impl Into<Tick>) {

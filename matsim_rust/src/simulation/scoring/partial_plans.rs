@@ -5,6 +5,7 @@ use crate::simulation::events::{
     VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
+use crate::simulation::pt::schedule::{SimRouteStop, SimTransitRoute};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPlanElement::{Activity, Leg};
@@ -157,6 +158,30 @@ impl PartialPlan {
         self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |_| {});
     }
 
+    /// The person boards a vehicle of schedule-based transit of `route` at `stop`.
+    pub(crate) fn board_transit_vehicle(
+        &mut self,
+        event: &PersonEntersVehicleEvent,
+        route: &SimTransitRoute,
+        stop: &SimRouteStop,
+    ) {
+        self.with_current_leg(PersonEntersVehicleEvent::TYPE, |leg| {
+            leg.partial_route
+                .handle_transit_boarding(event, route, stop)
+        });
+    }
+
+    /// The person alights from a vehicle of schedule-based transit at `stop`.
+    pub(crate) fn alight_transit_vehicle(
+        &mut self,
+        _event: &PersonLeavesVehicleEvent,
+        stop: &SimRouteStop,
+    ) {
+        self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |leg| {
+            leg.partial_route.handle_transit_alighting(stop)
+        });
+    }
+
     pub(crate) fn vehicle_enters_traffic(&mut self, event: &VehicleEntersTrafficEvent) {
         self.with_current_leg(VehicleEntersTrafficEvent::TYPE, |leg| {
             leg.partial_route.handle_vehicle_enters_traffic(event)
@@ -296,7 +321,7 @@ impl Default for PartialLeg {
 impl PartialLeg {
     fn handle_person_departure(&mut self, event: &PersonDepartureEvent) {
         self.mode = Some(event.leg_mode.clone());
-        self.routing_mode = Some(event.routing_mode.clone());
+        self.routing_mode = event.routing_mode.clone();
         self.dep_time = Some(event.time);
     }
 
@@ -360,6 +385,8 @@ struct PartialRoute {
     distance: Option<f64>,
     vehicle: Option<Id<InternalVehicle>>,
     pt_description: Option<InternalPtRouteDescription>,
+    /// Distance of the access stop from the start of its transit route.
+    pt_access_distance: Option<f64>,
 
     //TODO These values are currently unused
     relative_position_on_departure_link: Option<f64>,
@@ -380,6 +407,7 @@ impl Default for PartialRoute {
             distance: None,
             vehicle: None,
             pt_description: None,
+            pt_access_distance: None,
             relative_position_on_departure_link: None,
             relative_position_on_arrival_link: None,
             route: Vec::default(),
@@ -441,6 +469,39 @@ impl PartialRoute {
             access_facility_id: event.access_facility.external().to_string(),
             egress_facility_id: event.egress_facility.external().to_string(),
         });
+    }
+
+    fn handle_transit_boarding(
+        &mut self,
+        event: &PersonEntersVehicleEvent,
+        route: &SimTransitRoute,
+        stop: &SimRouteStop,
+    ) {
+        if self.route_type == Some(PartialRouteTypes::Network) {
+            panic!("Caught boarding a transit vehicle on a Network Route Type!")
+        }
+        self.route_type = Some(PartialRouteTypes::Pt);
+        self.pt_access_distance = Some(stop.distance_from_start);
+        self.pt_description = Some(InternalPtRouteDescription {
+            transit_route_id: route.route.external().to_string(),
+            boarding_time: Some(event.time),
+            transit_line_id: route.line.external().to_string(),
+            access_facility_id: stop.facility.external().to_string(),
+            // Known when the person alights.
+            egress_facility_id: String::new(),
+        });
+    }
+
+    fn handle_transit_alighting(&mut self, stop: &SimRouteStop) {
+        let description = self
+            .pt_description
+            .as_mut()
+            .unwrap_or_else(|| panic!("Caught alighting from a transit vehicle before boarding!"));
+        description.egress_facility_id = stop.facility.external().to_string();
+        let access_distance = self
+            .pt_access_distance
+            .expect("The access distance is set when boarding.");
+        self.distance = Some(stop.distance_from_start - access_distance);
     }
 
     /// Consuming function turning PartialRoute into an InternalRoute
@@ -557,7 +618,7 @@ mod tests {
                 .person(Id::create("person"))
                 .link(Id::create("start"))
                 .leg_mode(Id::create(mode))
-                .routing_mode(Id::create(mode))
+                .routing_mode(Some(Id::create(mode)))
                 .build()
                 .unwrap(),
         );

@@ -44,7 +44,7 @@ Bisher werden ÖV-Legs teleportiert. Der Fahrplan wird zwar geladen (`ScenarioCo
 
 ## Ablauf im Tick T
 
-In `LegEngine::do_step`, nach `send_recv` und der Teleportation:
+In `LegEngine::do_step`, nach den Netzbewegungen und vor `send_recv` (so werden Fahrzeuge zu anderen Partitionen noch im selben Schritt gesendet, auch im letzten; empfangene Fahrzeuge kommen frühestens im nächsten Tick an):
 
 1. **Fahrten starten**, deren erster Halt lokal liegt: `TransitDriverStarts`, `departure` und `PersonEntersVehicle` (Fahrer), danach die Ankunft am ersten Halt.
 2. **Fällige Ankünfte:**
@@ -115,3 +115,172 @@ Kapazität und abgewiesenes Einsteigen, Störungsmodell, `chainedDepartures`, Li
 - `cargo test --workspace -- --test-threads=1 --skip berlin::`
 - `cargo fmt --all -- --check` und `git diff --check`
 - Optional, nur `--release`: Berlin 0,1 % fahrplanbasiert als Lauf, der nicht abstürzen darf, plus Laufzeitvergleich mit dem Teleportieren.
+
+## Verfeinerung nach Schritt 1
+
+Die folgenden Abschnitte konkretisieren die Schritte 2–9 anhand des Codes. Wo sie vom obigen Text abweichen, gelten sie.
+
+Reihenfolge: 2 → 3 → 4 → 5 → 6 → 8a (Integrationstest ohne Scoring) → 7 → 8b → 9.
+Pro Schritt ein Commit (nach Rückfrage), jeweils mit grünen Unit-Tests.
+
+---
+
+### Schritt 2: Events
+
+Dateien: `simulation/events/mod.rs`, `simulation/io/xml/events.rs`, `simulation/io/proto/proto_events.rs`,
+Muster: `PtTeleportationArrivalEvent` (Struct mit `#[event_struct]`, `TYPE`, `try_from_proto_event`,
+`From<&E> for GenericEvent`, Writer-Zweig in `xml/events.rs:179`, Parser in `handle()` (`xml/events.rs:361`)
+und `try_event_from_proto` (`proto_events.rs:612`)). Proto braucht **keine** `.proto`-Änderung, Events
+laufen über die Attribut-Map von `GenericEvent`.
+
+Neue Events (Typnamen und Attribute wie MATSim, mit der Java-Referenz aus Schritt 0 gegenprüfen):
+- `TransitDriverStartsEvent` – `"TransitDriverStarts"`: `driverId`, `vehicleId`, `transitLineId`, `transitRouteId`, `departureId`
+- `VehicleArrivesAtFacilityEvent` – `"VehicleArrivesAtFacility"`: `vehicle`, `facility`, `delay`
+- `VehicleDepartsAtFacilityEvent` – `"VehicleDepartsAtFacility"`: `vehicle`, `facility`, `delay`
+- `AgentWaitingForPtEvent` – `"waitingForPt"`: `agent`, `atStop`, `destinationStop`
+
+`PersonDepartureEvent::routing_mode` wird `Option<Id<String>>` (XML: Attribut weglassen; Proto: Attribut
+optional, wie `PersonStuckEvent::leg_mode`). Aufrufer anpassen: `leg_engine.rs:269` (`Some(..)`),
+`scoring/partial_plans.rs:299`, Tests in `events/utils.rs`, `backpacking_engine.rs`.
+
+Tests: Roundtrip XML und Proto je Event; Departure ohne `routing_mode` in beiden Formaten.
+
+### Schritt 3: Fahrgast-Trait (`simulation/pt/passenger.rs`)
+
+```rust
+pub trait TransitPassengerLogic {
+    fn access_stop(&self) -> Id<TransitStopFacility>;   // wo der Agent wartet
+    fn egress_stop(&self) -> Id<TransitStopFacility>;   // für AgentWaitingForPt
+    fn waiting_for_line(&self) -> Option<Id<TransitLine>>;
+    fn wants_to_board(&self, line: &Id<TransitLine>, route: &Id<TransitRoute>, upcoming: &[SimRouteStop]) -> bool;
+    fn wants_to_alight(&self, stop: &Id<TransitStopFacility>) -> bool;
+}
+```
+**Befund 1:** Die Engine muss wissen, an welcher Haltestelle der Agent wartet; dafür kommen
+`access_stop` und `egress_stop` zu den drei Methoden aus dem Plan hinzu.
+
+- `SimulationAgentLogic::as_transit_passenger(&self) -> Option<&dyn TransitPassengerLogic>` mit Default `None`
+  (`agents/mod.rs`), Weiterleitung in `SimulationAgent` (`agents/agent.rs`) und `AdaptivePlanBasedSimulationLogic`.
+- `PlanBasedSimulationLogic` implementiert MATSims `checkLineAndStop` aus `InternalPtRouteDescription` des
+  aktuellen Legs: richtige Linie, Ausstiegshaltestelle kommt in `upcoming` noch vor. Die String-IDs werden
+  hier per `Id::try_get_from_ext` aufgelöst; die Engine ruft `access_stop`/`egress_stop`/`waiting_for_line`
+  nur einmal pro Leg (beim Erreichen der Haltestelle) und speichert das Ergebnis. `wants_to_alight` vergleicht
+  per `external()` (String-Vergleich, kein Hash).
+- Neue `AgentEvent`-Variante `TransitVehicleLeft()`: `PlanBasedSimulationLogic` setzt den Routenzeiger aufs
+  Ende (`set_curr_route_element_to_last`, `agent_logic.rs:76`), sodass `curr_link_id` den End-Link liefert.
+
+Unit-Tests: richtige/falsche Linie, andere Route derselben Linie steigt ein, Ausstieg schon passiert
+(nicht in `upcoming`), Nicht-ÖV-Leg liefert `None`.
+
+### Schritt 4: Partitionswechsel
+
+- `pt/transit_run.rs` (oder in der Engine): `TransitRun { departure: usize, stop: usize, vehicle: SimulationVehicle, last_departure: SimTime }`
+  `SimulationVehicle` bekommt `new_transit(InternalVehicle)` (ohne Fahrer), `add_passenger`, `take_passengers_where`.
+  **Befund 2:** `SimulationVehicle::driver()` und `curr_link_id()` paniken ohne Fahrer, ebenso
+  `emit_partition_*_events_for_vehicle` (`engines/mod.rs`) und Backpacking (`person_ids`). Transit-Fahrzeuge
+  gehen deshalb nie durch diese Funktionen.
+- `messages.rs`: `TransitVehicleMessage { run, arrival: SimTime, attachments }`, `InternalSyncMessage::transit_vehicles`
+  inkl. `is_empty`, `take_transit_vehicles`; `NetMessageBroker::add_transit_vehicle(msg, to, now)` – die
+  Zielpartition kommt direkt aus `SimRouteStop::partition`, kein Link-Lookup.
+- `PartitionChangeEntity::TransitVehicle(&SimulationVehicle)`: Backpacking nimmt nur die Fahrgäste mit
+  (`backpacking_data_collector.rs:212`). Partition-Events nur `AgentLeaves/EntersPartition` der Fahrgäste,
+  kein `VehicleEntersPartition` (der Reisezeit-Rechner `travel_time_calculator.rs` sieht ÖV-Fahrzeuge damit nicht).
+- Assertion für verspätete Ankünfte wie `TeleportationEngine::receive_remote_agent` (`teleportation_engine.rs:124`).
+- `describe_unprocessed_messages` (`controller/mod.rs:390`) zählt auch Fahrgäste in ÖV-Fahrzeugen.
+
+**Befund 3:** Partitionen lesen verlässlich nur Nachrichten von Nachbarn (gemeinsamer Link). Liegt der
+nächste Halt in einer Partition ohne gemeinsamen Link (Route läuft durch eine dritte Partition), gilt dasselbe
+Risiko wie bei der Teleportation: Abhilfe `global_sync`, sonst greift die Assertion. Für Stufe 1 so lassen
+und in `docs/architecture.md` dokumentieren.
+
+Tests: Nachricht mit Fahrzeug + 2 Fahrgästen inkl. Attachments (Muster `messages.rs:298`), Backpacking-Send/Receive.
+
+### Schritt 5: `TransitEngine` (`simulation/pt/transit_engine.rs`) und Einbindung
+
+Zustand pro Partition (alles dicht, keine Hash-Lookups im heißen Pfad):
+- `schedule: Arc<TransitSimSchedule>`.
+- `starts: Vec<usize>` – lokale Abfahrten (erster Halt lokal), sortiert nach (Zeit, Abfahrtsindex), plus Cursor.
+- `runs: Vec<Option<TransitRun>>` + Free-List (Slab nur für aktive Fahrten; ein Slab über alle Abfahrten wäre
+  bei Berlin pro Partition zu groß).
+- Zwei `TimeQueue`s mit `add_with_order(order = Abfahrtsindex)`: Ankünfte und Abfahrten, Einträge sind Slab-Indizes.
+- `stops: Vec<StopState>` indiziert über `Id<TransitStopFacility>::internal()`, nur bei `ScheduleBased` allokiert.
+  `StopState { waiting: Vec<Waiting { line: Option<Id<TransitLine>>, agent }>, halting: Vec<usize> }`.
+  Wartende in Ankunftsreihenfolge (FIFO wie MATSim); Filter über `line` vor `wants_to_board`. Gruppierung nach
+  Linie erst, wenn das Profiling es verlangt.
+- Fahrplanzeiten in **einer** Funktion: Ankunft = max(Abfahrt + arrival_offset, vorige Abfahrt + 1 Tick),
+  Abfahrt = max(Ankunft, Abfahrt + departure_offset) – hier hängt später das Störungsmodell.
+
+Ablauf in `LegEngine::do_step` vor `send_recv` (umgesetzt; ursprünglich danach geplant, siehe oben). Empfangene Fahrzeuge reiht die `send_recv`-Schleife ein:
+1. Empfangene `TransitVehicleMessage`s in die Ankunfts-Queue (nach Attachments/Partition-Events).
+2. Fahrten starten: `TransitDriverStarts`, `departure` (Fahrer, Modus der Route, ohne Routing-Modus),
+   `PersonEntersVehicle` (Fahrer), dann Ankunft am ersten Halt einreihen.
+3. Fällige Ankünfte: `VehicleArrivesAtFacility` (delay 0) → Aussteigen (`PersonLeavesVehicle`,
+   `TransitVehicleLeft`, Agent zurück an `LegEngine` → `arrival` wie bisher) → Einsteigen → Abfahrt einreihen,
+   Fahrzeug in `halting`. Letzter Halt: `PersonLeavesVehicle` + `arrival` des Fahrers, Fahrt aus dem Slab.
+   (Ob SBB am letzten Halt noch `VehicleDepartsAtFacility` schreibt, an der Java-Referenz prüfen.)
+4. Neu angekommene Wartende (aus `receive_agent` dieses Ticks gepuffert): `waitingForPt`, sofort in haltende
+   passende Fahrzeuge, sonst in `waiting`.
+5. Fällige Abfahrten: `VehicleDepartsAtFacility`, aus `halting` entfernen, nächste Ankunft lokal einreihen oder senden.
+
+Einbindung:
+- `ResponsibleEngine::Transit` in `find_responsible_engine` (`leg_engine.rs:285`): `ScheduleBased`, Modus in
+  `passenger_modes`, Route `Pt`. Modi als `IntSet` einmal beim Bau aufgelöst.
+- `LegEngine::new` bekommt `Arc<TransitSimSchedule>` und Transit-Garage (`simulation.rs:202`).
+- `drain()` gibt Wartende und Fahrgäste zurück (Stuck-Events wie bisher, `simulation.rs:90`); Fahrer existieren
+  nicht als Agenten und bekommen keine.
+
+Unit-Tests (Engine mit Default-`comp_env` und Event-Sammler): Ein-/Aussteigen, verpasste Abfahrt → nächstes
+Fahrzeug derselben Linie, früh angekommener Agent, zwei Fahrzeuge gleichzeitig an einer Haltestelle
+(Reihenfolge nach Abfahrtsindex), letzter Halt, Stuck beim Warten und im Fahrzeug, +1-Tick-Regel bei Offset 0.
+
+### Schritt 6: Planvorbereitung (`scenario/prepare/prepare_for_mobsim.rs`)
+
+- `PrepareForMobsimContext` bekommt `transit_schedule` und `transit_sim_schedule`.
+- In `trip_is_valid` (`:274`): für Passagiermodi bei `ScheduleBased` keine Reisezeitpflicht (Ausnahme analog
+  zu `is_network_mode`, `:300`).
+- Rein lesende Prüfung der Pt-Route: Linie, Route, Zugangs- und Ausstiegshaltestelle existieren, beide liegen auf
+  der Route, Ausstieg nach Zugang, `start_link`/`end_link` gleich den Stop-Links. Ungültig → wie bisher
+  `NeedsRouting` (ohne ÖV-Router ergibt das einen `PrepareError`).
+- Tests: gültige Route, falsche Reihenfolge, falscher Start-Link, unbekannte Linie; teleportiert unverändert.
+
+### Schritt 7: Erlebte Pläne (`scoring/backpacking/`, `scoring/partial_plans.rs`)
+
+- Fahrer ignorieren. **Befund 4:** Der Collector panikt für Personen ohne Backpack (`backpacking_data_collector.rs:138`),
+  und Fahrer-IDs liegen nicht sicher hinter allen Personen-IDs (vorgeladener ID-Store). Daher
+  `TransitSimSchedule::is_driver(&Id<InternalPerson>)` über einen sortierten `Vec<u64>` der internen Fahrer-IDs (Binärsuche).
+- Je Fahrzeug Linie/Route aus `TransitDriverStarts` und letzte Haltestelle aus `VehicleArrivesAtFacility` halten;
+  beim Partitionswechsel im `BackpackingAttachment` mitgeben.
+- `PersonEntersVehicle` eines ÖV-Fahrzeugs → Route-Typ `Pt` (statt `Network`), Zugang + `boarding_time`;
+  `PersonLeavesVehicle` → Ausstieg.
+- **Befund 5:** Distanz wie `RouteUtils.calcDistance` ohne Netz zur Scoring-Zeit: `SimRouteStop` bekommt
+  `distance_from_start` (kumulierte Linklängen der Netzroute bis zum Stop-Link, in Schritt 1 nachgerüstet);
+  Distanz = Differenz zwischen Ausstieg und Zugang. Mit Java gegenprüfen (Linklänge des Start-Links zählt nicht mit).
+- Tests: Fahrgast über zwei Halte, Partitionswechsel dazwischen, Fahrer-Events erzeugen keinen Plan.
+
+### Schritt 8: Integrationstests (`tests/simulation/pt.rs`)
+
+- 8a (nach Schritt 6, `scoring.mode: Disabled`): `pt_tutorial` fahrplanbasiert mit 1 und 2 Partitionen;
+  neue Config `tests/resources/pt_tutorial/pt_tutorial_schedule_based_config.yml` (mit `vehicles_path`).
+  Zwei Läufe ergeben dieselben Events; 1 und 2 Partitionen ergeben dieselben Events (Vergleicher ignoriert
+  Reihenfolge innerhalb einer Zeit, `events/comparison.rs`).
+- 8b (nach Schritt 7): Scoring an; Abgleich mit der Java-Referenz `expected_events_sbb/`, sobald du sie aus
+  Schritt 0 lieferst (Hinweis: `deterministicServiceModes={train,pt}`, da `3to1` Modus `pt` hat).
+- Bestehender teleportierter Test bleibt unverändert.
+
+### Schritt 9: Dokumentation
+
+`docs/architecture.md`: Abschnitt ÖV-Simulation (Datenfluss Scenario → `TransitSimSchedule` → `TransitEngine`,
+Partitionswechsel, Befund 3) und Abweichungen von SBB (≥1 Tick je Abschnitt, keine Ein-/Aussteigezeiten, keine
+Kapazität, keine `chainedDepartures`, keine Link-Events, delay immer 0). `README.md`/Config-Doku:
+`transit.simulation`, `transit.vehicles_path`, `transit.passenger_modes`.
+
+---
+
+### Verifikation
+
+- Pro Schritt: `cargo test -p matsim-rust --lib simulation::pt -- --test-threads=1` plus betroffene Module
+  (`events`, `io`, `messaging`, `scoring`, `scenario::prepare`), `RUSTFLAGS="-D warnings" cargo check --tests`.
+- Ab 8a: `cargo test -p matsim-rust --test simulation pt:: -- --test-threads=1`.
+- Vor jedem Push: `cargo test --workspace -- --test-threads=1 --skip berlin::`, `cargo fmt --all -- --check`,
+  `git diff --check`.
+- Optional am Ende, nur `--release`: Berlin 0,1 % fahrplanbasiert (muss durchlaufen) + Laufzeit gegenüber Teleportieren.

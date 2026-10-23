@@ -15,6 +15,8 @@ pub struct PartitionChangeContext {
 pub enum PartitionChangeEntity<'a> {
     Vehicle(&'a SimulationVehicle),
     TeleportationAgent(&'a SimulationAgent),
+    /// A vehicle of schedule-based transit. It has no driver, only passengers.
+    TransitVehicle(&'a SimulationVehicle),
 }
 
 impl std::fmt::Debug for PartitionChangeEntity<'_> {
@@ -22,6 +24,7 @@ impl std::fmt::Debug for PartitionChangeEntity<'_> {
         match self {
             Self::Vehicle(_) => f.write_str("Vehicle"),
             Self::TeleportationAgent(_) => f.write_str("TeleportationAgent"),
+            Self::TransitVehicle(_) => f.write_str("TransitVehicle"),
         }
     }
 }

@@ -157,6 +157,10 @@ cargo run --bin convert_to_binary --release -- --network network.xml --populatio
 Optionally, `--transit-schedule` and `--facilities` convert a transit schedule and an activity facilities file as
 well. Facilities are referenced in the config via `facilities.path`.
 
+Transit legs are teleported by default. To move transit vehicles according to the schedule, set
+`transit.simulation: ScheduleBased` and reference the transit vehicles via `transit.vehicles_path`; the legs of
+`transit.passenger_modes` (default `pt`) then ride these vehicles. See `docs/architecture.md`.
+
 ## RustRover settings
 
 If you use RustRover, you need to disable "Optimize Import". Otherwise, the imports are sorted differently compared to

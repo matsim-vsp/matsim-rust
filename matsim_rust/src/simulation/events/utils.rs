@@ -571,7 +571,7 @@ mod test {
                     .person(Id::create(&person))
                     .link(Id::create(&link))
                     .leg_mode(Id::create(&mode))
-                    .routing_mode(Id::create(&format!("routing_{}", step % 3)))
+                    .routing_mode(Some(Id::create(&format!("routing_{}", step % 3))))
                     .build()
                     .unwrap(),
             ));

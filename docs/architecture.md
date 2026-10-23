@@ -171,6 +171,49 @@ The link dynamics deviate from QSim in the following points:
 - A vehicle stays in the queue for at least one tick, so that a link behaves the same whether or not it is split
   between partitions (see `LegEngine::do_step`).
 
+### Schedule-Based Transit
+
+By default, transit legs are teleported with the travel time of their route. With
+`transit.simulation: ScheduleBased`, transit vehicles move from stop to stop according to the schedule instead, and
+passengers wait at stops, board and alight, like in SBB's deterministic transit engine for MATSim
+(`SBBTransitQSimEngine`). The vehicles are read from `transit.vehicles_path` into a garage of their own; the legs of
+`transit.passenger_modes` (default `pt`) with a transit route ride them.
+
+`From<Scenario> for ControllerScenario` builds a dense `TransitSimSchedule` once, after the population is loaded, so
+that the ids of persons and their vehicles do not depend on transit. Routes are sorted by the external ids of line
+and route, departures by the external id of their driver, `pt_<line>_<route>_<departure>`, which also fixes the order
+in which the driver ids are created. The index of a departure orders simultaneous events. Every stop of a route keeps
+its link, the partition of the link, its offsets and its distance from the start of the route. Building the schedule
+panics if it cannot be simulated, e.g. if a stop has no link or a vehicle serves two departures at the same time.
+
+The `TransitEngine` is part of the `LegEngine` and runs before the messages are exchanged. There is no driver agent:
+the engine moves the vehicles, and a driver only exists as an id for the events (`TransitDriverStarts`, `departure`,
+`PersonEntersVehicle`, `PersonLeavesVehicle`, `arrival`). Due starts, arrivals and departures come from queues; the
+engine does nothing per tick and vehicle. When a vehicle arrives, passengers alight and waiting agents board. An agent
+reaching a stop boards a halting vehicle right away. Passengers decide via `TransitPassengerLogic`, which agents expose
+through `SimulationAgentLogic::as_transit_passenger`. Plan-based agents follow MATSim's `checkLineAndStop`: they board
+any vehicle of the planned line which still serves their egress stop. A vehicle arrives at `departure time + arrival
+offset`, but at least one tick after it left the previous stop, and departs at `departure time + departure offset`, but
+not before it arrived (`stop_times`). If the next stop is on another partition, the vehicle and its passengers are sent
+there; the scoring backpacks of the passengers and the state of the vehicle for experienced plans move with them.
+
+Plan preparation does not require travel times for these legs, but checks their transit route against the schedule.
+Experienced plans get a transit route with line, route, stops and boarding time, like MATSim's `EventsToLegs`. Its
+distance is the length of the network route from the link of the access stop, excluding it, to the link of the egress
+stop, including it, like `RouteUtils.calcDistance` for transit passenger routes.
+
+Deviations from SBB's engine:
+
+- A vehicle needs at least one tick from one stop to the next, so that the result does not depend on whether the next
+  stop is on another partition. SBB allows zero seconds.
+- Boarding and alighting take no time, vehicles have no capacity, and `delay` is always 0.
+- There are no chained departures, no link events, and no driver logic.
+
+Transit vehicles are sent to the partition of the next stop, which may not be a neighbor: links allowing no main
+mode, such as most transit links, do not make partitions neighbors. Like teleported agents, such vehicles are only
+received while the partition waits for its neighbors, and the engine panics if one arrives after it was due. Enable
+`computational_setup.global_sync`, or include the transit modes in `qsim.main_modes`, if this happens.
+
 ### External Services
 
 As a next step, we integrated the ability to communicate to external services. They are intended to be used during the
