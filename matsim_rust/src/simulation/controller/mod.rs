@@ -921,6 +921,8 @@ mod tests {
             transit_schedule: Arc::new(
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
+            transit_garage: Arc::new(Garage::default()),
+            transit_sim_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
@@ -970,6 +972,8 @@ mod tests {
             transit_schedule: Arc::new(
                 crate::simulation::scenario::transit::TransitSchedule::default(),
             ),
+            transit_garage: Arc::new(Garage::default()),
+            transit_sim_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),

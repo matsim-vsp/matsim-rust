@@ -1082,6 +1082,7 @@ mod tests {
             garage,
             population: Population { persons },
             transit_schedule: TransitSchedule::default(),
+            transit_garage: Garage::default(),
             facilities,
             config: Arc::new(config),
         };
@@ -1121,6 +1122,7 @@ mod tests {
             garage: Garage::default(),
             population,
             transit_schedule: TransitSchedule::default(),
+            transit_garage: Garage::default(),
             facilities: ActivityFacilities::default(),
             config: Arc::new(Config::default()),
         }
@@ -1138,6 +1140,7 @@ mod tests {
             garage,
             population,
             transit_schedule: TransitSchedule::default(),
+            transit_garage: Garage::default(),
             facilities: ActivityFacilities::default(),
             config: Arc::new(config),
         }
