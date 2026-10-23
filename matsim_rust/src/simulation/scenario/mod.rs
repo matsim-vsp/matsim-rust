@@ -417,6 +417,7 @@ mod tests {
         let mut config = Config::default();
         config.set_transit(Transit {
             schedule_path: Some("./assets/pt_tutorial/transitschedule.xml".into()),
+            ..Transit::default()
         });
 
         let scenario = Scenario::load(config);

@@ -549,9 +549,54 @@ pub struct Vehicles {
     pub path: Option<PathBuf>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Transit {
     pub schedule_path: Option<PathBuf>,
+    /// Transit vehicles and their types. Only needed if `simulation` is
+    /// [`TransitSimulation::ScheduleBased`].
+    #[serde(default)]
+    pub vehicles_path: Option<PathBuf>,
+    #[serde(default)]
+    pub simulation: TransitSimulation,
+    /// Leg modes whose legs ride transit vehicles if `simulation` is
+    /// [`TransitSimulation::ScheduleBased`], like MATSim's `transit.transitModes`.
+    #[serde(default = "default_transit_passenger_modes")]
+    pub passenger_modes: Vec<String>,
+}
+
+impl Default for Transit {
+    fn default() -> Self {
+        Self {
+            schedule_path: None,
+            vehicles_path: None,
+            simulation: TransitSimulation::default(),
+            passenger_modes: default_transit_passenger_modes(),
+        }
+    }
+}
+
+fn default_transit_passenger_modes() -> Vec<String> {
+    vec!["pt".to_string()]
+}
+
+/// How the mobsim moves passengers of transit legs.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum TransitSimulation {
+    /// Transit legs are teleported with the travel time of their route.
+    #[default]
+    Teleported,
+    /// Transit vehicles move from stop to stop according to the schedule, without using the
+    /// network, and passengers board and alight them, like SBB's deterministic transit simulation
+    /// in MATSim.
+    ScheduleBased,
+}
+
+fn parse_transit_simulation(value: &str) -> TransitSimulation {
+    match value.to_lowercase().replace(['-', '_'], "").as_str() {
+        "teleported" => TransitSimulation::Teleported,
+        "schedulebased" => TransitSimulation::ScheduleBased,
+        _ => panic!("Invalid transit simulation: {}", value),
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -597,6 +642,14 @@ register_override!("vehicles.path", |config, value| {
 
 register_override!("transit.schedule_path", |config, value| {
     config.transit_mut().schedule_path = Some(PathBuf::from(value));
+});
+
+register_override!("transit.vehicles_path", |config, value| {
+    config.transit_mut().vehicles_path = Some(PathBuf::from(value));
+});
+
+register_override!("transit.simulation", |config, value| {
+    config.transit_mut().simulation = parse_transit_simulation(value);
 });
 
 register_override!("facilities.path", |config, value| {
@@ -1687,7 +1740,9 @@ mod tests {
         PartitionMethod, Partitioning, QSim, Replanning, Routing, Scoring, ScoringMode,
         StrategySetting, TeleportedParams, TravelTimeCalculator, VertexWeight, parse_key_val,
     };
-    use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
+    use crate::simulation::config::{
+        Ids, Network, Population, Transit, TransitSimulation, Vehicles,
+    };
     use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
     use crate::simulation::replanning::{
         KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME,
@@ -2315,6 +2370,55 @@ modules:
         let config = Config::default();
 
         assert_eq!(None, config.transit().schedule_path);
+        assert_eq!(None, config.transit().vehicles_path);
+        assert_eq!(TransitSimulation::Teleported, config.transit().simulation);
+        assert_eq!(vec!["pt".to_string()], config.transit().passenger_modes);
+    }
+
+    #[test]
+    fn read_schedule_based_transit_from_yaml_with_default_passenger_modes() {
+        let yaml = r#"
+modules:
+  transit:
+    type: Transit
+    schedule_path: schedule.xml.gz
+    vehicles_path: transitVehicles.xml.gz
+    simulation: ScheduleBased
+"#;
+
+        let parsed_config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
+
+        let transit = parsed_config.transit();
+        assert_eq!(
+            Some(PathBuf::from("transitVehicles.xml.gz")),
+            transit.vehicles_path
+        );
+        assert_eq!(TransitSimulation::ScheduleBased, transit.simulation);
+        assert_eq!(vec!["pt".to_string()], transit.passenger_modes);
+    }
+
+    #[test]
+    fn override_transit_simulation_and_vehicles_path() {
+        let mut config = base_config();
+        config.apply_overrides(&[
+            (
+                "transit.simulation".to_string(),
+                "schedule_based".to_string(),
+            ),
+            (
+                "transit.vehicles_path".to_string(),
+                "transitVehicles.xml".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            TransitSimulation::ScheduleBased,
+            config.transit().simulation
+        );
+        assert_eq!(
+            Some(PathBuf::from("transitVehicles.xml")),
+            config.transit().vehicles_path
+        );
     }
 
     #[test]
@@ -2549,6 +2653,7 @@ modules:
         });
         config.set_transit(Transit {
             schedule_path: Some("schedule".into()),
+            ..Transit::default()
         });
         config.set_ids(Ids {
             path: Some("ids".into()),
