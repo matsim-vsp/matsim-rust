@@ -266,12 +266,12 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .person(agent.id().clone())
                 .link(route.start_link().clone())
                 .leg_mode(leg.mode.clone())
-                .routing_mode(
+                .routing_mode(Some(
                     leg.routing_mode
                         .as_ref()
                         .unwrap_or_else(|| panic!("Missing routing mode for leg {:?}", leg))
                         .clone(),
-                )
+                ))
                 .build()
                 .unwrap(),
         );

@@ -296,7 +296,7 @@ impl Default for PartialLeg {
 impl PartialLeg {
     fn handle_person_departure(&mut self, event: &PersonDepartureEvent) {
         self.mode = Some(event.leg_mode.clone());
-        self.routing_mode = Some(event.routing_mode.clone());
+        self.routing_mode = event.routing_mode.clone();
         self.dep_time = Some(event.time);
     }
 
@@ -557,7 +557,7 @@ mod tests {
                 .person(Id::create("person"))
                 .link(Id::create("start"))
                 .leg_mode(Id::create(mode))
-                .routing_mode(Id::create(mode))
+                .routing_mode(Some(Id::create(mode)))
                 .build()
                 .unwrap(),
         );

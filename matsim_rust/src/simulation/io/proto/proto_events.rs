@@ -1,10 +1,11 @@
 use crate::generated::events::{GenericEvent, TimeStep};
 use crate::generated::general::AttributeValue;
 use crate::simulation::events::{
-    ActivityEndEvent, ActivityStartEvent, EventHandlerRegisterFn, EventTrait, EventsManager,
-    LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent, PersonDepartureEvent,
-    PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
-    PtTeleportationArrivalEvent, TeleportationArrivalEvent, VehicleEntersTrafficEvent,
+    ActivityEndEvent, ActivityStartEvent, AgentWaitingForPtEvent, EventHandlerRegisterFn,
+    EventTrait, EventsManager, LinkEnterEvent, LinkLeaveEvent, PersonArrivalEvent,
+    PersonDepartureEvent, PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
+    PtTeleportationArrivalEvent, TeleportationArrivalEvent, TransitDriverStartsEvent,
+    VehicleArrivesAtFacilityEvent, VehicleDepartsAtFacilityEvent, VehicleEntersTrafficEvent,
     VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::{CreateMissingIds, ExistingIds, IdResolver};
@@ -158,10 +159,12 @@ impl From<&PersonDepartureEvent> for GenericEvent {
             "mode".to_string(),
             AttributeValue::from(value.leg_mode.external()),
         );
-        attributes.insert(
-            "routing_mode".to_string(),
-            AttributeValue::from(value.routing_mode.external()),
-        );
+        if let Some(routing_mode) = &value.routing_mode {
+            attributes.insert(
+                "routing_mode".to_string(),
+                AttributeValue::from(routing_mode.external()),
+            );
+        }
         GenericEvent {
             r#type: value.type_().to_string(),
             attributes,
@@ -307,6 +310,92 @@ impl From<&VehicleLeavesTrafficEvent> for GenericEvent {
         attributes.insert(
             "relative_position".to_string(),
             AttributeValue::from(value.relative_position),
+        );
+        GenericEvent {
+            r#type: value.type_().to_string(),
+            attributes,
+        }
+    }
+}
+
+impl From<&TransitDriverStartsEvent> for GenericEvent {
+    fn from(value: &TransitDriverStartsEvent) -> Self {
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "driverId".to_string(),
+            AttributeValue::from(value.driver.external()),
+        );
+        attributes.insert(
+            "vehicleId".to_string(),
+            AttributeValue::from(value.vehicle.external()),
+        );
+        attributes.insert(
+            "transitLineId".to_string(),
+            AttributeValue::from(value.transit_line.external()),
+        );
+        attributes.insert(
+            "transitRouteId".to_string(),
+            AttributeValue::from(value.transit_route.external()),
+        );
+        attributes.insert(
+            "departureId".to_string(),
+            AttributeValue::from(value.departure.external()),
+        );
+        GenericEvent {
+            r#type: value.type_().to_string(),
+            attributes,
+        }
+    }
+}
+
+impl From<&VehicleArrivesAtFacilityEvent> for GenericEvent {
+    fn from(value: &VehicleArrivesAtFacilityEvent) -> Self {
+        facility_event(value.type_(), &value.vehicle, &value.facility, value.delay)
+    }
+}
+
+impl From<&VehicleDepartsAtFacilityEvent> for GenericEvent {
+    fn from(value: &VehicleDepartsAtFacilityEvent) -> Self {
+        facility_event(value.type_(), &value.vehicle, &value.facility, value.delay)
+    }
+}
+
+fn facility_event(
+    type_: &str,
+    vehicle: &crate::simulation::id::Id<crate::simulation::scenario::vehicles::InternalVehicle>,
+    facility: &crate::simulation::id::Id<crate::simulation::scenario::transit::TransitStopFacility>,
+    delay: f64,
+) -> GenericEvent {
+    let mut attributes = HashMap::new();
+    attributes.insert(
+        "vehicle".to_string(),
+        AttributeValue::from(vehicle.external()),
+    );
+    attributes.insert(
+        "facility".to_string(),
+        AttributeValue::from(facility.external()),
+    );
+    attributes.insert("delay".to_string(), AttributeValue::from(delay));
+    GenericEvent {
+        r#type: type_.to_string(),
+        attributes,
+    }
+}
+
+impl From<&AgentWaitingForPtEvent> for GenericEvent {
+    fn from(value: &AgentWaitingForPtEvent) -> Self {
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "agent".to_string(),
+            AttributeValue::from(value.agent.external()),
+        );
+        attributes.insert(
+            "atStop".to_string(),
+            AttributeValue::from(value.at_stop.external()),
+        );
+        attributes.insert(
+            "destinationStop".to_string(),
+            AttributeValue::from(value.destination_stop.external()),
         );
         GenericEvent {
             r#type: value.type_().to_string(),
@@ -463,6 +552,20 @@ pub(crate) fn event_to_proto(event: &dyn EventTrait) -> GenericEvent {
     } else if let Some(event) = event.as_any().downcast_ref::<VehicleLeavesTrafficEvent>() {
         GenericEvent::from(event)
     } else if let Some(event) = event.as_any().downcast_ref::<PersonStuckEvent>() {
+        GenericEvent::from(event)
+    } else if let Some(event) = event.as_any().downcast_ref::<TransitDriverStartsEvent>() {
+        GenericEvent::from(event)
+    } else if let Some(event) = event
+        .as_any()
+        .downcast_ref::<VehicleArrivesAtFacilityEvent>()
+    {
+        GenericEvent::from(event)
+    } else if let Some(event) = event
+        .as_any()
+        .downcast_ref::<VehicleDepartsAtFacilityEvent>()
+    {
+        GenericEvent::from(event)
+    } else if let Some(event) = event.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
         GenericEvent::from(event)
     } else {
         // TODO use general event here and log warning
@@ -629,6 +732,10 @@ pub(crate) fn try_event_from_proto(
         VehicleEntersTrafficEvent::TYPE => Box::new(VehicleEntersTrafficEvent::try_from_proto_event(proto_event, time, ids)?),
         VehicleLeavesTrafficEvent::TYPE => Box::new(VehicleLeavesTrafficEvent::try_from_proto_event(proto_event, time, ids)?),
         PersonStuckEvent::TYPE => Box::new(PersonStuckEvent::try_from_proto_event(proto_event, time, ids)?),
+        TransitDriverStartsEvent::TYPE => Box::new(TransitDriverStartsEvent::try_from_proto_event(proto_event, time, ids)?),
+        VehicleArrivesAtFacilityEvent::TYPE => Box::new(VehicleArrivesAtFacilityEvent::try_from_proto_event(proto_event, time, ids)?),
+        VehicleDepartsAtFacilityEvent::TYPE => Box::new(VehicleDepartsAtFacilityEvent::try_from_proto_event(proto_event, time, ids)?),
+        AgentWaitingForPtEvent::TYPE => Box::new(AgentWaitingForPtEvent::try_from_proto_event(proto_event, time, ids)?),
         _ => panic!("Unknown event type: {:?}", type_),
     };
     Some(event)
@@ -652,6 +759,17 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
+
+    #[deterministic_id_test]
+    fn transit_events_proto_round_trip() {
+        // Proto parsing also keeps all attributes in `attributes`, so compare the proto messages.
+        for event in crate::simulation::io::xml::events::tests::transit_events() {
+            let proto = event_to_proto(event.as_ref());
+            let parsed = event_from_proto(event.time(), &proto);
+            assert_eq!(event.type_(), parsed.type_());
+            assert_eq!(proto, event_to_proto(parsed.as_ref()));
+        }
+    }
 
     #[deterministic_id_test]
     fn person_stuck_proto_round_trip_preserves_optional_attributes() {
