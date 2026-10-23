@@ -9,8 +9,10 @@ use matsim_rust::simulation::events::utils::{compare_event_folder, read_events};
 use matsim_rust::simulation::id::Id;
 use matsim_rust::simulation::population::agent_source::PreplanningHorizonAgentSource;
 use matsim_rust::simulation::scenario::Scenario;
+use matsim_rust::simulation::scenario::population::Population;
+use matsim_rust::simulation::scenario::vehicles::Garage;
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Barrier};
@@ -90,6 +92,30 @@ fn pt_tutorial_schedule_based_is_reproducible_and_independent_of_partitioning() 
 
     compare_event_folder(&single, &single_again).unwrap();
     compare_event_folder(&single, &two_parts).unwrap();
+
+    // The experienced transit legs are scored, independent of the partitioning.
+    let scores = |events: &PathBuf| {
+        let plans = events.parent().unwrap().join("output_plans.binpb");
+        let population = Population::from_file(&plans, &mut Garage::new());
+        population
+            .persons
+            .iter()
+            .map(|(id, person)| {
+                (
+                    id.external().to_string(),
+                    person.selected_plan().unwrap().score,
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let single_scores = scores(&single);
+    assert!(!single_scores.is_empty());
+    assert!(
+        single_scores
+            .values()
+            .all(|score| score.is_some_and(f64::is_finite))
+    );
+    assert_eq!(single_scores, scores(&two_parts));
 }
 
 #[deterministic_id_test(matsim_rust)]

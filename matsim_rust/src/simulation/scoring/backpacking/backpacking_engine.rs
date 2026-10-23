@@ -2,6 +2,7 @@ use crate::simulation::events::{EventTrait, EventsManager};
 use crate::simulation::framework_events::{MobsimEvent, MobsimEventsManager, QSimId};
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scoring::backpacking::backpack::PersonExperience;
 use crate::simulation::scoring::backpacking::backpacking_data_collector::{
@@ -10,6 +11,7 @@ use crate::simulation::scoring::backpacking::backpacking_data_collector::{
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 pub(crate) struct BackpackingWorkerResult {
@@ -23,9 +25,15 @@ pub struct BackpackingEngine {
 }
 
 impl BackpackingEngine {
-    pub fn new(home_person_ids: Vec<Id<InternalPerson>>) -> Self {
+    pub fn new(
+        home_person_ids: Vec<Id<InternalPerson>>,
+        transit_schedule: Arc<TransitSimSchedule>,
+    ) -> Self {
         Self {
-            backpacking_data_collector: BackpackingDataCollector::new(home_person_ids),
+            backpacking_data_collector: BackpackingDataCollector::new(
+                home_person_ids,
+                transit_schedule,
+            ),
         }
     }
 
@@ -104,6 +112,8 @@ impl BackpackingEngine {
         Self::forward(&engine, events, Collector::person_arrival);
         Self::forward(&engine, events, Collector::activity_start);
         Self::forward(&engine, events, Collector::person_stuck);
+        Self::forward(&engine, events, Collector::transit_driver_starts);
+        Self::forward(&engine, events, Collector::vehicle_arrives_at_facility);
     }
 
     fn forward<E: EventTrait>(
@@ -150,15 +160,15 @@ mod tests {
         let link = |id: &str| Id::<Link>::create(id);
         let time = SimTime::from_secs;
 
-        let engine = Rc::new(RefCell::new(BackpackingEngine::new(vec![
-            driver.clone(),
-            passenger.clone(),
-        ])));
+        let engine = Rc::new(RefCell::new(BackpackingEngine::new(
+            vec![driver.clone(), passenger.clone()],
+            Default::default(),
+        )));
         let mut events = EventsManager::new();
         BackpackingEngine::register_event_handlers(engine.clone(), &mut events);
         events.reset_iteration(0);
-        // Backpacking subscribes to the twelve event types it needs, but not to all events.
-        assert!(format!("{events:?}").contains("per_type: 12, catch_all: 0"));
+        // Backpacking subscribes to the fourteen event types it needs, but not to all events.
+        assert!(format!("{events:?}").contains("per_type: 14, catch_all: 0"));
 
         for person in [&driver, &passenger] {
             events.process_event(
@@ -277,5 +287,125 @@ mod tests {
             );
             assert_eq!(route.generic_delegate().vehicle(), &Some(vehicle.clone()));
         }
+    }
+
+    /// Runs the transit engine on the tutorial schedule with one passenger. The passenger's own
+    /// departure, arrival and activities come from other engines, so the test emits them.
+    #[deterministic_id_test]
+    fn reconstructs_transit_leg_from_transit_engine_events_and_ignores_drivers() {
+        use crate::simulation::Identifiable;
+        use crate::simulation::controller::ThreadLocalComputationalEnvironment;
+        use crate::simulation::pt::transit_engine::TransitEngine;
+        use crate::simulation::scenario::network::Network;
+        use crate::simulation::scenario::population::Population;
+        use crate::simulation::scenario::transit::TransitSchedule;
+        use crate::simulation::scenario::vehicles::Garage;
+        use crate::simulation::time::{SimClock, Tick};
+        use crate::test_utils::create_pt_agent;
+        use std::path::{Path, PathBuf};
+
+        let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
+        let schedule =
+            TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
+        let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        let schedule = Arc::new(TransitSimSchedule::build(
+            &schedule,
+            &network,
+            &garage,
+            &Population::default(),
+        ));
+        let agent = create_pt_agent(1, "Blue Line", "1to3", "1", "3", "11", "33");
+        let person = agent.id().clone();
+        let pt = Id::<String>::get_from_ext("pt");
+        let time = SimTime::from_secs;
+
+        let engine = Rc::new(RefCell::new(BackpackingEngine::new(
+            vec![person.clone()],
+            schedule.clone(),
+        )));
+        let mut comp_env = ThreadLocalComputationalEnvironment::default();
+        BackpackingEngine::register_event_handlers(
+            engine.clone(),
+            &mut comp_env.events_manager_borrow_mut(),
+        );
+        let mut transit = TransitEngine::new(
+            schedule,
+            Arc::new(garage),
+            0,
+            comp_env.clone(),
+            SimClock::new(1),
+        );
+
+        let mut events = comp_env.events_manager_borrow_mut();
+        events.reset_iteration(0);
+        events.process_event(
+            &ActivityEndEventBuilder::default()
+                .time(time(21000))
+                .person(person.clone())
+                .link(Id::create("11"))
+                .coordinate(Coordinate::default())
+                .act_type(Id::create("home"))
+                .build()
+                .unwrap(),
+        );
+        events.process_event(
+            &PersonDepartureEventBuilder::default()
+                .time(time(21000))
+                .person(person.clone())
+                .link(Id::create("11"))
+                .leg_mode(pt.clone())
+                .routing_mode(Some(pt.clone()))
+                .build()
+                .unwrap(),
+        );
+        drop(events);
+
+        transit.receive_agent(agent);
+        let alighted: Vec<_> = (21000..=23000)
+            .flat_map(|tick| transit.do_step(Tick::new(tick)))
+            .collect();
+        assert_eq!(1, alighted.len());
+
+        let mut events = comp_env.events_manager_borrow_mut();
+        events.process_event(
+            &PersonArrivalEventBuilder::default()
+                .time(time(22140))
+                .person(person.clone())
+                .link(Id::create("33"))
+                .leg_mode(pt.clone())
+                .build()
+                .unwrap(),
+        );
+        events.process_event(
+            &ActivityStartEventBuilder::default()
+                .time(time(22140))
+                .person(person.clone())
+                .link(Id::create("33"))
+                .coordinate(Coordinate::default())
+                .act_type(Id::create("work"))
+                .build()
+                .unwrap(),
+        );
+        drop(events);
+
+        let experiences = engine.borrow_mut().finish();
+        // Drivers have no backpacks and do not show up.
+        assert_eq!(1, experiences.len());
+        let plan = experiences[&person].plan();
+        let InternalPlanElement::Leg(leg) = &plan.elements[1] else {
+            panic!("Expected a leg");
+        };
+        assert_eq!(Some(Duration::from_secs(1140)), leg.trav_time);
+        let Some(InternalRoute::Pt(route)) = &leg.route else {
+            panic!("Expected a transit route, got {:?}", leg.route);
+        };
+        assert_eq!("Blue Line", route.description.transit_line_id);
+        assert_eq!("1to3", route.description.transit_route_id);
+        assert_eq!("1", route.description.access_facility_id);
+        assert_eq!("3", route.description.egress_facility_id);
+        assert_eq!(Some(time(21600)), route.description.boarding_time);
+        assert_eq!(Some(6100.0), route.generic_delegate().distance());
+        assert_eq!(&Id::<Link>::get_from_ext("11"), route.start_link());
+        assert_eq!(&Id::<Link>::get_from_ext("33"), route.end_link());
     }
 }

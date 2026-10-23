@@ -1,8 +1,6 @@
 modules:
   scoring:
     type: Scoring
-    # Experienced plans of schedule-based transit legs follow in a later step.
-    mode: Disabled
     activity_params:
       - activity_type: h
         typical_duration_s: 43200.0

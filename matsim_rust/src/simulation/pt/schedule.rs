@@ -8,7 +8,7 @@ use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
 use itertools::Itertools;
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Dense, simulation-ready view of the transit schedule. It is built once, before the first
 /// iteration, and shared by all partitions. The maps of [`TransitSchedule`] are only read while
@@ -25,6 +25,8 @@ use tracing::info;
 pub struct TransitSimSchedule {
     routes: Vec<SimTransitRoute>,
     departures: Vec<SimDeparture>,
+    /// Internal ids of all drivers, sorted, to recognize drivers in events.
+    drivers: Vec<u64>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -49,6 +51,10 @@ pub struct SimRouteStop {
     pub arrival_offset: Duration,
     /// Departure offset relative to the departure time. Falls back to the arrival offset.
     pub departure_offset: Duration,
+    /// Length of the network route from the first link, excluding it, to the stop's link,
+    /// including it. The difference between two stops is the distance a passenger travels, like
+    /// MATSim's `RouteUtils.calcDistance` for transit passenger routes.
+    pub distance_from_start: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,9 +149,15 @@ impl TransitSimSchedule {
             })
             .collect();
 
+        let mut drivers: Vec<_> = departures
+            .iter()
+            .map(|departure| departure.driver.internal())
+            .collect();
+        drivers.sort_unstable();
         let result = Self {
             routes: sim_routes,
             departures,
+            drivers,
         };
         result.assert_vehicles_are_not_shared_at_the_same_time();
         info!(
@@ -179,12 +191,22 @@ impl TransitSimSchedule {
     /// Finds a route by the external ids of its line and route. The routes are sorted by these
     /// ids, so this is a binary search without hashing.
     pub fn find_route(&self, line: &str, route: &str) -> Option<&SimTransitRoute> {
+        self.find_route_index(line, route)
+            .map(|index| &self.routes[index])
+    }
+
+    /// Like [`Self::find_route`], but returns the index of the route.
+    pub fn find_route_index(&self, line: &str, route: &str) -> Option<usize> {
         self.routes
             .binary_search_by(|candidate| {
                 (candidate.line.external(), candidate.route.external()).cmp(&(line, route))
             })
             .ok()
-            .map(|index| &self.routes[index])
+    }
+
+    /// Whether `person` is the driver of a departure. Drivers only exist as ids for the events.
+    pub fn is_driver(&self, person: &Id<InternalPerson>) -> bool {
+        !self.drivers.is_empty() && self.drivers.binary_search(&person.internal()).is_ok()
     }
 
     /// Scheduled time at which the departure arrives at its last stop.
@@ -243,11 +265,13 @@ impl SimTransitRoute {
             line.id
         );
 
+        let distances = stop_distances(line, route, schedule, network);
         let stops: Vec<_> = route
             .stops
             .iter()
+            .zip(distances)
             .enumerate()
-            .map(|(index, stop)| {
+            .map(|(index, (stop, distance_from_start))| {
                 let (arrival_offset, departure_offset) =
                     match (stop.arrival_offset, stop.departure_offset) {
                         (Some(arrival), Some(departure)) => (arrival, departure),
@@ -266,6 +290,7 @@ impl SimTransitRoute {
                     link,
                     arrival_offset,
                     departure_offset,
+                    distance_from_start,
                 }
             })
             .collect();
@@ -290,6 +315,66 @@ impl SimTransitRoute {
             stops,
         }
     }
+}
+
+/// The distance of every stop from the start of the network route, see
+/// [`SimRouteStop::distance_from_start`]. Stops are matched to the network route in order, so that
+/// routes visiting a link twice work. A stop whose link is not on the rest of the network route
+/// gets the distance of the previous stop.
+fn stop_distances(
+    line: &TransitLine,
+    route: &TransitRoute,
+    schedule: &TransitSchedule,
+    network: &Network,
+) -> Vec<f64> {
+    let links = &route.network_route;
+    // `from_start[i]` is the length of links 1..=i. The first link does not count, like the
+    // departure link of a network route.
+    let from_start: Vec<f64> = links
+        .iter()
+        .enumerate()
+        .scan(0.0, |sum, (index, link)| {
+            if index > 0 {
+                *sum += network
+                    .links_with_ids()
+                    .get(link)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Link {link} of the network route of transit route {} of line {} is \
+                             not part of the network.",
+                            route.id, line.id
+                        )
+                    })
+                    .length;
+            }
+            Some(*sum)
+        })
+        .collect();
+
+    let mut position = 0;
+    let mut distance = 0.0;
+    route
+        .stops
+        .iter()
+        .map(|stop| {
+            let link = stop_link(&stop.facility_id, schedule, network);
+            match links[position..]
+                .iter()
+                .position(|candidate| *candidate == link)
+            {
+                Some(offset) => {
+                    position += offset;
+                    distance = from_start[position];
+                }
+                None => warn!(
+                    "Link {link} of stop {} is not on the rest of the network route of transit \
+                     route {} of line {}. Passengers get no distance for it.",
+                    stop.facility_id, route.id, line.id
+                ),
+            }
+            distance
+        })
+        .collect()
 }
 
 fn stop_link(
@@ -400,6 +485,33 @@ mod tests {
         assert_eq!(Duration::from_secs(240), stops[1].departure_offset);
         assert_eq!(Duration::from_secs(540), stops[2].arrival_offset);
         assert_eq!(Duration::from_secs(540), stops[2].departure_offset);
+    }
+
+    #[deterministic_id_test]
+    fn stop_distances_exclude_first_link_and_include_stop_link() {
+        let schedule = tutorial_schedule();
+
+        let distances = |route: usize| -> Vec<f64> {
+            schedule.routes()[route]
+                .stops
+                .iter()
+                .map(|stop| stop.distance_from_start)
+                .collect()
+        };
+        // Links 11 (100 m), 12 (2400 m), 23 (3600 m) and 33 (100 m). The tutorial plans have
+        // 6100 m from stop 1 to stop 3, too.
+        assert_eq!(vec![0.0, 2400.0, 6100.0], distances(0));
+        assert_eq!(vec![0.0, 3600.0, 6100.0], distances(1));
+    }
+
+    #[deterministic_id_test]
+    fn drivers_are_recognized() {
+        let schedule = tutorial_schedule();
+
+        assert!(schedule.is_driver(&schedule.departures()[17].driver));
+        let person = Id::<InternalPerson>::create("102");
+        assert!(!schedule.is_driver(&person));
+        assert!(!TransitSimSchedule::default().is_driver(&person));
     }
 
     #[deterministic_id_test]

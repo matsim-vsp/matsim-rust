@@ -127,6 +127,7 @@ mod tests {
             partition: 0,
             arrival_offset: Duration::ZERO,
             departure_offset: Duration::ZERO,
+            distance_from_start: 0.0,
         }
     }
 
