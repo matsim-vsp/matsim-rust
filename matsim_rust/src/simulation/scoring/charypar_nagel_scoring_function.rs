@@ -1,4 +1,5 @@
 use crate::simulation::config::Config;
+use crate::simulation::config::ScoreAtAll;
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::utils::calc_distance;
 use crate::simulation::scenario::network::Network;
@@ -16,6 +17,7 @@ const SECONDS_PER_DAY: f64 = 86_400.0;
 #[derive(Debug, Clone, Copy)]
 struct ActivityScoringParams {
     typical_duration_s: f64,
+    score_at_all: ScoreAtAll,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -59,6 +61,7 @@ impl CharyparNagelScoringFunction {
                     params.activity_type.clone(),
                     ActivityScoringParams {
                         typical_duration_s: params.typical_duration_s,
+                        score_at_all: params.score_at_all,
                     },
                 )
             })
@@ -198,6 +201,10 @@ impl CharyparNagelScoringFunction {
                     activity.act_type.external()
                 )
             })?;
+
+        if params.score_at_all == ScoreAtAll::No {
+            return Ok(0.0);
+        }
 
         if !duration_s.is_finite() {
             return Err(format!(
@@ -548,11 +555,52 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn activity_score_is_zero_when_score_at_all_is_no_and_no_mode_params_given() {
+        let scorer_wo_act_scoring = make_scorer(
+            vec![
+                ("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::No),
+                ("work", 8.0 * SECONDS_PER_HOUR, ScoreAtAll::No),
+            ],
+            Vec::new(),
+            Network::new(),
+        );
+
+        // Verify that the scorer with activity scoring does not return zero for the same plans.
+        let scorer_w_act_scoring = make_scorer(
+            vec![
+                ("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
+                ("work", 8.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
+            ],
+            Vec::new(),
+            Network::new(),
+        );
+
+        let person = Id::create("person");
+
+        let plan = plan(vec![
+            activity("home", None, Some(6 * 3_600)),
+            activity("work", Some(6 * 3_600), Some(18 * 3_600)),
+            activity("home", Some(18 * 3_600), None),
+        ]);
+
+        let score_wo_act_scoring = scorer_wo_act_scoring
+            .score(&person, "person", &plan)
+            .unwrap();
+
+        let score_w_act_scoring = scorer_w_act_scoring
+            .score(&person, "person", &plan)
+            .unwrap();
+
+        assert_eq!(0.0, score_wo_act_scoring);
+        assert_ne!(0.0, score_w_act_scoring);
+    }
+
+    #[deterministic_id_test]
     fn scores_overnight_different_boundary_and_single_activities() {
         let scorer = make_scorer(
             vec![
-                ("home", 12.0 * SECONDS_PER_HOUR),
-                ("work", 8.0 * SECONDS_PER_HOUR),
+                ("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
+                ("work", 8.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
             ],
             Vec::new(),
             Network::new(),
@@ -610,8 +658,8 @@ mod tests {
         let walk = mode("walk", -3.0, 0.0, 0.0, 1.0);
         let scorer = make_scorer(
             vec![
-                ("home", 12.0 * SECONDS_PER_HOUR),
-                ("work", 8.0 * SECONDS_PER_HOUR),
+                ("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
+                ("work", 8.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
             ],
             vec![car, walk],
             Network::new(),
@@ -643,7 +691,10 @@ mod tests {
         );
 
         let time_only_scorer = make_scorer(
-            vec![("home", SECONDS_PER_DAY), ("work", SECONDS_PER_DAY)],
+            vec![
+                ("home", SECONDS_PER_DAY, ScoreAtAll::Yes),
+                ("work", SECONDS_PER_DAY, ScoreAtAll::Yes),
+            ],
             vec![mode("car", -6.0, 0.0, 0.0, 2.0)],
             Network::new(),
         );
@@ -685,7 +736,10 @@ mod tests {
         unused.daily_utility_constant = 100.0;
 
         let mut scorer = make_scorer(
-            vec![("home", SECONDS_PER_DAY), ("work", SECONDS_PER_DAY)],
+            vec![
+                ("home", SECONDS_PER_DAY, ScoreAtAll::Yes),
+                ("work", SECONDS_PER_DAY, ScoreAtAll::Yes),
+            ],
             vec![car, walk, unused],
             Network::new(),
         );
@@ -740,8 +794,8 @@ mod tests {
         let (network, start, middle, end) = network();
         let scorer = make_scorer(
             vec![
-                ("home", 12.0 * SECONDS_PER_HOUR),
-                ("work", 8.0 * SECONDS_PER_HOUR),
+                ("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
+                ("work", 8.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes),
             ],
             vec![mode("car", 0.0, -1.0, 0.0, 0.0)],
             network,
@@ -778,7 +832,7 @@ mod tests {
     #[deterministic_id_test]
     fn adds_end_time_abort_penalty_to_completed_prefix() {
         let scorer = make_scorer(
-            vec![("home", 12.0 * SECONDS_PER_HOUR)],
+            vec![("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes)],
             vec![mode("car", -6.0, 0.0, 0.0, 0.0)],
             Network::new(),
         );
@@ -806,7 +860,7 @@ mod tests {
     #[deterministic_id_test]
     fn reports_missing_mode_and_required_distance_with_person_context() {
         let scorer = make_scorer(
-            vec![("home", 12.0 * SECONDS_PER_HOUR)],
+            vec![("home", 12.0 * SECONDS_PER_HOUR, ScoreAtAll::Yes)],
             vec![mode("car", 0.0, -1.0, 0.0, 0.0)],
             Network::new(),
         );
@@ -845,17 +899,20 @@ mod tests {
     }
 
     fn make_scorer(
-        activity_params: Vec<(&str, f64)>,
+        activity_params: Vec<(&str, f64, ScoreAtAll)>,
         mode_params: Vec<ModeParameter>,
         network: Network,
     ) -> CharyparNagelScoringFunction {
         let mut config = Config::default();
         config.scoring_mut().activity_params = activity_params
             .into_iter()
-            .map(|(activity_type, typical_duration_s)| ActivityParameter {
-                activity_type: activity_type.to_string(),
-                typical_duration_s,
-            })
+            .map(
+                |(activity_type, typical_duration_s, score_at_all)| ActivityParameter {
+                    activity_type: activity_type.to_string(),
+                    typical_duration_s,
+                    score_at_all,
+                },
+            )
             .collect();
         config.scoring_mut().mode_params = mode_params;
         config.scoring_mut().agent_params = vec![AgentParameter::default()];
