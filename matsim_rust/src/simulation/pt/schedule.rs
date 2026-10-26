@@ -27,8 +27,6 @@ use tracing::{info, warn};
 pub struct TransitSimSchedule {
     routes: Vec<SimTransitRoute>,
     departures: Vec<SimDeparture>,
-    /// Internal ids of all drivers, sorted, to recognize drivers in events.
-    drivers: Vec<u64>,
 }
 
 /// Index of a route in [`TransitSimSchedule::routes`]. Only the schedule creates such indices, so
@@ -179,15 +177,9 @@ impl TransitSimSchedule {
             })
             .collect();
 
-        let mut drivers: Vec<_> = departures
-            .iter()
-            .map(|departure| departure.driver.internal())
-            .collect();
-        drivers.sort_unstable();
         let result = Self {
             routes: sim_routes,
             departures,
-            drivers,
         };
         result.assert_vehicles_are_not_shared_at_the_same_time();
         info!(
@@ -243,9 +235,38 @@ impl TransitSimSchedule {
             .map(RouteIndex::new)
     }
 
-    /// Whether `person` is the driver of a departure. Drivers only exist as ids for the events.
-    pub fn is_driver(&self, person: &Id<InternalPerson>) -> bool {
-        !self.drivers.is_empty() && self.drivers.binary_search(&person.internal()).is_ok()
+    /// The access and egress stop of a passenger of `route` of `line`, given by their external
+    /// ids: the first stop `access` and the first stop `egress` after it. Routes may serve a stop
+    /// twice.
+    pub fn passenger_stops(
+        &self,
+        line: &str,
+        route: &str,
+        access: &str,
+        egress: &str,
+    ) -> Option<(&SimTransitRoute, &SimRouteStop, &SimRouteStop)> {
+        let transit_route = self.find_route(line, route)?;
+        let stops = &transit_route.stops;
+        let access_index = stops
+            .iter()
+            .position(|stop| stop.facility.external() == access)?;
+        let egress_stop = stops[access_index + 1..]
+            .iter()
+            .find(|stop| stop.facility.external() == egress)?;
+        Some((transit_route, &stops[access_index], egress_stop))
+    }
+
+    /// The distance a passenger travels on `route` of `line` from stop `access` to stop `egress`,
+    /// see [`SimRouteStop::distance_from_start`].
+    pub fn passenger_distance(
+        &self,
+        line: &str,
+        route: &str,
+        access: &str,
+        egress: &str,
+    ) -> Option<f64> {
+        self.passenger_stops(line, route, access, egress)
+            .map(|(_, access, egress)| egress.distance_from_start - access.distance_from_start)
     }
 
     /// Scheduled time at which the departure arrives at its last stop.
@@ -561,13 +582,34 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn drivers_are_recognized() {
+    fn passenger_distance_between_stops() {
         let schedule = tutorial_schedule();
 
-        assert!(schedule.is_driver(&schedule.departures()[17].driver));
-        let person = Id::<InternalPerson>::create("102");
-        assert!(!schedule.is_driver(&person));
-        assert!(!TransitSimSchedule::default().is_driver(&person));
+        assert_eq!(
+            Some(6100.0),
+            schedule.passenger_distance("Blue Line", "1to3", "1", "3")
+        );
+        assert_eq!(
+            Some(3700.0),
+            schedule.passenger_distance("Blue Line", "1to3", "2a", "3")
+        );
+        // Egress before access, unknown stop, unknown route.
+        assert_eq!(
+            None,
+            schedule.passenger_distance("Blue Line", "1to3", "3", "1")
+        );
+        assert_eq!(
+            None,
+            schedule.passenger_distance("Blue Line", "1to3", "1", "2b")
+        );
+        assert_eq!(
+            None,
+            schedule.passenger_distance("Blue Line", "1to2", "1", "3")
+        );
+        assert_eq!(
+            None,
+            TransitSimSchedule::default().passenger_distance("Blue Line", "1to3", "1", "3")
+        );
     }
 
     #[deterministic_id_test]

@@ -5,7 +5,7 @@ use crate::simulation::events::{
     VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
-use crate::simulation::pt::schedule::{SimRouteStop, SimTransitRoute};
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPlanElement::{Activity, Leg};
@@ -13,6 +13,7 @@ use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPlan,
     InternalPlanElement, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
 };
+use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitStopFacility};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use std::time::Duration;
@@ -158,16 +159,17 @@ impl PartialPlan {
         self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |_| {});
     }
 
-    /// The person boards a vehicle of schedule-based transit of `route` at `stop`.
+    /// The person boards a vehicle of schedule-based transit of `line` and `route` at `stop`.
     pub(crate) fn board_transit_vehicle(
         &mut self,
         event: &PersonEntersVehicleEvent,
-        route: &SimTransitRoute,
-        stop: &SimRouteStop,
+        line: &Id<TransitLine>,
+        route: &Id<TransitRoute>,
+        stop: &Id<TransitStopFacility>,
     ) {
         self.with_current_leg(PersonEntersVehicleEvent::TYPE, |leg| {
             leg.partial_route
-                .handle_transit_boarding(event, route, stop)
+                .handle_transit_boarding(event, line, route, stop)
         });
     }
 
@@ -175,7 +177,7 @@ impl PartialPlan {
     pub(crate) fn alight_transit_vehicle(
         &mut self,
         _event: &PersonLeavesVehicleEvent,
-        stop: &SimRouteStop,
+        stop: &Id<TransitStopFacility>,
     ) {
         self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |leg| {
             leg.partial_route.handle_transit_alighting(stop)
@@ -212,7 +214,9 @@ impl PartialPlan {
         });
     }
 
-    pub(crate) fn finish(mut self) -> InternalPlan {
+    /// Finishes the plan. `transit_schedule` is only used for the distances of the legs of
+    /// schedule-based transit, which the events do not contain.
+    pub(crate) fn finish(mut self, transit_schedule: &TransitSimSchedule) -> InternalPlan {
         if let Some(activity) = self.current_activity.take() {
             // if there was an aborted activity before,
             if activity.is_initialized() {
@@ -221,6 +225,14 @@ impl PartialPlan {
         } else if let Some(leg) = self.current_leg.take() {
             // a plan can never end with a leg, so we mark it as aborted and finish it
             self.elements.push(Leg(leg.finish_incomplete()));
+        }
+        for element in &mut self.elements {
+            if let Leg(leg) = element
+                && let Some(InternalRoute::Pt(route)) = &mut leg.route
+                && route.generic_delegate.distance().is_none()
+            {
+                set_transit_distance(route, transit_schedule);
+            }
         }
 
         InternalPlan {
@@ -385,8 +397,6 @@ struct PartialRoute {
     distance: Option<f64>,
     vehicle: Option<Id<InternalVehicle>>,
     pt_description: Option<InternalPtRouteDescription>,
-    /// Distance of the access stop from the start of its transit route.
-    pt_access_distance: Option<f64>,
 
     //TODO These values are currently unused
     relative_position_on_departure_link: Option<f64>,
@@ -407,7 +417,6 @@ impl Default for PartialRoute {
             distance: None,
             vehicle: None,
             pt_description: None,
-            pt_access_distance: None,
             relative_position_on_departure_link: None,
             relative_position_on_arrival_link: None,
             route: Vec::default(),
@@ -474,43 +483,38 @@ impl PartialRoute {
     fn handle_transit_boarding(
         &mut self,
         event: &PersonEntersVehicleEvent,
-        route: &SimTransitRoute,
-        stop: &SimRouteStop,
+        line: &Id<TransitLine>,
+        route: &Id<TransitRoute>,
+        stop: &Id<TransitStopFacility>,
     ) {
         if self.route_type == Some(PartialRouteTypes::Network) {
             panic!("Caught boarding a transit vehicle on a Network Route Type!")
         }
         self.route_type = Some(PartialRouteTypes::Pt);
-        self.pt_access_distance = Some(stop.distance_from_start);
         self.pt_description = Some(InternalPtRouteDescription {
-            transit_route_id: route.route.external().to_string(),
+            transit_route_id: route.external().to_string(),
             boarding_time: Some(event.time),
-            transit_line_id: route.line.external().to_string(),
-            access_facility_id: stop.facility.external().to_string(),
+            transit_line_id: line.external().to_string(),
+            access_facility_id: stop.external().to_string(),
             // Known when the person alights.
             egress_facility_id: String::new(),
         });
     }
 
-    fn handle_transit_alighting(&mut self, stop: &SimRouteStop) {
+    fn handle_transit_alighting(&mut self, stop: &Id<TransitStopFacility>) {
         let description = self
             .pt_description
             .as_mut()
             .unwrap_or_else(|| panic!("Caught alighting from a transit vehicle before boarding!"));
-        description.egress_facility_id = stop.facility.external().to_string();
-        let access_distance = self
-            .pt_access_distance
-            .expect("The access distance is set when boarding.");
-        self.distance = Some(stop.distance_from_start - access_distance);
+        description.egress_facility_id = stop.external().to_string();
+        // The distance is set when the plan is finished, see `set_transit_distance`.
     }
 
     /// Consuming function turning PartialRoute into an InternalRoute
     fn finish(self) -> InternalRoute {
-        if matches!(
-            self.route_type,
-            Some(PartialRouteTypes::Generic | PartialRouteTypes::Pt)
-        ) && self.distance.is_none()
-        {
+        // Routes of schedule-based transit get their distance when the plan is finished, see
+        // `set_transit_distance`. Teleported transit routes have it from their event.
+        if self.route_type == Some(PartialRouteTypes::Generic) && self.distance.is_none() {
             panic!("Tried to finish teleported PartialRoute without distance!");
         }
         if self.route_type == Some(PartialRouteTypes::Network) && self.vehicle.is_none() {
@@ -581,6 +585,30 @@ impl PartialRoute {
     }
 }
 
+/// Sets the distance of a route of schedule-based transit from the schedule, like MATSim's
+/// `RouteUtils.calcDistance` for transit passenger routes.
+fn set_transit_distance(route: &mut InternalPtRoute, transit_schedule: &TransitSimSchedule) {
+    let description = &route.description;
+    let distance = transit_schedule
+        .passenger_distance(
+            &description.transit_line_id,
+            &description.transit_route_id,
+            &description.access_facility_id,
+            &description.egress_facility_id,
+        )
+        .unwrap_or_else(|| {
+            panic!(
+                "Tried to finish a transit route of line {} and route {} from stop {} to stop {}, \
+                 which the transit schedule does not contain.",
+                description.transit_line_id,
+                description.transit_route_id,
+                description.access_facility_id,
+                description.egress_facility_id
+            )
+        });
+    route.generic_delegate.set_distance(Some(distance));
+}
+
 #[cfg(test)]
 mod tests {
     use super::PartialPlan;
@@ -591,6 +619,7 @@ mod tests {
         TeleportationArrivalEventBuilder,
     };
     use crate::simulation::id::Id;
+    use crate::simulation::pt::schedule::TransitSimSchedule;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::population::{
         InternalPlan, InternalPlanElement, InternalRoute,
@@ -703,7 +732,7 @@ mod tests {
         let completed_elements = partial.elements.clone();
 
         stuck(&mut partial);
-        let plan = partial.finish();
+        let plan = partial.finish(&TransitSimSchedule::default());
 
         assert_eq!(plan.elements.len(), 3);
         assert_only_last_element_aborted(&plan);
@@ -726,7 +755,7 @@ mod tests {
         let completed_elements = partial.elements.clone();
 
         stuck(&mut partial);
-        let plan = partial.finish();
+        let plan = partial.finish(&TransitSimSchedule::default());
 
         assert_eq!(plan.elements.len(), 2);
         assert_only_last_element_aborted(&plan);
@@ -751,7 +780,7 @@ mod tests {
         let completed_elements = partial.elements.clone();
 
         stuck(&mut partial);
-        let plan = partial.finish();
+        let plan = partial.finish(&TransitSimSchedule::default());
 
         assert_eq!(plan.elements.len(), 3);
         assert_only_last_element_aborted(&plan);
@@ -772,7 +801,7 @@ mod tests {
         let completed_elements = partial.elements.clone();
 
         stuck(&mut partial);
-        let plan = partial.finish();
+        let plan = partial.finish(&TransitSimSchedule::default());
 
         assert_eq!(plan.elements.len(), 2);
         assert_only_last_element_aborted(&plan);
@@ -815,7 +844,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let plan = partial.finish();
+        let plan = partial.finish(&TransitSimSchedule::default());
         let InternalPlanElement::Leg(leg) = &plan.elements[1] else {
             panic!("Expected reconstructed leg");
         };
@@ -837,7 +866,12 @@ mod tests {
 
     #[deterministic_id_test]
     fn leaves_eventless_plan_empty_and_marks_unfinished_leg_as_aborted() {
-        assert!(PartialPlan::default().finish().elements.is_empty());
+        assert!(
+            PartialPlan::default()
+                .finish(&TransitSimSchedule::default())
+                .elements
+                .is_empty()
+        );
 
         let mut leg_plan = PartialPlan::default();
         finish_initial_activity(&mut leg_plan);
@@ -859,7 +893,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let plan = leg_plan.finish();
+        let plan = leg_plan.finish(&TransitSimSchedule::default());
         let InternalPlanElement::Leg(leg) = &plan.elements[1] else {
             panic!("Expected unfinished leg");
         };
@@ -877,5 +911,51 @@ mod tests {
             vec!["start", "current"]
         );
         assert_eq!(route.generic_delegate().end_link().external(), "current");
+    }
+
+    /// Builds a plan with a leg of schedule-based transit of line `L` and route `R` from stop
+    /// `s1` to `s3`.
+    fn transit_leg_plan() -> PartialPlan {
+        let mut plan = PartialPlan::default();
+        finish_initial_activity(&mut plan);
+        depart(&mut plan, "pt");
+        let enters = PersonEntersVehicleEventBuilder::default()
+            .time(SimTime::from_secs(20))
+            .person(Id::create("person"))
+            .vehicle(Id::create("bus"))
+            .build()
+            .unwrap();
+        plan.board_transit_vehicle(
+            &enters,
+            &Id::create("L"),
+            &Id::create("R"),
+            &Id::create("s1"),
+        );
+        let leaves = crate::simulation::events::PersonLeavesVehicleEventBuilder::default()
+            .time(SimTime::from_secs(30))
+            .person(Id::create("person"))
+            .vehicle(Id::create("bus"))
+            .build()
+            .unwrap();
+        plan.alight_transit_vehicle(&leaves, &Id::create("s3"));
+        plan.person_arrival(
+            &PersonArrivalEventBuilder::default()
+                .time(SimTime::from_secs(30))
+                .person(Id::create("person"))
+                .link(Id::create("end"))
+                .leg_mode(Id::create("pt"))
+                .build()
+                .unwrap(),
+        );
+        start_activity(&mut plan);
+        plan
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(
+        expected = "Tried to finish a transit route of line L and route R from stop s1 to stop s3, which the transit schedule does not contain."
+    )]
+    fn transit_leg_on_unknown_route_panics_when_plan_is_finished() {
+        transit_leg_plan().finish(&TransitSimSchedule::default());
     }
 }

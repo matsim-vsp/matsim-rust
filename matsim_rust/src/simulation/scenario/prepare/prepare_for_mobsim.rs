@@ -386,26 +386,16 @@ fn network_route_is_valid(
 /// later egress stop are on the route, and the route starts and ends at the links of these stops.
 fn pt_route_is_valid(schedule: &TransitSimSchedule, route: &InternalPtRoute) -> bool {
     let description = &route.description;
-    let Some(transit_route) =
-        schedule.find_route(&description.transit_line_id, &description.transit_route_id)
-    else {
-        return false;
-    };
-    let stops = &transit_route.stops;
-    let Some(access) = stops
-        .iter()
-        .position(|stop| stop.facility.external() == description.access_facility_id)
-    else {
-        return false;
-    };
-    let Some(egress) = stops[access + 1..]
-        .iter()
-        .position(|stop| stop.facility.external() == description.egress_facility_id)
-        .map(|offset| access + 1 + offset)
-    else {
-        return false;
-    };
-    stops[access].link == *route.start_link() && stops[egress].link == *route.end_link()
+    schedule
+        .passenger_stops(
+            &description.transit_line_id,
+            &description.transit_route_id,
+            &description.access_facility_id,
+            &description.egress_facility_id,
+        )
+        .is_some_and(|(_, access, egress)| {
+            access.link == *route.start_link() && egress.link == *route.end_link()
+        })
 }
 
 /// Whether legs of `mode` ride transit vehicles of the schedule-based transit simulation.

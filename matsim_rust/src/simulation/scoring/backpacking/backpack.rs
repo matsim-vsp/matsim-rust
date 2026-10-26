@@ -1,5 +1,6 @@
 use crate::simulation::events::EventTrait;
 use crate::simulation::id::Id;
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::population::{InternalPerson, InternalPlan};
 use crate::simulation::scoring::partial_plans::PartialPlan;
 
@@ -39,10 +40,10 @@ impl Backpack {
     }
 
     #[hotpath::measure]
-    pub(crate) fn finish(mut self) -> PersonExperience {
+    pub(crate) fn finish(mut self, transit_schedule: &TransitSimSchedule) -> PersonExperience {
         PersonExperience {
             person_id: self.person_id,
-            plan: self.backpack_plan.finish(),
+            plan: self.backpack_plan.finish(transit_schedule),
             events: std::mem::take(&mut self.events),
         }
     }
@@ -77,6 +78,7 @@ mod tests {
     use super::*;
     use crate::simulation::events::{ActivityEndEventBuilder, PersonStuckEventBuilder};
     use crate::simulation::io::xml::population::IOPerson;
+    use crate::simulation::pt::schedule::TransitSimSchedule;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::population::InternalPlanElement;
     use crate::simulation::time::SimTime;
@@ -112,7 +114,7 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let mut experience = backpack.finish();
+        let mut experience = backpack.finish(&TransitSimSchedule::default());
         experience.plan_mut().score = Some(42.5);
 
         let person = experience.convert_to_person(&original);
@@ -169,7 +171,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let experienced_plan = backpack.finish();
+        let experienced_plan = backpack.finish(&TransitSimSchedule::default());
         let InternalPlanElement::Activity(activity) = &experienced_plan.plan().elements[0] else {
             panic!("Expected reconstructed activity");
         };

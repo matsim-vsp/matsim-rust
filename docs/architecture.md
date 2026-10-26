@@ -203,9 +203,13 @@ and passengers is sent there, together with the scoring backpacks of the passeng
 typed (`RouteIndex`, `DepartureIndex`), so that they cannot be confused.
 
 Plan preparation does not require travel times for these legs, but checks their transit route against the schedule.
-Experienced plans get a transit route with line, route, stops and boarding time, like MATSim's `EventsToLegs`. Its
-distance is the length of the network route from the link of the access stop, excluding it, to the link of the egress
-stop, including it, like `RouteUtils.calcDistance` for transit passenger routes.
+Experienced plans get a transit route with line, route, stops and boarding time, like MATSim's `EventsToLegs`.
+Backpacking takes them from the events only: line, route and driver from `TransitDriverStarts`, the current stop from
+`VehicleArrivesAtFacility`. This state of a vehicle moves with it to other partitions as an attachment, so that the
+next partition also recognizes the driver, who has no backpack. The distance of the route is set when the plan is
+finished, which is the only use of the schedule in backpacking. It is the length of the network route from the link
+of the access stop, excluding it, to the link of the egress stop, including it, like `RouteUtils.calcDistance` for
+transit passenger routes.
 
 Deviations from SBB's engine:
 

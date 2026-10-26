@@ -1,5 +1,4 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, LinkEnterEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
@@ -8,8 +7,9 @@ use crate::simulation::events::{
 };
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeEntity;
-use crate::simulation::pt::schedule::{RouteIndex, TransitSimSchedule};
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitStopFacility};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::scoring::backpacking::backpack::{Backpack, PersonExperience};
 use crate::simulation::scoring::partial_plans::PartialPlan;
@@ -18,24 +18,32 @@ use std::sync::Arc;
 
 pub(crate) struct BackpackingAttachment {
     backpacks: Vec<Backpack>,
+    /// The state of a transit vehicle, which moves with it.
+    transit_vehicle: Option<TransitVehicleState>,
 }
 
 /// What the collector knows about a vehicle of schedule-based transit, like MATSim's
-/// `EventsToLegs` keeps for transit vehicles.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// `EventsToLegs` keeps for transit vehicles. It comes from the events only.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransitVehicleState {
-    route: RouteIndex,
-    /// Index of the stop at which the vehicle arrived last.
-    stop: Option<usize>,
+    line: Id<TransitLine>,
+    route: Id<TransitRoute>,
+    driver: Id<InternalPerson>,
+    /// The stop at which the vehicle arrived last.
+    stop: Option<Id<TransitStopFacility>>,
 }
 
 pub struct BackpackingDataCollector {
     home_person_ids: Vec<Id<InternalPerson>>,
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
-    /// Empty unless transit is simulated schedule based.
-    transit_schedule: Arc<TransitSimSchedule>,
     transit_vehicles: IntMap<Id<InternalVehicle>, TransitVehicleState>,
+    /// Drivers of transit vehicles on this partition. They have no backpacks, and their events
+    /// are ignored.
+    transit_drivers: IntSet<Id<InternalPerson>>,
+    /// Only used to compute the distances of transit legs when the plans are finished. Empty
+    /// unless transit is simulated schedule based.
+    transit_schedule: Arc<TransitSimSchedule>,
 }
 
 impl BackpackingDataCollector {
@@ -47,8 +55,9 @@ impl BackpackingDataCollector {
             home_person_ids,
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
-            transit_schedule,
             transit_vehicles: Default::default(),
+            transit_drivers: Default::default(),
+            transit_schedule,
         }
     }
 
@@ -61,39 +70,49 @@ impl BackpackingDataCollector {
         }
         self.vehicle_id2person_ids.clear();
         self.transit_vehicles.clear();
+        self.transit_drivers.clear();
     }
 
     /// Records the person as an occupant of the vehicle and forwards the event to its backpack.
     #[hotpath::measure]
     pub(crate) fn person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
-        if self.transit_schedule.is_driver(&event.person) {
+        let Some(plan) = Self::plan_unless_driver(
+            &mut self.person_id2backpack,
+            &self.transit_drivers,
+            &event.person,
+        ) else {
             return;
+        };
+        match self.transit_vehicles.get(&event.vehicle) {
+            Some(state) => plan.board_transit_vehicle(
+                event,
+                &state.line,
+                &state.route,
+                Self::current_stop(state, event),
+            ),
+            None => plan.person_enters_vehicle(event),
         }
         self.vehicle_id2person_ids
             .entry(event.vehicle.clone())
             .or_default()
             .insert(event.person.clone());
-        match self.transit_vehicles.get(&event.vehicle).copied() {
-            Some(state) => {
-                let route = self.transit_schedule.route(state.route);
-                let stop = &route.stops[Self::current_stop(state, event)];
-                Self::backpack(&mut self.person_id2backpack, &event.person)
-                    .partial_plan_mut()
-                    .board_transit_vehicle(event, route, stop);
-            }
-            None => self
-                .partial_plan(&event.person)
-                .person_enters_vehicle(event),
-        }
     }
 
     /// Removes the person from the occupants of the vehicle and forwards the event to its backpack.
     #[hotpath::measure]
     pub(crate) fn person_leaves_vehicle(&mut self, event: &PersonLeavesVehicleEvent) {
-        if self.transit_schedule.is_driver(&event.person) {
+        let Some(plan) = Self::plan_unless_driver(
+            &mut self.person_id2backpack,
+            &self.transit_drivers,
+            &event.person,
+        ) else {
             // The driver leaves at the end of the departure.
             self.transit_vehicles.remove(&event.vehicle);
             return;
+        };
+        match self.transit_vehicles.get(&event.vehicle) {
+            Some(state) => plan.alight_transit_vehicle(event, Self::current_stop(state, event)),
+            None => plan.person_leaves_vehicle(event),
         }
         let remove_vehicle = self
             .vehicle_id2person_ids
@@ -106,76 +125,76 @@ impl BackpackingDataCollector {
         if remove_vehicle {
             self.vehicle_id2person_ids.remove(&event.vehicle);
         }
-        match self.transit_vehicles.get(&event.vehicle).copied() {
-            Some(state) => {
-                let route = self.transit_schedule.route(state.route);
-                let stop = &route.stops[Self::current_stop(state, event)];
-                Self::backpack(&mut self.person_id2backpack, &event.person)
-                    .partial_plan_mut()
-                    .alight_transit_vehicle(event, stop);
-            }
-            None => self
-                .partial_plan(&event.person)
-                .person_leaves_vehicle(event),
-        }
     }
 
     pub(crate) fn person_departure(&mut self, event: &PersonDepartureEvent) {
-        if self.transit_schedule.is_driver(&event.person) {
-            return;
+        if let Some(plan) = Self::plan_unless_driver(
+            &mut self.person_id2backpack,
+            &self.transit_drivers,
+            &event.person,
+        ) {
+            plan.person_departure(event);
         }
-        self.partial_plan(&event.person).person_departure(event);
     }
 
     pub(crate) fn person_arrival(&mut self, event: &PersonArrivalEvent) {
-        if self.transit_schedule.is_driver(&event.person) {
-            return;
+        match Self::plan_unless_driver(
+            &mut self.person_id2backpack,
+            &self.transit_drivers,
+            &event.person,
+        ) {
+            Some(plan) => plan.person_arrival(event),
+            // The driver's departure ends with its arrival.
+            None => {
+                self.transit_drivers.remove(&event.person);
+            }
         }
-        self.partial_plan(&event.person).person_arrival(event);
     }
 
     pub(crate) fn transit_driver_starts(&mut self, event: &TransitDriverStartsEvent) {
-        let route = self
-            .transit_schedule
-            .find_route_index(
-                event.transit_line.external(),
-                event.transit_route.external(),
-            )
-            .unwrap_or_else(|| {
-                panic!(
-                    "Transit route {} of line {} is not in the schedule.",
-                    event.transit_route, event.transit_line
-                )
-            });
+        self.transit_drivers.insert(event.driver.clone());
         self.transit_vehicles.insert(
             event.vehicle.clone(),
-            TransitVehicleState { route, stop: None },
+            TransitVehicleState {
+                line: event.transit_line.clone(),
+                route: event.transit_route.clone(),
+                driver: event.driver.clone(),
+                stop: None,
+            },
         );
     }
 
     pub(crate) fn vehicle_arrives_at_facility(&mut self, event: &VehicleArrivesAtFacilityEvent) {
-        let Some(state) = self.transit_vehicles.get_mut(&event.vehicle) else {
-            return;
-        };
-        let stops = &self.transit_schedule.route(state.route).stops;
-        // Routes may serve a stop twice, so search after the previous stop.
-        let from = state.stop.map_or(0, |stop| stop + 1);
-        let offset = stops[from..]
-            .iter()
-            .position(|stop| stop.facility == event.facility)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Transit vehicle {} arrives at stop {}, which its route does not serve next.",
-                    event.vehicle, event.facility
-                )
-            });
-        state.stop = Some(from + offset);
+        if let Some(state) = self.transit_vehicles.get_mut(&event.vehicle) {
+            state.stop = Some(event.facility.clone());
+        }
     }
 
-    fn current_stop(state: TransitVehicleState, event: &impl std::fmt::Debug) -> usize {
+    fn current_stop<'a>(
+        state: &'a TransitVehicleState,
+        event: &impl std::fmt::Debug,
+    ) -> &'a Id<TransitStopFacility> {
         state
             .stop
+            .as_ref()
             .unwrap_or_else(|| panic!("Transit vehicle is at no stop for event {event:?}."))
+    }
+
+    /// The partial plan of `person`, or `None` for transit drivers. Drivers are only looked up for
+    /// persons without a backpack, so that other persons need no additional lookup.
+    fn plan_unless_driver<'a>(
+        backpacks: &'a mut IntMap<Id<InternalPerson>, Backpack>,
+        transit_drivers: &IntSet<Id<InternalPerson>>,
+        person: &Id<InternalPerson>,
+    ) -> Option<&'a mut PartialPlan> {
+        match backpacks.get_mut(person) {
+            Some(backpack) => Some(backpack.partial_plan_mut()),
+            None if transit_drivers.contains(person) => None,
+            None => panic!(
+                "No backpack is available for person {} while handling an event.",
+                person.external()
+            ),
+        }
     }
 
     pub(crate) fn activity_start(&mut self, event: &ActivityStartEvent) {
@@ -251,9 +270,16 @@ impl BackpackingDataCollector {
         {
             self.vehicle_id2person_ids.remove(vehicle.id());
         }
-        if let PartitionChangeEntity::TransitVehicle(vehicle) = entity {
-            self.transit_vehicles.remove(vehicle.id());
-        }
+        let transit_vehicle = match entity {
+            PartitionChangeEntity::TransitVehicle(vehicle) => {
+                let state = self.transit_vehicles.remove(vehicle.id());
+                if let Some(state) = &state {
+                    self.transit_drivers.remove(&state.driver);
+                }
+                state
+            }
+            _ => None,
+        };
 
         let backpacks = person_ids
             .into_iter()
@@ -268,7 +294,10 @@ impl BackpackingDataCollector {
                     })
             })
             .collect();
-        BackpackingAttachment { backpacks }
+        BackpackingAttachment {
+            backpacks,
+            transit_vehicle,
+        }
     }
 
     #[hotpath::measure]
@@ -278,15 +307,10 @@ impl BackpackingDataCollector {
         attachment: BackpackingAttachment,
     ) {
         let expected_person_ids = Self::person_ids(entity);
-        if let PartitionChangeEntity::TransitVehicle(vehicle) = entity {
-            // The driver knows the route and the stop which the vehicle approaches.
-            let driver = vehicle.driver().as_transit_driver().unwrap_or_else(|| {
-                panic!("Transit vehicle {} has no transit driver.", vehicle.id())
-            });
-            let state = TransitVehicleState {
-                route: driver.departure().route,
-                stop: driver.stop_index().checked_sub(1),
-            };
+        if let (PartitionChangeEntity::TransitVehicle(vehicle), Some(state)) =
+            (entity, attachment.transit_vehicle)
+        {
+            self.transit_drivers.insert(state.driver.clone());
             self.transit_vehicles.insert(vehicle.id().clone(), state);
         }
         assert_eq!(
@@ -349,7 +373,7 @@ impl BackpackingDataCollector {
     pub(crate) fn finish(&mut self) -> IntMap<Id<InternalPerson>, PersonExperience> {
         self.person_id2backpack
             .drain()
-            .map(|(person_id, backpack)| (person_id, backpack.finish()))
+            .map(|(person_id, backpack)| (person_id, backpack.finish(&self.transit_schedule)))
             .collect()
     }
 }
@@ -361,52 +385,6 @@ mod tests {
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils::create_agent;
     use macros::deterministic_id_test;
-
-    /// The tutorial schedule and the driver of its 06:00 departure of route 1to3, which has left
-    /// stop 1 and approaches stop 2a.
-    fn tutorial_driver() -> (
-        Arc<TransitSimSchedule>,
-        crate::simulation::agents::agent::SimulationAgent,
-    ) {
-        use crate::simulation::agents::agent::SimulationAgent;
-        use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
-        use crate::simulation::pt::driver::TransitDriverLogic;
-        use crate::simulation::scenario::network::Network;
-        use crate::simulation::scenario::population::Population;
-        use crate::simulation::scenario::transit::TransitSchedule;
-        use crate::simulation::scenario::vehicles::Garage;
-        use crate::simulation::time::SimTime;
-        use std::path::{Path, PathBuf};
-
-        let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
-        let schedule =
-            TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
-        let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
-        let schedule = Arc::new(TransitSimSchedule::build(
-            &schedule,
-            &network,
-            &garage,
-            &Population::default(),
-        ));
-        let (index, _) = schedule
-            .indexed_departures()
-            .find(|(_, departure)| departure.driver.external() == "pt_Blue Line_1to3_01")
-            .unwrap();
-        let six = SimTime::from_secs(6 * 3600);
-        let mut driver = SimulationAgent::new(Box::new(TransitDriverLogic::new(
-            schedule.clone(),
-            index,
-            six,
-        )));
-        driver.notify_event(&mut AgentEvent::TransitStopArrived(), six);
-        driver.notify_event(
-            &mut AgentEvent::TransitStopDeparted {
-                earliest_arrival: six + SimTime::from_secs(1),
-            },
-            six,
-        );
-        (schedule, driver)
-    }
 
     #[deterministic_id_test]
     fn migrates_driver_and_passenger_and_rebuilds_vehicle_mapping() {
@@ -449,12 +427,8 @@ mod tests {
     fn migrates_only_passengers_of_transit_vehicle() {
         let passenger = create_agent(2, vec!["destination"]);
         let passenger_id = passenger.id().clone();
-        let (_, driver) = tutorial_driver();
-        let mut vehicle = SimulationVehicle::new(
-            InternalVehicle::new(11, 0, 1.0, 1.0),
-            Some(driver),
-            Vec::new(),
-        );
+        let mut vehicle =
+            SimulationVehicle::new(InternalVehicle::new(11, 0, 1.0, 1.0), None, Vec::new());
         vehicle.add_passenger(passenger);
         let mut departing =
             BackpackingDataCollector::new(vec![passenger_id.clone()], Default::default());
@@ -478,12 +452,7 @@ mod tests {
         );
 
         // An empty transit vehicle carries no backpacks and creates no mapping.
-        let (_, driver) = tutorial_driver();
-        let empty = SimulationVehicle::new(
-            InternalVehicle::new(12, 0, 1.0, 1.0),
-            Some(driver),
-            Vec::new(),
-        );
+        let empty = SimulationVehicle::new(InternalVehicle::new(12, 0, 1.0, 1.0), None, Vec::new());
         let attachment = arriving.send(PartitionChangeEntity::TransitVehicle(&empty));
         let mut other = BackpackingDataCollector::new(Vec::new(), Default::default());
         other.receive(PartitionChangeEntity::TransitVehicle(&empty), attachment);
@@ -578,23 +547,28 @@ mod tests {
 
         let mut vehicle = SimulationVehicle::new(
             garage.vehicles.get(&vehicle_id).unwrap().clone(),
-            Some(tutorial_driver().1),
+            None,
             Vec::new(),
         );
         vehicle.add_passenger(agent);
         let attachment = departing.send(PartitionChangeEntity::TransitVehicle(&vehicle));
         assert!(departing.transit_vehicles.is_empty());
 
-        let schedule_route_1to3 = schedule.find_route_index("Blue Line", "1to3").unwrap();
+        assert!(departing.transit_drivers.is_empty());
+
+        let driver = schedule.departures()[0].driver.clone();
         let mut arriving = BackpackingDataCollector::new(Vec::new(), schedule);
         arriving.receive(PartitionChangeEntity::TransitVehicle(&vehicle), attachment);
         assert_eq!(
             Some(&TransitVehicleState {
-                route: schedule_route_1to3,
-                stop: Some(0)
+                line: Id::get_from_ext("Blue Line"),
+                route: Id::get_from_ext("1to3"),
+                driver: driver.clone(),
+                stop: Some(Id::get_from_ext("1")),
             }),
             arriving.transit_vehicles.get(&vehicle_id)
         );
+        assert!(arriving.transit_drivers.contains(&driver));
 
         arriving.vehicle_arrives_at_facility(&arrives("2a"));
         arriving.vehicle_arrives_at_facility(&arrives("3"));
@@ -615,6 +589,27 @@ mod tests {
                 .build()
                 .unwrap(),
         );
+
+        // The driver has no backpack on this partition; its last events are ignored.
+        arriving.person_leaves_vehicle(
+            &PersonLeavesVehicleEventBuilder::default()
+                .time(time(22140))
+                .person(driver.clone())
+                .vehicle(vehicle_id.clone())
+                .build()
+                .unwrap(),
+        );
+        arriving.person_arrival(
+            &PersonArrivalEventBuilder::default()
+                .time(time(22140))
+                .person(driver.clone())
+                .link(Id::create("33"))
+                .leg_mode(Id::create("train"))
+                .build()
+                .unwrap(),
+        );
+        assert!(arriving.transit_vehicles.is_empty());
+        assert!(arriving.transit_drivers.is_empty());
 
         let experiences = arriving.finish();
         let InternalPlanElement::Leg(leg) = &experiences[&person].plan().elements[1] else {
