@@ -1,3 +1,4 @@
+use crate::simulation::pt::schedule::DepartureIndex;
 use crate::simulation::vehicles::SimulationVehicle;
 
 /// A departure of a transit vehicle which is on its way. It only carries the dynamic state; the
@@ -5,7 +6,7 @@ use crate::simulation::vehicles::SimulationVehicle;
 #[derive(Debug)]
 pub struct TransitRun {
     /// Index into [`TransitSimSchedule::departures`](super::schedule::TransitSimSchedule::departures).
-    pub(crate) departure: usize,
+    pub(crate) departure: DepartureIndex,
     /// Index of the stop at which the vehicle halts or which it approaches.
     pub(crate) stop: usize,
     pub(crate) vehicle: SimulationVehicle,

@@ -288,6 +288,7 @@ mod tests {
     use crate::simulation::messaging::partition_change::{
         PartitionChangeContext, PartitionChangeEntity, PartitionChangeExtensionsManager,
     };
+    use crate::simulation::pt::schedule::DepartureIndex;
     use crate::simulation::pt::transit_run::TransitRun;
     use crate::simulation::scenario::vehicles::InternalVehicle;
     use crate::simulation::time::{SimTime, Tick};
@@ -381,7 +382,7 @@ mod tests {
         vehicle.add_passenger(create_agent(1, vec!["destination"]));
         vehicle.add_passenger(create_agent(2, vec!["destination"]));
         let run = TransitRun {
-            departure: 3,
+            departure: DepartureIndex::for_test(3),
             stop: 1,
             vehicle,
         };
@@ -423,7 +424,7 @@ mod tests {
         );
 
         assert_eq!(SimTime::from_secs(70), arrival);
-        assert_eq!((3, 1), (run.departure, run.stop));
+        assert_eq!((DepartureIndex::for_test(3), 1), (run.departure, run.stop));
         let passengers: Vec<_> = run
             .vehicle
             .passengers()

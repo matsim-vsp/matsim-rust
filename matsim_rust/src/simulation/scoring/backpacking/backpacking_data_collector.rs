@@ -7,7 +7,7 @@ use crate::simulation::events::{
 };
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeEntity;
-use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::pt::schedule::{RouteIndex, TransitSimSchedule};
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::scoring::backpacking::backpack::{Backpack, PersonExperience};
@@ -25,8 +25,7 @@ pub(crate) struct BackpackingAttachment {
 /// `EventsToLegs` keeps for transit vehicles.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct TransitVehicleState {
-    /// Index into [`TransitSimSchedule::routes`].
-    route: usize,
+    route: RouteIndex,
     /// Index of the stop at which the vehicle arrived last.
     stop: Option<usize>,
 }
@@ -528,11 +527,12 @@ mod tests {
         let attachment = departing.send(PartitionChangeEntity::TransitVehicle(&vehicle));
         assert!(departing.transit_vehicles.is_empty());
 
+        let schedule_route_1to3 = schedule.find_route_index("Blue Line", "1to3").unwrap();
         let mut arriving = BackpackingDataCollector::new(Vec::new(), schedule);
         arriving.receive(PartitionChangeEntity::TransitVehicle(&vehicle), attachment);
         assert_eq!(
             Some(&TransitVehicleState {
-                route: 0,
+                route: schedule_route_1to3,
                 stop: Some(0)
             }),
             arriving.transit_vehicles.get(&vehicle_id)

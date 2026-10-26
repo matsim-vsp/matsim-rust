@@ -29,6 +29,38 @@ pub struct TransitSimSchedule {
     drivers: Vec<u64>,
 }
 
+/// Index of a route in [`TransitSimSchedule::routes`]. Only the schedule creates such indices, so
+/// that they cannot be confused with other indices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RouteIndex(u32);
+
+/// Index of a departure in [`TransitSimSchedule::departures`]. Departures are sorted by the
+/// external id of their driver, so the index orders simultaneous events, see [`Self::order`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DepartureIndex(u32);
+
+impl RouteIndex {
+    fn new(index: usize) -> Self {
+        Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX routes."))
+    }
+}
+
+impl DepartureIndex {
+    fn new(index: usize) -> Self {
+        Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX departures."))
+    }
+
+    /// Stable tie-break order of simultaneous events, e.g. for [`TimeQueue`](crate::simulation::time_queue::TimeQueue).
+    pub fn order(self) -> u64 {
+        u64::from(self.0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct SimTransitRoute {
     pub line: Id<TransitLine>,
@@ -59,8 +91,7 @@ pub struct SimRouteStop {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimDeparture {
-    /// Index into [`TransitSimSchedule::routes`].
-    pub route: usize,
+    pub route: RouteIndex,
     pub id: Id<TransitDeparture>,
     pub time: SimTime,
     pub vehicle: Id<InternalVehicle>,
@@ -108,7 +139,7 @@ impl TransitSimSchedule {
                         route.id.external(),
                         departure.id.external()
                     );
-                    (driver, route_index, departure)
+                    (driver, RouteIndex::new(route_index), departure)
                 })
             })
             .collect();
@@ -176,12 +207,20 @@ impl TransitSimSchedule {
         &self.departures
     }
 
-    pub fn route(&self, index: usize) -> &SimTransitRoute {
-        &self.routes[index]
+    pub fn route(&self, index: RouteIndex) -> &SimTransitRoute {
+        &self.routes[index.0 as usize]
     }
 
-    pub fn departure(&self, index: usize) -> &SimDeparture {
-        &self.departures[index]
+    pub fn departure(&self, index: DepartureIndex) -> &SimDeparture {
+        &self.departures[index.0 as usize]
+    }
+
+    /// All departures with their indices, in the order of the indices.
+    pub fn indexed_departures(&self) -> impl Iterator<Item = (DepartureIndex, &SimDeparture)> {
+        self.departures
+            .iter()
+            .enumerate()
+            .map(|(index, departure)| (DepartureIndex::new(index), departure))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -192,16 +231,17 @@ impl TransitSimSchedule {
     /// ids, so this is a binary search without hashing.
     pub fn find_route(&self, line: &str, route: &str) -> Option<&SimTransitRoute> {
         self.find_route_index(line, route)
-            .map(|index| &self.routes[index])
+            .map(|index| self.route(index))
     }
 
     /// Like [`Self::find_route`], but returns the index of the route.
-    pub fn find_route_index(&self, line: &str, route: &str) -> Option<usize> {
+    pub fn find_route_index(&self, line: &str, route: &str) -> Option<RouteIndex> {
         self.routes
             .binary_search_by(|candidate| {
                 (candidate.line.external(), candidate.route.external()).cmp(&(line, route))
             })
             .ok()
+            .map(RouteIndex::new)
     }
 
     /// Whether `person` is the driver of a departure. Drivers only exist as ids for the events.
@@ -211,7 +251,8 @@ impl TransitSimSchedule {
 
     /// Scheduled time at which the departure arrives at its last stop.
     fn scheduled_end(&self, departure: &SimDeparture) -> SimTime {
-        let last_stop = self.routes[departure.route]
+        let last_stop = self
+            .route(departure.route)
             .stops
             .last()
             .expect("Routes have at least one stop.");
@@ -522,13 +563,13 @@ mod tests {
         assert_eq!(100, departures.len());
         let first = &departures[0];
         assert_eq!("pt_Blue Line_1to3_01", first.driver.external());
-        assert_eq!(0, first.route);
+        assert_eq!("1to3", schedule.route(first.route).route.external());
         assert_eq!("01", first.id.external());
         assert_eq!(SimTime::from_secs(6 * 3600), first.time);
         assert_eq!("tr_1", first.vehicle.external());
         let last = departures.last().unwrap();
         assert_eq!("pt_Blue Line_3to1_50", last.driver.external());
-        assert_eq!(1, last.route);
+        assert_eq!("3to1", schedule.route(last.route).route.external());
 
         assert!(
             departures

@@ -17,7 +17,9 @@ use crate::simulation::messaging::messages::TransitVehicleMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
-use crate::simulation::pt::schedule::{SimDeparture, SimRouteStop, TransitSimSchedule};
+use crate::simulation::pt::schedule::{
+    DepartureIndex, SimDeparture, SimRouteStop, TransitSimSchedule,
+};
 use crate::simulation::pt::transit_run::TransitRun;
 use crate::simulation::scenario::transit::TransitLine;
 use crate::simulation::scenario::vehicles::Garage;
@@ -45,7 +47,7 @@ pub(crate) struct TransitEngine {
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
     /// Departures whose first stop is on this partition, sorted by time and departure index.
-    starts: Vec<usize>,
+    starts: Vec<DepartureIndex>,
     next_start: usize,
     /// Runs on this partition. A slot stays the same while a run is on this partition, so that
     /// queues and stops can refer to it.
@@ -116,10 +118,8 @@ impl TransitEngine {
         comp_env: ThreadLocalComputationalEnvironment,
         clock: SimClock,
     ) -> Self {
-        let mut starts: Vec<usize> = schedule
-            .departures()
-            .iter()
-            .enumerate()
+        let mut starts: Vec<DepartureIndex> = schedule
+            .indexed_departures()
             .filter(|(_, departure)| schedule.route(departure.route).stops[0].partition == rank)
             .map(|(index, _)| index)
             .collect();
@@ -181,7 +181,7 @@ impl TransitEngine {
         for passenger in run.vehicle.passengers() {
             emit_partition_enter_events_for_agent(&mut self.comp_env, passenger, from, now_time);
         }
-        let order = run.departure as u64;
+        let order = run.departure.order();
         let slot = self.insert_run(run);
         self.arrivals.add_with_order(
             DueRun {
@@ -320,7 +320,7 @@ impl TransitEngine {
                     time: arrival,
                 },
                 now,
-                index as u64,
+                index.order(),
             );
         }
     }
@@ -393,7 +393,7 @@ impl TransitEngine {
                 time: departure_time,
             },
             now,
-            run.departure as u64,
+            run.departure.order(),
         );
     }
 
@@ -485,7 +485,7 @@ impl TransitEngine {
         let earliest_arrival = now + SimTime::from_duration(self.clock.tick_length());
         let arrival = stop_times(departure, &route.stops[next_stop], earliest_arrival).arrival;
         let to = route.stops[next_stop].partition;
-        let order = run.departure as u64;
+        let order = run.departure.order();
 
         if to == self.rank {
             let run = self.runs[slot].as_mut().expect("Slot of a run is empty.");
