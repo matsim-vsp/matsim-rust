@@ -21,8 +21,6 @@ pub trait TransitDriver {
     fn departure_index(&self) -> DepartureIndex;
     fn departure(&self) -> &SimDeparture;
     fn route(&self) -> &SimTransitRoute;
-    /// Index of [`Self::current_stop`] in the stops of [`Self::route`].
-    fn stop_index(&self) -> usize;
     /// The stop at which the vehicle halts or which it approaches.
     fn current_stop(&self) -> &SimRouteStop;
     /// The stops after [`Self::current_stop`].
@@ -91,10 +89,6 @@ impl TransitDriver for TransitDriverLogic {
 
     fn route(&self) -> &SimTransitRoute {
         self.schedule.route(self.departure().route)
-    }
-
-    fn stop_index(&self) -> usize {
-        self.stop
     }
 
     fn current_stop(&self) -> &SimRouteStop {

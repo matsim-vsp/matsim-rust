@@ -102,13 +102,6 @@ fn transit_driver(vehicle: &SimulationVehicle) -> &dyn TransitDriver {
         .unwrap_or_else(|| panic!("Transit vehicle {} has no transit driver.", vehicle.id()))
 }
 
-/// Where a vehicle is: its departure and the index of its current stop. Both are copies, so that
-/// the vehicle can be changed afterwards.
-fn position(vehicle: &SimulationVehicle) -> (DepartureIndex, usize) {
-    let driver = transit_driver(vehicle);
-    (driver.departure_index(), driver.stop_index())
-}
-
 impl TransitEngine {
     pub(crate) fn new(
         schedule: Arc<TransitSimSchedule>,
@@ -296,11 +289,9 @@ impl TransitEngine {
         now: SimTime,
         alighted: &mut Vec<SimulationAgent>,
     ) {
-        let (departure, stop_index) = position(&vehicle);
-        let route = self
-            .schedule
-            .route(self.schedule.departure(departure).route);
-        let facility = &route.stops[stop_index].facility;
+        let driver = transit_driver(&vehicle);
+        let departure = driver.departure_index();
+        let facility = driver.current_stop().facility.clone();
         let vehicle_id = vehicle.id().clone();
 
         self.comp_env.events_manager_borrow_mut().process_event(
@@ -318,7 +309,7 @@ impl TransitEngine {
         let leaving = vehicle.take_passengers_where(|passenger| {
             passenger
                 .as_transit_passenger()
-                .is_some_and(|passenger| passenger.wants_to_alight(facility))
+                .is_some_and(|passenger| passenger.wants_to_alight(&facility))
         });
         for mut passenger in leaving {
             self.comp_env.events_manager_borrow_mut().process_event(
@@ -333,9 +324,13 @@ impl TransitEngine {
             alighted.push(passenger);
         }
 
-        let upcoming = &route.stops[stop_index + 1..];
+        let driver = transit_driver(&vehicle);
+        let route = driver.route();
+        let upcoming = driver.upcoming_stops();
         let stop = facility.internal() as usize;
         let state = &mut self.stops[stop];
+        // Collected first, because the driver's route and stops borrow the vehicle.
+        let mut boarding = Vec::new();
         if !upcoming.is_empty() && !state.waiting.is_empty() {
             for waiting in std::mem::take(&mut state.waiting) {
                 let boards = waiting.line.as_ref().is_none_or(|line| *line == route.line)
@@ -352,11 +347,14 @@ impl TransitEngine {
                             .build()
                             .unwrap(),
                     );
-                    vehicle.add_passenger(waiting.agent);
+                    boarding.push(waiting.agent);
                 } else {
                     state.waiting.push(waiting);
                 }
             }
+        }
+        for agent in boarding {
+            vehicle.add_passenger(agent);
         }
 
         let due = DueDeparture {
@@ -431,31 +429,31 @@ impl TransitEngine {
             .position(|vehicle| transit_driver(vehicle).departure_index() == due.departure)
             .expect("A departing vehicle halts at its stop.");
         let mut vehicle = halting.remove(position_in_stop);
-        let (departure, stop_index) = position(&vehicle);
-        let route = self
-            .schedule
-            .route(self.schedule.departure(departure).route);
+        let driver = transit_driver(&vehicle);
+        let departure = driver.departure_index();
+        let at_last_stop = driver.is_at_last_stop();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &VehicleDepartsAtFacilityEventBuilder::default()
                 .time(now)
                 .vehicle(vehicle.id().clone())
-                .facility(route.stops[stop_index].facility.clone())
+                .facility(driver.current_stop().facility.clone())
                 .build()
                 .unwrap(),
         );
 
-        let Some(next_stop) = route.stops.get(stop_index + 1) else {
+        if at_last_stop {
             self.finish_departure(vehicle, now);
             return;
-        };
+        }
 
         let earliest_arrival = now + SimTime::from_duration(self.clock.tick_length());
         vehicle.driver_mut().notify_event(
             &mut AgentEvent::TransitStopDeparted { earliest_arrival },
             now,
         );
-        let to = next_stop.partition;
+        // The driver now approaches the next stop.
+        let to = transit_driver(&vehicle).current_stop().partition;
 
         if to == self.rank {
             self.moving
@@ -870,7 +868,13 @@ mod tests {
         assert_eq!(1, to);
         let (vehicle, _) = message.into_parts();
         let arrival = vehicle.driver().end_time(SimTime::default());
-        assert_eq!(1, super::transit_driver(&vehicle).stop_index());
+        assert_eq!(
+            "s2",
+            super::transit_driver(&vehicle)
+                .current_stop()
+                .facility
+                .external()
+        );
         assert_eq!(1, vehicle.passengers().len());
         assert_eq!(SIX + 60, arrival.as_secs());
 
