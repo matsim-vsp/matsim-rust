@@ -5,7 +5,6 @@ use crate::simulation::engines::teleportation_engine::TeleportedAgent;
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeAttachments;
 use crate::simulation::network::sim_network::StorageUpdate;
-use crate::simulation::pt::transit_run::TransitRun;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::time::{SimTime, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
@@ -102,34 +101,28 @@ impl std::fmt::Debug for VehicleMessage {
     }
 }
 
-/// A transit vehicle with its passengers, sent to the partition of its next stop.
+/// A transit vehicle with its driver and passengers, sent to the partition of its next stop. The
+/// driver knows when the vehicle arrives there.
 #[derive(Debug)]
 pub(crate) struct TransitVehicleMessage {
-    run: TransitRun,
-    arrival: SimTime,
+    vehicle: SimulationVehicle,
     attachments: PartitionChangeAttachments,
 }
 
 impl TransitVehicleMessage {
-    pub(crate) fn new(
-        run: TransitRun,
-        arrival: SimTime,
-        attachments: PartitionChangeAttachments,
-    ) -> Self {
+    pub(crate) fn new(vehicle: SimulationVehicle, attachments: PartitionChangeAttachments) -> Self {
         Self {
-            run,
-            arrival,
+            vehicle,
             attachments,
         }
     }
 
-    pub(crate) fn run(&self) -> &TransitRun {
-        &self.run
+    pub(crate) fn vehicle(&self) -> &SimulationVehicle {
+        &self.vehicle
     }
 
-    /// The run, when it arrives at its next stop, and the attachments.
-    pub(crate) fn into_parts(self) -> (TransitRun, SimTime, PartitionChangeAttachments) {
-        (self.run, self.arrival, self.attachments)
+    pub(crate) fn into_parts(self) -> (SimulationVehicle, PartitionChangeAttachments) {
+        (self.vehicle, self.attachments)
     }
 }
 
@@ -288,8 +281,6 @@ mod tests {
     use crate::simulation::messaging::partition_change::{
         PartitionChangeContext, PartitionChangeEntity, PartitionChangeExtensionsManager,
     };
-    use crate::simulation::pt::schedule::DepartureIndex;
-    use crate::simulation::pt::transit_run::TransitRun;
     use crate::simulation::scenario::vehicles::InternalVehicle;
     use crate::simulation::time::{SimTime, Tick};
     use crate::simulation::vehicles::SimulationVehicle;
@@ -378,14 +369,10 @@ mod tests {
 
     #[deterministic_id_test]
     fn sync_message_preserves_transit_vehicle_with_passengers_and_attachments() {
-        let mut vehicle = SimulationVehicle::new_transit(InternalVehicle::new(9, 0, 1.0, 1.0));
+        let mut vehicle =
+            SimulationVehicle::new(InternalVehicle::new(9, 0, 1.0, 1.0), None, Vec::new());
         vehicle.add_passenger(create_agent(1, vec!["destination"]));
         vehicle.add_passenger(create_agent(2, vec!["destination"]));
-        let run = TransitRun {
-            departure: DepartureIndex::for_test(3),
-            stop: 1,
-            vehicle,
-        };
         let context = PartitionChangeContext {
             time: SimTime::from_secs(10),
             from: 0,
@@ -402,31 +389,20 @@ mod tests {
             move |_, attachment, _| *arrival_received.borrow_mut() = attachment,
         );
 
-        let attachments = manager.send(
-            PartitionChangeEntity::TransitVehicle(&run.vehicle),
-            &context,
-        );
+        let attachments = manager.send(PartitionChangeEntity::TransitVehicle(&vehicle), &context);
         let mut message = InternalSyncMessage::new(Tick::new(10), 0, 1);
-        message.add_transit_vehicle(TransitVehicleMessage::new(
-            run,
-            SimTime::from_secs(70),
-            attachments,
-        ));
+        message.add_transit_vehicle(TransitVehicleMessage::new(vehicle, attachments));
         assert!(!message.is_empty());
 
-        let (run, arrival, attachments) =
-            message.take_transit_vehicles().pop().unwrap().into_parts();
+        let (vehicle, attachments) = message.take_transit_vehicles().pop().unwrap().into_parts();
         assert!(message.is_empty());
         manager.receive(
-            PartitionChangeEntity::TransitVehicle(&run.vehicle),
+            PartitionChangeEntity::TransitVehicle(&vehicle),
             attachments,
             &context,
         );
 
-        assert_eq!(SimTime::from_secs(70), arrival);
-        assert_eq!((DepartureIndex::for_test(3), 1), (run.departure, run.stop));
-        let passengers: Vec<_> = run
-            .vehicle
+        let passengers: Vec<_> = vehicle
             .passengers()
             .iter()
             .map(|p| p.id().external().to_owned())

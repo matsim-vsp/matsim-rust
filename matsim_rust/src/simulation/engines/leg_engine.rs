@@ -200,16 +200,16 @@ impl<C: SimCommunicator> LegEngine<C> {
             }
 
             for transit_vehicle in msg.take_transit_vehicles() {
-                let (run, arrival, attachments) = transit_vehicle.into_parts();
+                let (vehicle, attachments) = transit_vehicle.into_parts();
                 self.comp_env
                     .partition_migration_extensions_manager_borrow_mut()
                     .receive(
-                        PartitionChangeEntity::TransitVehicle(&run.vehicle),
+                        PartitionChangeEntity::TransitVehicle(&vehicle),
                         attachments,
                         &context,
                     );
                 self.transit_engine
-                    .receive_remote_vehicle(now, run, arrival, from);
+                    .receive_remote_vehicle(now, vehicle, from);
             }
         }
 

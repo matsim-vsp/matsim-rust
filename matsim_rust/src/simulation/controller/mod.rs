@@ -401,7 +401,7 @@ fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage
             messages
                 .iter()
                 .flat_map(|msg| msg.transit_vehicles())
-                .flat_map(|transit| transit.run().vehicle.passengers())
+                .flat_map(|transit| transit.vehicle().passengers())
                 .map(|passenger| passenger.id().external()),
         )
         .collect();

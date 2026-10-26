@@ -1,6 +1,8 @@
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::{Link, Network};
-use crate::simulation::scenario::population::{InternalPerson, Population};
+use crate::simulation::scenario::population::{
+    InternalGenericRoute, InternalLeg, InternalPerson, InternalRoute, Population,
+};
 use crate::simulation::scenario::transit::{
     TransitDeparture, TransitLine, TransitRoute, TransitSchedule, TransitStopFacility,
 };
@@ -54,11 +56,6 @@ impl DepartureIndex {
     pub fn order(self) -> u64 {
         u64::from(self.0)
     }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(index: u32) -> Self {
-        Self(index)
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -71,6 +68,8 @@ pub struct SimTransitRoute {
     /// Last link of the network route, or the link of the last stop if the route has no links.
     pub end_link: Id<Link>,
     pub stops: Vec<SimRouteStop>,
+    /// The leg of the drivers of this route, built once so that drivers need not allocate it.
+    pub driver_leg: InternalLeg,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -347,6 +346,21 @@ impl SimTransitRoute {
             .cloned()
             .unwrap_or_else(|| stops.last().unwrap().link.clone());
 
+        let driver_leg = InternalLeg {
+            mode: route.transport_mode.clone(),
+            routing_mode: None,
+            dep_time: None,
+            trav_time: None,
+            route: Some(InternalRoute::Generic(InternalGenericRoute::new(
+                start_link.clone(),
+                end_link.clone(),
+                None,
+                None,
+                None,
+            ))),
+            attributes: Default::default(),
+        };
+
         Self {
             line: line.id.clone(),
             route: route.id.clone(),
@@ -354,6 +368,7 @@ impl SimTransitRoute {
             start_link,
             end_link,
             stops,
+            driver_leg,
         }
     }
 }

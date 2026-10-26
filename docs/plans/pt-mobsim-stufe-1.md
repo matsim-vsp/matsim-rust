@@ -24,6 +24,7 @@ Bisher werden ÖV-Legs teleportiert. Der Fahrplan wird zwar geladen (`ScenarioCo
    - Der Fahrer existiert nur als `Id<InternalPerson>` für die MATSim-Events.
    - Die laufende Fahrt (`TransitRun`) trägt `SimulationVehicle`, Routenindex, Halteindex und Abfahrtszeit inline. Über Partitionen wandern nur diese Daten; der Fahrplan ist überall derselbe `Arc`.
    - Eine Fahrerlogik kommt erst, wenn Fahrer entscheiden sollen (Busse im Netz, DRT, Anschlüsse abwarten).
+   - **Revidiert nach der Umsetzung:** Der Zustand der Fahrt gehört doch zum Fahrer. Ein `SimulationAgent` mit `TransitDriverLogic` sitzt im Fahrzeug, hält Abfahrt und aktuellen Halt und berechnet die Zeiten (`stop_times`). Die Engine erzeugt ihn zur Abfahrtszeit. `TransitRun` und der Slab der Engine sind entfallen; Indizes in den Fahrplan sind typisiert (`RouteIndex`, `DepartureIndex`).
 3. **Die Fahrgäste entscheiden über einen eigenen Trait** `TransitPassengerLogic` in `pt/passenger.rs`:
    - `wants_to_board(line, route, upcoming_stops) -> bool`: steigt der Agent hier ein?
    - `wants_to_alight(stop) -> bool`: steigt er hier aus?

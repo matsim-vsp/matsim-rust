@@ -1,4 +1,5 @@
 use crate::simulation::Identifiable;
+use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, LinkEnterEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
@@ -17,8 +18,6 @@ use std::sync::Arc;
 
 pub(crate) struct BackpackingAttachment {
     backpacks: Vec<Backpack>,
-    /// The state of a transit vehicle, which moves with it.
-    transit_vehicle: Option<TransitVehicleState>,
 }
 
 /// What the collector knows about a vehicle of schedule-based transit, like MATSim's
@@ -252,12 +251,9 @@ impl BackpackingDataCollector {
         {
             self.vehicle_id2person_ids.remove(vehicle.id());
         }
-        let transit_vehicle = match entity {
-            PartitionChangeEntity::TransitVehicle(vehicle) => {
-                self.transit_vehicles.remove(vehicle.id())
-            }
-            _ => None,
-        };
+        if let PartitionChangeEntity::TransitVehicle(vehicle) = entity {
+            self.transit_vehicles.remove(vehicle.id());
+        }
 
         let backpacks = person_ids
             .into_iter()
@@ -272,10 +268,7 @@ impl BackpackingDataCollector {
                     })
             })
             .collect();
-        BackpackingAttachment {
-            backpacks,
-            transit_vehicle,
-        }
+        BackpackingAttachment { backpacks }
     }
 
     #[hotpath::measure]
@@ -285,9 +278,15 @@ impl BackpackingDataCollector {
         attachment: BackpackingAttachment,
     ) {
         let expected_person_ids = Self::person_ids(entity);
-        if let (PartitionChangeEntity::TransitVehicle(vehicle), Some(state)) =
-            (entity, attachment.transit_vehicle)
-        {
+        if let PartitionChangeEntity::TransitVehicle(vehicle) = entity {
+            // The driver knows the route and the stop which the vehicle approaches.
+            let driver = vehicle.driver().as_transit_driver().unwrap_or_else(|| {
+                panic!("Transit vehicle {} has no transit driver.", vehicle.id())
+            });
+            let state = TransitVehicleState {
+                route: driver.departure().route,
+                stop: driver.stop_index().checked_sub(1),
+            };
             self.transit_vehicles.insert(vehicle.id().clone(), state);
         }
         assert_eq!(
@@ -336,7 +335,7 @@ impl BackpackingDataCollector {
                 .cloned()
                 .collect(),
             PartitionChangeEntity::TeleportationAgent(agent) => vec![agent.id().clone()],
-            // The driver of a transit vehicle is no agent and has no backpack.
+            // The driver of a transit vehicle is no person of the population and has no backpack.
             PartitionChangeEntity::TransitVehicle(vehicle) => vehicle
                 .passengers()
                 .iter()
@@ -362,6 +361,52 @@ mod tests {
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils::create_agent;
     use macros::deterministic_id_test;
+
+    /// The tutorial schedule and the driver of its 06:00 departure of route 1to3, which has left
+    /// stop 1 and approaches stop 2a.
+    fn tutorial_driver() -> (
+        Arc<TransitSimSchedule>,
+        crate::simulation::agents::agent::SimulationAgent,
+    ) {
+        use crate::simulation::agents::agent::SimulationAgent;
+        use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
+        use crate::simulation::pt::driver::TransitDriverLogic;
+        use crate::simulation::scenario::network::Network;
+        use crate::simulation::scenario::population::Population;
+        use crate::simulation::scenario::transit::TransitSchedule;
+        use crate::simulation::scenario::vehicles::Garage;
+        use crate::simulation::time::SimTime;
+        use std::path::{Path, PathBuf};
+
+        let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
+        let schedule =
+            TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
+        let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        let schedule = Arc::new(TransitSimSchedule::build(
+            &schedule,
+            &network,
+            &garage,
+            &Population::default(),
+        ));
+        let (index, _) = schedule
+            .indexed_departures()
+            .find(|(_, departure)| departure.driver.external() == "pt_Blue Line_1to3_01")
+            .unwrap();
+        let six = SimTime::from_secs(6 * 3600);
+        let mut driver = SimulationAgent::new(Box::new(TransitDriverLogic::new(
+            schedule.clone(),
+            index,
+            six,
+        )));
+        driver.notify_event(&mut AgentEvent::TransitStopArrived(), six);
+        driver.notify_event(
+            &mut AgentEvent::TransitStopDeparted {
+                earliest_arrival: six + SimTime::from_secs(1),
+            },
+            six,
+        );
+        (schedule, driver)
+    }
 
     #[deterministic_id_test]
     fn migrates_driver_and_passenger_and_rebuilds_vehicle_mapping() {
@@ -404,7 +449,12 @@ mod tests {
     fn migrates_only_passengers_of_transit_vehicle() {
         let passenger = create_agent(2, vec!["destination"]);
         let passenger_id = passenger.id().clone();
-        let mut vehicle = SimulationVehicle::new_transit(InternalVehicle::new(11, 0, 1.0, 1.0));
+        let (_, driver) = tutorial_driver();
+        let mut vehicle = SimulationVehicle::new(
+            InternalVehicle::new(11, 0, 1.0, 1.0),
+            Some(driver),
+            Vec::new(),
+        );
         vehicle.add_passenger(passenger);
         let mut departing =
             BackpackingDataCollector::new(vec![passenger_id.clone()], Default::default());
@@ -428,7 +478,12 @@ mod tests {
         );
 
         // An empty transit vehicle carries no backpacks and creates no mapping.
-        let empty = SimulationVehicle::new_transit(InternalVehicle::new(12, 0, 1.0, 1.0));
+        let (_, driver) = tutorial_driver();
+        let empty = SimulationVehicle::new(
+            InternalVehicle::new(12, 0, 1.0, 1.0),
+            Some(driver),
+            Vec::new(),
+        );
         let attachment = arriving.send(PartitionChangeEntity::TransitVehicle(&empty));
         let mut other = BackpackingDataCollector::new(Vec::new(), Default::default());
         other.receive(PartitionChangeEntity::TransitVehicle(&empty), attachment);
@@ -521,8 +576,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut vehicle =
-            SimulationVehicle::new_transit(garage.vehicles.get(&vehicle_id).unwrap().clone());
+        let mut vehicle = SimulationVehicle::new(
+            garage.vehicles.get(&vehicle_id).unwrap().clone(),
+            Some(tutorial_driver().1),
+            Vec::new(),
+        );
         vehicle.add_passenger(agent);
         let attachment = departing.send(PartitionChangeEntity::TransitVehicle(&vehicle));
         assert!(departing.transit_vehicles.is_empty());

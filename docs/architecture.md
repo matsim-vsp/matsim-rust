@@ -186,16 +186,21 @@ in which the driver ids are created. The index of a departure orders simultaneou
 its link, the partition of the link, its offsets and its distance from the start of the route. Building the schedule
 panics if it cannot be simulated, e.g. if a stop has no link or a vehicle serves two departures at the same time.
 
-The `TransitEngine` is part of the `LegEngine` and runs before the messages are exchanged. There is no driver agent:
-the engine moves the vehicles, and a driver only exists as an id for the events (`TransitDriverStarts`, `departure`,
-`PersonEntersVehicle`, `PersonLeavesVehicle`, `arrival`). Due starts, arrivals and departures come from queues; the
-engine does nothing per tick and vehicle. When a vehicle arrives, passengers alight and waiting agents board. An agent
+The `TransitEngine` is part of the `LegEngine` and runs before the messages are exchanged. At the departure time, it
+creates a vehicle with a driver, a `SimulationAgent` with `TransitDriverLogic`, which drivers expose through
+`SimulationAgentLogic::as_transit_driver`. As with cars, the driver holds the state of the trip, i.e. its departure and
+current stop, and decides when the vehicle arrives and departs; the engine moves the vehicle, lets passengers board and
+alight, and emits the events, including those of the driver (`TransitDriverStarts`, `departure`,
+`PersonEntersVehicle`, `PersonLeavesVehicle`, `arrival`). Drivers are no persons of the population: they get no stuck
+events and are dropped at the end of the simulation. Vehicles on their way wait in a queue until their driver's next
+arrival, halting vehicles belong to their stop until their departure; the engine does nothing per tick and vehicle. When a vehicle arrives, passengers alight and waiting agents board. An agent
 reaching a stop boards a halting vehicle right away. Passengers decide via `TransitPassengerLogic`, which agents expose
 through `SimulationAgentLogic::as_transit_passenger`. Plan-based agents follow MATSim's `checkLineAndStop`: they board
 any vehicle of the planned line which still serves their egress stop. A vehicle arrives at `departure time + arrival
 offset`, but at least one tick after it left the previous stop, and departs at `departure time + departure offset`, but
-not before it arrived (`stop_times`). If the next stop is on another partition, the vehicle and its passengers are sent
-there; the scoring backpacks of the passengers and the state of the vehicle for experienced plans move with them.
+not before it arrived (`stop_times` of the driver). If the next stop is on another partition, the vehicle with its driver
+and passengers is sent there, together with the scoring backpacks of the passengers. Indices into the schedule are
+typed (`RouteIndex`, `DepartureIndex`), so that they cannot be confused.
 
 Plan preparation does not require travel times for these legs, but checks their transit route against the schedule.
 Experienced plans get a transit route with line, route, stops and boarding time, like MATSim's `EventsToLegs`. Its

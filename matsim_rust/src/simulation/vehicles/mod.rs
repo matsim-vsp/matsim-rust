@@ -27,12 +27,6 @@ impl SimulationVehicle {
         }
     }
 
-    /// Creates a vehicle of schedule-based transit. It has no driver, because the transit engine
-    /// moves it.
-    pub fn new_transit(vehicle: InternalVehicle) -> Self {
-        Self::new(vehicle, None, Vec::new())
-    }
-
     pub fn add_passenger(&mut self, passenger: SimulationAgent) {
         self.passengers.push(passenger);
     }
@@ -149,7 +143,8 @@ mod tests {
 
     #[deterministic_id_test]
     fn take_passengers_where_keeps_order_of_both_groups() {
-        let mut vehicle = SimulationVehicle::new_transit(InternalVehicle::new(1, 0, 1.0, 1.0));
+        let mut vehicle =
+            SimulationVehicle::new(InternalVehicle::new(1, 0, 1.0, 1.0), None, Vec::new());
         for id in 1..=5 {
             vehicle.add_passenger(create_agent(id, vec!["destination"]));
         }
