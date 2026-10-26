@@ -101,6 +101,31 @@ impl std::fmt::Debug for VehicleMessage {
     }
 }
 
+/// A transit vehicle with its driver and passengers, sent to the partition of its next stop. The
+/// driver knows when the vehicle arrives there.
+#[derive(Debug)]
+pub(crate) struct TransitVehicleMessage {
+    vehicle: SimulationVehicle,
+    attachments: PartitionChangeAttachments,
+}
+
+impl TransitVehicleMessage {
+    pub(crate) fn new(vehicle: SimulationVehicle, attachments: PartitionChangeAttachments) -> Self {
+        Self {
+            vehicle,
+            attachments,
+        }
+    }
+
+    pub(crate) fn vehicle(&self) -> &SimulationVehicle {
+        &self.vehicle
+    }
+
+    pub(crate) fn into_parts(self) -> (SimulationVehicle, PartitionChangeAttachments) {
+        (self.vehicle, self.attachments)
+    }
+}
+
 impl EndTime for TeleportationMessage {
     fn end_time(&self, _now: SimTime) -> SimTime {
         self.end_time
@@ -120,6 +145,7 @@ pub struct InternalSyncMessage {
     to_process: u32,
     vehicles: Vec<VehicleMessage>,
     teleportations: Vec<TeleportationMessage>,
+    transit_vehicles: Vec<TransitVehicleMessage>,
     storage_capacities: Vec<StorageUpdate>,
 }
 
@@ -148,6 +174,7 @@ impl InternalSyncMessage {
             to_process: to,
             vehicles: Vec::new(),
             teleportations: Vec::new(),
+            transit_vehicles: Vec::new(),
             storage_capacities: Vec::new(),
         }
     }
@@ -158,6 +185,10 @@ impl InternalSyncMessage {
 
     pub(crate) fn add_teleportation(&mut self, teleportation: TeleportationMessage) {
         self.teleportations.push(teleportation);
+    }
+
+    pub(crate) fn add_transit_vehicle(&mut self, transit_vehicle: TransitVehicleMessage) {
+        self.transit_vehicles.push(transit_vehicle);
     }
 
     pub fn add_storage_cap(&mut self, storage_cap: StorageUpdate) {
@@ -189,10 +220,15 @@ impl InternalSyncMessage {
         &self.teleportations
     }
 
+    pub(crate) fn transit_vehicles(&self) -> &[TransitVehicleMessage] {
+        &self.transit_vehicles
+    }
+
     /// Whether the message carries nothing. Neighbors send such messages in every step.
     pub fn is_empty(&self) -> bool {
         self.vehicles.is_empty()
             && self.teleportations.is_empty()
+            && self.transit_vehicles.is_empty()
             && self.storage_capacities.is_empty()
     }
 
@@ -210,6 +246,10 @@ impl InternalSyncMessage {
 
     pub(crate) fn take_teleportations(&mut self) -> Vec<TeleportationMessage> {
         std::mem::take(&mut self.teleportations)
+    }
+
+    pub(crate) fn take_transit_vehicles(&mut self) -> Vec<TransitVehicleMessage> {
+        std::mem::take(&mut self.transit_vehicles)
     }
 }
 
@@ -236,11 +276,12 @@ impl Ord for InternalSyncMessage {
 
 #[cfg(test)]
 mod tests {
-    use super::{InternalSyncMessage, TeleportationMessage, VehicleMessage};
+    use super::{InternalSyncMessage, TeleportationMessage, TransitVehicleMessage, VehicleMessage};
     use crate::simulation::Identifiable;
     use crate::simulation::messaging::partition_change::{
         PartitionChangeContext, PartitionChangeEntity, PartitionChangeExtensionsManager,
     };
+    use crate::simulation::scenario::vehicles::InternalVehicle;
     use crate::simulation::time::{SimTime, Tick};
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils::create_agent;
@@ -324,5 +365,49 @@ mod tests {
 
         assert_eq!(vehicle.id().external(), "8");
         assert_eq!(received.borrow().as_deref(), Some("vehicle attachment"));
+    }
+
+    #[deterministic_id_test]
+    fn sync_message_preserves_transit_vehicle_with_passengers_and_attachments() {
+        let mut vehicle =
+            SimulationVehicle::new(InternalVehicle::new(9, 0, 1.0, 1.0), None, Vec::new());
+        vehicle.add_passenger(create_agent(1, vec!["destination"]));
+        vehicle.add_passenger(create_agent(2, vec!["destination"]));
+        let context = PartitionChangeContext {
+            time: SimTime::from_secs(10),
+            from: 0,
+            to: 1,
+        };
+        let received = Rc::new(RefCell::new(None));
+        let arrival_received = received.clone();
+        let mut manager = PartitionChangeExtensionsManager::new();
+        manager.register::<usize, _, _>(
+            |entity, _| match entity {
+                PartitionChangeEntity::TransitVehicle(vehicle) => Some(vehicle.passengers().len()),
+                _ => None,
+            },
+            move |_, attachment, _| *arrival_received.borrow_mut() = attachment,
+        );
+
+        let attachments = manager.send(PartitionChangeEntity::TransitVehicle(&vehicle), &context);
+        let mut message = InternalSyncMessage::new(Tick::new(10), 0, 1);
+        message.add_transit_vehicle(TransitVehicleMessage::new(vehicle, attachments));
+        assert!(!message.is_empty());
+
+        let (vehicle, attachments) = message.take_transit_vehicles().pop().unwrap().into_parts();
+        assert!(message.is_empty());
+        manager.receive(
+            PartitionChangeEntity::TransitVehicle(&vehicle),
+            attachments,
+            &context,
+        );
+
+        let passengers: Vec<_> = vehicle
+            .passengers()
+            .iter()
+            .map(|p| p.id().external().to_owned())
+            .collect();
+        assert_eq!(vec!["1", "2"], passengers);
+        assert_eq!(Some(2), *received.borrow());
     }
 }

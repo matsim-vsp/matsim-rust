@@ -14,14 +14,17 @@ use zstd::stream::write::Encoder as ZstdEncoder;
 
 use crate::simulation::events::{
     ActivityEndEvent, ActivityEndEventBuilder, ActivityStartEvent, ActivityStartEventBuilder,
-    EventHandlerRegisterFn, EventTrait, EventsManager, GenericEvent, LinkEnterEvent,
-    LinkEnterEventBuilder, LinkLeaveEvent, LinkLeaveEventBuilder, PersonArrivalEvent,
-    PersonArrivalEventBuilder, PersonDepartureEvent, PersonDepartureEventBuilder,
-    PersonEntersVehicleEvent, PersonEntersVehicleEventBuilder, PersonLeavesVehicleEvent,
-    PersonLeavesVehicleEventBuilder, PersonStuckEvent, PersonStuckEventBuilder,
-    PtTeleportationArrivalEvent, PtTeleportationArrivalEventBuilder, TeleportationArrivalEvent,
-    TeleportationArrivalEventBuilder, VehicleEntersTrafficEvent, VehicleEntersTrafficEventBuilder,
-    VehicleLeavesTrafficEvent, VehicleLeavesTrafficEventBuilder,
+    AgentWaitingForPtEvent, AgentWaitingForPtEventBuilder, EventHandlerRegisterFn, EventTrait,
+    EventsManager, GenericEvent, LinkEnterEvent, LinkEnterEventBuilder, LinkLeaveEvent,
+    LinkLeaveEventBuilder, PersonArrivalEvent, PersonArrivalEventBuilder, PersonDepartureEvent,
+    PersonDepartureEventBuilder, PersonEntersVehicleEvent, PersonEntersVehicleEventBuilder,
+    PersonLeavesVehicleEvent, PersonLeavesVehicleEventBuilder, PersonStuckEvent,
+    PersonStuckEventBuilder, PtTeleportationArrivalEvent, PtTeleportationArrivalEventBuilder,
+    TeleportationArrivalEvent, TeleportationArrivalEventBuilder, TransitDriverStartsEvent,
+    TransitDriverStartsEventBuilder, VehicleArrivesAtFacilityEvent,
+    VehicleArrivesAtFacilityEventBuilder, VehicleDepartsAtFacilityEvent,
+    VehicleDepartsAtFacilityEventBuilder, VehicleEntersTrafficEvent,
+    VehicleEntersTrafficEventBuilder, VehicleLeavesTrafficEvent, VehicleLeavesTrafficEventBuilder,
 };
 use crate::simulation::id::{CreateMissingIds, ExistingIds, Id, IdResolver};
 use crate::simulation::io::batch::{BatchPipeline, ReadAhead};
@@ -149,15 +152,20 @@ impl XmlEventsWriter {
                 ev.vehicle
             )
         } else if let Some(ev) = e.as_any().downcast_ref::<PersonDepartureEvent>() {
-            format!(
-                "<event time=\"{}\" type=\"{}\" person=\"{}\" link=\"{}\" legMode=\"{}\" computationalRoutingMode=\"{}\"/>\n",
+            let mut result = format!(
+                "<event time=\"{}\" type=\"{}\" person=\"{}\" link=\"{}\" legMode=\"{}\"",
                 ev.time().format_decimal_seconds(),
                 ev.type_(),
                 ev.person,
                 ev.link,
                 ev.leg_mode,
-                ev.routing_mode
-            )
+            );
+            // Like MATSim, transit drivers have no routing mode.
+            if let Some(routing_mode) = &ev.routing_mode {
+                result.push_str(&format!(" computationalRoutingMode=\"{routing_mode}\""));
+            }
+            result.push_str("/>\n");
+            result
         } else if let Some(ev) = e.as_any().downcast_ref::<PersonArrivalEvent>() {
             format!(
                 "<event time=\"{}\" type=\"{}\" person=\"{}\" link=\"{}\" legMode=\"{}\"/>\n",
@@ -211,6 +219,44 @@ impl XmlEventsWriter {
                 ev.vehicle,
                 ev.network_mode,
                 ev.relative_position
+            )
+        } else if let Some(ev) = e.as_any().downcast_ref::<TransitDriverStartsEvent>() {
+            format!(
+                "<event time=\"{}\" type=\"{}\" driverId=\"{}\" vehicleId=\"{}\" transitLineId=\"{}\" transitRouteId=\"{}\" departureId=\"{}\"/>\n",
+                ev.time().format_decimal_seconds(),
+                ev.type_(),
+                ev.driver,
+                ev.vehicle,
+                ev.transit_line,
+                ev.transit_route,
+                ev.departure
+            )
+        } else if let Some(ev) = e.as_any().downcast_ref::<VehicleArrivesAtFacilityEvent>() {
+            format!(
+                "<event time=\"{}\" type=\"{}\" vehicle=\"{}\" facility=\"{}\" delay=\"{}\"/>\n",
+                ev.time().format_decimal_seconds(),
+                ev.type_(),
+                ev.vehicle,
+                ev.facility,
+                ev.delay
+            )
+        } else if let Some(ev) = e.as_any().downcast_ref::<VehicleDepartsAtFacilityEvent>() {
+            format!(
+                "<event time=\"{}\" type=\"{}\" vehicle=\"{}\" facility=\"{}\" delay=\"{}\"/>\n",
+                ev.time().format_decimal_seconds(),
+                ev.type_(),
+                ev.vehicle,
+                ev.facility,
+                ev.delay
+            )
+        } else if let Some(ev) = e.as_any().downcast_ref::<AgentWaitingForPtEvent>() {
+            format!(
+                "<event time=\"{}\" type=\"{}\" agent=\"{}\" atStop=\"{}\" destinationStop=\"{}\"/>\n",
+                ev.time().format_decimal_seconds(),
+                ev.type_(),
+                ev.agent,
+                ev.at_stop,
+                ev.destination_stop
             )
         } else if let Some(stuck) = e.as_any().downcast_ref::<PersonStuckEvent>() {
             let mut result = format!(
@@ -373,6 +419,10 @@ fn handle(attr: &Vec<OwnedAttribute>, ids: &impl IdResolver) -> Option<Box<dyn E
         VehicleEntersTrafficEvent::TYPE => handle_vehicle_enters_traffic(attr, ids),
         VehicleLeavesTrafficEvent::TYPE => handle_vehicle_leaves_traffic(attr, ids),
         PersonStuckEvent::TYPE => handle_person_stuck(attr, ids),
+        TransitDriverStartsEvent::TYPE => handle_transit_driver_starts(attr, ids),
+        VehicleArrivesAtFacilityEvent::TYPE => handle_vehicle_arrives_at_facility(attr, ids),
+        VehicleDepartsAtFacilityEvent::TYPE => handle_vehicle_departs_at_facility(attr, ids),
+        AgentWaitingForPtEvent::TYPE => handle_agent_waiting_for_pt(attr, ids),
         _ => panic!("Unknown event type {ev_type}"),
     }
 }
@@ -481,8 +531,10 @@ fn handle_departure(
     let person: Id<InternalPerson> = ids.resolve(value_from_name(attr, "person").unwrap())?;
     let link: Id<Link> = ids.resolve(value_from_name(attr, "link").unwrap())?;
     let leg_mode: Id<String> = ids.resolve(value_from_name(attr, "legMode").unwrap())?;
-    let routing_mode: Id<String> =
-        ids.resolve(value_from_name(attr, "computationalRoutingMode").unwrap())?;
+    let routing_mode: Option<Id<String>> = match value_from_name(attr, "computationalRoutingMode") {
+        Some(value) => Some(ids.resolve(value)?),
+        None => None,
+    };
     Some(Box::new(
         PersonDepartureEventBuilder::default()
             .time(time)
@@ -655,6 +707,83 @@ fn handle_person_stuck(
     ))
 }
 
+fn handle_transit_driver_starts(
+    attr: &Vec<OwnedAttribute>,
+    ids: &impl IdResolver,
+) -> Option<Box<dyn EventTrait>> {
+    let time = SimTime::parse_decimal_seconds(value_from_name(attr, "time").unwrap()).unwrap();
+    Some(Box::new(
+        TransitDriverStartsEventBuilder::default()
+            .time(time)
+            .driver(ids.resolve(value_from_name(attr, "driverId").unwrap())?)
+            .vehicle(ids.resolve(value_from_name(attr, "vehicleId").unwrap())?)
+            .transit_line(ids.resolve(value_from_name(attr, "transitLineId").unwrap())?)
+            .transit_route(ids.resolve(value_from_name(attr, "transitRouteId").unwrap())?)
+            .departure(ids.resolve(value_from_name(attr, "departureId").unwrap())?)
+            .build()
+            .unwrap(),
+    ))
+}
+
+fn handle_vehicle_arrives_at_facility(
+    attr: &Vec<OwnedAttribute>,
+    ids: &impl IdResolver,
+) -> Option<Box<dyn EventTrait>> {
+    let time = SimTime::parse_decimal_seconds(value_from_name(attr, "time").unwrap()).unwrap();
+    Some(Box::new(
+        VehicleArrivesAtFacilityEventBuilder::default()
+            .time(time)
+            .vehicle(ids.resolve(value_from_name(attr, "vehicle").unwrap())?)
+            .facility(ids.resolve(value_from_name(attr, "facility").unwrap())?)
+            .delay(parse_delay(attr))
+            .build()
+            .unwrap(),
+    ))
+}
+
+fn handle_vehicle_departs_at_facility(
+    attr: &Vec<OwnedAttribute>,
+    ids: &impl IdResolver,
+) -> Option<Box<dyn EventTrait>> {
+    let time = SimTime::parse_decimal_seconds(value_from_name(attr, "time").unwrap()).unwrap();
+    Some(Box::new(
+        VehicleDepartsAtFacilityEventBuilder::default()
+            .time(time)
+            .vehicle(ids.resolve(value_from_name(attr, "vehicle").unwrap())?)
+            .facility(ids.resolve(value_from_name(attr, "facility").unwrap())?)
+            .delay(parse_delay(attr))
+            .build()
+            .unwrap(),
+    ))
+}
+
+/// MATSim writes the delay of transit vehicles, but older event files may lack it.
+fn parse_delay(attr: &Vec<OwnedAttribute>) -> f64 {
+    value_from_name(attr, "delay")
+        .map(|delay| {
+            delay
+                .parse()
+                .unwrap_or_else(|_| panic!("Invalid delay {delay} of transit event"))
+        })
+        .unwrap_or_default()
+}
+
+fn handle_agent_waiting_for_pt(
+    attr: &Vec<OwnedAttribute>,
+    ids: &impl IdResolver,
+) -> Option<Box<dyn EventTrait>> {
+    let time = SimTime::parse_decimal_seconds(value_from_name(attr, "time").unwrap()).unwrap();
+    Some(Box::new(
+        AgentWaitingForPtEventBuilder::default()
+            .time(time)
+            .agent(ids.resolve(value_from_name(attr, "agent").unwrap())?)
+            .at_stop(ids.resolve(value_from_name(attr, "atStop").unwrap())?)
+            .destination_stop(ids.resolve(value_from_name(attr, "destinationStop").unwrap())?)
+            .build()
+            .unwrap(),
+    ))
+}
+
 fn value_from_name<'a>(attr: &'a Vec<OwnedAttribute>, name: &str) -> Option<&'a String> {
     attr.iter()
         .find(|&a| a.name.local_name.eq(name))
@@ -662,11 +791,13 @@ fn value_from_name<'a>(attr: &'a Vec<OwnedAttribute>, name: &str) -> Option<&'a 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{XmlEventsReader, XmlEventsWriter};
     use crate::simulation::events::{
-        ActivityStartEvent, ActivityStartEventBuilder, EventTrait, PersonStuckEvent,
-        PersonStuckEventBuilder,
+        ActivityStartEvent, ActivityStartEventBuilder, AgentWaitingForPtEventBuilder, EventTrait,
+        PersonDepartureEventBuilder, PersonStuckEvent, PersonStuckEventBuilder,
+        TransitDriverStartsEventBuilder, VehicleArrivesAtFacilityEventBuilder,
+        VehicleDepartsAtFacilityEventBuilder,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
@@ -676,6 +807,91 @@ mod tests {
     use std::io::Read;
     use std::path::Path;
     use std::path::PathBuf;
+
+    /// The transit events of the schedule-based transit simulation and a departure without
+    /// routing mode, as MATSim writes it for transit drivers.
+    pub(crate) fn transit_events() -> Vec<Box<dyn EventTrait>> {
+        let time = SimTime::from_secs(21600);
+        vec![
+            Box::new(
+                TransitDriverStartsEventBuilder::default()
+                    .time(time)
+                    .driver(Id::create("pt_Blue Line_1to3_01"))
+                    .vehicle(Id::create("tr_1"))
+                    .transit_line(Id::create("Blue Line"))
+                    .transit_route(Id::create("1to3"))
+                    .departure(Id::create("01"))
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                PersonDepartureEventBuilder::default()
+                    .time(time)
+                    .person(Id::create("pt_Blue Line_1to3_01"))
+                    .link(Id::create("11"))
+                    .leg_mode(Id::create("train"))
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                VehicleArrivesAtFacilityEventBuilder::default()
+                    .time(time)
+                    .vehicle(Id::create("tr_1"))
+                    .facility(Id::create("1"))
+                    .delay(0.0)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                AgentWaitingForPtEventBuilder::default()
+                    .time(time)
+                    .agent(Id::create("102"))
+                    .at_stop(Id::create("1"))
+                    .destination_stop(Id::create("3"))
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                VehicleDepartsAtFacilityEventBuilder::default()
+                    .time(time)
+                    .vehicle(Id::create("tr_1"))
+                    .facility(Id::create("1"))
+                    .delay(2.5)
+                    .build()
+                    .unwrap(),
+            ),
+        ]
+    }
+
+    #[deterministic_id_test]
+    fn transit_events_xml_round_trip() {
+        let events = transit_events();
+        assert_eq!(
+            "<event time=\"21600\" type=\"TransitDriverStarts\" driverId=\"pt_Blue Line_1to3_01\" vehicleId=\"tr_1\" transitLineId=\"Blue Line\" transitRouteId=\"1to3\" departureId=\"01\"/>\n",
+            XmlEventsWriter::event_2_string(events[0].as_ref())
+        );
+        assert_eq!(
+            "<event time=\"21600\" type=\"departure\" person=\"pt_Blue Line_1to3_01\" link=\"11\" legMode=\"train\"/>\n",
+            XmlEventsWriter::event_2_string(events[1].as_ref())
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.xml");
+        let writer = XmlEventsWriter::new(&path);
+        for event in &events {
+            writer.on_any(event.as_ref());
+        }
+        writer.finish();
+
+        let mut reader = XmlEventsReader::new(&path);
+        for expected in &events {
+            let (_, parsed) = reader.read_next().unwrap();
+            assert!(
+                expected.as_ref() == parsed.as_ref(),
+                "{expected:?} != {parsed:?}"
+            );
+        }
+    }
 
     #[deterministic_id_test]
     fn person_stuck_xml_round_trip_preserves_optional_attributes() {

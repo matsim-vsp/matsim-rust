@@ -4,6 +4,8 @@ pub mod agent_logic;
 use crate::simulation::Identifiable;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
+use crate::simulation::pt::driver::TransitDriver;
+use crate::simulation::pt::passenger::TransitPassengerLogic;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{InternalActivity, InternalLeg, InternalPerson};
 use crate::simulation::time::SimTime;
@@ -29,6 +31,18 @@ pub trait SimulationAgentLogic:
     fn peek_next_link_id(&self) -> Option<&Id<Link>>;
     fn wakeup_time(&self, now: SimTime) -> SimTime;
 
+    /// The agent's decisions as a passenger of schedule-based transit. `None` for agents which are
+    /// not on a transit leg.
+    fn as_transit_passenger(&self) -> Option<&dyn TransitPassengerLogic> {
+        None
+    }
+
+    /// The agent as the driver of a departure of schedule-based transit. `None` for all other
+    /// agents.
+    fn as_transit_driver(&self) -> Option<&dyn TransitDriver> {
+        None
+    }
+
     fn into_person(self: Box<Self>) -> Option<InternalPerson>;
 }
 
@@ -51,6 +65,17 @@ pub enum AgentEvent<'a> {
     NetworkLegStarted(),
     LeftLink(),
     NetworkLegFinished(),
+
+    // transit related events
+    /// The agent alighted from a transit vehicle at the end of its leg.
+    TransitVehicleLeft(),
+    /// The vehicle of a transit driver arrived at its current stop.
+    TransitStopArrived(),
+    /// The vehicle of a transit driver left its current stop. It cannot arrive at the next stop
+    /// before `earliest_arrival`.
+    TransitStopDeparted {
+        earliest_arrival: SimTime,
+    },
 }
 
 pub struct ActivityStartedEvent<'a> {

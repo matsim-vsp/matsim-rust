@@ -8,6 +8,7 @@ use crate::simulation::agents::{
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
+use crate::simulation::pt::passenger::TransitPassengerLogic;
 use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
@@ -57,7 +58,7 @@ impl Identifiable<InternalPerson> for PlanBasedSimulationLogic {
 impl EnvironmentalEventObserver for PlanBasedSimulationLogic {
     fn notify_event(&mut self, event: &mut AgentEvent, _now: SimTime) {
         match event {
-            AgentEvent::TeleportationStarted { .. } => {
+            AgentEvent::TeleportationStarted { .. } | AgentEvent::TransitVehicleLeft() => {
                 self.set_curr_route_element_to_last();
             }
             AgentEvent::LeftLink { .. } => {
@@ -216,6 +217,14 @@ impl SimulationAgentLogic for PlanBasedSimulationLogic {
         self.activity_end_time.unwrap()
     }
 
+    fn as_transit_passenger(&self) -> Option<&dyn TransitPassengerLogic> {
+        if self.state() == SimulationAgentState::LEG && self.pt_description().is_some() {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
         Some(self.basic_agent_delegate)
     }
@@ -295,6 +304,10 @@ impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
         }
 
         end
+    }
+
+    fn as_transit_passenger(&self) -> Option<&dyn TransitPassengerLogic> {
+        self.delegate.as_transit_passenger()
     }
 
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {

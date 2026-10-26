@@ -7,7 +7,7 @@ use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPerson,
-    InternalPlan, InternalRoute,
+    InternalPlan, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
 };
 use crate::simulation::scenario::vehicles::InternalVehicleType;
 use crate::simulation::time::SimTime;
@@ -55,6 +55,65 @@ pub fn create_agent(id: u64, route: Vec<&str>) -> SimulationAgent {
     let mut agent = SimulationAgent::new_plan_based(person);
     agent.advance_plan(SimTime::default());
 
+    agent
+}
+
+/// Creates an agent on a transit leg of `line` and `route` from stop `access` on `start_link` to
+/// stop `egress` on `end_link`.
+pub fn create_pt_agent(
+    id: u64,
+    line: &str,
+    route: &str,
+    access: &str,
+    egress: &str,
+    start_link: &str,
+    end_link: &str,
+) -> SimulationAgent {
+    let pt_route = InternalPtRoute {
+        generic_delegate: InternalGenericRoute::new(
+            Id::create(start_link),
+            Id::create(end_link),
+            None,
+            Some(1000.0),
+            None,
+        ),
+        description: InternalPtRouteDescription {
+            transit_route_id: route.to_string(),
+            boarding_time: None,
+            transit_line_id: line.to_string(),
+            access_facility_id: access.to_string(),
+            egress_facility_id: egress.to_string(),
+        },
+    };
+    let leg = InternalLeg::new(
+        InternalRoute::Pt(pt_route),
+        "pt",
+        "pt",
+        Duration::default(),
+        None,
+    );
+    let mut plan = InternalPlan::default();
+    plan.add_act(InternalActivity::new(
+        Some(Coordinate::default()),
+        "home",
+        Id::create(start_link),
+        None,
+        Some(SimTime::default()),
+        None,
+    ));
+    plan.add_leg(leg);
+    plan.add_act(InternalActivity::new(
+        Some(Coordinate::default()),
+        "work",
+        Id::create(end_link),
+        None,
+        None,
+        None,
+    ));
+    let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
+
+    let mut agent = SimulationAgent::new_plan_based(person);
+    agent.advance_plan(SimTime::default());
     agent
 }
 

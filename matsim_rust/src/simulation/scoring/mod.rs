@@ -113,9 +113,13 @@ pub(crate) fn create_registrations(
     for rank in 0..num_parts {
         let home_person_ids = std::mem::take(&mut home_person_ids[rank as usize]);
         let result_sender = result_sender.clone();
+        let transit_schedule = scenario.core.transit_sim_schedule.clone();
         worker_registrations.entry(rank).or_default().push(Box::new(
             move |events, mobsim_events, _partition_events, migration_extensions| {
-                let engine = Rc::new(RefCell::new(BackpackingEngine::new(home_person_ids)));
+                let engine = Rc::new(RefCell::new(BackpackingEngine::new(
+                    home_person_ids,
+                    transit_schedule,
+                )));
                 BackpackingEngine::register(
                     engine,
                     events,

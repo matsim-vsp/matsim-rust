@@ -280,18 +280,16 @@ impl NetworkRoutingModule {
 mod tests {
     use super::NetworkRoutingModule;
     use crate::simulation::InternalAttributes;
-    use crate::simulation::config::Config;
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::a_star::Alt;
     use crate::simulation::replanning::routing::cost::FreeSpeedTravelTimeAndDisutility;
     use crate::simulation::replanning::routing::teleportation::TeleportationRoutingModule;
     use crate::simulation::replanning::routing::{Facility, RoutingModule, RoutingRequestBuilder};
-    use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
+    use crate::simulation::scenario::facilities::ActivityFacility;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
         InternalActivity, InternalLeg, InternalPlanElement, InternalRoute,
     };
-    use crate::simulation::scenario::vehicles::Garage;
     use crate::simulation::scenario::{Coordinate, ScenarioCore};
     use crate::simulation::time::SimTime;
     use assert_approx_eq::assert_approx_eq;
@@ -509,12 +507,7 @@ mod tests {
             least_cost_path_calculator,
             ScenarioCore {
                 network,
-                garage: Arc::new(Garage::default()),
-                transit_schedule: Arc::new(
-                    crate::simulation::scenario::transit::TransitSchedule::default(),
-                ),
-                facilities: Arc::new(ActivityFacilities::default()),
-                config: Arc::new(Config::default()),
+                ..Default::default()
             },
         );
 

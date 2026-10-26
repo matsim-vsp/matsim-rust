@@ -6,9 +6,10 @@ pub mod transit;
 pub mod trip_structure_utils;
 pub mod vehicles;
 
-use crate::simulation::config::Config;
+use crate::simulation::config::{Config, TransitSimulation};
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::sim_network::SimNetworkPartition;
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::{id, io};
 use facilities::ActivityFacilities;
 use network::Network;
@@ -160,6 +161,8 @@ pub struct Scenario {
     pub garage: Garage,
     pub population: Population,
     pub transit_schedule: TransitSchedule,
+    /// Transit vehicles and their types, separate from the vehicles of persons.
+    pub transit_garage: Garage,
     pub facilities: ActivityFacilities,
     pub config: Arc<Config>,
 }
@@ -184,12 +187,16 @@ impl Scenario {
         // reference them.
         let facilities = Self::load_facilities(&config);
         let population = Self::load_population(&config, &mut garage);
+        // Transit vehicles are loaded after the population, so that the internal ids of the
+        // persons' vehicles do not depend on whether transit vehicles are loaded.
+        let transit_garage = Self::load_transit_garage(&config);
 
         Scenario {
             network,
             garage,
             population,
             transit_schedule,
+            transit_garage,
             facilities,
             config,
         }
@@ -212,6 +219,15 @@ impl Scenario {
 
     fn load_garage(config: &Config) -> Garage {
         if let Some(path) = &config.vehicles().path {
+            let garage_in_path = io::resolve_path(config.context(), path);
+            Garage::from_file(&garage_in_path)
+        } else {
+            Garage::default()
+        }
+    }
+
+    fn load_transit_garage(config: &Config) -> Garage {
+        if let Some(path) = &config.transit().vehicles_path {
             let garage_in_path = io::resolve_path(config.context(), path);
             Garage::from_file(&garage_in_path)
         } else {
@@ -253,6 +269,10 @@ pub struct ScenarioCore {
     pub network: Arc<Network>,
     pub garage: Arc<Garage>,
     pub transit_schedule: Arc<TransitSchedule>,
+    pub transit_garage: Arc<Garage>,
+    /// Dense schedule for the transit engine. Empty unless transit is simulated
+    /// [schedule based](TransitSimulation::ScheduleBased).
+    pub transit_sim_schedule: Arc<TransitSimSchedule>,
     /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
     pub facilities: Arc<ActivityFacilities>,
     pub config: Arc<Config>,
@@ -288,11 +308,24 @@ pub struct MobsimInput {
 
 impl From<Scenario> for ControllerScenario {
     fn from(scenario: Scenario) -> Self {
+        // Built here, after the population exists, so that the driver ids come after all person
+        // ids. With teleported transit, no driver ids are created.
+        let transit_sim_schedule = match scenario.config.transit().simulation {
+            TransitSimulation::Teleported => TransitSimSchedule::default(),
+            TransitSimulation::ScheduleBased => TransitSimSchedule::build(
+                &scenario.transit_schedule,
+                &scenario.network,
+                &scenario.transit_garage,
+                &scenario.population,
+            ),
+        };
         Self {
             core: ScenarioCore {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
                 transit_schedule: Arc::new(scenario.transit_schedule),
+                transit_garage: Arc::new(scenario.transit_garage),
+                transit_sim_schedule: Arc::new(transit_sim_schedule),
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
             },
@@ -477,6 +510,7 @@ mod tests {
             garage,
             population,
             transit_schedule: TransitSchedule::default(),
+            transit_garage: Garage::default(),
             facilities: ActivityFacilities::default(),
             config,
         }

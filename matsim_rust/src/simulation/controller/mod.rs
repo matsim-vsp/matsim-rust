@@ -397,11 +397,18 @@ fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage
         .iter()
         .flat_map(|msg| msg.teleportations())
         .map(|teleportation| teleportation.id().external())
+        .chain(
+            messages
+                .iter()
+                .flat_map(|msg| msg.transit_vehicles())
+                .flat_map(|transit| transit.vehicle().passengers())
+                .map(|passenger| passenger.id().external()),
+        )
         .collect();
     agents.sort_unstable();
     format!(
         "Mobsim iteration {iteration} ended with {} unprocessed messages between partitions (from, to) {pairs:?}. \
-        {} teleported agents are lost, e.g. {:?}. A partition only reads messages from partitions it shares a link \
+        {} teleported agents and transit passengers are lost, e.g. {:?}. A partition only reads messages from partitions it shares a link \
         with. Check whether the network consists of components that are not connected by links.",
         messages.len(),
         agents.len(),
@@ -899,9 +906,7 @@ mod tests {
     use crate::simulation::network::sim_network::SimNetworkPartition;
     use crate::simulation::population::agent_source::PopulationAgentSource;
     use crate::simulation::replanning::routing::TripRouter;
-    use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::{InternalPerson, InternalPlan, Population};
-    use crate::simulation::scenario::vehicles::Garage;
     use crate::simulation::scenario::{
         MobsimInput, MobsimScenarioPartition, PopulationShard, ScenarioCore,
     };
@@ -916,15 +921,8 @@ mod tests {
         config.qsim_mut().end_time = 0;
         let config = Arc::new(config);
         let scenario_core = ScenarioCore {
-            network: Arc::new(Network::new()),
-            garage: Arc::new(Garage::default()),
-            transit_schedule: Arc::new(
-                crate::simulation::scenario::transit::TransitSchedule::default(),
-            ),
-            facilities: Arc::new(
-                crate::simulation::scenario::facilities::ActivityFacilities::default(),
-            ),
             config: config.clone(),
+            ..Default::default()
         };
 
         let completed_iterations = Arc::new(Mutex::new(Vec::new()));
@@ -965,15 +963,8 @@ mod tests {
         let mut config = Config::default();
         config.computational_setup_mut().replanning_threads = 2;
         let scenario_core = ScenarioCore {
-            network: Arc::new(Network::new()),
-            garage: Arc::new(Garage::default()),
-            transit_schedule: Arc::new(
-                crate::simulation::scenario::transit::TransitSchedule::default(),
-            ),
-            facilities: Arc::new(
-                crate::simulation::scenario::facilities::ActivityFacilities::default(),
-            ),
             config: Arc::new(config),
+            ..Default::default()
         };
         let pool = ReplanningPool::new(&scenario_core, TripRouter::default());
 

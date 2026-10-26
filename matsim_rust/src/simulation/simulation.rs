@@ -3,7 +3,7 @@ use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
-use crate::simulation::engines::leg_engine::LegEngine;
+use crate::simulation::engines::leg_engine::{LegEngine, TransitContext};
 use crate::simulation::events::PersonStuckEventBuilder;
 use crate::simulation::framework_events::MobsimEvent;
 use crate::simulation::messaging::messages::InternalSyncMessage;
@@ -204,6 +204,11 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
             scenario.garage.clone(),
             self.net_message_broker,
             scenario.config.qsim(),
+            TransitContext {
+                schedule: scenario.transit_sim_schedule.clone(),
+                garage: scenario.transit_garage.clone(),
+                config: scenario.config.transit(),
+            },
             self.comp_env.clone(),
         );
 
