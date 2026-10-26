@@ -48,22 +48,17 @@ pub(crate) struct TransitEngine {
     /// Departures whose first stop is on this partition, sorted by time and departure index.
     starts: Vec<DepartureIndex>,
     next_start: usize,
-    /// Vehicles approaching their next stop.
-    moving: TimeQueue<MovingVehicle, ()>,
-    /// Vehicles halting at a stop, by when they depart.
-    departures: TimeQueue<DueDeparture, ()>,
-    /// Indexed by the internal id of the stop facility.
+    moving_vehicle_queue: TimeQueue<SimulationVehicleWrapper, ()>,
+    departure_queue: TimeQueue<DueDeparture, ()>,
     stops: Vec<StopState>,
-    /// Agents which reached their stop in this tick.
     arriving_passengers: Vec<SimulationAgent>,
-    /// Vehicles leaving to other partitions, with the partition of their next stop.
     outgoing: Vec<(u32, TransitVehicleMessage)>,
 }
 
 /// A vehicle on its way, due when its driver arrives at the next stop.
-struct MovingVehicle(SimulationVehicle);
+struct SimulationVehicleWrapper(SimulationVehicle);
 
-impl EndTime for MovingVehicle {
+impl EndTime for SimulationVehicleWrapper {
     fn end_time(&self, now: SimTime) -> SimTime {
         self.0.driver().end_time(now)
     }
@@ -82,11 +77,10 @@ impl EndTime for DueDeparture {
     }
 }
 
+/// The state of a stop: the passengers waiting for a vehicle and the vehicles halting at the stop.
 #[derive(Default)]
 struct StopState {
-    /// In order of arrival, like in MATSim.
     waiting: Vec<WaitingPassenger>,
-    /// Vehicles halting at the stop, in order of arrival.
     halting: Vec<SimulationVehicle>,
 }
 
@@ -136,8 +130,8 @@ impl TransitEngine {
             clock,
             starts,
             next_start: 0,
-            moving: TimeQueue::new(),
-            departures: TimeQueue::new(),
+            moving_vehicle_queue: TimeQueue::new(),
+            departure_queue: TimeQueue::new(),
             stops,
             arriving_passengers: Vec::new(),
             outgoing: Vec::new(),
@@ -171,8 +165,11 @@ impl TransitEngine {
             emit_partition_enter_events_for_agent(&mut self.comp_env, passenger, from, now_time);
         }
         let order = transit_driver(&vehicle).departure_index().order();
-        self.moving
-            .add_with_order(MovingVehicle(vehicle), now_time, order);
+        self.moving_vehicle_queue.add_with_order(
+            SimulationVehicleWrapper(vehicle),
+            now_time,
+            order,
+        );
     }
 
     /// Vehicles which left for other partitions in the last step, with the partition of their
@@ -188,13 +185,13 @@ impl TransitEngine {
         let mut alighted = Vec::new();
 
         self.start_departures(now_time);
-        for MovingVehicle(vehicle) in self.moving.pop(now_time) {
+        for SimulationVehicleWrapper(vehicle) in self.moving_vehicle_queue.pop(now_time) {
             self.arrive(vehicle, now_time, &mut alighted);
         }
         for agent in std::mem::take(&mut self.arriving_passengers) {
             self.start_waiting(agent, now_time);
         }
-        for due in self.departures.pop(now_time) {
+        for due in self.departure_queue.pop(now_time) {
             self.depart(due, now_time, now);
         }
         alighted
@@ -214,10 +211,10 @@ impl TransitEngine {
                 result.extend(vehicle.into_passengers());
             }
         }
-        for MovingVehicle(vehicle) in self.moving.drain() {
+        for SimulationVehicleWrapper(vehicle) in self.moving_vehicle_queue.drain() {
             result.extend(vehicle.into_passengers());
         }
-        self.departures.drain();
+        self.departure_queue.drain();
         result.extend(std::mem::take(&mut self.arriving_passengers));
         result
     }
@@ -278,8 +275,11 @@ impl TransitEngine {
                 now,
             )));
             let vehicle = SimulationVehicle::new(vehicle.clone(), Some(driver), Vec::new());
-            self.moving
-                .add_with_order(MovingVehicle(vehicle), now, index.order());
+            self.moving_vehicle_queue.add_with_order(
+                SimulationVehicleWrapper(vehicle),
+                now,
+                index.order(),
+            );
         }
     }
 
@@ -363,7 +363,8 @@ impl TransitEngine {
             time: vehicle.driver().end_time(now),
         };
         state.halting.push(vehicle);
-        self.departures.add_with_order(due, now, departure.order());
+        self.departure_queue
+            .add_with_order(due, now, departure.order());
     }
 
     fn start_waiting(&mut self, agent: SimulationAgent, now: SimTime) {
@@ -456,8 +457,11 @@ impl TransitEngine {
         let to = transit_driver(&vehicle).current_stop().partition;
 
         if to == self.rank {
-            self.moving
-                .add_with_order(MovingVehicle(vehicle), now, departure.order());
+            self.moving_vehicle_queue.add_with_order(
+                SimulationVehicleWrapper(vehicle),
+                now,
+                departure.order(),
+            );
         } else {
             for passenger in vehicle.passengers() {
                 emit_partition_leave_events_for_agent(&mut self.comp_env, passenger, to, now);

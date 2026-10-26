@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub(crate) struct BackpackingAttachment {
     backpacks: Vec<Backpack>,
     /// The state of a transit vehicle, which moves with it.
-    transit_vehicle: Option<TransitVehicleState>,
+    transit_vehicle_state: Option<TransitVehicleState>,
 }
 
 /// What the collector knows about a vehicle of schedule-based transit, like MATSim's
@@ -37,12 +37,10 @@ pub struct BackpackingDataCollector {
     home_person_ids: Vec<Id<InternalPerson>>,
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
-    transit_vehicles: IntMap<Id<InternalVehicle>, TransitVehicleState>,
+    transit_vehicle_states: IntMap<Id<InternalVehicle>, TransitVehicleState>,
     /// Drivers of transit vehicles on this partition. They have no backpacks, and their events
     /// are ignored.
     transit_drivers: IntSet<Id<InternalPerson>>,
-    /// Only used to compute the distances of transit legs when the plans are finished. Empty
-    /// unless transit is simulated schedule based.
     transit_schedule: Arc<TransitSimSchedule>,
 }
 
@@ -55,7 +53,7 @@ impl BackpackingDataCollector {
             home_person_ids,
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
-            transit_vehicles: Default::default(),
+            transit_vehicle_states: Default::default(),
             transit_drivers: Default::default(),
             transit_schedule,
         }
@@ -69,7 +67,7 @@ impl BackpackingDataCollector {
                 .insert(person.clone(), Backpack::new(person.clone()));
         }
         self.vehicle_id2person_ids.clear();
-        self.transit_vehicles.clear();
+        self.transit_vehicle_states.clear();
         self.transit_drivers.clear();
     }
 
@@ -83,7 +81,7 @@ impl BackpackingDataCollector {
         ) else {
             return;
         };
-        match self.transit_vehicles.get(&event.vehicle) {
+        match self.transit_vehicle_states.get(&event.vehicle) {
             Some(state) => plan.board_transit_vehicle(
                 event,
                 &state.line,
@@ -107,10 +105,10 @@ impl BackpackingDataCollector {
             &event.person,
         ) else {
             // The driver leaves at the end of the departure.
-            self.transit_vehicles.remove(&event.vehicle);
+            self.transit_vehicle_states.remove(&event.vehicle);
             return;
         };
-        match self.transit_vehicles.get(&event.vehicle) {
+        match self.transit_vehicle_states.get(&event.vehicle) {
             Some(state) => plan.alight_transit_vehicle(event, Self::current_stop(state, event)),
             None => plan.person_leaves_vehicle(event),
         }
@@ -153,7 +151,7 @@ impl BackpackingDataCollector {
 
     pub(crate) fn transit_driver_starts(&mut self, event: &TransitDriverStartsEvent) {
         self.transit_drivers.insert(event.driver.clone());
-        self.transit_vehicles.insert(
+        self.transit_vehicle_states.insert(
             event.vehicle.clone(),
             TransitVehicleState {
                 line: event.transit_line.clone(),
@@ -165,7 +163,7 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn vehicle_arrives_at_facility(&mut self, event: &VehicleArrivesAtFacilityEvent) {
-        if let Some(state) = self.transit_vehicles.get_mut(&event.vehicle) {
+        if let Some(state) = self.transit_vehicle_states.get_mut(&event.vehicle) {
             state.stop = Some(event.facility.clone());
         }
     }
@@ -272,7 +270,7 @@ impl BackpackingDataCollector {
         }
         let transit_vehicle = match entity {
             PartitionChangeEntity::TransitVehicle(vehicle) => {
-                let state = self.transit_vehicles.remove(vehicle.id());
+                let state = self.transit_vehicle_states.remove(vehicle.id());
                 if let Some(state) = &state {
                     self.transit_drivers.remove(&state.driver);
                 }
@@ -296,7 +294,7 @@ impl BackpackingDataCollector {
             .collect();
         BackpackingAttachment {
             backpacks,
-            transit_vehicle,
+            transit_vehicle_state: transit_vehicle,
         }
     }
 
@@ -308,10 +306,11 @@ impl BackpackingDataCollector {
     ) {
         let expected_person_ids = Self::person_ids(entity);
         if let (PartitionChangeEntity::TransitVehicle(vehicle), Some(state)) =
-            (entity, attachment.transit_vehicle)
+            (entity, attachment.transit_vehicle_state)
         {
             self.transit_drivers.insert(state.driver.clone());
-            self.transit_vehicles.insert(vehicle.id().clone(), state);
+            self.transit_vehicle_states
+                .insert(vehicle.id().clone(), state);
         }
         assert_eq!(
             attachment.backpacks.len(),
@@ -464,6 +463,7 @@ mod tests {
     #[deterministic_id_test]
     fn transit_vehicle_state_moves_with_vehicle() {
         use crate::simulation::events::{
+
             ActivityEndEventBuilder, PersonArrivalEventBuilder, PersonDepartureEventBuilder,
             PersonEntersVehicleEventBuilder, PersonLeavesVehicleEventBuilder,
             TransitDriverStartsEventBuilder, VehicleArrivesAtFacilityEventBuilder,
@@ -471,6 +471,7 @@ mod tests {
         use crate::simulation::scenario::Coordinate;
         use crate::simulation::scenario::network::Network;
         use crate::simulation::scenario::population::{
+
             InternalPlanElement, InternalRoute, Population,
         };
         use crate::simulation::scenario::transit::TransitSchedule;
@@ -552,7 +553,7 @@ mod tests {
         );
         vehicle.add_passenger(agent);
         let attachment = departing.send(PartitionChangeEntity::TransitVehicle(&vehicle));
-        assert!(departing.transit_vehicles.is_empty());
+        assert!(departing.transit_vehicle_states.is_empty());
 
         assert!(departing.transit_drivers.is_empty());
 
@@ -566,7 +567,7 @@ mod tests {
                 driver: driver.clone(),
                 stop: Some(Id::get_from_ext("1")),
             }),
-            arriving.transit_vehicles.get(&vehicle_id)
+            arriving.transit_vehicle_states.get(&vehicle_id)
         );
         assert!(arriving.transit_drivers.contains(&driver));
 
@@ -608,7 +609,7 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        assert!(arriving.transit_vehicles.is_empty());
+        assert!(arriving.transit_vehicle_states.is_empty());
         assert!(arriving.transit_drivers.is_empty());
 
         let experiences = arriving.finish();
