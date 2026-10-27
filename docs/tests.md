@@ -15,9 +15,8 @@ where the logger is set during the test. As a convention, each integration test 
 
 ## Agent phases and network performance
 
-The phase API includes compile-fail doctests for read-only capabilities, activity-only operations and
-the consumption of mutable projections during a phase transition. Run them with `cargo test -p
-matsim-rust --doc`. Agent tests that create IDs use `#[deterministic_id_test]` as usual.
+The phase API separates read-only capabilities from mutation and consumes mutable projections during
+a phase transition. Agent tests that create IDs use `#[deterministic_id_test]` as usual.
 
 The three-link simulation tests record an ordered event trace in addition to the normal event-file
 comparisons. The latter deliberately ignore ordering among simultaneous events and therefore cannot
@@ -25,26 +24,14 @@ detect a changed activity/departure or link-leave/link-enter sequence. The order
 zero-duration interaction activities; a separate test stops exactly at the final arrival to preserve
 the distinction between arriving and starting the final activity in the next tick.
 
-`agent_network_benchmark` measures actual node/link movement of 1,024 vehicles along 64 links. Scenario
-construction, agent/ID creation and output are outside the timed interval; no event files are written.
-It uses three warmup samples and ten measurements by default:
+`agent_network_benchmark` measures node/link movement of 1,024 vehicles along 64 links.
+It prints nanosecond timings for ten samples after three warmups; `MATSIM_AGENT_BENCH_SAMPLES`
+sets the number of measured samples. Setup, agent/ID creation and output are outside the timed
+interval. Run it in release mode without concurrent builds:
 
 ```shell
 cargo test -p matsim-rust --release --lib agent_network_benchmark -- --ignored --nocapture --test-threads=1
 ```
-
-Set `MATSIM_AGENT_BENCH_SAMPLES=1` for one measured sample after the three warmups. For before/after
-comparisons, build and preserve the baseline test executable outside `target/` before modifying the
-implementation, then build the new executable with the same settings. Alternate both executables for
-ten measurement pairs on the same otherwise idle machine. Compare paired timings and their scatter;
-a repeatable slowdown outside baseline variation is a regression. Do not compare debug timings or
-run this benchmark concurrently with compilation or other benchmarks.
-
-For the phase/role migration, the final ten alternating pairs on Apple Silicon with Rust 1.94.0
-(release, default features, 2026-10-27) gave median sample times of 5.093 ms before and 5.115 ms after.
-The median paired change was +0.56%; the mean paired change was +0.14%, with an approximate 95%
-Student-t interval of [-2.33%, +2.61%]. This measurement did not resolve a slowdown. Construction and
-the increased fixed storage for the private leg runtime are outside this hot-path measurement.
 
 ## METIS tests
 

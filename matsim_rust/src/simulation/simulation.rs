@@ -1,6 +1,6 @@
 use crate::simulation::Identifiable;
+use crate::simulation::agents::AgentPhase;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{AgentPhase, SimulationAgentLogic};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;

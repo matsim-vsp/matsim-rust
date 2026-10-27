@@ -111,7 +111,7 @@ fn vehicle_movement_still_advances_passengers_with_generic_routes() {
 }
 
 #[deterministic_id_test(matsim_rust)]
-fn materialization_restores_unfinished_routes_and_all_plans() {
+fn materialization_preserves_unfinished_routes_and_all_plans() {
     for adaptive in [false, true] {
         let mut person = network_person(1, vec!["a", "b", "c"]);
         person.plans_mut()[0].score = Some(42.0);

@@ -834,6 +834,12 @@ struct MoveSingleLinkResult {
 #[cfg(test)]
 mod tests {
     use super::{Candidate, SimNetworkPartition};
+    use crate::simulation::Identifiable;
+    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::{
+        AgentPhase, AgentPhaseMut, LegCommands, LegLogic, LegMut, NetworkDriverCommands,
+        NetworkDriverLogic, SimulationAgentLogic, VehiclePassengerCommands,
+    };
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent};
@@ -844,6 +850,8 @@ mod tests {
     use crate::simulation::network::link::SimLink::Local;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node};
+    use crate::simulation::scenario::population::{InternalLeg, InternalPerson, InternalRoute};
+    use crate::simulation::time::SimTime;
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils;
     use assert_approx_eq::assert_approx_eq;
@@ -854,6 +862,8 @@ mod tests {
     use std::cell::RefCell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone, Default)]
     // simple events handler that just records the events it receives.
@@ -940,6 +950,129 @@ mod tests {
 
     fn test_vehicle(id: u64, route: Vec<&str>) -> SimulationVehicle {
         SimulationVehicle::from_parts(id, 0, 100.0, 1.0, test_utils::create_agent(id, route))
+    }
+
+    struct CommittingDriver {
+        delegate: SimulationAgent,
+        start: Id<Link>,
+        peeked: Id<Link>,
+        left_link: bool,
+        position_queries_after_leave: Arc<AtomicUsize>,
+    }
+
+    impl Identifiable<InternalPerson> for CommittingDriver {
+        fn id(&self) -> &Id<InternalPerson> {
+            self.delegate.id()
+        }
+    }
+
+    impl SimulationAgentLogic for CommittingDriver {
+        fn phase(&self) -> AgentPhase<'_> {
+            AgentPhase::Leg(self)
+        }
+        fn phase_mut(&mut self) -> AgentPhaseMut<'_> {
+            let id = self.delegate.id().internal();
+            AgentPhaseMut::Leg(LegMut::new(self, id))
+        }
+        fn into_person(self: Box<Self>) -> InternalPerson {
+            self.delegate.into_person()
+        }
+    }
+
+    impl LegLogic for CommittingDriver {
+        fn curr_leg(&self) -> &InternalLeg {
+            self.delegate.leg().curr_leg()
+        }
+        fn route(&self) -> &InternalRoute {
+            self.delegate.leg().route()
+        }
+        fn curr_link_id(&self) -> Option<&Id<Link>> {
+            NetworkDriverLogic::curr_link_id(self)
+        }
+        fn network_driver(&self) -> Option<&dyn NetworkDriverLogic> {
+            Some(self)
+        }
+    }
+
+    impl LegCommands for CommittingDriver {
+        fn start_next_activity(&mut self, now: SimTime) {
+            self.delegate.leg_mut().start_next_activity(now);
+        }
+        fn network_driver_mut(&mut self) -> Option<&mut dyn NetworkDriverCommands> {
+            Some(self)
+        }
+        fn vehicle_passenger_mut(&mut self) -> Option<&mut dyn VehiclePassengerCommands> {
+            Some(self)
+        }
+    }
+
+    impl NetworkDriverLogic for CommittingDriver {
+        fn curr_link_id(&self) -> Option<&Id<Link>> {
+            Some(if self.left_link {
+                self.position_queries_after_leave
+                    .fetch_add(1, Ordering::Relaxed);
+                &self.peeked
+            } else {
+                &self.start
+            })
+        }
+        fn peek_next_link_id(&self) -> Option<&Id<Link>> {
+            (!self.left_link).then_some(&self.peeked)
+        }
+        fn mode(&self) -> &Id<String> {
+            &self.delegate.leg().curr_leg().mode
+        }
+    }
+
+    impl NetworkDriverCommands for CommittingDriver {
+        fn leave_link(&mut self, _now: SimTime) {
+            self.left_link = true;
+        }
+    }
+
+    impl VehiclePassengerCommands for CommittingDriver {
+        fn leave_link(&mut self, _now: SimTime) {
+            panic!("Driver movement must commit through the network-driver role");
+        }
+    }
+
+    #[deterministic_id_test]
+    fn movement_reuses_the_checked_destination_after_the_driver_commits() {
+        let mut global_network = Network::new();
+        add_test_nodes(&mut global_network, &["S", "K", "TX", "TY"]);
+        add_test_link(&mut global_network, "A", "S", "K", 1.0, 3600.0, 100.0);
+        add_test_link(&mut global_network, "X", "K", "TX", 75.0, 3600.0, 100.0);
+        add_test_link(&mut global_network, "Y", "K", "TY", 75.0, 3600.0, 100.0);
+        let mut network =
+            SimNetworkPartition::from_network_for_test(&global_network, 0, &test_utils::config());
+        let position_queries_after_leave = Arc::new(AtomicUsize::new(0));
+        let driver = CommittingDriver {
+            delegate: test_utils::create_agent(1, vec!["A", "X"]),
+            start: Id::get_from_ext("A"),
+            peeked: Id::get_from_ext("X"),
+            left_link: false,
+            position_queries_after_leave: position_queries_after_leave.clone(),
+        };
+        let vehicle =
+            SimulationVehicle::from_parts(1, 0, 100.0, 1.0, SimulationAgent::new(Box::new(driver)));
+        network.send_veh_en_route(vehicle, None, 0);
+        let (mut env, events) = environment_with_transition_events();
+        network.move_links(&mut env, 0);
+        network.move_nodes(&mut env, 1);
+
+        assert_eq!(events.leaves_on("A"), vec!["1"]);
+        assert_eq!(
+            &*events.link_enters.borrow(),
+            &[("X".to_string(), "1".to_string())]
+        );
+        assert_eq!(local_vehicle_count(&network, "X"), 1);
+        assert_eq!(local_vehicle_count(&network, "Y"), 0);
+        // Only the debug assertion validates the committed position. Release movement reuses
+        // the link whose connectivity and capacity were checked before removing the vehicle.
+        assert_eq!(
+            position_queries_after_leave.load(Ordering::Relaxed),
+            usize::from(cfg!(debug_assertions))
+        );
     }
 
     /// Measures the actual node/link hot path, excluding construction, ID creation and file I/O.

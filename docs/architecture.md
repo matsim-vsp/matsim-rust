@@ -128,67 +128,6 @@ Scoring uses the public `PlanScorer` trait and reads only the experienced plan. 
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
 
-### Agent Phases and Roles
-
-`SimulationAgent` owns one `Box<dyn SimulationAgentLogic>`. The logic exposes the person's identity,
-an immutable or mutable phase projection, and consuming materialization into `InternalPerson` after
-mobsim. Every simulation agent owns a plan; `into_person` therefore cannot return `None`.
-
-`AgentPhase` is either `Activity(&dyn ActivityLogic)` or `Leg(&dyn LegLogic)`. A leg offers optional
-`NetworkDriverLogic` and `TeleportationLogic` roles. Network routes offer both: the leg engine still
-decides from the configured main modes and route type which engine handles a departure. Generic and
-PT routes offer teleportation. Adding another role means adding its trait and optional provider methods
-with default `None` implementations; existing providers need not implement the new role. Network-driver
-and teleportation traits do not require a person or an activity plan. This does not yet add planless
-drivers to vehicles or introduce a transit passenger engine.
-
-The selected plan and network-role availability are determined once for their respective lifetimes.
-The plan-based core moves its current leg into a private `LegRuntime` during the leg phase. Role
-queries therefore access a typed leg directly rather than traversing the person's plans. A private
-placeholder retains the plan's element slot; leaving the leg phase or materializing the person restores
-the original leg, including its complete route. Adaptive routing only reads or edits the full plan in
-the activity phase, when no leg is extracted. Unselected plans remain in the person throughout mobsim.
-The node carries the already checked destination's internal ID into the movement. The driver commits
-its previously peeked link, avoiding another phase projection and an owned ID copy to discover the
-same destination again. Typed ID maps also support borrowing their internal `u64` for this lookup;
-hashing and equality still use that same number. Generic map lookups should receive `&Id` or `&u64`;
-existing double references need dereferencing to disambiguate the key type. The active-link set clones the ID only when the link
-is newly activated. No plan or route is cloned, and no projection allocates. The existing logic box
-reserves inline storage for one leg runtime, increasing the fixed memory per plan-based agent.
-
-`VehiclePassengerCommands` only preserves the existing link-movement notifications to agents already
-riding in a vehicle, including generic-route occupants. It supplies no boarding or transit behavior.
-
-Read traits contain observations only; separate commands traits implement mutations and callbacks.
-`ActivityMut` and `LegMut` borrow the command implementation without allocating. Their phase-transition
-methods consume the projection, preventing use of the old phase after the transition. Movement-role
-borrows cannot outlive their leg borrow. Public plan-based logic types are facades; only their private
-cores implement the roles, so callers obtain capabilities through the phase/role providers. The
-`SimulationAgent` projection helpers report the person ID and expected phase or role on a mismatch.
-These projections are never stored in vehicles or messages; the boxed owner continues to move between
-engines and partitions.
-
-The receiving engine changes phase, preserving the simulation's existing timing:
-
-- The activity engine emits `ActivityEnd`, then invokes `on_finished`. Adaptive activity logic can
-  replace the next trip here. The leg engine subsequently invokes `start_next_leg`, publishes the
-  departure, and selects the responsible engine.
-- Arrival events are emitted while the agent is still in the leg phase. The activity engine invokes
-  `start_next_activity` on receipt in the next tick, then publishes `ActivityStart` and calls `on_started`.
-  An agent that arrives at the simulation's final tick is consequently still considered stuck.
-- `LinkLeave` precedes the driver's and passengers' route updates, followed by `LinkEnter` where the
-  receiving link is local. Teleportation begins only on the sending partition; the receiver retains
-  the sender's end time and only queues the agent.
-
-`AdaptivePlanBasedSimulationLogic` overrides only activity observations and commands. Leg and movement
-roles come directly from its plan-based delegate. Wakeup can start one asynchronous routing request;
-activity completion receives its response and replaces the next trip. Scheduling remains based on the
-same wakeup/end times, including the engine-provided departure time in the wakeup callback.
-
-`EndTime` is still used by time-queue entries and the appropriate phase/role observations. There is no
-agent-wide event-command channel or general plan-advance operation. Stuck events are derived from the
-remaining agents' phases during cleanup, not from a third runtime phase.
-
 ### Link Dynamics
 
 A link consists of a queue, a buffer and a waiting list for departing vehicles. A vehicle may leave the queue after its

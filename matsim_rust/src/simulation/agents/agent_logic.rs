@@ -37,17 +37,9 @@ struct PlanLogic {
     basic_agent_delegate: InternalPerson,
     selected_plan: usize,
     curr_plan_element: usize,
-    activity_end_time: Option<SimTime>,
-    active_leg: Option<LegRuntime>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-struct LegRuntime {
-    leg: InternalLeg,
     curr_route_element: usize,
+    activity_end_time: Option<SimTime>,
     has_network_route: bool,
-    person_id: Id<InternalPerson>,
-    curr_plan_element: usize,
 }
 
 #[derive(Debug)]
@@ -90,10 +82,12 @@ impl SimulationAgentLogic for PlanBasedSimulationLogic {
     fn phase(&self) -> AgentPhase<'_> {
         self.inner.phase()
     }
+
     #[inline]
     fn phase_mut(&mut self) -> AgentPhaseMut<'_> {
         self.inner.phase_mut()
     }
+
     fn into_person(self: Box<Self>) -> InternalPerson {
         self.inner.into_person()
     }
@@ -121,8 +115,9 @@ impl PlanLogic {
             basic_agent_delegate,
             selected_plan,
             curr_plan_element: 0,
+            curr_route_element: 0,
             activity_end_time: Some(first_act_end),
-            active_leg: None,
+            has_network_route: false,
         }
     }
 
@@ -157,81 +152,39 @@ impl PlanLogic {
         }
     }
 
-    fn restore_active_leg(&mut self) {
-        if let Some(runtime) = self.active_leg.take() {
-            *self.basic_agent_delegate.plans_mut()[self.selected_plan].elements
-                [self.curr_plan_element]
-                .as_leg_mut()
-                .expect("Leg runtime must belong to a leg") = runtime.leg;
-        }
-    }
-
-    fn into_person(mut self) -> InternalPerson {
-        self.restore_active_leg();
+    fn into_person(self) -> InternalPerson {
         self.basic_agent_delegate
     }
 
     fn advance(&mut self, now: SimTime) {
-        self.restore_active_leg();
         self.curr_plan_element += 1;
+        self.curr_route_element = 0;
         assert!(
             self.curr_plan_element < self.basic_agent_delegate.total_elements(),
             "Cannot advance plan of agents {:?} beyond its last element.",
             self.id()
         );
+        // Every plan element remains in the person. Transitions only change the cursors and
+        // cached activity time/capability; materialization needs no restoration step.
         if self.is_activity() {
             self.activity_end_time = Some(self.curr_act().cmp_end_time(now));
+            self.has_network_route = false;
         } else {
             self.activity_end_time = None;
-            let person_id = self.id().clone();
-            let leg = self.basic_agent_delegate.plans_mut()[self.selected_plan].elements
-                [self.curr_plan_element]
-                .as_leg_mut()
-                .expect("Leg phase must point to a leg");
-            // Move the current leg into its private runtime, so role queries do not repeatedly
-            // traverse person -> selected plan -> element. No route or plan is cloned. The
-            // placeholder is never exposed: transitions and materialization restore the leg.
-            let placeholder = InternalLeg {
-                mode: leg.mode.clone(),
-                routing_mode: None,
-                dep_time: None,
-                trav_time: None,
-                route: None,
-                attributes: Default::default(),
-            };
-            let leg = std::mem::replace(leg, placeholder);
-            self.active_leg = Some(LegRuntime {
-                has_network_route: matches!(leg.route, Some(InternalRoute::Network(_))),
-                leg,
-                curr_route_element: 0,
-                person_id,
-                curr_plan_element: self.curr_plan_element,
-            });
+            self.has_network_route = self
+                .curr_leg()
+                .route
+                .as_ref()
+                .is_some_and(|route| matches!(route, InternalRoute::Network(_)));
         }
     }
 
     #[inline]
-    fn leg_runtime(&self) -> &LegRuntime {
-        self.active_leg
-            .as_ref()
-            .expect("Leg phase must have a leg runtime")
-    }
-
-    #[inline]
-    fn leg_runtime_mut(&mut self) -> &mut LegRuntime {
-        self.active_leg
-            .as_mut()
-            .expect("Leg phase must have a leg runtime")
-    }
-}
-
-impl LegRuntime {
-    #[inline]
     fn route(&self) -> &InternalRoute {
-        self.leg
+        self.curr_leg()
             .route
             .as_ref()
-            .unwrap_or_else(|| panic!("Missing route for agent {}", self.person_id))
+            .unwrap_or_else(|| panic!("Missing route for agent {}", self.id()))
     }
 
     #[inline]
@@ -243,7 +196,9 @@ impl LegRuntime {
                 1 => Some(route.end_link()),
                 _ => panic!(
                     "A generic route only has two elements. Current plan element {:?}, Current route element {:?}, Current agent {:?}",
-                    self.curr_plan_element, self.curr_route_element, self.person_id
+                    self.curr_plan_element,
+                    self.curr_route_element,
+                    self.id()
                 ),
             },
         }
@@ -262,14 +217,12 @@ impl LegRuntime {
 }
 
 impl EndTime for PlanLogic {
-    fn end_time(&self, _now: SimTime) -> SimTime {
-        self.activity_end_time.unwrap()
-    }
-}
-
-impl EndTime for LegRuntime {
     fn end_time(&self, now: SimTime) -> SimTime {
-        now.saturating_add(self.leg.travel_time())
+        if self.is_activity() {
+            self.activity_end_time.unwrap()
+        } else {
+            now.saturating_add(self.curr_leg().travel_time())
+        }
     }
 }
 
@@ -279,19 +232,16 @@ impl ActivityLogic for PlanLogic {
             .and_then(|p| p.as_activity())
             .expect("Activity phase must point to an activity")
     }
-
     fn next_act(&self) -> Option<&InternalActivity> {
         // If the current plan element is an activity, the next one should be a leg.
         self.plan_element_at(self.curr_plan_element + 2)
             .and_then(|p| p.as_activity())
     }
-
     fn next_leg(&self) -> Option<&InternalLeg> {
         // The next plan element after the current activity should be a leg.
         self.plan_element_at(self.curr_plan_element + 1)
             .and_then(|p| p.as_leg())
     }
-
     fn wakeup_time(&self, _: SimTime) -> SimTime {
         self.activity_end_time.unwrap()
     }
@@ -306,24 +256,24 @@ impl ActivityCommands for PlanLogic {
 impl LegLogic for PlanLogic {
     #[inline]
     fn curr_leg(&self) -> &InternalLeg {
-        &self.leg_runtime().leg
+        self.plan_element_at(self.curr_plan_element)
+            .and_then(|p| p.as_leg())
+            .expect("Leg phase must point to a leg")
     }
     #[inline]
     fn route(&self) -> &InternalRoute {
-        self.leg_runtime().route()
+        PlanLogic::route(self)
     }
     #[inline]
     fn curr_link_id(&self) -> Option<&Id<Link>> {
-        self.leg_runtime().current_link()
+        self.current_link()
     }
-
     #[inline]
     fn network_driver(&self) -> Option<&dyn NetworkDriverLogic> {
-        let runtime = self.leg_runtime();
-        runtime.has_network_route.then_some(runtime)
+        self.has_network_route.then_some(self)
     }
     fn teleportation(&self) -> Option<&dyn TeleportationLogic> {
-        Some(self.leg_runtime())
+        Some(self)
     }
 }
 
@@ -333,22 +283,21 @@ impl LegCommands for PlanLogic {
     }
     #[inline]
     fn network_driver_mut(&mut self) -> Option<&mut dyn NetworkDriverCommands> {
-        let runtime = self.leg_runtime_mut();
-        if runtime.has_network_route {
-            Some(runtime)
+        if self.has_network_route {
+            Some(self)
         } else {
             None
         }
     }
     fn teleportation_mut(&mut self) -> Option<&mut dyn TeleportationCommands> {
-        Some(self.leg_runtime_mut())
+        Some(self)
     }
     fn vehicle_passenger_mut(&mut self) -> Option<&mut dyn VehiclePassengerCommands> {
-        Some(self.leg_runtime_mut())
+        Some(self)
     }
 }
 
-impl NetworkDriverLogic for LegRuntime {
+impl NetworkDriverLogic for PlanLogic {
     #[inline]
     fn curr_link_id(&self) -> Option<&Id<Link>> {
         self.current_link()
@@ -362,34 +311,33 @@ impl NetworkDriverLogic for LegRuntime {
     }
     #[inline]
     fn mode(&self) -> &Id<String> {
-        &self.leg.mode
+        &self.curr_leg().mode
     }
 }
 
-impl NetworkDriverCommands for LegRuntime {
+impl NetworkDriverCommands for PlanLogic {
     #[inline]
     fn leave_link(&mut self, _now: SimTime) {
         self.curr_route_element += 1;
     }
 }
 
-impl VehiclePassengerCommands for LegRuntime {
+impl VehiclePassengerCommands for PlanLogic {
     #[inline]
     fn leave_link(&mut self, _now: SimTime) {
         self.curr_route_element += 1;
     }
 }
 
-impl TeleportationLogic for LegRuntime {
+impl TeleportationLogic for PlanLogic {
     #[inline]
     fn mode(&self) -> &Id<String> {
-        &self.leg.mode
+        &self.curr_leg().mode
     }
     #[inline]
     fn route(&self) -> &InternalRoute {
-        self.route()
+        PlanLogic::route(self)
     }
-
     fn destination_link(&self) -> &Id<Link> {
         // Network routes contain both endpoints. Teleportation advances to the vector's last
         // element, so partition transport must use that same link rather than route metadata.
@@ -403,7 +351,7 @@ impl TeleportationLogic for LegRuntime {
     }
 }
 
-impl TeleportationCommands for LegRuntime {
+impl TeleportationCommands for PlanLogic {
     fn begin_teleportation(&mut self, _now: SimTime) {
         self.set_curr_route_element_to_last();
     }
