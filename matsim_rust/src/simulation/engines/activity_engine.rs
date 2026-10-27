@@ -1,9 +1,6 @@
 use crate::simulation::Identifiable;
+use crate::simulation::agents::EndTime;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{
-    ActivityStartedEvent, AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic,
-    WokeUpEvent,
-};
 use crate::simulation::config::Config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{ActivityEndEventBuilder, ActivityStartEventBuilder};
@@ -52,7 +49,7 @@ impl ActivityEngine {
         let now = now.into();
         let now_time = self.clock.tick_to_time(now);
         for mut agent in agents {
-            agent.advance_plan(now_time);
+            agent.leg_mut().start_next_activity(now_time);
             self.receive_agent(now, AsleepSimulationAgent::build(agent, now_time));
         }
 
@@ -79,13 +76,14 @@ impl ActivityEngine {
             .into_iter()
             .chain(end_from_awake.into_iter())
         {
+            let act = agent.activity().curr_act();
             self.comp_env.events_manager_borrow_mut().process_event(
                 &ActivityEndEventBuilder::default()
                     .time(now)
                     .person(agent.id().clone())
-                    .link(agent.curr_act().link_id().clone())
-                    .act_type(agent.curr_act().act_type.clone())
-                    .coordinate(agent.curr_act().coord().clone())
+                    .link(act.link_id().clone())
+                    .act_type(act.act_type.clone())
+                    .coordinate(act.coord().clone())
                     .build()
                     .unwrap(),
             );
@@ -119,7 +117,7 @@ impl ActivityEngine {
     fn receive_agent(&mut self, now: Tick, mut agent: AsleepSimulationAgent) {
         // emmit act start event
         let now_time = self.clock.tick_to_time(now);
-        let act = agent.agent.curr_act();
+        let act = agent.agent.activity().curr_act();
         self.comp_env.events_manager_borrow_mut().process_event(
             &ActivityStartEventBuilder::default()
                 .time(now_time)
@@ -131,12 +129,10 @@ impl ActivityEngine {
                 .unwrap(),
         );
 
-        agent.agent.notify_event(
-            &mut AgentEvent::ActivityStarted(ActivityStartedEvent {
-                agent: &mut self.comp_env,
-            }),
-            now_time,
-        );
+        agent
+            .agent
+            .activity_mut()
+            .on_started(&mut self.comp_env, now_time);
         self.asleep_q.add(agent, now_time);
     }
 
@@ -180,14 +176,11 @@ impl ActivityEngine {
         end_time: SimTime,
         now: SimTime,
     ) {
-        agent.notify_event(
-            &mut AgentEvent::WokeUp(WokeUpEvent { comp_env, end_time }),
-            now,
-        );
+        agent.activity_mut().on_wakeup(comp_env, end_time, now);
     }
 
     fn notify_act_end(agent: &mut SimulationAgent, now: SimTime) {
-        agent.notify_event(&mut AgentEvent::ActivityFinished(), now);
+        agent.activity_mut().on_finished(now);
     }
 
     #[cfg(test)]
@@ -247,7 +240,7 @@ impl From<AsleepSimulationAgent> for AwakeSimulationAgent {
 impl EndTime for AwakeSimulationAgent {
     fn end_time(&self, _now: SimTime) -> SimTime {
         // Using begin_time as reference because if only max_dur is set for activity, the agent assumes that the argument of end_time is the time when the activity started.
-        self.agent.end_time(self.begin_time)
+        self.agent.activity().end_time(self.begin_time)
     }
 }
 
@@ -260,7 +253,7 @@ struct AsleepSimulationAgent {
 
 impl AsleepSimulationAgent {
     fn build(agent: SimulationAgent, now: SimTime) -> Self {
-        let wakeup_time = agent.wakeup_time(now);
+        let wakeup_time = agent.activity().wakeup_time(now);
         AsleepSimulationAgent {
             agent,
             wakeup_time,
@@ -283,7 +276,6 @@ mod tests {
         InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
     };
     use crate::simulation::Identifiable;
-    use crate::simulation::agents::SimulationAgentLogic;
     use crate::simulation::agents::agent::SimulationAgent;
     use crate::simulation::config::Config;
     use crate::simulation::controller::{
@@ -397,18 +389,37 @@ mod tests {
         let agents = test_adaptive(plan, env);
         let agent = agents.first().unwrap();
 
-        assert_eq!(agent.curr_act().act_type, Id::get_from_ext("home"));
-        assert_eq!(agent.curr_act().link_id, Some(Id::get_from_ext("start")));
-        assert_eq!(agent.next_act().act_type, Id::get_from_ext("work"));
-        assert_eq!(agent.next_act().link_id, Some(Id::get_from_ext("end")));
+        assert_eq!(
+            agent.activity().curr_act().act_type,
+            Id::get_from_ext("home")
+        );
+        assert_eq!(
+            agent.activity().curr_act().link_id,
+            Some(Id::get_from_ext("start"))
+        );
+        assert_eq!(
+            agent.activity().next_act().unwrap().act_type,
+            Id::get_from_ext("work")
+        );
+        assert_eq!(
+            agent.activity().next_act().unwrap().link_id,
+            Some(Id::get_from_ext("end"))
+        );
 
-        let leg = agent.next_leg().unwrap();
+        let leg = agent.activity().next_leg().unwrap();
 
         assert_eq!(leg.mode, Id::get_from_ext("new_mode"));
         assert!(&leg.mode.external().eq("new_mode"));
         assert_eq!(leg, &new_leg());
 
         handle.join().unwrap();
+        let person = agents.into_iter().next().unwrap().into_person();
+        assert_eq!(
+            person.selected_plan().unwrap().elements[1]
+                .as_leg()
+                .unwrap(),
+            &new_leg()
+        );
     }
 
     fn routing_env(
@@ -510,6 +521,16 @@ mod tests {
             assert!(agents.is_empty());
             assert_eq!(engine.awake_agents().len(), 1);
             assert_eq!(engine.awake_agents()[0].id(), &Id::create("1"));
+            // A ready response is only installed at activity completion, not at wakeup.
+            assert_eq!(
+                engine.awake_agents()[0]
+                    .activity()
+                    .next_leg()
+                    .unwrap()
+                    .mode
+                    .external(),
+                "mode"
+            );
         }
         {
             let agents = engine.do_step(10, vec![]);

@@ -1,7 +1,5 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -70,12 +68,14 @@ impl SimulationVehicle {
         self.vehicle.pce
     }
 
+    #[inline]
     pub fn curr_link_id(&self) -> Option<&Id<Link>> {
-        self.driver().curr_link_id()
+        self.driver().network_driver().curr_link_id()
     }
 
+    #[inline]
     pub fn peek_next_route_element(&self) -> Option<&Id<Link>> {
-        self.driver().peek_next_link_id()
+        self.driver().network_driver().peek_next_link_id()
     }
 
     pub fn internal_vehicle(&self) -> &InternalVehicle {
@@ -94,12 +94,14 @@ impl SimulationVehicle {
     }
 }
 
-impl EnvironmentalEventObserver for SimulationVehicle {
-    fn notify_event(&mut self, event: &mut AgentEvent, now: SimTime) {
-        self.driver_mut().notify_event(event, now);
-        self.passengers.iter_mut().for_each(|p| {
-            p.notify_event(event, now);
-        });
+impl SimulationVehicle {
+    /// Keep the existing driver-first, then passenger route-update order.
+    #[inline]
+    pub fn leave_link(&mut self, now: SimTime) {
+        self.driver_mut().network_driver_mut().leave_link(now);
+        for passenger in &mut self.passengers {
+            passenger.vehicle_passenger_mut().leave_link(now);
+        }
     }
 }
 

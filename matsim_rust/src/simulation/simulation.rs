@@ -1,6 +1,6 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
+use crate::simulation::agents::{AgentPhase, SimulationAgentLogic};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
@@ -90,18 +90,18 @@ where
     fn emit_stuck_events(&mut self, time: SimTime, agents: &[SimulationAgent]) {
         let mut events = agents
             .iter()
-            .filter_map(|agent| match agent.state() {
-                SimulationAgentState::ACTIVITY if agent.next_leg().is_none() => None,
-                SimulationAgentState::LEG => Some(
+            .filter_map(|agent| match agent.phase() {
+                AgentPhase::Activity(activity) if activity.next_leg().is_none() => None,
+                AgentPhase::Leg(leg) => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
                         .person(agent.id().clone())
-                        .link(agent.curr_link_id().cloned())
-                        .leg_mode(Some(agent.curr_leg().mode.clone()))
+                        .link(leg.curr_link_id().cloned())
+                        .leg_mode(Some(leg.curr_leg().mode.clone()))
                         .build()
                         .unwrap(),
                 ),
-                SimulationAgentState::ACTIVITY | SimulationAgentState::STUCK => Some(
+                AgentPhase::Activity(_) => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
                         .person(agent.id().clone())
@@ -140,8 +140,7 @@ where
         agent: &SimulationAgent,
         message_broker: &NetMessageBroker<C>,
     ) -> bool {
-        let leg = agent.curr_leg();
-        let route = leg.route.as_ref().unwrap();
+        let route = agent.teleportation().route();
         let to = message_broker.rank_for_link(route.end_link());
         message_broker.rank() == to
     }

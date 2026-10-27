@@ -1,5 +1,4 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{
@@ -379,7 +378,7 @@ impl LocalLink {
                     .link(self.id.clone())
                     .person(v.driver().id().clone())
                     .time(now_time)
-                    .network_mode(v.driver().curr_leg().mode.clone())
+                    .network_mode(v.driver().network_driver().mode().clone())
                     .build()
                     .unwrap(),
             );
@@ -406,7 +405,11 @@ impl LocalLink {
                 break;
             }
 
-            let arrive = veh.vehicle.driver().is_wanting_to_arrive_on_current_link();
+            let arrive = veh
+                .vehicle
+                .driver()
+                .network_driver()
+                .is_wanting_to_arrive_on_current_link();
             let capacity_left = self.has_flow_capacity_left();
 
             // If the vehicle wants to arrive, remove it from the queue
@@ -449,6 +452,7 @@ impl LocalLink {
             if option
                 .unwrap()
                 .driver()
+                .network_driver()
                 .is_wanting_to_arrive_on_current_link()
             {
                 released_vehicles.push(self.pop_from_waiting(comp_env, now));
@@ -480,7 +484,7 @@ impl LocalLink {
                 .link(self.id.clone())
                 .person(vehicle.driver().id().clone())
                 .time(now_time)
-                .network_mode(vehicle.driver().curr_leg().mode.clone())
+                .network_mode(vehicle.driver().network_driver().mode().clone())
                 .build()
                 .unwrap(),
         );

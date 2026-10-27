@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
@@ -53,7 +52,7 @@ pub fn create_agent(id: u64, route: Vec<&str>) -> SimulationAgent {
     let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
 
     let mut agent = SimulationAgent::new_plan_based(person);
-    agent.advance_plan(SimTime::default());
+    agent.activity_mut().start_next_leg(SimTime::default());
 
     agent
 }

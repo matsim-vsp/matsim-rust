@@ -99,7 +99,7 @@ impl Population {
     }
 
     pub fn from_agents(agents: Vec<SimulationAgent>) -> Self {
-        let persons = agents.into_iter().filter_map(|a| a.into_person()).collect();
+        let persons = agents.into_iter().map(|a| a.into_person()).collect();
         Self::from_persons(persons)
     }
 

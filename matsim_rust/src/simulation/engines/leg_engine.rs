@@ -1,6 +1,5 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
 use crate::simulation::config::QSim;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
@@ -207,7 +206,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                 );
             }
 
-            let leg = veh.driver().curr_leg();
+            let leg = veh.driver().leg().curr_leg();
             self.comp_env.events_manager_borrow_mut().process_event(
                 &PersonArrivalEventBuilder::default()
                     .time(now_time)
@@ -241,12 +240,13 @@ impl<C: SimCommunicator> LegEngine<C> {
     }
 
     fn publish_person_arrival(&mut self, now_time: SimTime, agent: &SimulationAgent) {
-        let leg = agent.curr_leg();
+        let logic = agent.leg();
+        let leg = logic.curr_leg();
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonArrivalEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .link(agent.curr_link_id().unwrap().clone())
+                .link(logic.curr_link_id().unwrap().clone())
                 .leg_mode(leg.mode.clone())
                 .build()
                 .unwrap(),
@@ -255,10 +255,11 @@ impl<C: SimCommunicator> LegEngine<C> {
 
     pub(crate) fn receive_agent(&mut self, now: Tick, mut agent: SimulationAgent) {
         let now_time = self.clock.tick_to_time(now);
-        agent.advance_plan(now_time);
+        agent.activity_mut().start_next_leg(now_time);
 
-        let leg = agent.curr_leg();
-        let route = leg.route.as_ref().unwrap();
+        let logic = agent.leg();
+        let leg = logic.curr_leg();
+        let route = logic.route();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonDepartureEventBuilder::default()
@@ -283,7 +284,8 @@ impl<C: SimCommunicator> LegEngine<C> {
     }
 
     fn find_responsible_engine(&self, agent: &SimulationAgent) -> ResponsibleEngine {
-        let leg = agent.curr_leg();
+        let logic = agent.leg();
+        let leg = logic.curr_leg();
 
         // If mode of leg is not main mode, teleport vehicle in every case
         if !self.main_modes.contains(&leg.mode) {
@@ -291,7 +293,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         }
 
         // Otherwise, make the decision based on the route type
-        match leg.route.as_ref().unwrap() {
+        match logic.route() {
             InternalRoute::Network(_) => Leg,
             _ => Teleportation,
         }
@@ -345,13 +347,9 @@ impl VehicularDepartureHandler {
         agent: SimulationAgent,
         garage: &Garage,
     ) -> Option<SimulationVehicle> {
-        assert_eq!(agent.state(), SimulationAgentState::LEG);
-
-        let leg = agent.curr_leg();
-        let route = leg
-            .route
-            .as_ref()
-            .unwrap_or_else(|| panic!("Missing route for agent {} at leg {:?}", agent.id(), leg));
+        let logic = agent.leg();
+        let leg = logic.curr_leg();
+        let route = logic.route();
 
         let veh_id = if let Some(v) = route.as_generic().vehicle().as_ref() {
             v.clone()

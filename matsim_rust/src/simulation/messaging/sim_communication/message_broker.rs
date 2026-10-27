@@ -1,4 +1,3 @@
-use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::{
     InternalSyncMessage, TeleportationMessage, VehicleMessage,
@@ -79,7 +78,10 @@ where
         now: impl Into<Tick>,
     ) {
         let now = now.into();
-        let link_id = teleportation_message.agent().curr_link_id().unwrap();
+        let link_id = teleportation_message
+            .agent()
+            .teleportation()
+            .destination_link();
         let partition = *self.link_mapping.get(link_id).unwrap();
         let rank = self.rank();
         let message = self
@@ -196,7 +198,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
     use crate::simulation::config;
     use crate::simulation::id::Id;
     use crate::simulation::messaging::messages::VehicleMessage;
@@ -273,7 +274,7 @@ mod tests {
                 assert_eq!(0, msg.time());
                 assert_eq!(1, msg.vehicles().len());
                 let (mut vehicle, attachments) = msg.vehicles_mut().remove(0).into_parts();
-                vehicle.notify_event(&mut AgentEvent::LeftLink(), SimTime::default());
+                vehicle.leave_link(SimTime::default());
                 broker.add_veh(VehicleMessage::with_attachments(vehicle, attachments), 1);
             } else {
                 for msg in result_0 {

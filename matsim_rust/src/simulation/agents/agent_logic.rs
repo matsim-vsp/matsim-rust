@@ -4,7 +4,9 @@ use crate::external_services::routing::{
 };
 use crate::simulation::Identifiable;
 use crate::simulation::agents::{
-    AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic, SimulationAgentState,
+    ActivityCommands, ActivityLogic, ActivityMut, AgentPhase, AgentPhaseMut, EndTime, LegCommands,
+    LegLogic, LegMut, NetworkDriverCommands, NetworkDriverLogic, SimulationAgentLogic,
+    TeleportationCommands, TeleportationLogic, VehiclePassengerCommands,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
@@ -26,18 +28,39 @@ use tracing::trace;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PlanBasedSimulationLogic {
-    pub(super) basic_agent_delegate: InternalPerson,
-    pub(super) curr_plan_element: usize,
-    pub(super) curr_route_element: usize,
-    activity_end_time: Option<SimTime>,
+    inner: PlanLogic,
 }
 
+// Roles are implemented only on private cores. A public facade exposes them through its phase.
+#[derive(Debug, PartialEq, Clone)]
+struct PlanLogic {
+    basic_agent_delegate: InternalPerson,
+    selected_plan: usize,
+    curr_plan_element: usize,
+    activity_end_time: Option<SimTime>,
+    active_leg: Option<LegRuntime>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+struct LegRuntime {
+    leg: InternalLeg,
+    curr_route_element: usize,
+    has_network_route: bool,
+    person_id: Id<InternalPerson>,
+    curr_plan_element: usize,
+}
+
+#[derive(Debug)]
 pub struct AdaptivePlanBasedSimulationLogic {
-    delegate: PlanBasedSimulationLogic,
+    inner: AdaptiveLogic,
+}
+
+struct AdaptiveLogic {
+    delegate: PlanLogic,
     route_receiver: Option<Receiver<InternalRoutingResponse>>,
 }
 
-impl Debug for AdaptivePlanBasedSimulationLogic {
+impl Debug for AdaptiveLogic {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -48,227 +71,401 @@ impl Debug for AdaptivePlanBasedSimulationLogic {
     }
 }
 
+impl PlanBasedSimulationLogic {
+    pub fn new(person: InternalPerson) -> Self {
+        Self {
+            inner: PlanLogic::new(person),
+        }
+    }
+}
+
 impl Identifiable<InternalPerson> for PlanBasedSimulationLogic {
+    fn id(&self) -> &Id<InternalPerson> {
+        self.inner.id()
+    }
+}
+
+impl SimulationAgentLogic for PlanBasedSimulationLogic {
+    #[inline]
+    fn phase(&self) -> AgentPhase<'_> {
+        self.inner.phase()
+    }
+    #[inline]
+    fn phase_mut(&mut self) -> AgentPhaseMut<'_> {
+        self.inner.phase_mut()
+    }
+    fn into_person(self: Box<Self>) -> InternalPerson {
+        self.inner.into_person()
+    }
+}
+
+impl Identifiable<InternalPerson> for PlanLogic {
     fn id(&self) -> &Id<InternalPerson> {
         self.basic_agent_delegate.id()
     }
 }
 
-impl EnvironmentalEventObserver for PlanBasedSimulationLogic {
-    fn notify_event(&mut self, event: &mut AgentEvent, _now: SimTime) {
-        match event {
-            AgentEvent::TeleportationStarted { .. } => {
-                self.set_curr_route_element_to_last();
-            }
-            AgentEvent::LeftLink { .. } => {
-                self.curr_route_element += 1;
-            }
-            _ => {}
-        }
-    }
-}
-
-impl PlanBasedSimulationLogic {
-    /// This method advances the pointer to the last element of the route. We need this in case of
-    /// teleported legs. Advancing the route pointer to the last element directly ensures that teleporting
-    /// the vehicle is independent of whether the leg has a Generic-Teleportation route or a network
-    /// route.
-    fn set_curr_route_element_to_last(&mut self) {
-        let route = self.curr_leg().route.as_ref().unwrap();
-        if route.as_network().is_some() {
-            let last = route.as_network().unwrap().route().len() - 1;
-            self.curr_route_element = last;
-        } else {
-            self.curr_route_element = 1;
-        }
-    }
-
-    pub fn new(basic_agent_delegate: InternalPerson) -> Self {
-        let first_act_end = basic_agent_delegate
-            .plan_element_at(0)
-            .unwrap()
+impl PlanLogic {
+    fn new(basic_agent_delegate: InternalPerson) -> Self {
+        // The selected plan is fixed during mobsim; adaptive routing only replaces its elements.
+        let selected_plan = basic_agent_delegate
+            .plans()
+            .iter()
+            .position(|plan| plan.selected)
+            .expect("Simulation agent must have a selected plan");
+        let first_act_end = basic_agent_delegate.plans()[selected_plan].elements[0]
             .as_activity()
             .unwrap()
             .cmp_end_time(SimTime::default());
         Self {
             basic_agent_delegate,
+            selected_plan,
             curr_plan_element: 0,
-            curr_route_element: 0,
             activity_end_time: Some(first_act_end),
+            active_leg: None,
         }
     }
-}
 
-impl SimulationAgentLogic for PlanBasedSimulationLogic {
-    fn curr_act(&self) -> &InternalActivity {
-        self.basic_agent_delegate
-            .plan_element_at(self.curr_plan_element)
-            .and_then(|p| p.as_activity())
-            .unwrap()
+    #[inline]
+    fn plan_element_at(&self, index: usize) -> Option<&InternalPlanElement> {
+        self.basic_agent_delegate.plans()[self.selected_plan]
+            .elements
+            .get(index)
     }
 
-    fn next_act(&self) -> &InternalActivity {
-        let add = if self.curr_plan_element.is_multiple_of(2) {
-            // If the current plan element is an activity, the next one should be a leg
-            2
+    #[inline]
+    fn is_activity(&self) -> bool {
+        self.curr_plan_element.is_multiple_of(2)
+    }
+
+    #[inline]
+    fn phase(&self) -> AgentPhase<'_> {
+        if self.is_activity() {
+            AgentPhase::Activity(self)
         } else {
-            // If the current plan element is a leg, the next one should be an activity
-            1
-        };
-        self.basic_agent_delegate
-            .plan_element_at(self.curr_plan_element + add)
-            .and_then(|p| p.as_activity())
-            .unwrap()
+            AgentPhase::Leg(self)
+        }
     }
 
-    fn curr_leg(&self) -> &InternalLeg {
-        self.basic_agent_delegate
-            .plan_element_at(self.curr_plan_element)
-            .and_then(|p| p.as_leg())
-            .unwrap()
-    }
-
-    fn next_leg(&self) -> Option<&InternalLeg> {
-        let add = if self.curr_plan_element.is_multiple_of(2) {
-            // If the current plan element is an activity, the next one should be a leg
-            1
+    #[inline]
+    fn phase_mut(&mut self) -> AgentPhaseMut<'_> {
+        let id = self.id().internal();
+        if self.is_activity() {
+            AgentPhaseMut::Activity(ActivityMut::new(self, id))
         } else {
-            // If the current plan element is a leg, the next one should be an activity
-            2
-        };
-        self.basic_agent_delegate
-            .plan_element_at(self.curr_plan_element + add)
-            .and_then(|p| p.as_leg())
+            AgentPhaseMut::Leg(LegMut::new(self, id))
+        }
     }
 
-    fn advance_plan(&mut self, now: SimTime) {
+    fn restore_active_leg(&mut self) {
+        if let Some(runtime) = self.active_leg.take() {
+            *self.basic_agent_delegate.plans_mut()[self.selected_plan].elements
+                [self.curr_plan_element]
+                .as_leg_mut()
+                .expect("Leg runtime must belong to a leg") = runtime.leg;
+        }
+    }
+
+    fn into_person(mut self) -> InternalPerson {
+        self.restore_active_leg();
+        self.basic_agent_delegate
+    }
+
+    fn advance(&mut self, now: SimTime) {
+        self.restore_active_leg();
         self.curr_plan_element += 1;
-        self.curr_route_element = 0;
         assert!(
             self.curr_plan_element < self.basic_agent_delegate.total_elements(),
             "Cannot advance plan of agents {:?} beyond its last element.",
-            self.basic_agent_delegate.id()
+            self.id()
         );
-
-        match self.state() {
-            SimulationAgentState::LEG => self.activity_end_time = None,
-            SimulationAgentState::ACTIVITY => {
-                self.activity_end_time = Some(self.curr_act().cmp_end_time(now))
-            }
-            SimulationAgentState::STUCK => {}
-        }
-    }
-
-    fn state(&self) -> SimulationAgentState {
-        if self.curr_plan_element.is_multiple_of(2) {
-            SimulationAgentState::ACTIVITY
+        if self.is_activity() {
+            self.activity_end_time = Some(self.curr_act().cmp_end_time(now));
         } else {
-            SimulationAgentState::LEG
+            self.activity_end_time = None;
+            let person_id = self.id().clone();
+            let leg = self.basic_agent_delegate.plans_mut()[self.selected_plan].elements
+                [self.curr_plan_element]
+                .as_leg_mut()
+                .expect("Leg phase must point to a leg");
+            // Move the current leg into its private runtime, so role queries do not repeatedly
+            // traverse person -> selected plan -> element. No route or plan is cloned. The
+            // placeholder is never exposed: transitions and materialization restore the leg.
+            let placeholder = InternalLeg {
+                mode: leg.mode.clone(),
+                routing_mode: None,
+                dep_time: None,
+                trav_time: None,
+                route: None,
+                attributes: Default::default(),
+            };
+            let leg = std::mem::replace(leg, placeholder);
+            self.active_leg = Some(LegRuntime {
+                has_network_route: matches!(leg.route, Some(InternalRoute::Network(_))),
+                leg,
+                curr_route_element: 0,
+                person_id,
+                curr_plan_element: self.curr_plan_element,
+            });
         }
     }
 
-    fn is_wanting_to_arrive_on_current_link(&self) -> bool {
-        self.peek_next_link_id().is_none()
+    #[inline]
+    fn leg_runtime(&self) -> &LegRuntime {
+        self.active_leg
+            .as_ref()
+            .expect("Leg phase must have a leg runtime")
     }
 
-    fn curr_link_id(&self) -> Option<&Id<Link>> {
-        if self.state() != SimulationAgentState::LEG {
-            return None;
-        }
-
-        match self.curr_leg().route.as_ref().unwrap() {
-            InternalRoute::Generic(g) => match self.curr_route_element {
-                0 => Some(g.start_link()),
-                1 => Some(g.end_link()),
-                _ => panic!(
-                    "A generic route only has two elements. Current plan element {:?}, Current route element {:?}, Current agent {:?}",
-                    self.curr_plan_element,
-                    self.curr_route_element,
-                    self.basic_agent_delegate.id()
-                ),
-            },
-            InternalRoute::Network(n) => n.route_element_at(self.curr_route_element),
-            InternalRoute::Pt(p) => match self.curr_route_element {
-                0 => Some(p.start_link()),
-                1 => Some(p.end_link()),
-                _ => panic!(
-                    "A generic route only has two elements. Current plan element {:?}, Current route element {:?}, Current agent {:?}",
-                    self.curr_plan_element,
-                    self.curr_route_element,
-                    self.basic_agent_delegate.id()
-                ),
-            },
-        }
+    #[inline]
+    fn leg_runtime_mut(&mut self) -> &mut LegRuntime {
+        self.active_leg
+            .as_mut()
+            .expect("Leg phase must have a leg runtime")
     }
+}
 
-    fn peek_next_link_id(&self) -> Option<&Id<Link>> {
-        let next_i = self.curr_route_element + 1;
-        self.curr_leg()
+impl LegRuntime {
+    #[inline]
+    fn route(&self) -> &InternalRoute {
+        self.leg
             .route
             .as_ref()
-            .unwrap()
-            .as_network()
-            .unwrap()
-            .route_element_at(next_i)
+            .unwrap_or_else(|| panic!("Missing route for agent {}", self.person_id))
+    }
+
+    #[inline]
+    fn current_link(&self) -> Option<&Id<Link>> {
+        match self.route() {
+            InternalRoute::Network(n) => n.route_element_at(self.curr_route_element),
+            route => match self.curr_route_element {
+                0 => Some(route.start_link()),
+                1 => Some(route.end_link()),
+                _ => panic!(
+                    "A generic route only has two elements. Current plan element {:?}, Current route element {:?}, Current agent {:?}",
+                    self.curr_plan_element, self.curr_route_element, self.person_id
+                ),
+            },
+        }
+    }
+
+    /// This method advances the pointer to the last element of the route. We need this in case of
+    /// teleported legs. Advancing the route pointer to the last element directly ensures that teleporting
+    /// the vehicle is independent of whether the leg has a Generic-Teleportation route or a network
+    /// route.
+    fn set_curr_route_element_to_last(&mut self) {
+        self.curr_route_element = match self.route() {
+            InternalRoute::Network(n) => n.route().len() - 1,
+            _ => 1,
+        };
+    }
+}
+
+impl EndTime for PlanLogic {
+    fn end_time(&self, _now: SimTime) -> SimTime {
+        self.activity_end_time.unwrap()
+    }
+}
+
+impl EndTime for LegRuntime {
+    fn end_time(&self, now: SimTime) -> SimTime {
+        now.saturating_add(self.leg.travel_time())
+    }
+}
+
+impl ActivityLogic for PlanLogic {
+    fn curr_act(&self) -> &InternalActivity {
+        self.plan_element_at(self.curr_plan_element)
+            .and_then(|p| p.as_activity())
+            .expect("Activity phase must point to an activity")
+    }
+
+    fn next_act(&self) -> Option<&InternalActivity> {
+        // If the current plan element is an activity, the next one should be a leg.
+        self.plan_element_at(self.curr_plan_element + 2)
+            .and_then(|p| p.as_activity())
+    }
+
+    fn next_leg(&self) -> Option<&InternalLeg> {
+        // The next plan element after the current activity should be a leg.
+        self.plan_element_at(self.curr_plan_element + 1)
+            .and_then(|p| p.as_leg())
     }
 
     fn wakeup_time(&self, _: SimTime) -> SimTime {
         self.activity_end_time.unwrap()
     }
+}
 
-    fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        Some(self.basic_agent_delegate)
+impl ActivityCommands for PlanLogic {
+    fn start_next_leg(&mut self, now: SimTime) {
+        self.advance(now);
     }
 }
 
-impl EndTime for PlanBasedSimulationLogic {
-    fn end_time(&self, now: SimTime) -> SimTime {
-        match self
-            .basic_agent_delegate
-            .plan_element_at(self.curr_plan_element)
-            .unwrap()
-        {
-            InternalPlanElement::Activity(_) => self.activity_end_time.unwrap(),
-            InternalPlanElement::Leg(l) => now.saturating_add(l.travel_time()),
+impl LegLogic for PlanLogic {
+    #[inline]
+    fn curr_leg(&self) -> &InternalLeg {
+        &self.leg_runtime().leg
+    }
+    #[inline]
+    fn route(&self) -> &InternalRoute {
+        self.leg_runtime().route()
+    }
+    #[inline]
+    fn curr_link_id(&self) -> Option<&Id<Link>> {
+        self.leg_runtime().current_link()
+    }
+
+    #[inline]
+    fn network_driver(&self) -> Option<&dyn NetworkDriverLogic> {
+        let runtime = self.leg_runtime();
+        runtime.has_network_route.then_some(runtime)
+    }
+    fn teleportation(&self) -> Option<&dyn TeleportationLogic> {
+        Some(self.leg_runtime())
+    }
+}
+
+impl LegCommands for PlanLogic {
+    fn start_next_activity(&mut self, now: SimTime) {
+        self.advance(now);
+    }
+    #[inline]
+    fn network_driver_mut(&mut self) -> Option<&mut dyn NetworkDriverCommands> {
+        let runtime = self.leg_runtime_mut();
+        if runtime.has_network_route {
+            Some(runtime)
+        } else {
+            None
+        }
+    }
+    fn teleportation_mut(&mut self) -> Option<&mut dyn TeleportationCommands> {
+        Some(self.leg_runtime_mut())
+    }
+    fn vehicle_passenger_mut(&mut self) -> Option<&mut dyn VehiclePassengerCommands> {
+        Some(self.leg_runtime_mut())
+    }
+}
+
+impl NetworkDriverLogic for LegRuntime {
+    #[inline]
+    fn curr_link_id(&self) -> Option<&Id<Link>> {
+        self.current_link()
+    }
+    #[inline]
+    fn peek_next_link_id(&self) -> Option<&Id<Link>> {
+        self.route()
+            .as_network()
+            .expect("Network-driver role must have a network route")
+            .route_element_at(self.curr_route_element + 1)
+    }
+    #[inline]
+    fn mode(&self) -> &Id<String> {
+        &self.leg.mode
+    }
+}
+
+impl NetworkDriverCommands for LegRuntime {
+    #[inline]
+    fn leave_link(&mut self, _now: SimTime) {
+        self.curr_route_element += 1;
+    }
+}
+
+impl VehiclePassengerCommands for LegRuntime {
+    #[inline]
+    fn leave_link(&mut self, _now: SimTime) {
+        self.curr_route_element += 1;
+    }
+}
+
+impl TeleportationLogic for LegRuntime {
+    #[inline]
+    fn mode(&self) -> &Id<String> {
+        &self.leg.mode
+    }
+    #[inline]
+    fn route(&self) -> &InternalRoute {
+        self.route()
+    }
+
+    fn destination_link(&self) -> &Id<Link> {
+        // Network routes contain both endpoints. Teleportation advances to the vector's last
+        // element, so partition transport must use that same link rather than route metadata.
+        match self.route() {
+            InternalRoute::Network(route) => route
+                .route()
+                .last()
+                .expect("Network route must not be empty"),
+            route => route.end_link(),
         }
     }
 }
 
+impl TeleportationCommands for LegRuntime {
+    fn begin_teleportation(&mut self, _now: SimTime) {
+        self.set_curr_route_element_to_last();
+    }
+}
+
+impl AdaptivePlanBasedSimulationLogic {
+    pub fn new(person: InternalPerson) -> Self {
+        Self {
+            inner: AdaptiveLogic {
+                delegate: PlanLogic::new(person),
+                route_receiver: None,
+            },
+        }
+    }
+}
+
+impl Identifiable<InternalPerson> for AdaptivePlanBasedSimulationLogic {
+    fn id(&self) -> &Id<InternalPerson> {
+        self.inner.delegate.id()
+    }
+}
+
 impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
+    #[inline]
+    fn phase(&self) -> AgentPhase<'_> {
+        if self.inner.delegate.is_activity() {
+            AgentPhase::Activity(&self.inner)
+        } else {
+            self.inner.delegate.phase()
+        }
+    }
+
+    #[inline]
+    fn phase_mut(&mut self) -> AgentPhaseMut<'_> {
+        if self.inner.delegate.is_activity() {
+            let id = self.inner.delegate.id().internal();
+            AgentPhaseMut::Activity(ActivityMut::new(&mut self.inner, id))
+        } else {
+            self.inner.delegate.phase_mut()
+        }
+    }
+
+    fn into_person(self: Box<Self>) -> InternalPerson {
+        self.inner.delegate.into_person()
+    }
+}
+
+impl EndTime for AdaptiveLogic {
+    fn end_time(&self, now: SimTime) -> SimTime {
+        self.delegate.end_time(now)
+    }
+}
+
+impl ActivityLogic for AdaptiveLogic {
     fn curr_act(&self) -> &InternalActivity {
         self.delegate.curr_act()
     }
-
-    fn next_act(&self) -> &InternalActivity {
+    fn next_act(&self) -> Option<&InternalActivity> {
         self.delegate.next_act()
     }
-
-    fn curr_leg(&self) -> &InternalLeg {
-        self.delegate.curr_leg()
-    }
-
     fn next_leg(&self) -> Option<&InternalLeg> {
         self.delegate.next_leg()
-    }
-
-    fn advance_plan(&mut self, now: SimTime) {
-        self.delegate.advance_plan(now);
-    }
-
-    fn state(&self) -> SimulationAgentState {
-        self.delegate.state()
-    }
-
-    fn is_wanting_to_arrive_on_current_link(&self) -> bool {
-        self.delegate.is_wanting_to_arrive_on_current_link()
-    }
-
-    fn curr_link_id(&self) -> Option<&Id<Link>> {
-        self.delegate.curr_link_id()
-    }
-
-    fn peek_next_link_id(&self) -> Option<&Id<Link>> {
-        self.delegate.peek_next_link_id()
     }
 
     fn wakeup_time(&self, now: SimTime) -> SimTime {
@@ -277,13 +474,11 @@ impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
             // no need to wake up if there is no other leg.
             return end;
         }
-
         let horizon: Option<u32> = self
             .delegate
             .curr_act()
             .attributes
             .get(crate::simulation::scenario::population::PREPLANNING_HORIZON);
-
         if let Some(h) = horizon {
             if SimTime::from_secs(h as u64) > end {
                 // if horizon is larger than the current end time, then end - h would be negative (might be the case at the very beginning of the simulation)
@@ -293,48 +488,28 @@ impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
                 end = end.saturating_sub(Duration::from_secs(h as u64));
             }
         }
-
         end
     }
+}
 
-    fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        Box::new(self.delegate).into_person()
+impl ActivityCommands for AdaptiveLogic {
+    fn on_wakeup(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        end_time: SimTime,
+        now: SimTime,
+    ) {
+        self.react_to_woke_up(comp_env, end_time, now);
+    }
+    fn on_finished(&mut self, now: SimTime) {
+        self.replace_route(now);
+    }
+    fn start_next_leg(&mut self, now: SimTime) {
+        self.delegate.start_next_leg(now);
     }
 }
 
-impl EndTime for AdaptivePlanBasedSimulationLogic {
-    fn end_time(&self, now: SimTime) -> SimTime {
-        self.delegate.end_time(now)
-    }
-}
-
-impl Identifiable<InternalPerson> for AdaptivePlanBasedSimulationLogic {
-    fn id(&self) -> &Id<InternalPerson> {
-        self.delegate.id()
-    }
-}
-
-impl EnvironmentalEventObserver for AdaptivePlanBasedSimulationLogic {
-    fn notify_event(&mut self, mut event: &mut AgentEvent, now: SimTime) {
-        match &mut event {
-            AgentEvent::WokeUp(w) => {
-                self.react_to_woke_up(w.comp_env, w.end_time, now);
-            }
-            AgentEvent::ActivityFinished() => self.replace_route(now),
-            _ => {}
-        }
-        self.delegate.notify_event(event, now);
-    }
-}
-
-impl AdaptivePlanBasedSimulationLogic {
-    pub fn new(person: InternalPerson) -> Self {
-        Self {
-            delegate: PlanBasedSimulationLogic::new(person),
-            route_receiver: None,
-        }
-    }
-
+impl AdaptiveLogic {
     fn react_to_woke_up(
         &mut self,
         comp_env: &mut ThreadLocalComputationalEnvironment,
@@ -346,8 +521,9 @@ impl AdaptivePlanBasedSimulationLogic {
             return;
         }
 
-        let preplan = self.next_leg().is_some()
+        let preplan = self.delegate.next_leg().is_some()
             && self
+                .delegate
                 .curr_act()
                 .attributes
                 .get::<u32>(crate::simulation::scenario::population::PREPLANNING_HORIZON)
@@ -431,7 +607,7 @@ impl AdaptivePlanBasedSimulationLogic {
 
         comp_env
             .get_service::<Sender<InternalRoutingRequest>>(ExternalServiceType::Routing(mode.clone()))
-            .unwrap_or_else(|| panic!("There is not service registered for routing of mode {} and agent id {}. Please make sure that you have started a corresponding thread. Next leg {:?}", mode, self.id(), self.next_leg()))
+            .unwrap_or_else(|| panic!("There is not service registered for routing of mode {} and agent id {}. Please make sure that you have started a corresponding thread. Next leg {:?}", mode, self.delegate.id(), self.delegate.next_leg()))
             .blocking_send(request)
             .expect("InternalRoutingRequest channel closed unexpectedly");
 
@@ -645,6 +821,174 @@ mod tests {
         }
     }
 
+    fn person_with_leg(route: InternalRoute) -> InternalPerson {
+        let mut plan = InternalPlan::default();
+        let mut first = make_activity("home", "l1");
+        first.max_dur = Some(Duration::from_secs(10));
+        plan.add_act(first);
+        let mut leg = make_leg("car");
+        leg.route = Some(route);
+        plan.add_leg(leg);
+        let mut last = make_activity("work", "l2");
+        last.max_dur = Some(Duration::from_secs(7));
+        plan.add_act(last);
+        InternalPerson::new(Id::create("person"), plan)
+    }
+
+    fn generic_route() -> crate::simulation::scenario::population::InternalGenericRoute {
+        crate::simulation::scenario::population::InternalGenericRoute::new(
+            Id::create("l1"),
+            Id::create("l2"),
+            Some(Duration::from_secs(10)),
+            Some(100.0),
+            None,
+        )
+    }
+
+    #[deterministic_id_test]
+    fn phases_preserve_times_and_materialize_the_complete_person() {
+        use crate::simulation::agents::agent::SimulationAgent;
+        for adaptive in [false, true] {
+            let person = person_with_leg(InternalRoute::Generic(generic_route()));
+            let expected = person.clone();
+            let mut agent = if adaptive {
+                SimulationAgent::new_adaptive_plan_based(person)
+            } else {
+                SimulationAgent::new_plan_based(person)
+            };
+            assert_eq!(
+                agent.activity().end_time(SimTime::default()),
+                SimTime::from_secs(10)
+            );
+            assert_eq!(
+                agent.activity().wakeup_time(SimTime::default()),
+                SimTime::from_secs(10)
+            );
+            agent.activity_mut().on_finished(SimTime::from_secs(10));
+            // Completion callbacks do not switch phase before the receiving engine runs.
+            assert!(matches!(agent.phase(), AgentPhase::Activity(_)));
+            agent.activity_mut().start_next_leg(SimTime::from_secs(10));
+            assert!(agent.leg().network_driver().is_none());
+            assert_eq!(agent.leg().curr_link_id(), Some(&Id::get_from_ext("l1")));
+            assert_eq!(
+                agent.teleportation().end_time(SimTime::from_secs(10)),
+                SimTime::from_secs(20)
+            );
+            agent
+                .teleportation_mut()
+                .begin_teleportation(SimTime::from_secs(10));
+            assert_eq!(agent.leg().curr_link_id(), Some(&Id::get_from_ext("l2")));
+            assert!(matches!(agent.phase(), AgentPhase::Leg(_)));
+            agent.leg_mut().start_next_activity(SimTime::from_secs(21));
+            assert_eq!(
+                agent.activity().end_time(SimTime::from_secs(100)),
+                SimTime::from_secs(28)
+            );
+            assert!(agent.activity().next_leg().is_none());
+            assert!(agent.activity().next_act().is_none());
+            assert_eq!(agent.into_person(), expected);
+        }
+    }
+
+    #[deterministic_id_test]
+    fn network_roles_follow_route_positions_including_round_trips_and_single_link_routes() {
+        use crate::simulation::agents::agent::SimulationAgent;
+        use crate::simulation::scenario::population::InternalNetworkRoute;
+        for adaptive in [false, true] {
+            for links in [vec!["l1"], vec!["l1", "l2"], vec!["l1", "l2", "l1"]] {
+                let generic = crate::simulation::scenario::population::InternalGenericRoute::new(
+                    Id::create("l1"),
+                    Id::create(links.last().unwrap()),
+                    Some(Duration::from_secs(10)),
+                    Some(100.0),
+                    None,
+                );
+                let route = InternalRoute::Network(InternalNetworkRoute::new(
+                    generic,
+                    links.iter().map(|id| Id::get_from_ext(id)).collect(),
+                ));
+                let person = person_with_leg(route);
+                let mut agent = if adaptive {
+                    SimulationAgent::new_adaptive_plan_based(person)
+                } else {
+                    SimulationAgent::new_plan_based(person)
+                };
+                agent.activity_mut().start_next_leg(SimTime::default());
+                assert!(agent.leg().teleportation().is_some());
+                for (index, link) in links.iter().enumerate() {
+                    let driver = agent.network_driver();
+                    assert_eq!(driver.curr_link_id().unwrap().external(), *link);
+                    assert_eq!(
+                        driver.is_wanting_to_arrive_on_current_link(),
+                        index + 1 == links.len()
+                    );
+                    assert_eq!(
+                        driver.peek_next_link_id().map(Id::external),
+                        links.get(index + 1).copied()
+                    );
+                    if index + 1 < links.len() {
+                        agent.network_driver_mut().leave_link(SimTime::default());
+                    }
+                }
+                agent
+                    .teleportation_mut()
+                    .begin_teleportation(SimTime::default());
+                assert_eq!(
+                    agent.network_driver().curr_link_id().unwrap().external(),
+                    *links.last().unwrap()
+                );
+            }
+        }
+    }
+
+    #[deterministic_id_test]
+    fn pt_routes_only_offer_teleportation_and_keep_their_metadata() {
+        use crate::simulation::agents::agent::SimulationAgent;
+        use crate::simulation::scenario::population::{
+            InternalPtRoute, InternalPtRouteDescription,
+        };
+        let route = InternalRoute::Pt(InternalPtRoute {
+            generic_delegate: generic_route(),
+            description: InternalPtRouteDescription {
+                transit_route_id: "route".into(),
+                boarding_time: Some(SimTime::from_secs(12)),
+                transit_line_id: "line".into(),
+                access_facility_id: "from".into(),
+                egress_facility_id: "to".into(),
+            },
+        });
+        let mut agent = SimulationAgent::new_plan_based(person_with_leg(route.clone()));
+        agent.activity_mut().start_next_leg(SimTime::default());
+        assert!(agent.leg().network_driver().is_none());
+        assert_eq!(agent.teleportation().route(), &route);
+        assert_eq!(agent.teleportation().destination_link(), route.end_link());
+        agent
+            .teleportation_mut()
+            .begin_teleportation(SimTime::default());
+        assert_eq!(agent.leg().curr_link_id(), Some(route.end_link()));
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Agent person: expected Leg phase, found Activity")]
+    fn wrong_phase_fails_at_the_capability_boundary() {
+        use crate::simulation::agents::agent::SimulationAgent;
+        let agent = SimulationAgent::new_plan_based(person_with_leg(InternalRoute::Generic(
+            generic_route(),
+        )));
+        agent.leg();
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Agent person: expected NetworkDriver role")]
+    fn missing_role_fails_at_the_capability_boundary() {
+        use crate::simulation::agents::agent::SimulationAgent;
+        let mut agent = SimulationAgent::new_plan_based(person_with_leg(InternalRoute::Generic(
+            generic_route(),
+        )));
+        agent.activity_mut().start_next_leg(SimTime::default());
+        agent.network_driver_mut();
+    }
+
     #[deterministic_id_test]
     fn test_replace_next_trip_basic() {
         // Plan: home --leg1--> work --leg2--> shop
@@ -663,8 +1007,11 @@ mod tests {
             request_id: Uuid::now_v7(),
         };
 
-        logic.replace_next_trip(response.clone(), SimTime::default());
+        logic
+            .inner
+            .replace_next_trip(response.clone(), SimTime::default());
         let elements = &logic
+            .inner
             .delegate
             .basic_agent_delegate
             .selected_plan()

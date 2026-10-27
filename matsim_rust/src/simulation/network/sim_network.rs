@@ -1,6 +1,5 @@
 use super::link::{LocalLink, SimLink, SplitInLink, SplitOutLink};
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{EventsManager, LinkEnterEventBuilder, LinkLeaveEventBuilder};
 use crate::simulation::id::Id;
@@ -48,6 +47,15 @@ impl<C: StableTypeId> From<IntSet<Id<C>>> for ActiveCache<C> {
 impl<C: StableTypeId + 'static> ActiveCache<C> {
     fn activate(&mut self, id: Id<C>) -> bool {
         self.active.insert(id)
+    }
+
+    fn activate_ref(&mut self, id: &Id<C>) -> bool {
+        // Most vehicles enter a link that is already active. Clone its ID only on insertion.
+        if self.active.contains(id) {
+            false
+        } else {
+            self.activate(id.clone())
+        }
     }
 
     fn deactivate(&mut self, id: &Id<C>) -> bool {
@@ -116,8 +124,8 @@ struct Candidate {
 #[derive(Debug, PartialEq)]
 enum FrontDecision {
     NoVehicle,
-    MoveNormally,
-    MoveAlthoughStuck,
+    MoveNormally(u64),
+    MoveAlthoughStuck(u64),
     Wait,
     Abort,
 }
@@ -694,9 +702,9 @@ impl SimNetworkPartition {
             return FrontDecision::Abort;
         }
         if out_link.is_available() {
-            FrontDecision::MoveNormally
+            FrontDecision::MoveNormally(next_id.internal())
         } else if in_link.is_veh_stuck(now) {
-            FrontDecision::MoveAlthoughStuck
+            FrontDecision::MoveAlthoughStuck(next_id.internal())
         } else {
             FrontDecision::Wait
         }
@@ -712,7 +720,8 @@ impl SimNetworkPartition {
     ) {
         loop {
             match Self::evaluate_front_vehicle(in_link_id, links, now) {
-                FrontDecision::MoveNormally | FrontDecision::MoveAlthoughStuck => {
+                FrontDecision::MoveNormally(next_link)
+                | FrontDecision::MoveAlthoughStuck(next_link) => {
                     let in_link = links.get_mut(in_link_id).unwrap();
                     let vehicle = in_link
                         .pop_veh_and_restart_stuck_timer(now)
@@ -722,6 +731,7 @@ impl SimNetworkPartition {
                         vehicle,
                         in_link_id,
                         in_link_active,
+                        next_link,
                         links,
                         active_links,
                         comp_env,
@@ -752,6 +762,7 @@ impl SimNetworkPartition {
         mut vehicle: SimulationVehicle,
         old_link_id: &Id<Link>,
         old_link_active: bool,
+        next_link: u64,
         links: &mut IntMap<Id<Link>, SimLink>,
         active_links: &mut ActiveCache<Link>,
         comp_env: &mut ThreadLocalComputationalEnvironment,
@@ -769,9 +780,15 @@ impl SimNetworkPartition {
                 .build()
                 .unwrap(),
         );
-        vehicle.notify_event(&mut AgentEvent::LeftLink(), now_time);
-        let new_link_id = vehicle.curr_link_id().unwrap().clone();
-        let new_link = links.get_mut(&new_link_id).unwrap();
+        vehicle.leave_link(now_time);
+        // Reuse the destination whose connectivity/capacity was checked before popping the
+        // vehicle. A driver commits its previously peeked link; release builds need no second
+        // phase/role projection or ID copy to discover the same destination again.
+        debug_assert_eq!(vehicle.curr_link_id().map(Id::internal), Some(next_link));
+        // A link whose to node equals its from node can be the old and the new link at once. In
+        // that case, the vehicle has just been pushed onto the old link, so it stays active.
+        let old_link_stays_active = old_link_active || next_link == old_link_id.internal();
+        let new_link = links.get_mut(&next_link).unwrap();
 
         // for out links, link enter event is published at receiving partition
         if let SimLink::Local(_) = new_link {
@@ -787,14 +804,10 @@ impl SimNetworkPartition {
 
         new_link.push_veh(vehicle, QStart, now);
 
-        // A link whose to node equals its from node can be the old and the new link at once. In
-        // that case, the vehicle has just been pushed onto the old link, so it stays active.
-        let old_link_stays_active = old_link_active || new_link_id == *old_link_id;
-
         // activate new link, unless it sleeps. A vehicle at the end of the queue does not change
         // when a sleeping link has to be moved.
         if !new_link.is_sleeping() {
-            active_links.activate(new_link_id);
+            active_links.activate_ref(new_link.id());
         }
 
         // deactivate old link if it is not active anymore
@@ -927,6 +940,68 @@ mod tests {
 
     fn test_vehicle(id: u64, route: Vec<&str>) -> SimulationVehicle {
         SimulationVehicle::from_parts(id, 0, 100.0, 1.0, test_utils::create_agent(id, route))
+    }
+
+    /// Measures the actual node/link hot path, excluding construction, ID creation and file I/O.
+    /// Run with `cargo test -p matsim-rust --release --lib agent_network_benchmark -- --ignored --nocapture --test-threads=1`.
+    /// Save the baseline test executable before changing the implementation to compare both binaries.
+    #[deterministic_id_test]
+    #[ignore = "release benchmark"]
+    fn agent_network_benchmark() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        assert!(
+            !cfg!(debug_assertions),
+            "Run this benchmark in release mode"
+        );
+        const LINKS: usize = 64;
+        const VEHICLES: u64 = 1024;
+        let samples = std::env::var("MATSIM_AGENT_BENCH_SAMPLES")
+            .map(|value| value.parse::<usize>().unwrap())
+            .unwrap_or(10);
+        let node_ids: Vec<_> = (0..=LINKS).map(|i| format!("node-{i}")).collect();
+        let link_ids: Vec<_> = (0..LINKS).map(|i| format!("link-{i}")).collect();
+        let route: Vec<_> = link_ids.iter().map(String::as_str).collect();
+        let mut global_network = Network::new();
+        add_test_nodes(
+            &mut global_network,
+            &node_ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        for i in 0..LINKS {
+            add_test_link(
+                &mut global_network,
+                &link_ids[i],
+                &node_ids[i],
+                &node_ids[i + 1],
+                100.0,
+                36_000_000.0,
+                100.0,
+            );
+        }
+        // Avoid storage-capacity congestion so that each sample performs the same link movements.
+        let mut config = test_utils::config();
+        config.qsim_mut().sample_size = 1000.0;
+        for sample in 0..samples + 3 {
+            let mut network =
+                SimNetworkPartition::from_network_for_test(&global_network, 0, &config);
+            let mut env = ThreadLocalComputationalEnvironment::default();
+            for id in 0..VEHICLES {
+                network.send_veh_en_route(test_vehicle(id, route.clone()), None, 0);
+            }
+            let mut ended = Vec::with_capacity(VEHICLES as usize);
+            let start = Instant::now();
+            for tick in 0..=2 * LINKS as u64 + 2 {
+                network.move_nodes(&mut env, tick);
+                ended.extend(network.move_links(&mut env, tick).vehicles_end_leg);
+            }
+            let elapsed = start.elapsed();
+            assert_eq!(ended.len(), VEHICLES as usize);
+            black_box(&ended);
+            if sample >= 3 {
+                println!("agent_network_ns={}", elapsed.as_nanos());
+            }
+        }
     }
 
     fn push_vehicle_to_queue(
