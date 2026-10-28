@@ -137,14 +137,6 @@ impl<T: StableTypeId + 'static> Hash for Id<T> {
     }
 }
 
-// IDs compare and hash by their internal number. Borrowing that same number permits typed
-// maps to reuse an already checked destination without cloning or resolving another ID.
-impl<T: StableTypeId> std::borrow::Borrow<u64> for Id<T> {
-    fn borrow(&self) -> &u64 {
-        &self.id.internal
-    }
-}
-
 impl<T: StableTypeId + 'static> Ord for Id<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.internal().cmp(&other.internal())
@@ -201,17 +193,6 @@ mod tests {
     use crate::simulation::id::{Id, UntypedId};
     use macros::deterministic_id_test;
     use std::sync::Arc;
-
-    #[deterministic_id_test]
-    fn typed_map_can_reuse_an_internal_id_for_lookup() {
-        let id = Id::<()>::create("link");
-        let mut map = nohash_hasher::IntMap::default();
-        map.insert(id.clone(), 7);
-        assert_eq!(map.get(&id.internal()), map.get(&id));
-        assert_eq!(map.get(&(id.internal() + 1)), None);
-        *map.get_mut(&id.internal()).unwrap() = 9;
-        assert_eq!(map.get(&id), Some(&9));
-    }
 
     #[deterministic_id_test]
     fn test_id_eq() {

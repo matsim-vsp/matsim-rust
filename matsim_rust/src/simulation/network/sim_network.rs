@@ -49,15 +49,6 @@ impl<C: StableTypeId + 'static> ActiveCache<C> {
         self.active.insert(id)
     }
 
-    fn activate_ref(&mut self, id: &Id<C>) -> bool {
-        // Most vehicles enter a link that is already active. Clone its ID only on insertion.
-        if self.active.contains(id) {
-            false
-        } else {
-            self.activate(id.clone())
-        }
-    }
-
     fn deactivate(&mut self, id: &Id<C>) -> bool {
         self.active.remove(id)
     }
@@ -124,8 +115,8 @@ struct Candidate {
 #[derive(Debug, PartialEq)]
 enum FrontDecision {
     NoVehicle,
-    MoveNormally(u64),
-    MoveAlthoughStuck(u64),
+    MoveNormally(Id<Link>),
+    MoveAlthoughStuck(Id<Link>),
     Wait,
     Abort,
 }
@@ -702,9 +693,9 @@ impl SimNetworkPartition {
             return FrontDecision::Abort;
         }
         if out_link.is_available() {
-            FrontDecision::MoveNormally(next_id.internal())
+            FrontDecision::MoveNormally(next_id.clone())
         } else if in_link.is_veh_stuck(now) {
-            FrontDecision::MoveAlthoughStuck(next_id.internal())
+            FrontDecision::MoveAlthoughStuck(next_id.clone())
         } else {
             FrontDecision::Wait
         }
@@ -762,7 +753,7 @@ impl SimNetworkPartition {
         mut vehicle: SimulationVehicle,
         old_link_id: &Id<Link>,
         old_link_active: bool,
-        next_link: u64,
+        next_link: Id<Link>,
         links: &mut IntMap<Id<Link>, SimLink>,
         active_links: &mut ActiveCache<Link>,
         comp_env: &mut ThreadLocalComputationalEnvironment,
@@ -783,11 +774,11 @@ impl SimNetworkPartition {
         vehicle.leave_link(now_time);
         // Reuse the destination whose connectivity/capacity was checked before popping the
         // vehicle. A driver commits its previously peeked link; release builds need no second
-        // phase/role projection or ID copy to discover the same destination again.
-        debug_assert_eq!(vehicle.curr_link_id().map(Id::internal), Some(next_link));
+        // phase/role projection to discover the same destination again.
+        debug_assert_eq!(vehicle.curr_link_id(), Some(&next_link));
         // A link whose to node equals its from node can be the old and the new link at once. In
         // that case, the vehicle has just been pushed onto the old link, so it stays active.
-        let old_link_stays_active = old_link_active || next_link == old_link_id.internal();
+        let old_link_stays_active = old_link_active || next_link == *old_link_id;
         let new_link = links.get_mut(&next_link).unwrap();
 
         // for out links, link enter event is published at receiving partition
@@ -807,7 +798,7 @@ impl SimNetworkPartition {
         // activate new link, unless it sleeps. A vehicle at the end of the queue does not change
         // when a sleeping link has to be moved.
         if !new_link.is_sleeping() {
-            active_links.activate_ref(new_link.id());
+            active_links.activate(next_link);
         }
 
         // deactivate old link if it is not active anymore

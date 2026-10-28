@@ -404,7 +404,7 @@ impl IndexableGraph for ForwardBackwardRoutingGraph {
         // Map link ids back to (forward) link indices
         link_ids
             .iter()
-            .map(|id| *self.forward_link_id_pos().get(*id).unwrap())
+            .map(|id| *self.forward_link_id_pos().get(id).unwrap())
             .collect()
     }
 

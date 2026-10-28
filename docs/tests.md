@@ -13,26 +13,6 @@ that the ID store is empty before the test starts and (2) run the test in serial
 If you need a test to be run exclusively in serial, it should be an integration test. This is also the case for tests
 where the logger is set during the test. As a convention, each integration test should be an `[deterministic_id_test]`.
 
-## Agent phases and network performance
-
-The phase API separates read-only capabilities from mutation and consumes mutable projections during
-a phase transition. Agent tests that create IDs use `#[deterministic_id_test]` as usual.
-
-The three-link simulation tests record an ordered event trace in addition to the normal event-file
-comparisons. The latter deliberately ignore ordering among simultaneous events and therefore cannot
-detect a changed activity/departure or link-leave/link-enter sequence. The ordered trace also covers
-zero-duration interaction activities; a separate test stops exactly at the final arrival to preserve
-the distinction between arriving and starting the final activity in the next tick.
-
-`agent_network_benchmark` measures node/link movement of 1,024 vehicles along 64 links.
-It prints nanosecond timings for ten samples after three warmups; `MATSIM_AGENT_BENCH_SAMPLES`
-sets the number of measured samples. Setup, agent/ID creation and output are outside the timed
-interval. Run it in release mode without concurrent builds:
-
-```shell
-cargo test -p matsim-rust --release --lib agent_network_benchmark -- --ignored --nocapture --test-threads=1
-```
-
 ## METIS tests
 
 The tests in `simulation::network::metis_partitioning` call the native METIS library. They used to be flaky and

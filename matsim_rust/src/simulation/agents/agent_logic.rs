@@ -39,6 +39,8 @@ struct PlanLogic {
     curr_plan_element: usize,
     curr_route_element: usize,
     activity_end_time: Option<SimTime>,
+    // Set when a leg starts. Within-day replanning replaces only legs that have not started yet,
+    // so the route of the current leg cannot change before the next transition.
     has_network_route: bool,
 }
 
