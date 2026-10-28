@@ -176,7 +176,11 @@ pub struct KinematicStorageCap {
 
 impl KinematicStorageCap {
     fn update(&mut self, now: Tick) {
-        while self.pending.front().is_some_and(|gap| gap.available_at <= now) {
+        while self
+            .pending
+            .front()
+            .is_some_and(|gap| gap.available_at <= now)
+        {
             self.reserved.used -= self.pending.pop_front().unwrap().pce;
         }
     }
