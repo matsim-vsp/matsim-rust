@@ -21,8 +21,8 @@ def main(directory):
     results = {label: summaries(directory / file) for label, file in labels}
     print("# Berlin v6.4, 0.1%: same-runner performance comparison\n")
     print("One warmup and three fresh measured runs per row; release builds, no event files. "
-          "Completed trips count PersonArrival events of all modes; link entries count LinkEnter events.\n")
-    print("| Source / dynamics | Partitions | Median (s) | Min (s) | Max (s) | Range (s) | Completed trips | Link entries |")
+          "Completed legs count PersonArrival events of all modes; link entries count LinkEnter events.\n")
+    print("| Source / dynamics | Partitions | Median (s) | Min (s) | Max (s) | Range (s) | Completed legs | Link entries |")
     print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for label, _ in labels:
         for parts, row in sorted(results[label].items()):

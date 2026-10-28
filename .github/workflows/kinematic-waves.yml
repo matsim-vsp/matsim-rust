@@ -1,12 +1,7 @@
 name: Kinematic waves validation
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'matsim_rust/src/simulation/network/**'
-      - 'matsim_rust/src/simulation/controller/berlin_performance.rs'
-      - '.github/workflows/kinematic-waves.yml'
+  workflow_dispatch:
 
 jobs:
   berlin-performance:
@@ -76,6 +71,7 @@ jobs:
           cargo test -p matsim-rust --release --features http --lib berlin_performance -- --ignored --nocapture --test-threads=1 | tee performance-results/kinematic-after.log
       - name: Compare measurements and check whitespace
         run: |
+          set -o pipefail
           python3 scripts/summarize_berlin_performance.py performance-results | tee performance-results/report.md
           git diff --check
       - uses: actions/upload-artifact@v4

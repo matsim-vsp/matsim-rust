@@ -51,6 +51,9 @@ for Kinematic Waves.
 
 ## Berlin performance measurement
 
+The initial [Kinematic Waves comparison](performance/kinematic-waves.md) records the six measured
+combinations, raw runtimes, result counts, source revisions, machine, compiler and input hashes.
+
 The ignored `controller::controller::berlin_performance::berlin_performance` library test uses
 the existing Berlin-v6.4 0.1% scenario and one iteration. It refuses debug builds. For each of
 one and two partitions it loads fresh simulation state for one warmup and three measurements.
@@ -70,7 +73,7 @@ cargo test -p matsim-rust --release --lib berlin_performance -- --ignored --noca
 MATSIM_BENCH_DYNAMICS=KinematicWaves cargo test -p matsim-rust --release --lib berlin_performance -- --ignored --nocapture --test-threads=1
 ```
 
-`.github/workflows/kinematic-waves.yml` executes the unchanged Queue physics from `b943ec9`
+The manually dispatched `.github/workflows/kinematic-waves.yml` executes the unchanged Queue physics from `b943ec9`
 (the benchmark-only commit based on `7fc3125`) and the current source on the same runner.
 It copies the current benchmark harness to the baseline so harness fixes are identical on both
 sides; the exact harness diff is retained. The workflow then runs all correctness checks and the
