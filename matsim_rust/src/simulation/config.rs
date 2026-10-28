@@ -1706,7 +1706,10 @@ mod tests {
         assert_eq!(waves, parsed);
         let mut config = Config::default();
         config.apply_overrides(&[("qsim.traffic_dynamics".into(), "KinematicWaves".into())]);
-        assert_eq!(TrafficDynamics::KinematicWaves, config.qsim().traffic_dynamics);
+        assert_eq!(
+            TrafficDynamics::KinematicWaves,
+            config.qsim().traffic_dynamics
+        );
         config.apply_overrides(&[("qsim.traffic_dynamics".into(), "Queue".into())]);
         assert_eq!(TrafficDynamics::Queue, config.qsim().traffic_dynamics);
     }
@@ -1714,10 +1717,14 @@ mod tests {
     #[test]
     fn deprecated_simulation_preserves_traffic_dynamics() {
         let mut config: super::Config = serde_yaml::from_str(
-            "modules:\n  simulation:\n    type: Simulation\n    traffic_dynamics: KinematicWaves\n"
-        ).unwrap();
+            "modules:\n  simulation:\n    type: Simulation\n    traffic_dynamics: KinematicWaves\n",
+        )
+        .unwrap();
         config.ensure_defaults();
-        assert_eq!(super::TrafficDynamics::KinematicWaves, config.qsim().traffic_dynamics);
+        assert_eq!(
+            super::TrafficDynamics::KinematicWaves,
+            config.qsim().traffic_dynamics
+        );
     }
     use crate::simulation::config;
     use crate::simulation::config::Output;

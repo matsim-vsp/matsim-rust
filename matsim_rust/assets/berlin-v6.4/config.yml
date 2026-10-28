@@ -35,6 +35,8 @@ modules:
     end_time: 129600
     ticks_per_second: 1
     sample_size: 0.001
+    # Opt in with KinematicWaves; Queue preserves the event-file reference behavior.
+    traffic_dynamics: Queue
     stuck_threshold: 30
     main_modes:
       - car

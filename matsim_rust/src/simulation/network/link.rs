@@ -7,7 +7,9 @@ use crate::simulation::events::{
 };
 use crate::simulation::id::Id;
 use crate::simulation::network::flow_cap::Flowcap;
-use crate::simulation::network::storage_cap::{StorageCap, StorageCapacityDefinition, StorageRelease};
+use crate::simulation::network::storage_cap::{
+    StorageCap, StorageCapacityDefinition, StorageRelease,
+};
 use crate::simulation::network::stuck_timer::StuckTimer;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::network::Node;
@@ -557,7 +559,10 @@ impl LocalLink {
 
     fn release_storage(&mut self, pce: f64, now: Tick) {
         if let Some(releases) = &mut self.new_releases {
-            releases.push(StorageRelease { pce, available_at: self.storage_cap.release_tick(now) });
+            releases.push(StorageRelease {
+                pce,
+                available_at: self.storage_cap.release_tick(now),
+            });
         }
         self.storage_cap.release(pce, now);
     }
@@ -710,7 +715,10 @@ impl SplitInLink {
     }
 
     pub(super) fn drain_storage_releases(&mut self) -> Option<std::vec::Drain<'_, StorageRelease>> {
-        self.local_link.new_releases.as_mut().map(|releases| releases.drain(..))
+        self.local_link
+            .new_releases
+            .as_mut()
+            .map(|releases| releases.drain(..))
     }
 }
 

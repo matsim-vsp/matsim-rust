@@ -207,7 +207,7 @@ mod tests {
     use crate::simulation::network::sim_network::StorageUpdate;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Network, Node};
-    use crate::simulation::time::SimTime;
+    use crate::simulation::time::{SimTime, Tick};
     use crate::simulation::vehicles::SimulationVehicle;
     use crate::test_utils::create_agent;
     use macros::deterministic_id_test;
@@ -455,18 +455,31 @@ mod tests {
         execute_test(|broker| {
             if broker.rank() == 2 {
                 for (released, at) in [(1., 10), (2.5, 20), (0.5, 20)] {
-                    broker.add_cap_update(StorageUpdate {
-                        link_id: Id::create("4"), from_part: 1, released,
-                        available_at: Tick::new(at),
-                    }, 0);
+                    broker.add_cap_update(
+                        StorageUpdate {
+                            link_id: Id::create("4"),
+                            from_part: 1,
+                            released,
+                            available_at: Tick::new(at),
+                        },
+                        0,
+                    );
                 }
             }
             let messages = broker.send_recv(0);
-            let updates: Vec<_> = messages.iter().flat_map(|msg| msg.storage_capacities()).collect();
+            let updates: Vec<_> = messages
+                .iter()
+                .flat_map(|msg| msg.storage_capacities())
+                .collect();
             if broker.rank() == 1 {
                 assert_eq!(3, updates.len());
-                assert_eq!(vec![(1., 10), (2.5, 20), (0.5, 20)],
-                    updates.iter().map(|cap| (cap.released, cap.available_at.value())).collect::<Vec<_>>());
+                assert_eq!(
+                    vec![(1., 10), (2.5, 20), (0.5, 20)],
+                    updates
+                        .iter()
+                        .map(|cap| (cap.released, cap.available_at.value()))
+                        .collect::<Vec<_>>()
+                );
                 assert!(updates.iter().all(|cap| cap.from_part == 2));
             } else {
                 assert!(updates.is_empty());

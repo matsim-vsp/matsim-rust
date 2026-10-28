@@ -9,12 +9,25 @@ fn link(length: f64, sample: f64, ticks: u32) -> LocalLink {
     config.sample_size = sample;
     config.ticks_per_second = ticks;
     // q_in = (1 / 10) / (0.24 + 0.16) = 0.25 PCE/s before sampling.
-    LocalLink::build(Id::create("waves-link"), 900., 6.25, 1., length, 10., &config,
-        Id::create("from"), Id::create("to"))
+    LocalLink::build(
+        Id::create("waves-link"),
+        900.,
+        6.25,
+        1.,
+        length,
+        10.,
+        &config,
+        Id::create("from"),
+        Id::create("to"),
+    )
 }
 
 fn vehicle(id: u64, pce: f64, arrives: bool) -> SimulationVehicle {
-    let route = if arrives { vec!["waves-link"] } else { vec!["waves-link", "next"] };
+    let route = if arrives {
+        vec!["waves-link"]
+    } else {
+        vec!["waves-link", "next"]
+    };
     SimulationVehicle::from_parts(id, 0, 100., pce, test_utils::create_agent(id, route))
 }
 
@@ -92,8 +105,11 @@ fn local_and_split_storage_admit_on_identical_ticks() {
                 let mut local = link(length, sample, ticks);
                 let mut incoming = SplitInLink::new(0, link(length, sample, ticks));
                 let mut outgoing = SplitOutLink {
-                    id: local.id.clone(), from: local.from.clone(), to_part: 1,
-                    q: VecDeque::new(), storage_cap: local.storage_cap.clone(),
+                    id: local.id.clone(),
+                    from: local.from.clone(),
+                    to_part: 1,
+                    q: VecDeque::new(),
+                    storage_cap: local.storage_cap.clone(),
                     inflow_cap: local.inflow_cap.clone(),
                 };
                 // Fill storage, including oversubscription by a large vehicle. Both admission
@@ -102,10 +118,14 @@ fn local_and_split_storage_admit_on_identical_ticks() {
                 local.push_veh(vehicle(1, pce, true), 0, LinkPosition::QStart);
                 outgoing.push_veh(vehicle(1, pce, true), LinkPosition::QStart, Tick::zero());
                 assert_eq!(1, outgoing.take_veh().len());
-                incoming.local_link.push_veh(vehicle(1, pce, true), 0, LinkPosition::QStart);
+                incoming
+                    .local_link
+                    .push_veh(vehicle(1, pce, true), 0, LinkPosition::QStart);
                 let due = local.q.front().unwrap().earliest_exit_time;
                 local.do_sim_step(due, &mut Default::default());
-                incoming.local_link.do_sim_step(due, &mut Default::default());
+                incoming
+                    .local_link
+                    .do_sim_step(due, &mut Default::default());
                 assert!(!incoming.local_link.is_active());
                 let releases: Vec<_> = incoming.drain_storage_releases().unwrap().collect();
                 assert_eq!(1, releases.len());
@@ -114,12 +134,26 @@ fn local_and_split_storage_admit_on_identical_ticks() {
                     outgoing.apply_storage_cap_update(release.pce, release.available_at);
                 }
                 assert!(incoming.drain_storage_releases().unwrap().next().is_none());
+                let gap_arrival = local.storage_cap.release_tick(due);
+                assert!(!local.storage_cap.is_available(due));
+                assert!(!outgoing.storage_cap.is_available(due));
                 let mut first = None;
                 for now in due.value() + 1..=10_000 {
+                    // Check storage separately so a depleted inflow budget cannot hide an
+                    // extra transport tick, especially on very short links.
+                    let storage = local.storage_cap.is_available(Tick::new(now));
+                    assert_eq!(now >= gap_arrival.value(), storage);
+                    assert_eq!(storage, outgoing.storage_cap.is_available(Tick::new(now)));
                     let available = local.is_available(now);
-                    assert_eq!(available, outgoing.is_available(Tick::new(now)),
-                        "length={length}, ticks={ticks}, sample={sample}, now={now}");
-                    if available { first = Some(now); break; }
+                    assert_eq!(
+                        available,
+                        outgoing.is_available(Tick::new(now)),
+                        "length={length}, ticks={ticks}, sample={sample}, now={now}"
+                    );
+                    if available {
+                        first = Some(now);
+                        break;
+                    }
                 }
                 assert!(first.is_some());
                 assert_eq!(0., local.storage_cap.used());

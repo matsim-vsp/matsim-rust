@@ -3,8 +3,8 @@ use crate::simulation::config;
 use crate::simulation::config::TrafficDynamics;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::{Link, Network};
-use nohash_hasher::IntMap;
 use crate::simulation::time::{SimClock, Tick};
+use nohash_hasher::IntMap;
 use std::collections::VecDeque;
 
 use super::STORAGE_CAPACITY_USED_IN_QSIM;
@@ -30,8 +30,15 @@ impl StorageCapacityDefinition {
         effective_cell_size: f64,
         free_speed: f64,
     ) -> Self {
-        Self::build_with_dynamics(length, perm_lanes, capacity_h, sample_size,
-            effective_cell_size, free_speed, &config::QSim::default())
+        Self::build_with_dynamics(
+            length,
+            perm_lanes,
+            capacity_h,
+            sample_size,
+            effective_cell_size,
+            free_speed,
+            &config::QSim::default(),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -65,11 +72,16 @@ impl StorageCapacityDefinition {
             original: max_storage_cap,
             // A release in the link phase is usable in a later node phase. Rounding upwards
             // prevents early release; a minimum of one tick also covers zero-length links.
-            gap_travel_ticks: kinematic.then(|| SimClock::new(config.ticks_per_second)
-                .secs_to_ticks_ceil(gap_travel_time).max(Tick::new(1))),
-            inflow_per_tick: kinematic.then(||
+            gap_travel_ticks: kinematic.then(|| {
+                SimClock::new(config.ticks_per_second)
+                    .secs_to_ticks_ceil(gap_travel_time)
+                    .max(Tick::new(1))
+            }),
+            inflow_per_tick: kinematic.then(|| {
                 (perm_lanes / effective_cell_size) / (1.0 / GAP_SPEED + 1.0 / free_speed)
-                    * sample_size / f64::from(config.ticks_per_second)),
+                    * sample_size
+                    / f64::from(config.ticks_per_second)
+            }),
         }
     }
 
@@ -162,6 +174,14 @@ pub struct KinematicStorageCap {
     pending: VecDeque<StorageRelease>,
 }
 
+impl KinematicStorageCap {
+    fn update(&mut self, now: Tick) {
+        while self.pending.front().is_some_and(|gap| gap.available_at <= now) {
+            self.reserved.used -= self.pending.pop_front().unwrap().pce;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct StorageRelease {
     pub pce: f64,
@@ -236,6 +256,11 @@ impl StorageCap {
     ///
     /// This method should be called when a vehicle leaves a link
     pub fn release(&mut self, value: f64, now: Tick) {
+        // SplitInLinks never perform admission queries. Expiring older gaps on a new release
+        // bounds their bookkeeping without keeping them active just for moving gaps.
+        if let Self::Kinematic(cap) = self {
+            cap.update(now);
+        }
         self.release_at(value, self.release_tick(now));
     }
 
@@ -254,10 +279,16 @@ impl StorageCap {
                 let release = StorageRelease { pce, available_at };
                 // Releases on one link normally arrive in order. Also accept batches received
                 // out of order without hiding an earlier gap behind a later one.
-                if cap.pending.back().is_none_or(|gap| gap.available_at <= available_at) {
+                if cap
+                    .pending
+                    .back()
+                    .is_none_or(|gap| gap.available_at <= available_at)
+                {
                     cap.pending.push_back(release);
                 } else {
-                    let index = cap.pending.partition_point(|gap| gap.available_at <= available_at);
+                    let index = cap
+                        .pending
+                        .partition_point(|gap| gap.available_at <= available_at);
                     cap.pending.insert(index, release);
                 }
             }
@@ -269,9 +300,7 @@ impl StorageCap {
         let cap = match self {
             Self::Queue(cap) => cap,
             Self::Kinematic(cap) => {
-                while cap.pending.front().is_some_and(|gap| gap.available_at <= now) {
-                    cap.reserved.used -= cap.pending.pop_front().unwrap().pce;
-                }
+                cap.update(now);
                 &mut cap.reserved
             }
         };
@@ -349,8 +378,12 @@ mod test {
     #[test]
     fn gap_duration_rounds_up_including_exact_and_short_links() {
         for ticks in [1, 4, 10] {
-            for (length, expected) in [(0., 1), (0.01, 1), (25., 6 * ticks as u64),
-                (25.01, 6 * ticks as u64 + 1)] {
+            for (length, expected) in [
+                (0., 1),
+                (0.01, 1),
+                (25., 6 * ticks as u64),
+                (25.01, 6 * ticks as u64 + 1),
+            ] {
                 let definition = kinematic_definition(length, 1., ticks);
                 assert_eq!(Some(Tick::new(expected)), definition.gap_travel_ticks);
                 let mut cap = StorageCap::from_definition(&definition);
@@ -368,6 +401,21 @@ mod test {
         cap.consume(cap.max());
         cap.release(1., Tick::new(5));
         assert!(cap.is_available(Tick::new(5)));
+    }
+
+    #[test]
+    fn receiver_bookkeeping_is_bounded_without_admission_queries() {
+        let mut cap = StorageCap::from_definition(&kinematic_definition(25., 1., 1));
+        for now in 0..1_000 {
+            cap.consume(1.);
+            cap.release(1., Tick::new(now));
+        }
+        let StorageCap::Kinematic(state) = &cap else {
+            unreachable!()
+        };
+        assert_eq!(6, state.pending.len());
+        assert!(cap.is_available(Tick::new(2_000)));
+        assert_eq!(0., cap.used());
     }
 
     #[test]

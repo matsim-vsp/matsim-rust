@@ -30,7 +30,10 @@ fn berlin_performance() {
             expected_counts = Some(counts);
             println!(
                 "BERLIN_RUN dynamics={dynamics} parts={parts} run={run} warmup={} seconds={:.6} completed_trips={} link_entries={}",
-                run == 0, elapsed.as_secs_f64(), counts.completed_trips, counts.link_entries
+                run == 0,
+                elapsed.as_secs_f64(),
+                counts.completed_trips,
+                counts.link_entries
             );
             if run > 0 {
                 measurements.push(elapsed.as_secs_f64());
@@ -40,8 +43,12 @@ fn berlin_performance() {
         let counts = expected_counts.unwrap();
         println!(
             "BERLIN_SUMMARY dynamics={dynamics} parts={parts} median={:.6} min={:.6} max={:.6} range={:.6} completed_trips={} link_entries={}",
-            measurements[1], measurements[0], measurements[2],
-            measurements[2] - measurements[0], counts.completed_trips, counts.link_entries
+            measurements[1],
+            measurements[0],
+            measurements[2],
+            measurements[2] - measurements[0],
+            counts.completed_trips,
+            counts.link_entries
         );
     }
 }
@@ -66,33 +73,37 @@ fn run_once(parts: u32, dynamics: &str) -> (Duration, Counts) {
     let mut listeners: HashMap<u32, Vec<Box<WorkerListenerRegisterFunction>>> = HashMap::new();
     for rank in 0..parts {
         let totals = totals.clone();
-        listeners.insert(rank, vec![Box::new(move |events, mobsim, _, _| {
-            // No cross-partition lock in either per-vehicle callback.
-            let counts = Rc::new(Cell::new(Counts::default()));
-            let arrivals = counts.clone();
-            events.on::<PersonArrivalEvent, _>(move |_| {
-                let mut count = arrivals.get();
-                count.completed_trips += 1;
-                arrivals.set(count);
-            });
-            let entries = counts.clone();
-            events.on::<LinkEnterEvent, _>(move |_| {
-                let mut count = entries.get();
-                count.link_entries += 1;
-                entries.set(count);
-            });
-            mobsim.on_event(move |event| {
-                if matches!(&event.payload, MobsimEvent::BeforeCleanup) {
-                    let mut total = totals.lock().unwrap();
-                    total.completed_trips += counts.get().completed_trips;
-                    total.link_entries += counts.get().link_entries;
-                }
-            });
-        })]);
+        listeners.insert(
+            rank,
+            vec![Box::new(move |events, mobsim, _, _| {
+                // No cross-partition lock in either per-vehicle callback.
+                let counts = Rc::new(Cell::new(Counts::default()));
+                let arrivals = counts.clone();
+                events.on::<PersonArrivalEvent, _>(move |_| {
+                    let mut count = arrivals.get();
+                    count.completed_trips += 1;
+                    arrivals.set(count);
+                });
+                let entries = counts.clone();
+                events.on::<LinkEnterEvent, _>(move |_| {
+                    let mut count = entries.get();
+                    count.link_entries += 1;
+                    entries.set(count);
+                });
+                mobsim.on_event(move |event| {
+                    if matches!(&event.payload, MobsimEvent::BeforeCleanup) {
+                        let mut total = totals.lock().unwrap();
+                        total.completed_trips += counts.get().completed_trips;
+                        total.link_entries += counts.get().link_entries;
+                    }
+                });
+            })],
+        );
     }
 
     // Reading, METIS, plan preparation, partition construction and worker startup are outside
-    // the timer. Every call owns a fresh scenario, capacities, population and worker pool.
+    // the timer. Worker initialization on the first command is part of run_mobsim. Every call
+    // owns a fresh scenario, capacities, population and worker pool.
     let scenario = Scenario::load(config);
     let mut controller = ControllerBuilder::default_with_scenario(scenario)
         .scoring_function(Box::new(scoring::OnlyTravelTimeDependentScoring))
@@ -100,8 +111,13 @@ fn run_once(parts: u32, dynamics: &str) -> (Duration, Counts) {
         .build()
         .unwrap();
     prepare_for_mobsim(&mut controller.scenario, &controller.trip_router).unwrap();
-    let inputs = controller.scenario.split_for_mobsim(&controller.link_storage_capacities);
-    let output = io::resolve_path(controller.config.context(), &controller.config.output().output_dir);
+    let inputs = controller
+        .scenario
+        .split_for_mobsim(&controller.link_storage_capacities);
+    let output = io::resolve_path(
+        controller.config.context(),
+        &controller.config.output().output_dir,
+    );
     prepare_output_directory(&output, controller.config.output().overwrite_files).unwrap();
     fs::create_dir_all(output.join("logs")).unwrap();
     let mut workers = controller.start_mobsim_workers();
