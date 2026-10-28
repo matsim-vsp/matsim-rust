@@ -1,6 +1,6 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::EndTime;
 use crate::simulation::agents::agent::SimulationAgent;
+use crate::simulation::agents::{EndTime, TransitTeleportation};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::{
     emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
@@ -15,7 +15,7 @@ use crate::simulation::messaging::partition_change::{
 };
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
-use crate::simulation::scenario::population::{InternalPerson, InternalRoute};
+use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::simulation::Simulation;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
@@ -83,7 +83,7 @@ impl TeleportationEngine {
     ) {
         let now_time = self.clock.tick_to_time(now);
         agent.teleportation_mut().begin_teleportation(now_time);
-        let end_time = agent.teleportation().end_time(now_time);
+        let end_time = agent.teleportation().arrival_time(now_time);
         let teleportation = TeleportedAgent::new(agent, end_time);
 
         if Simulation::is_local_route(teleportation.agent(), net_message_broker) {
@@ -161,10 +161,9 @@ impl TeleportationEngine {
         for teleporting_agent in &mut teleportation_agents {
             let agent = teleporting_agent.agent();
 
-            match agent.teleportation().route() {
-                InternalRoute::Generic(_) => self.emit_travelled(now, agent),
-                InternalRoute::Network(_) => self.emit_travelled(now, agent),
-                InternalRoute::Pt(_) => self.emit_travelled_with_pt(now, agent),
+            match agent.teleportation().transit() {
+                Some(transit) => self.emit_travelled_with_pt(now, agent, transit),
+                None => self.emit_travelled(now, agent),
             }
         }
         teleportation_agents
@@ -175,16 +174,14 @@ impl TeleportationEngine {
 
     fn emit_travelled(&mut self, now: Tick, agent: &SimulationAgent) {
         let now_time = self.clock.tick_to_time(now);
-        let teleportation = agent.teleportation();
-        let route = teleportation.route();
         self.comp_env.events_manager_borrow_mut().process_event(
             &TeleportationArrivalEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .mode(teleportation.mode().clone())
+                .mode(agent.leg().mode().clone())
                 .distance(
-                    route
-                        .as_generic()
+                    agent
+                        .teleportation()
                         .distance()
                         .expect("Route distance needs to be set."),
                 )
@@ -193,46 +190,29 @@ impl TeleportationEngine {
         );
     }
 
-    fn emit_travelled_with_pt(&mut self, now: Tick, agent: &SimulationAgent) {
+    fn emit_travelled_with_pt(
+        &mut self,
+        now: Tick,
+        agent: &SimulationAgent,
+        transit: TransitTeleportation<'_>,
+    ) {
         let now_time = self.clock.tick_to_time(now);
-        let teleportation = agent.teleportation();
-        let route = teleportation.route();
-        let transit_line_id =
-            Id::<String>::get_from_ext(route.as_pt().unwrap().description.transit_line_id.as_str());
-        let transit_route_id = Id::<String>::get_from_ext(
-            route.as_pt().unwrap().description.transit_route_id.as_str(),
-        );
-        let boarding_time = route
-            .as_pt()
-            .unwrap()
-            .description
+        let transit_line_id = Id::<String>::get_from_ext(transit.line);
+        let transit_route_id = Id::<String>::get_from_ext(transit.route);
+        let boarding_time = transit
             .boarding_time
             .expect("Boarding time needs to be set.");
-        let access_facility = Id::<String>::get_from_ext(
-            route
-                .as_pt()
-                .unwrap()
-                .description
-                .access_facility_id
-                .as_str(),
-        );
-        let egress_facility = Id::<String>::get_from_ext(
-            route
-                .as_pt()
-                .unwrap()
-                .description
-                .egress_facility_id
-                .as_str(),
-        );
+        let access_facility = Id::<String>::get_from_ext(transit.access_facility);
+        let egress_facility = Id::<String>::get_from_ext(transit.egress_facility);
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PtTeleportationArrivalEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .mode(teleportation.mode().clone())
+                .mode(agent.leg().mode().clone())
                 .distance(
-                    route
-                        .as_generic()
+                    agent
+                        .teleportation()
                         .distance()
                         .expect("Route distance needs to be set."),
                 )
@@ -253,8 +233,8 @@ mod tests {
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent::SimulationAgent;
     use crate::simulation::agents::{
-        AgentPhase, AgentPhaseMut, EndTime, LegCommands, LegLogic, LegMut, SimulationAgentLogic,
-        TeleportationCommands, TeleportationLogic,
+        AgentPhase, AgentPhaseMut, LegLogic, LegMut, NetworkDriverLogic, SimulationAgentLogic,
+        TeleportationLogic, TransitTeleportation,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
@@ -398,12 +378,6 @@ mod tests {
         started: Arc<AtomicUsize>,
     }
 
-    impl EndTime for CountingTeleportationLogic {
-        fn end_time(&self, now: SimTime) -> SimTime {
-            self.delegate.teleportation().end_time(now)
-        }
-    }
-
     impl Identifiable<InternalPerson> for CountingTeleportationLogic {
         fn id(&self) -> &Id<InternalPerson> {
             self.delegate.id()
@@ -424,39 +398,48 @@ mod tests {
     }
 
     impl LegLogic for CountingTeleportationLogic {
-        fn curr_leg(&self) -> &InternalLeg {
-            self.delegate.leg().curr_leg()
+        fn mode(&self) -> &Id<String> {
+            self.delegate.leg().mode()
         }
-        fn route(&self) -> &InternalRoute {
-            self.delegate.leg().route()
+        fn routing_mode(&self) -> Option<&Id<String>> {
+            self.delegate.leg().routing_mode()
+        }
+        fn departure_link(&self) -> &Id<Link> {
+            self.delegate.leg().departure_link()
         }
         fn curr_link_id(&self) -> Option<&Id<Link>> {
             self.delegate.leg().curr_link_id()
         }
+        fn network_driver(&self) -> Option<&dyn NetworkDriverLogic> {
+            None
+        }
+        fn network_driver_mut(&mut self) -> Option<&mut dyn NetworkDriverLogic> {
+            None
+        }
         fn teleportation(&self) -> Option<&dyn TeleportationLogic> {
             Some(self)
         }
-    }
-
-    impl LegCommands for CountingTeleportationLogic {
+        fn teleportation_mut(&mut self) -> Option<&mut dyn TeleportationLogic> {
+            Some(self)
+        }
         fn start_next_activity(&mut self, now: SimTime) {
             self.delegate.leg_mut().start_next_activity(now);
-        }
-        fn teleportation_mut(&mut self) -> Option<&mut dyn TeleportationCommands> {
-            Some(self)
         }
     }
 
     impl TeleportationLogic for CountingTeleportationLogic {
-        fn mode(&self) -> &Id<String> {
-            self.delegate.teleportation().mode()
+        fn destination_link(&self) -> &Id<Link> {
+            self.delegate.teleportation().destination_link()
         }
-        fn route(&self) -> &InternalRoute {
-            self.delegate.teleportation().route()
+        fn arrival_time(&self, departure: SimTime) -> SimTime {
+            self.delegate.teleportation().arrival_time(departure)
         }
-    }
-
-    impl TeleportationCommands for CountingTeleportationLogic {
+        fn distance(&self) -> Option<f64> {
+            self.delegate.teleportation().distance()
+        }
+        fn transit(&self) -> Option<TransitTeleportation<'_>> {
+            self.delegate.teleportation().transit()
+        }
         fn begin_teleportation(&mut self, now: SimTime) {
             self.started.fetch_add(1, Ordering::SeqCst);
             self.delegate.teleportation_mut().begin_teleportation(now);

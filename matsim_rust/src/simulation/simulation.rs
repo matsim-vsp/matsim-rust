@@ -91,13 +91,13 @@ where
         let mut events = agents
             .iter()
             .filter_map(|agent| match agent.phase() {
-                AgentPhase::Activity(activity) if activity.next_leg().is_none() => None,
+                AgentPhase::Activity(activity) if !activity.has_next_leg() => None,
                 AgentPhase::Leg(leg) => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
                         .person(agent.id().clone())
                         .link(leg.curr_link_id().cloned())
-                        .leg_mode(Some(leg.curr_leg().mode.clone()))
+                        .leg_mode(Some(leg.mode().clone()))
                         .build()
                         .unwrap(),
                 ),
@@ -140,8 +140,7 @@ where
         agent: &SimulationAgent,
         message_broker: &NetMessageBroker<C>,
     ) -> bool {
-        let route = agent.teleportation().route();
-        let to = message_broker.rank_for_link(route.end_link());
+        let to = message_broker.rank_for_link(agent.teleportation().destination_link());
         message_broker.rank() == to
     }
 }

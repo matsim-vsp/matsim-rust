@@ -62,7 +62,7 @@ fn emit_partition_enter_events_for_vehicle(
         .process_event(PartitionEvent::VehicleEntersPartition(
             VehicleEntersPartitionEvent {
                 vehicle_id: vehicle.id().clone(),
-                network_mode: vehicle.driver().network_driver().mode().clone(),
+                network_mode: vehicle.driver().leg().mode().clone(),
                 from,
                 time: now,
             },

@@ -378,7 +378,7 @@ impl LocalLink {
                     .link(self.id.clone())
                     .person(v.driver().id().clone())
                     .time(now_time)
-                    .network_mode(v.driver().network_driver().mode().clone())
+                    .network_mode(v.driver().leg().mode().clone())
                     .build()
                     .unwrap(),
             );
@@ -484,7 +484,7 @@ impl LocalLink {
                 .link(self.id.clone())
                 .person(vehicle.driver().id().clone())
                 .time(now_time)
-                .network_mode(vehicle.driver().network_driver().mode().clone())
+                .network_mode(vehicle.driver().leg().mode().clone())
                 .build()
                 .unwrap(),
         );

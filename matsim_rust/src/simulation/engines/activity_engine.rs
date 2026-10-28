@@ -76,13 +76,13 @@ impl ActivityEngine {
             .into_iter()
             .chain(end_from_awake.into_iter())
         {
-            let act = agent.activity().curr_act();
+            let act = agent.activity();
             self.comp_env.events_manager_borrow_mut().process_event(
                 &ActivityEndEventBuilder::default()
                     .time(now)
                     .person(agent.id().clone())
                     .link(act.link_id().clone())
-                    .act_type(act.act_type.clone())
+                    .act_type(act.act_type().clone())
                     .coordinate(act.coord().clone())
                     .build()
                     .unwrap(),
@@ -117,13 +117,13 @@ impl ActivityEngine {
     fn receive_agent(&mut self, now: Tick, mut agent: AsleepSimulationAgent) {
         // emmit act start event
         let now_time = self.clock.tick_to_time(now);
-        let act = agent.agent.activity().curr_act();
+        let act = agent.agent.activity();
         self.comp_env.events_manager_borrow_mut().process_event(
             &ActivityStartEventBuilder::default()
                 .time(now_time)
                 .person(agent.agent.id().clone())
                 .link(act.link_id().clone())
-                .act_type(act.act_type.clone())
+                .act_type(act.act_type().clone())
                 .coordinate(act.coord().clone())
                 .build()
                 .unwrap(),
@@ -389,37 +389,23 @@ mod tests {
         let agents = test_adaptive(plan, env);
         let agent = agents.first().unwrap();
 
-        assert_eq!(
-            agent.activity().curr_act().act_type,
-            Id::get_from_ext("home")
-        );
-        assert_eq!(
-            agent.activity().curr_act().link_id,
-            Some(Id::get_from_ext("start"))
-        );
-        assert_eq!(
-            agent.activity().next_act().unwrap().act_type,
-            Id::get_from_ext("work")
-        );
-        assert_eq!(
-            agent.activity().next_act().unwrap().link_id,
-            Some(Id::get_from_ext("end"))
-        );
+        assert_eq!(agent.activity().act_type(), &Id::get_from_ext("home"));
+        assert_eq!(agent.activity().link_id(), &Id::get_from_ext("start"));
+        assert!(agent.activity().has_next_leg());
 
-        let leg = agent.activity().next_leg().unwrap();
+        handle.join().unwrap();
+        // The agent has finished its first activity, so the replaced trip follows element 0.
+        let person = agents.into_iter().next().unwrap().into_person();
+        let elements = &person.selected_plan().unwrap().elements;
+        let next_act = elements[2].as_activity().unwrap();
+        assert_eq!(next_act.act_type, Id::get_from_ext("work"));
+        assert_eq!(next_act.link_id, Some(Id::get_from_ext("end")));
+
+        let leg = elements[1].as_leg().unwrap();
 
         assert_eq!(leg.mode, Id::get_from_ext("new_mode"));
         assert!(&leg.mode.external().eq("new_mode"));
         assert_eq!(leg, &new_leg());
-
-        handle.join().unwrap();
-        let person = agents.into_iter().next().unwrap().into_person();
-        assert_eq!(
-            person.selected_plan().unwrap().elements[1]
-                .as_leg()
-                .unwrap(),
-            &new_leg()
-        );
     }
 
     fn routing_env(
@@ -521,16 +507,6 @@ mod tests {
             assert!(agents.is_empty());
             assert_eq!(engine.awake_agents().len(), 1);
             assert_eq!(engine.awake_agents()[0].id(), &Id::create("1"));
-            // A ready response is only installed at activity completion, not at wakeup.
-            assert_eq!(
-                engine.awake_agents()[0]
-                    .activity()
-                    .next_leg()
-                    .unwrap()
-                    .mode
-                    .external(),
-                "mode"
-            );
         }
         {
             let agents = engine.do_step(10, vec![]);

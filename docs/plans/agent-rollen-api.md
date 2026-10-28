@@ -220,3 +220,38 @@ Nach jedem Schritt laufen `cargo test --workspace -- --test-threads=1 --skip ber
    geschlossenen Fahrerrolle.
 3. Die Schwelle für den Fast-Path in Schritt 5, z. B. Median mehr als 2 % über `main`.
 4. Den Mehr-Plan-Materialisierungstest in `agent_logic.rs` wieder aufnehmen.
+
+## Ergebnis
+
+Die Schritte 1 bis 4 sind in einem Durchgang umgesetzt und danach gemeinsam getestet worden, nicht einzeln
+nacheinander. Offene Entscheidung 1 bis 4 sind wie vorgeschlagen umgesetzt.
+
+Messung mit `agent_network_benchmark` im Release-Modus, 30 Runden mit je einem Prozess pro Variante und
+5 Samples pro Prozess. Verglichen wird der Median je Runde mit `main` (7fc31259):
+
+| Variante | Median | gegenüber `main` (Median, IQR) |
+| --- | --- | --- |
+| `main` | 4,78 ms | – |
+| Branch vor dem Umbau (6799154b) | 5,00 ms | +4,3 % (+2,7 % bis +6,5 %) |
+| Umbau ohne Fast-Path | 5,12 ms | +6,9 % (+5,3 % bis +8,9 %) |
+| Umbau mit `SimulationAgentLogic::network_driver()` | 4,90 ms | +2,3 % (+0,4 % bis +4,3 %) |
+
+Läufe mit wenigen langen Prozessen streuten um mehrere Prozentpunkte zwischen Wiederholungen. Belastbar
+sind deshalb nur die Runden-Vergleiche oben.
+
+Danach wurden auf Wunsch alle `#[inline]` (auf `main` gibt es keine) und der Shortcut
+`SimulationAgentLogic::network_driver()` entfernt. Messung in einer eigenen Sitzung, gleiche Methode:
+
+| Variante | gegenüber `main` (Median, IQR) |
+| --- | --- |
+| ohne `#[inline]`, mit Shortcut | +5,9 % (+4,2 % bis +7,5 %) |
+| ohne `#[inline]`, ohne Shortcut (aktueller Stand) | +9,6 % (+8,3 % bis +12,2 %) |
+
+Im direkten Vergleich kosteten die `#[inline]` allein 2,3 % (+0,1 % bis +4,5 %, 40 Runden).
+
+Pro Linkwechsel ruft das Netz den Fahrer dreimal auf: `is_wanting_to_arrive_on_current_link` in
+`LocalLink`, `peek_next_link_id` in `evaluate_front_vehicle` und `move_over_node`. Ohne Shortcut kostet jeder
+lesende Zugriff drei dyn-Aufrufe (`phase()`, `LegLogic::network_driver()`, Rollenmethode), der schreibende
+ebenfalls drei (`phase_mut()`, `network_driver_mut()`, `move_over_node`). Das sind neun pro Linkwechsel; auf
+`main` waren es vier (`is_wanting…`, `peek…`, `notify_event`, `curr_link_id`). Der Shortcut sparte den
+`phase()`-Aufruf bei den beiden lesenden Zugriffen.

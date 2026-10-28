@@ -13,9 +13,6 @@ pub trait EndTime {
     fn end_time(&self, now: SimTime) -> SimTime;
 }
 
-/// The owner exposes identity and the currently valid capabilities.
-/// Activity- and leg-specific functions live on roles, see
-/// https://github.com/matsim-vsp/matsim-rust/issues/203 for more details.
 pub trait SimulationAgentLogic: Identifiable<InternalPerson> + Send {
     fn phase(&self) -> AgentPhase<'_>;
     fn phase_mut(&mut self) -> AgentPhaseMut<'_>;

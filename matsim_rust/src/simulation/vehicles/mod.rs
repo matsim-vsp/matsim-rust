@@ -68,12 +68,10 @@ impl SimulationVehicle {
         self.vehicle.pce
     }
 
-    #[inline]
     pub fn curr_link_id(&self) -> Option<&Id<Link>> {
-        self.driver().network_driver().curr_link_id()
+        self.driver().leg().curr_link_id()
     }
 
-    #[inline]
     pub fn peek_next_route_element(&self) -> Option<&Id<Link>> {
         self.driver().network_driver().peek_next_link_id()
     }
@@ -95,13 +93,12 @@ impl SimulationVehicle {
 }
 
 impl SimulationVehicle {
-    /// Keep the existing driver-first, then passenger route-update order.
-    #[inline]
-    pub fn leave_link(&mut self, now: SimTime) {
-        self.driver_mut().network_driver_mut().leave_link(now);
-        for passenger in &mut self.passengers {
-            passenger.vehicle_passenger_mut().leave_link(now);
-        }
+    /// Moves the driver over the node onto `next_link`. As in MATSim, passengers keep their own
+    /// position until they leave the vehicle; their arrival link is the vehicle's link.
+    pub fn move_over_node(&mut self, next_link: &Id<Link>, now: SimTime) {
+        self.driver_mut()
+            .network_driver_mut()
+            .move_over_node(next_link, now);
     }
 }
 
