@@ -35,6 +35,9 @@ jobs:
         working-directory: baseline
         run: |
           set -o pipefail
+          # Use the identical harness, including fixes to benchmark-only code, on both revisions.
+          cp ../matsim_rust/src/simulation/controller/berlin_performance.rs matsim_rust/src/simulation/controller/berlin_performance.rs
+          git diff > ../performance-results/baseline-harness.patch
           git rev-parse HEAD | tee ../performance-results/baseline-source.txt
           cargo test -p matsim-rust --release --features http --lib berlin_performance -- --ignored --nocapture --test-threads=1 | tee ../performance-results/queue-before.log
       - name: Format for validation and export the formatting patch
@@ -44,17 +47,21 @@ jobs:
           cat performance-results/format.patch
           cargo fmt --all -- --check
       - name: Relevant network tests
-        run: cargo test -p matsim-rust --release --features http --lib simulation::network:: -- --test-threads=1
+        run: |
+          cargo test -p matsim-rust --release --features http --lib simulation::network:: -- --test-threads=1
       - name: Relevant messaging and configuration tests
         run: |
           cargo test -p matsim-rust --release --features http --lib simulation::messaging:: -- --test-threads=1
           cargo test -p matsim-rust --release --features http --lib simulation::config:: -- --test-threads=1
       - name: Remaining suite without Berlin
-        run: cargo test --workspace --release --features http -- --test-threads=1 --skip berlin::
+        run: |
+          cargo test --workspace --release --features http -- --test-threads=1 --skip berlin::
       - name: Queue Berlin correctness with one partition
-        run: cargo test -p matsim-rust --release --features http --test simulation berlin::test_berlin_1 -- --exact --test-threads=1
+        run: |
+          cargo test -p matsim-rust --release --features http --test simulation berlin::test_berlin_1 -- --exact --test-threads=1
       - name: Queue Berlin correctness with two partitions
-        run: cargo test -p matsim-rust --release --features http --test simulation berlin::test_berlin_2 -- --exact --test-threads=1
+        run: |
+          cargo test -p matsim-rust --release --features http --test simulation berlin::test_berlin_2 -- --exact --test-threads=1
       - name: Berlin Queue after
         run: |
           set -o pipefail

@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::sync::Mutex;
 use std::time::Instant;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, std::fmt::Debug, Default, PartialEq, Eq)]
 struct Counts {
     completed_trips: u64,
     link_entries: u64,
