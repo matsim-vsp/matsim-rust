@@ -100,6 +100,7 @@ where
             link_id: cap.link_id,
             from_part: rank,
             released: cap.released,
+            available_at: cap.available_at,
         });
     }
 
@@ -427,6 +428,7 @@ mod tests {
                     StorageUpdate {
                         link_id: Id::create("4"),
                         released: 42.0,
+                        available_at: Tick::zero(),
                         from_part: 1,
                     },
                     0,
@@ -445,6 +447,32 @@ mod tests {
                     assert!(msg.storage_capacities().is_empty(), "{msg:?}");
                 }
             }
+        });
+    }
+
+    #[deterministic_id_test]
+    fn send_recv_keeps_distinct_future_storage_release_ticks() {
+        execute_test(|broker| {
+            if broker.rank() == 2 {
+                for (released, at) in [(1., 10), (2.5, 20), (0.5, 20)] {
+                    broker.add_cap_update(StorageUpdate {
+                        link_id: Id::create("4"), from_part: 1, released,
+                        available_at: Tick::new(at),
+                    }, 0);
+                }
+            }
+            let messages = broker.send_recv(0);
+            let updates: Vec<_> = messages.iter().flat_map(|msg| msg.storage_capacities()).collect();
+            if broker.rank() == 1 {
+                assert_eq!(3, updates.len());
+                assert_eq!(vec![(1., 10), (2.5, 20), (0.5, 20)],
+                    updates.iter().map(|cap| (cap.released, cap.available_at.value())).collect::<Vec<_>>());
+                assert!(updates.iter().all(|cap| cap.from_part == 2));
+            } else {
+                assert!(updates.is_empty());
+            }
+            let next = broker.send_recv(1);
+            assert!(next.iter().all(|msg| msg.storage_capacities().is_empty()));
         });
     }
 

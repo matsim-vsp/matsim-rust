@@ -984,6 +984,14 @@ pub struct QSim {
     pub sample_size: f64,
     pub stuck_threshold: u32,
     pub main_modes: Vec<String>,
+    pub traffic_dynamics: TrafficDynamics,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrafficDynamics {
+    #[default]
+    Queue,
+    KinematicWaves,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -1081,6 +1089,7 @@ pub struct Simulation {
     pub sample_size: f64,
     pub stuck_threshold: u32,
     pub main_modes: Vec<String>,
+    pub traffic_dynamics: TrafficDynamics,
 }
 
 impl From<&Simulation> for QSim {
@@ -1092,6 +1101,7 @@ impl From<&Simulation> for QSim {
             sample_size: value.sample_size,
             stuck_threshold: value.stuck_threshold,
             main_modes: value.main_modes.clone(),
+            traffic_dynamics: value.traffic_dynamics,
         }
     }
 }
@@ -1122,6 +1132,14 @@ register_override!("qsim.ticks_per_second", |config, value| {
 
 register_override!("qsim.sample_size", |config, value| {
     config.qsim_mut().sample_size = value.parse().unwrap();
+});
+
+register_override!("qsim.traffic_dynamics", |config, value| {
+    config.qsim_mut().traffic_dynamics = match value.to_ascii_lowercase().as_str() {
+        "queue" => TrafficDynamics::Queue,
+        "kinematicwaves" | "kinematic-waves" => TrafficDynamics::KinematicWaves,
+        _ => panic!("Invalid qsim.traffic_dynamics: {value}"),
+    };
 });
 
 register_override!("qsim.stuck_threshold", |config, value| {
@@ -1385,6 +1403,7 @@ impl Default for QSim {
             sample_size: 1.0,
             stuck_threshold: 10,
             main_modes: vec![],
+            traffic_dynamics: TrafficDynamics::Queue,
         }
     }
 }
@@ -1416,6 +1435,7 @@ impl Default for Simulation {
             sample_size: qsim.sample_size,
             stuck_threshold: qsim.stuck_threshold,
             main_modes: qsim.main_modes,
+            traffic_dynamics: qsim.traffic_dynamics,
         }
     }
 }
@@ -1675,6 +1695,30 @@ fn default_profiling_level() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn traffic_dynamics_defaults_round_trips_and_overrides() {
+        use super::{Config, QSim, TrafficDynamics};
+        let defaults: QSim = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(TrafficDynamics::Queue, defaults.traffic_dynamics);
+        let waves: QSim = serde_yaml::from_str("traffic_dynamics: KinematicWaves").unwrap();
+        assert_eq!(TrafficDynamics::KinematicWaves, waves.traffic_dynamics);
+        let parsed: QSim = serde_yaml::from_str(&serde_yaml::to_string(&waves).unwrap()).unwrap();
+        assert_eq!(waves, parsed);
+        let mut config = Config::default();
+        config.apply_overrides(&[("qsim.traffic_dynamics".into(), "KinematicWaves".into())]);
+        assert_eq!(TrafficDynamics::KinematicWaves, config.qsim().traffic_dynamics);
+        config.apply_overrides(&[("qsim.traffic_dynamics".into(), "Queue".into())]);
+        assert_eq!(TrafficDynamics::Queue, config.qsim().traffic_dynamics);
+    }
+
+    #[test]
+    fn deprecated_simulation_preserves_traffic_dynamics() {
+        let mut config: super::Config = serde_yaml::from_str(
+            "modules:\n  simulation:\n    type: Simulation\n    traffic_dynamics: KinematicWaves\n"
+        ).unwrap();
+        config.ensure_defaults();
+        assert_eq!(super::TrafficDynamics::KinematicWaves, config.qsim().traffic_dynamics);
+    }
     use crate::simulation::config;
     use crate::simulation::config::Output;
     use crate::simulation::config::OverwriteFiles;
@@ -1727,6 +1771,7 @@ mod tests {
             sample_size: 0.1,
             stuck_threshold: 1,
             main_modes: vec!["bike".to_string()],
+            traffic_dynamics: config::TrafficDynamics::Queue,
         };
         let controller = Controller {
             first_iteration: 2,

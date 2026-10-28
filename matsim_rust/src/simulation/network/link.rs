@@ -7,7 +7,7 @@ use crate::simulation::events::{
 };
 use crate::simulation::id::Id;
 use crate::simulation::network::flow_cap::Flowcap;
-use crate::simulation::network::storage_cap::{StorageCap, StorageCapacityDefinition};
+use crate::simulation::network::storage_cap::{StorageCap, StorageCapacityDefinition, StorageRelease};
 use crate::simulation::network::stuck_timer::StuckTimer;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::network::Node;
@@ -15,6 +15,10 @@ use crate::simulation::time::{SimClock, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
 use std::collections::VecDeque;
 use std::fmt::Debug;
+
+#[cfg(test)]
+#[path = "kinematic_tests.rs"]
+mod kinematic_tests;
 
 pub enum LinkPosition {
     QStart,
@@ -96,13 +100,14 @@ impl SimLink {
         }
     }
 
-    pub fn is_available(&self) -> bool {
+    pub fn is_available(&mut self, now: impl Into<Tick>) -> bool {
+        let now = now.into();
         match self {
-            SimLink::Local(ll) => ll.is_available(),
+            SimLink::Local(ll) => ll.is_available(now),
             SimLink::In(_) => {
                 panic!("In Links can't accept vehicles")
             }
-            SimLink::Out(ol) => ol.storage_cap.is_available(),
+            SimLink::Out(ol) => ol.is_available(now),
         }
     }
 
@@ -163,7 +168,7 @@ impl SimLink {
         match self {
             SimLink::Local(l) => l.push_veh(vehicle, now, position),
             SimLink::In(il) => il.local_link.push_veh(vehicle, now, position),
-            SimLink::Out(ol) => ol.push_veh(vehicle, position),
+            SimLink::Out(ol) => ol.push_veh(vehicle, position, now),
         }
     }
 
@@ -202,6 +207,9 @@ pub struct LocalLink {
     free_speed: f64,
     storage_cap: StorageCap,
     flow_cap: Flowcap,
+    inflow_cap: Option<Flowcap>,
+    // Only the receiving half of a kinematic split link records releases for transmission.
+    new_releases: Option<Vec<StorageRelease>>,
     stuck_timer: StuckTimer,
     clock: SimClock,
     // The link does not need to be moved before this tick, see `fall_asleep`.
@@ -247,13 +255,14 @@ impl LocalLink {
         from: Id<Node>,
         to: Id<Node>,
     ) -> Self {
-        let storage_capacity = StorageCapacityDefinition::build(
+        let storage_capacity = StorageCapacityDefinition::build_with_dynamics(
             length,
             perm_lanes,
             capacity_h,
             config.sample_size,
             effective_cell_size,
             free_speed,
+            config,
         );
         Self::build_with_storage_capacity(
             id,
@@ -293,6 +302,8 @@ impl LocalLink {
             free_speed,
             storage_cap,
             flow_cap: Flowcap::new(capacity_per_tick),
+            inflow_cap: storage_capacity.inflow_per_tick().map(Flowcap::new),
+            new_releases: None,
             stuck_timer: StuckTimer::new(clock.secs_to_tick(config.stuck_threshold as u64)),
             clock,
             sleeping_until: None,
@@ -325,6 +336,7 @@ impl LocalLink {
         let earliest_exit_time = now.saturating_add(duration);
 
         // update state
+        consume_inflow(&mut self.inflow_cap, vehicle.pce(), now);
         self.storage_cap.consume(vehicle.pce());
         self.q.push_back(VehicleQEntry {
             vehicle,
@@ -412,7 +424,7 @@ impl LocalLink {
             // If the vehicle wants to arrive, remove it from the queue
             if arrive {
                 let veh = self.q.pop_front().unwrap().vehicle;
-                self.storage_cap.release(veh.pce());
+                self.release_storage(veh.pce(), now);
                 released_vehicles.push(veh);
                 continue;
             }
@@ -420,7 +432,7 @@ impl LocalLink {
             // If the vehicle wants to move to another link, put it into buffer
             if capacity_left {
                 let veh = self.q.pop_front().unwrap().vehicle;
-                self.storage_cap.release(veh.pce());
+                self.release_storage(veh.pce(), now);
                 self.push_to_buffer(veh);
             } else {
                 break;
@@ -536,8 +548,18 @@ impl LocalLink {
         self.q.len() + self.waiting_list.len() + self.buffer.len()
     }
 
-    pub fn is_available(&self) -> bool {
-        self.storage_cap.is_available()
+    pub fn is_available(&mut self, now: impl Into<Tick>) -> bool {
+        let now = now.into();
+        let storage = self.storage_cap.is_available(now);
+        let inflow = inflow_available(&mut self.inflow_cap, now);
+        storage && inflow
+    }
+
+    fn release_storage(&mut self, pce: f64, now: Tick) {
+        if let Some(releases) = &mut self.new_releases {
+            releases.push(StorageRelease { pce, available_at: self.storage_cap.release_tick(now) });
+        }
+        self.storage_cap.release(pce, now);
     }
 
     fn drain(&mut self) -> Vec<SimulationVehicle> {
@@ -615,6 +637,7 @@ pub struct SplitOutLink {
     pub to_part: u32,
     q: VecDeque<SimulationVehicle>,
     storage_cap: StorageCap,
+    inflow_cap: Option<Flowcap>,
 }
 
 impl SplitOutLink {
@@ -631,18 +654,25 @@ impl SplitOutLink {
             to_part,
             q: VecDeque::default(),
             storage_cap,
+            inflow_cap: storage_capacity.inflow_per_tick().map(Flowcap::new),
         }
     }
 
-    pub fn apply_storage_cap_update(&mut self, released: f64) {
-        self.storage_cap.consume(-released);
+    pub fn apply_storage_cap_update(&mut self, released: f64, available_at: Tick) {
+        self.storage_cap.release_at(released, available_at);
+    }
+
+    pub fn is_available(&mut self, now: Tick) -> bool {
+        let storage = self.storage_cap.is_available(now);
+        let inflow = inflow_available(&mut self.inflow_cap, now);
+        storage && inflow
     }
 
     pub fn take_veh(&mut self) -> VecDeque<SimulationVehicle> {
         std::mem::take(&mut self.q)
     }
 
-    pub fn push_veh(&mut self, veh: SimulationVehicle, position: LinkPosition) {
+    pub fn push_veh(&mut self, veh: SimulationVehicle, position: LinkPosition, now: Tick) {
         match position {
             LinkPosition::QStart => {}
             LinkPosition::Waiting => {
@@ -652,6 +682,7 @@ impl SplitOutLink {
                 )
             }
         }
+        consume_inflow(&mut self.inflow_cap, veh.pce(), now);
         self.storage_cap.consume(veh.pce());
         self.q.push_back(veh);
     }
@@ -664,7 +695,10 @@ pub struct SplitInLink {
 }
 
 impl SplitInLink {
-    pub(super) fn new(from_part: u32, local_link: LocalLink) -> Self {
+    pub(super) fn new(from_part: u32, mut local_link: LocalLink) -> Self {
+        if matches!(&local_link.storage_cap, StorageCap::Kinematic(_)) {
+            local_link.new_releases = Some(Vec::new());
+        }
         SplitInLink {
             from_part,
             local_link,
@@ -673,6 +707,25 @@ impl SplitInLink {
 
     pub(super) fn occupied_storage(&self) -> f64 {
         self.local_link.storage_cap.used()
+    }
+
+    pub(super) fn drain_storage_releases(&mut self) -> Option<std::vec::Drain<'_, StorageRelease>> {
+        self.local_link.new_releases.as_mut().map(|releases| releases.drain(..))
+    }
+}
+
+fn inflow_available(cap: &mut Option<Flowcap>, now: Tick) -> bool {
+    cap.as_mut().is_none_or(|cap| {
+        // Inflow refills independently of vehicles held in the downstream buffer.
+        cap.update_capacity(now, 0.0);
+        cap.has_capacity_left()
+    })
+}
+
+fn consume_inflow(cap: &mut Option<Flowcap>, pce: f64, now: Tick) {
+    if let Some(cap) = cap {
+        cap.update_capacity(now, 0.0);
+        cap.consume(pce);
     }
 }
 
@@ -911,11 +964,11 @@ mod sim_link_tests {
 
         link.push_veh(vehicle1, QStart, 0);
         assert_approx_eq!(1., link.used_storage());
-        assert!(link.is_available());
+        assert!(link.is_available(0));
 
         link.push_veh(vehicle2, QStart, 0);
         assert_approx_eq!(2.0, link.used_storage());
-        assert!(!link.is_available());
+        assert!(!link.is_available(0));
 
         let SimLink::Local(l) = &mut link else {
             unreachable!()
@@ -1182,6 +1235,7 @@ mod out_link_tests {
             to_part: 1,
             q: Default::default(),
             storage_cap: StorageCap::build(100., 1., 1., 1., 1., 1.),
+            inflow_cap: None,
         });
         let id1 = 42;
         let id2 = 43;
@@ -1224,10 +1278,11 @@ mod out_link_tests {
             to_part: 1,
             q: Default::default(),
             storage_cap: cap,
+            inflow_cap: None,
         };
 
         assert_eq!(2., out_link.storage_cap.used());
-        out_link.apply_storage_cap_update(2.);
+        out_link.apply_storage_cap_update(2., crate::simulation::time::Tick::zero());
 
         assert_eq!(0., out_link.storage_cap.used());
     }

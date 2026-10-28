@@ -12,6 +12,9 @@ jobs:
   berlin-performance:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    env:
+      RUSTFLAGS: -D warnings
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.94.0
@@ -23,10 +26,49 @@ jobs:
           { git rev-parse HEAD; rustc -Vv; uname -a; lscpu; } | tee performance-results/environment.txt
           sha256sum matsim_rust/assets/berlin-v6.4/* | tee performance-results/inputs.sha256
           cp matsim_rust/assets/berlin-v6.4/config.yml performance-results/config.yml
-      - name: Berlin Queue baseline
+      - uses: actions/checkout@v4
+        with:
+          # Benchmark harness committed before any traffic-physics change.
+          ref: b943ec9f7b75756a29e2b978961c611aec77e246
+          path: baseline
+      - name: Berlin Queue before (same runner)
+        working-directory: baseline
         run: |
           set -o pipefail
-          cargo test -p matsim-rust --release --lib berlin_performance -- --ignored --nocapture --test-threads=1 | tee performance-results/queue-before.log
+          git rev-parse HEAD | tee ../performance-results/baseline-source.txt
+          cargo test -p matsim-rust --release --features http --lib berlin_performance -- --ignored --nocapture --test-threads=1 | tee ../performance-results/queue-before.log
+      - name: Format for validation and export the formatting patch
+        run: |
+          cargo fmt --all
+          git diff > performance-results/format.patch
+          cat performance-results/format.patch
+          cargo fmt --all -- --check
+      - name: Relevant network tests
+        run: cargo test -p matsim-rust --release --features http --lib simulation::network:: -- --test-threads=1
+      - name: Relevant messaging and configuration tests
+        run: |
+          cargo test -p matsim-rust --release --features http --lib simulation::messaging:: -- --test-threads=1
+          cargo test -p matsim-rust --release --features http --lib simulation::config:: -- --test-threads=1
+      - name: Remaining suite without Berlin
+        run: cargo test --workspace --release --features http -- --test-threads=1 --skip berlin::
+      - name: Queue Berlin correctness with one partition
+        run: cargo test -p matsim-rust --release --features http --test simulation berlin::test_berlin_1 -- --exact --test-threads=1
+      - name: Queue Berlin correctness with two partitions
+        run: cargo test -p matsim-rust --release --features http --test simulation berlin::test_berlin_2 -- --exact --test-threads=1
+      - name: Berlin Queue after
+        run: |
+          set -o pipefail
+          cargo test -p matsim-rust --release --features http --lib berlin_performance -- --ignored --nocapture --test-threads=1 | tee performance-results/queue-after.log
+      - name: Berlin Kinematic Waves after
+        env:
+          MATSIM_BENCH_DYNAMICS: KinematicWaves
+        run: |
+          set -o pipefail
+          cargo test -p matsim-rust --release --features http --lib berlin_performance -- --ignored --nocapture --test-threads=1 | tee performance-results/kinematic-after.log
+      - name: Compare measurements and check whitespace
+        run: |
+          python3 scripts/summarize_berlin_performance.py performance-results | tee performance-results/report.md
+          git diff --check
       - uses: actions/upload-artifact@v4
         if: always()
         with:
