@@ -37,6 +37,7 @@ Run formatting, focused tests and the remaining suite before the expensive Berli
 
 ```shell
 cargo fmt --all -- --check
+mkdir -p matsim_rust/test_output
 cargo test -p matsim-rust --release --lib simulation::network:: -- --test-threads=1
 cargo test -p matsim-rust --release --lib simulation::messaging:: -- --test-threads=1
 cargo test --workspace --release --features http -- --test-threads=1 --skip berlin::

@@ -48,6 +48,8 @@ jobs:
           cargo fmt --all -- --check
       - name: Relevant network tests
         run: |
+          # Existing network tests write test_output/test.xml when run on their own.
+          mkdir -p matsim_rust/test_output
           cargo test -p matsim-rust --release --features http --lib simulation::network:: -- --test-threads=1
       - name: Relevant messaging and configuration tests
         run: |
