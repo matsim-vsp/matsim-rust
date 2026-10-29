@@ -24,6 +24,8 @@ pub struct StorageUpdate {
     pub link_id: Id<Link>,
     pub from_part: u32,
     pub released: f64,
+    /// Absolute tick when the sender's gap reaches QStart. Queue updates are immediate.
+    pub available_at: Tick,
 }
 
 #[derive(Debug)]
@@ -405,7 +407,7 @@ impl SimNetworkPartition {
     pub fn apply_storage_cap_updates(&mut self, storage_caps: Vec<StorageUpdate>) {
         for cap in storage_caps {
             if let SimLink::Out(link) = self.links.get_mut(&cap.link_id).unwrap() {
-                link.apply_storage_cap_update(cap.released);
+                link.apply_storage_cap_update(cap.released, cap.available_at);
             } else {
                 panic!("only expecting ids for split out links ")
             }
@@ -493,6 +495,15 @@ impl SimNetworkPartition {
         comp_env: &mut ThreadLocalComputationalEnvironment,
     ) -> MoveSingleLinkResult {
         let vehicles_end_leg = link.do_sim_step(now, comp_env);
+        Self::finish_link_step(link, active_nodes, now, vehicles_end_leg)
+    }
+
+    fn finish_link_step(
+        link: &mut LocalLink,
+        active_nodes: &mut ActiveCache<Node>,
+        now: Tick,
+        vehicles_end_leg: Vec<SimulationVehicle>,
+    ) -> MoveSingleLinkResult {
         if link.to_nodes_active() {
             active_nodes.activate(link.to.clone());
         }
@@ -517,25 +528,21 @@ impl SimNetworkPartition {
     ) -> MoveSingleLinkResult {
         // if anything has changed on the link, we want to report the updated storage capacity to the
         // upstream partition.
-        let before = link.occupied_storage();
-        let result = Self::move_local_link(&mut link.local_link, active_nodes, now, events);
-        let diff = before - link.occupied_storage();
+        let link_id = link.local_link.id.clone();
+        let from_part = link.from_part;
 
-        assert!(
-            diff.partial_cmp(&0.0).unwrap().is_ge(),
-            "The occupied storage on link {:?} cannot increase when moving vehicles.",
-            link.local_link.id
-        );
-
-        if diff > 0. {
+        // Register every new gap as capacity early, since the link might get empty and thus deactivated now.
+        let vehicles_end_leg = link.do_sim_step(now, events, |release| {
+            // Transfer every new gap before deactivation, even if the link is now empty.
+            // Its arrival is handled lazily by the upstream mirror, not by moving this link.
             storage_cap_updates.push(StorageUpdate {
-                link_id: link.local_link.id.clone(),
-                from_part: link.from_part,
-                released: diff,
-            })
-        }
-
-        result
+                link_id: link_id.clone(),
+                from_part,
+                released: release.pce,
+                available_at: release.available_at,
+            });
+        });
+        Self::finish_link_step(&mut link.local_link, active_nodes, now, vehicles_end_leg)
     }
 
     fn move_out_link(
@@ -660,7 +667,7 @@ impl SimNetworkPartition {
 
     fn evaluate_front_vehicle(
         in_id: &Id<Link>,
-        links: &IntMap<Id<Link>, SimLink>,
+        links: &mut IntMap<Id<Link>, SimLink>,
         now: Tick,
     ) -> FrontDecision {
         let in_link = links.get(in_id).unwrap();
@@ -693,9 +700,14 @@ impl SimNetworkPartition {
             );
             return FrontDecision::Abort;
         }
-        if out_link.is_available() {
+        let is_stuck = in_link.is_veh_stuck(now);
+        if links
+            .get_mut(&next_id.clone())
+            .unwrap()
+            .update_and_is_available(now)
+        {
             FrontDecision::MoveNormally
-        } else if in_link.is_veh_stuck(now) {
+        } else if is_stuck {
             FrontDecision::MoveAlthoughStuck
         } else {
             FrontDecision::Wait
@@ -1310,7 +1322,13 @@ mod tests {
             14.0,
             network.links.get(&Id::create("C")).unwrap().used_storage()
         );
-        assert!(network.links.get(&Id::create("C")).unwrap().is_available());
+        assert!(
+            network
+                .links
+                .get_mut(&Id::create("C"))
+                .unwrap()
+                .update_and_is_available(0)
+        );
 
         network.move_nodes(&mut env, 1);
         assert_eq!(vec!["1"], events.leaves_on("U"));
@@ -1636,9 +1654,13 @@ mod tests {
             network.move_nodes(&mut env, now);
             network.move_links(&mut env, now);
 
+            let link3_available = network
+                .links
+                .get_mut(&id_3)
+                .unwrap()
+                .update_and_is_available(now);
             let link1 = network.links.get(&id_1).unwrap();
             let link2 = network.links.get(&id_2).unwrap();
-            let link3 = network.links.get(&id_3).unwrap();
 
             // at 10, 20, 30, ... link1 offers a vehicle
             if now < 91 && (0..91).step_by(10).collect::<Vec<u32>>().contains(&now) {
@@ -1686,10 +1708,7 @@ mod tests {
                         || now == 1809
                         || now == 1910)
                     {
-                        assert!(
-                            !link3.is_available(),
-                            "Storage cap reached at timestep {now}"
-                        );
+                        assert!(!link3_available, "Storage cap reached at timestep {now}");
                     }
                 } else {
                     assert!(
@@ -1736,9 +1755,13 @@ mod tests {
             network.move_nodes(&mut env, now);
             network.move_links(&mut env, now);
 
+            let link3_available = network
+                .links
+                .get_mut(&id_3)
+                .unwrap()
+                .update_and_is_available(now);
             let link1 = network.links.get(&id_1).unwrap();
             let link2 = network.links.get(&id_2).unwrap();
-            let link3 = network.links.get(&id_3).unwrap();
 
             // at 10, 20, 30, ... link1 offers a vehicle
             if now < 91 && (0..91).step_by(10).collect::<Vec<u32>>().contains(&now) {
@@ -1777,10 +1800,7 @@ mod tests {
                         link2.offers_veh().is_some(),
                         "No vehicle offered at timestep {now}"
                     );
-                    assert!(
-                        !link3.is_available(),
-                        "Storage cap reached at timestep {now}"
-                    );
+                    assert!(!link3_available, "Storage cap reached at timestep {now}");
                 } else {
                     assert!(
                         link2.offers_veh().is_none(),
@@ -1973,6 +1993,76 @@ mod tests {
         let storage_cap = res.storage_cap_updates.first().unwrap();
         assert_eq!(split_link_id, storage_cap.link_id);
         assert_approx_eq!(100., storage_cap.released, 0.00001);
+    }
+
+    #[deterministic_id_test]
+    fn kinematic_split_sends_future_releases_before_the_empty_link_deactivates() {
+        let mut global = Network::new();
+        let _ = create_three_node_sim_network_with_partition(&mut global);
+        let link_id = Id::get_from_ext("link2");
+        global.get_link_mut(&link_id).length = 25.;
+        let mut config = test_utils::config();
+        config.qsim_mut().traffic_dynamics =
+            crate::simulation::config::TrafficDynamics::KinematicWaves;
+        let mut upstream = SimNetworkPartition::from_network_for_test(&global, 0, &config);
+        let mut downstream = SimNetworkPartition::from_network_for_test(&global, 1, &config);
+        assert_eq!(
+            upstream.links[&link_id].max_storage(),
+            downstream.links[&link_id].max_storage()
+        );
+        for (id, pce, now) in [(1, 1., 0), (2, 2.5, 1)] {
+            let make_vehicle = || {
+                SimulationVehicle::from_parts(
+                    id,
+                    0,
+                    100.,
+                    pce,
+                    test_utils::create_agent(id, vec!["link2"]),
+                )
+            };
+            upstream
+                .links
+                .get_mut(&link_id)
+                .unwrap()
+                .push_veh(make_vehicle(), QStart, now);
+            downstream
+                .links
+                .get_mut(&link_id)
+                .unwrap()
+                .push_veh(make_vehicle(), QStart, now);
+        }
+        downstream.active_links.activate(link_id.clone());
+        downstream.veh_counter = 2;
+        let first = downstream.move_links(&mut Default::default(), 2);
+        let second = downstream.move_links(&mut Default::default(), 3);
+        assert_eq!(1, first.storage_cap_updates.len());
+        assert_eq!(1, second.storage_cap_updates.len());
+        assert_eq!(
+            super::Tick::new(8),
+            first.storage_cap_updates[0].available_at
+        );
+        assert_eq!(
+            super::Tick::new(9),
+            second.storage_cap_updates[0].available_at
+        );
+        assert_eq!(0, downstream.active_links());
+        assert!(
+            downstream
+                .move_links(&mut Default::default(), 100)
+                .storage_cap_updates
+                .is_empty()
+        );
+        let updates = first
+            .storage_cap_updates
+            .into_iter()
+            .chain(second.storage_cap_updates)
+            .collect();
+        upstream.apply_storage_cap_updates(updates);
+        let mirror = upstream.links.get_mut(&link_id).unwrap();
+        for (now, expected) in [(7, 3.5), (8, 2.5), (8, 2.5), (9, 0.), (100, 0.)] {
+            let _ = mirror.update_and_is_available(now);
+            assert_eq!(expected, mirror.used_storage());
+        }
     }
 
     #[deterministic_id_test]

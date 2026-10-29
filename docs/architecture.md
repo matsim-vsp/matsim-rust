@@ -130,11 +130,16 @@ An empty experienced plan receives zero points from either built-in scorer.
 
 ### Link Dynamics
 
+`qsim.traffic_dynamics` selects `Queue` (the default, including legacy `Simulation` configs) or
+`KinematicWaves`. The CLI override accepts `--set qsim.traffic_dynamics=KinematicWaves`; the Rust API
+uses `config::TrafficDynamics`. Waiting-list departures retain their existing buffer/flow-capacity
+semantics in both modes.
+
 A link consists of a queue, a buffer and a waiting list for departing vehicles. A vehicle may leave the queue after its
 free-speed travel time, but not before the next tick. Vehicles that end their leg leave the queue without using flow
 capacity; all others move into the buffer if the link has flow capacity left. Departing vehicles move from the waiting
 list into the buffer before vehicles from the queue. The node at the end of the link takes vehicles from the buffer in
-FIFO order if the next link has storage capacity left or the front vehicle is stuck.
+FIFO order if the next link's admission capacities allow it or the front vehicle is stuck.
 
 As in MATSim's QSim (`QueueWithBuffer` with the fast capacity update), a vehicle consumes flow capacity when it enters the
 buffer (see `Flowcap`). It may enter as long as the accumulated capacity is positive, so the capacity can become
@@ -161,7 +166,7 @@ the activity engine, so that the order of the agents does not depend on the orde
 events within a time step still depends on it. It is deterministic for a single partition; with several partitions,
 the order in which messages from other partitions arrive already varies between runs.
 
-The link dynamics deviate from QSim in the following points:
+The Queue link dynamics deviate from QSim in the following points:
 
 - QSim accumulates capacity only when it checks whether a vehicle may enter the buffer, and resets its update time to
   the previous time step whenever a vehicle leaves the buffer; capacity not accumulated until then is lost. The Rust

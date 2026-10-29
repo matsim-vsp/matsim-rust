@@ -7,7 +7,9 @@ use crate::simulation::events::{
 };
 use crate::simulation::id::Id;
 use crate::simulation::network::flow_cap::Flowcap;
-use crate::simulation::network::storage_cap::{StorageCap, StorageCapacityDefinition};
+use crate::simulation::network::storage_cap::{
+    StorageCap, StorageCapacityDefinition, StorageRelease,
+};
 use crate::simulation::network::stuck_timer::StuckTimer;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::network::Node;
@@ -96,13 +98,14 @@ impl SimLink {
         }
     }
 
-    pub fn is_available(&self) -> bool {
+    pub fn update_and_is_available(&mut self, now: impl Into<Tick>) -> bool {
+        let now = now.into();
         match self {
-            SimLink::Local(ll) => ll.is_available(),
+            SimLink::Local(ll) => ll.update_and_is_available(now),
             SimLink::In(_) => {
                 panic!("In Links can't accept vehicles")
             }
-            SimLink::Out(ol) => ol.storage_cap.is_available(),
+            SimLink::Out(ol) => ol.update_and_is_available(now),
         }
     }
 
@@ -163,7 +166,7 @@ impl SimLink {
         match self {
             SimLink::Local(l) => l.push_veh(vehicle, now, position),
             SimLink::In(il) => il.local_link.push_veh(vehicle, now, position),
-            SimLink::Out(ol) => ol.push_veh(vehicle, position),
+            SimLink::Out(ol) => ol.push_veh(vehicle, position, now),
         }
     }
 
@@ -202,6 +205,7 @@ pub struct LocalLink {
     free_speed: f64,
     storage_cap: StorageCap,
     flow_cap: Flowcap,
+    inflow_cap: Option<Flowcap>,
     stuck_timer: StuckTimer,
     clock: SimClock,
     // The link does not need to be moved before this tick, see `fall_asleep`.
@@ -247,13 +251,14 @@ impl LocalLink {
         from: Id<Node>,
         to: Id<Node>,
     ) -> Self {
-        let storage_capacity = StorageCapacityDefinition::build(
+        let storage_capacity = StorageCapacityDefinition::build_with_dynamics(
             length,
             perm_lanes,
             capacity_h,
             config.sample_size,
             effective_cell_size,
             free_speed,
+            config,
         );
         Self::build_with_storage_capacity(
             id,
@@ -293,6 +298,7 @@ impl LocalLink {
             free_speed,
             storage_cap,
             flow_cap: Flowcap::new(capacity_per_tick),
+            inflow_cap: storage_capacity.inflow_per_tick().map(Flowcap::new),
             stuck_timer: StuckTimer::new(clock.secs_to_tick(config.stuck_threshold as u64)),
             clock,
             sleeping_until: None,
@@ -325,6 +331,7 @@ impl LocalLink {
         let earliest_exit_time = now.saturating_add(duration);
 
         // update state
+        consume_inflow(&mut self.inflow_cap, vehicle.pce(), now);
         self.storage_cap.consume(vehicle.pce());
         self.q.push_back(VehicleQEntry {
             vehicle,
@@ -350,7 +357,16 @@ impl LocalLink {
         now: impl Into<Tick>,
         comp_env: &mut ThreadLocalComputationalEnvironment,
     ) -> Vec<SimulationVehicle> {
-        let now = now.into();
+        self.do_sim_step_with_releases(now.into(), comp_env, |_| {})
+    }
+
+    /// If `handle_storage_release` is no No-op, it is normally used to forward storage releases to the partition's storage-update buffer.
+    fn do_sim_step_with_releases(
+        &mut self,
+        now: Tick,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        mut handle_storage_release: impl FnMut(StorageRelease),
+    ) -> Vec<SimulationVehicle> {
         let buffer_was_empty = self.buffer.is_empty();
         self.update_flow_cap(now);
 
@@ -366,7 +382,7 @@ impl LocalLink {
 
         let now_time = self.clock.tick_to_time(now);
         let mut ending_vehicles = self.add_waiting_to_buffer(comp_env, now);
-        ending_vehicles.append(&mut self.add_queue_to_buffer(now));
+        ending_vehicles.append(&mut self.add_queue_to_buffer(now, &mut handle_storage_release));
         if buffer_was_empty && !self.buffer.is_empty() {
             self.restart_stuck_timer(now);
         }
@@ -388,7 +404,11 @@ impl LocalLink {
         ending_vehicles
     }
 
-    fn add_queue_to_buffer(&mut self, now: Tick) -> Vec<SimulationVehicle> {
+    fn add_queue_to_buffer(
+        &mut self,
+        now: Tick,
+        handle_storage_release: &mut impl FnMut(StorageRelease),
+    ) -> Vec<SimulationVehicle> {
         let mut released_vehicles = vec![];
 
         loop {
@@ -412,7 +432,7 @@ impl LocalLink {
             // If the vehicle wants to arrive, remove it from the queue
             if arrive {
                 let veh = self.q.pop_front().unwrap().vehicle;
-                self.storage_cap.release(veh.pce());
+                self.release_storage(veh.pce(), now, handle_storage_release);
                 released_vehicles.push(veh);
                 continue;
             }
@@ -420,7 +440,7 @@ impl LocalLink {
             // If the vehicle wants to move to another link, put it into buffer
             if capacity_left {
                 let veh = self.q.pop_front().unwrap().vehicle;
-                self.storage_cap.release(veh.pce());
+                self.release_storage(veh.pce(), now, handle_storage_release);
                 self.push_to_buffer(veh);
             } else {
                 break;
@@ -536,8 +556,24 @@ impl LocalLink {
         self.q.len() + self.waiting_list.len() + self.buffer.len()
     }
 
-    pub fn is_available(&self) -> bool {
-        self.storage_cap.is_available()
+    pub fn update_and_is_available(&mut self, now: impl Into<Tick>) -> bool {
+        let now = now.into();
+        let storage = self.storage_cap.update_and_is_available(now);
+        let inflow = inflow_available(&mut self.inflow_cap, now);
+        storage && inflow
+    }
+
+    fn release_storage(
+        &mut self,
+        pce: f64,
+        now: Tick,
+        handle_storage_release: &mut impl FnMut(StorageRelease),
+    ) {
+        handle_storage_release(StorageRelease {
+            pce,
+            available_at: self.storage_cap.release_tick(now),
+        });
+        self.storage_cap.release(pce, now);
     }
 
     fn drain(&mut self) -> Vec<SimulationVehicle> {
@@ -615,6 +651,7 @@ pub struct SplitOutLink {
     pub to_part: u32,
     q: VecDeque<SimulationVehicle>,
     storage_cap: StorageCap,
+    inflow_cap: Option<Flowcap>,
 }
 
 impl SplitOutLink {
@@ -631,18 +668,25 @@ impl SplitOutLink {
             to_part,
             q: VecDeque::default(),
             storage_cap,
+            inflow_cap: storage_capacity.inflow_per_tick().map(Flowcap::new),
         }
     }
 
-    pub fn apply_storage_cap_update(&mut self, released: f64) {
-        self.storage_cap.consume(-released);
+    pub fn apply_storage_cap_update(&mut self, released: f64, available_at: Tick) {
+        self.storage_cap.apply_release(released, available_at);
+    }
+
+    pub fn update_and_is_available(&mut self, now: Tick) -> bool {
+        let storage = self.storage_cap.update_and_is_available(now);
+        let inflow = inflow_available(&mut self.inflow_cap, now);
+        storage && inflow
     }
 
     pub fn take_veh(&mut self) -> VecDeque<SimulationVehicle> {
         std::mem::take(&mut self.q)
     }
 
-    pub fn push_veh(&mut self, veh: SimulationVehicle, position: LinkPosition) {
+    pub fn push_veh(&mut self, veh: SimulationVehicle, position: LinkPosition, now: Tick) {
         match position {
             LinkPosition::QStart => {}
             LinkPosition::Waiting => {
@@ -652,6 +696,7 @@ impl SplitOutLink {
                 )
             }
         }
+        consume_inflow(&mut self.inflow_cap, veh.pce(), now);
         self.storage_cap.consume(veh.pce());
         self.q.push_back(veh);
     }
@@ -671,8 +716,54 @@ impl SplitInLink {
         }
     }
 
-    pub(super) fn occupied_storage(&self) -> f64 {
-        self.local_link.storage_cap.used()
+    /// Forwards storage releases directly to the caller during this step.
+    pub(super) fn do_sim_step(
+        &mut self,
+        now: impl Into<Tick>,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        mut handle_storage_release: impl FnMut(StorageRelease),
+    ) -> Vec<SimulationVehicle> {
+        let now = now.into();
+        match self.local_link.storage_cap {
+            StorageCap::Queue(_) => {
+                // This is a shortcut of `self.local_link.do_sim_step_with_releases` since we only need one release message per step in case of asd
+                // Preserve Queue's per-step net release, including its floating-point accumulation order.
+                let before = self.local_link.storage_cap.used();
+                let vehicles_end_leg = self.local_link.do_sim_step(now, comp_env);
+                let diff = before - self.local_link.storage_cap.used();
+                assert!(
+                    diff.partial_cmp(&0.0).unwrap().is_ge(),
+                    "The occupied storage on link {:?} cannot increase when moving vehicles.",
+                    self.local_link.id
+                );
+                if diff > 0. {
+                    handle_storage_release(StorageRelease {
+                        pce: diff,
+                        available_at: now,
+                    });
+                }
+                vehicles_end_leg
+            }
+            StorageCap::Kinematic(_) => {
+                self.local_link
+                    .do_sim_step_with_releases(now, comp_env, handle_storage_release)
+            }
+        }
+    }
+}
+
+fn inflow_available(cap: &mut Option<Flowcap>, now: Tick) -> bool {
+    cap.as_mut().is_none_or(|cap| {
+        // Inflow refills independently of vehicles held in the downstream buffer.
+        cap.update_capacity(now, 0.0);
+        cap.has_capacity_left()
+    })
+}
+
+fn consume_inflow(cap: &mut Option<Flowcap>, pce: f64, now: Tick) {
+    if let Some(cap) = cap {
+        cap.update_capacity(now, 0.0);
+        cap.consume(pce);
     }
 }
 
@@ -911,11 +1002,11 @@ mod sim_link_tests {
 
         link.push_veh(vehicle1, QStart, 0);
         assert_approx_eq!(1., link.used_storage());
-        assert!(link.is_available());
+        assert!(link.update_and_is_available(0));
 
         link.push_veh(vehicle2, QStart, 0);
         assert_approx_eq!(2.0, link.used_storage());
-        assert!(!link.is_available());
+        assert!(!link.update_and_is_available(0));
 
         let SimLink::Local(l) = &mut link else {
             unreachable!()
@@ -1182,6 +1273,7 @@ mod out_link_tests {
             to_part: 1,
             q: Default::default(),
             storage_cap: StorageCap::build(100., 1., 1., 1., 1., 1.),
+            inflow_cap: None,
         });
         let id1 = 42;
         let id2 = 43;
@@ -1224,11 +1316,269 @@ mod out_link_tests {
             to_part: 1,
             q: Default::default(),
             storage_cap: cap,
+            inflow_cap: None,
         };
 
         assert_eq!(2., out_link.storage_cap.used());
-        out_link.apply_storage_cap_update(2.);
+        out_link.apply_storage_cap_update(2., crate::simulation::time::Tick::zero());
 
         assert_eq!(0., out_link.storage_cap.used());
+    }
+}
+
+#[cfg(test)]
+mod kinematic_tests {
+    use super::*;
+    use crate::simulation::config::TrafficDynamics;
+    use crate::test_utils;
+    use macros::deterministic_id_test;
+
+    fn link(length: f64, sample: f64, ticks: u32) -> LocalLink {
+        link_with_dynamics(length, sample, ticks, TrafficDynamics::KinematicWaves)
+    }
+
+    fn link_with_dynamics(
+        length: f64,
+        sample: f64,
+        ticks: u32,
+        dynamics: TrafficDynamics,
+    ) -> LocalLink {
+        let mut config = test_utils::qsim_config();
+        config.traffic_dynamics = dynamics;
+        config.sample_size = sample;
+        config.ticks_per_second = ticks;
+        // With kinematic waves, q_in = (1 / 10) / (0.24 + 0.16) = 0.25 PCE/s before sampling.
+        LocalLink::build(
+            Id::create("waves-link"),
+            900.,
+            6.25,
+            1.,
+            length,
+            10.,
+            &config,
+            Id::create("from"),
+            Id::create("to"),
+        )
+    }
+
+    fn vehicle(id: u64, pce: f64, arrives: bool) -> SimulationVehicle {
+        let route = if arrives {
+            vec!["waves-link"]
+        } else {
+            vec!["waves-link", "next"]
+        };
+        SimulationVehicle::from_parts(id, 0, 100., pce, test_utils::create_agent(id, route))
+    }
+
+    #[deterministic_id_test]
+    fn inflow_is_exhausted_with_free_storage_and_refills_lazily() {
+        for sample in [1., 0.5] {
+            for ticks in [1, 4] {
+                let mut link = link(100., sample, ticks);
+                assert!(link.update_and_is_available(0));
+                link.push_veh(vehicle(1, 1., false), 0, LinkPosition::QStart);
+                assert!(link.storage_cap.update_and_is_available(Tick::zero()));
+                let next = (4. / sample) as u64 * ticks as u64;
+                assert!(!link.update_and_is_available(next - 1));
+                assert!(!link.update_and_is_available(next - 1));
+                assert!(link.update_and_is_available(next));
+                link.push_veh(vehicle(2, 1., false), next, LinkPosition::QStart);
+                assert!(!link.update_and_is_available(next));
+                assert!(link.update_and_is_available(1_000_000));
+                assert!(link.update_and_is_available(1_000_000));
+            }
+        }
+    }
+
+    #[deterministic_id_test]
+    fn destination_and_buffer_both_create_gaps_without_keeping_empty_links_active() {
+        for arrives in [false, true] {
+            let mut link = link(25., 1., 1);
+            link.push_veh(vehicle(1, 2.5, arrives), 0, LinkPosition::QStart);
+            let ended = link.do_sim_step(4, &mut Default::default());
+            assert_eq!(usize::from(arrives), ended.len());
+            assert!(!link.update_and_is_available(9));
+            if !arrives {
+                assert_eq!(1, link.buffer.len());
+                assert!(link.pop_veh_and_restart_stuck_timer(5).is_some());
+            }
+            assert!(!link.is_active());
+            // No link steps between release and availability.
+            assert!(link.update_and_is_available(10));
+            assert!(link.update_and_is_available(10));
+            assert_eq!(0., link.storage_cap.used());
+        }
+    }
+
+    #[deterministic_id_test]
+    fn admission_query_updates_a_sleeping_link_without_waking_it() {
+        let mut link = link(25., 1., 1);
+        link.push_veh(vehicle(1, 2.5, true), 0, LinkPosition::QStart);
+        assert_eq!(1, link.do_sim_step(4, &mut Default::default()).len());
+        link.push_veh(vehicle(2, 1., false), 100, LinkPosition::QStart);
+        link.do_sim_step(101, &mut Default::default());
+        assert_eq!(Some(Tick::new(104)), link.fall_asleep(Tick::new(101)));
+        assert!(link.is_sleeping());
+        assert!(!link.update_and_is_available(102));
+        assert_eq!(1., link.storage_cap.used());
+        assert!(link.is_sleeping());
+    }
+
+    #[deterministic_id_test]
+    fn departures_use_neither_storage_nor_inflow_budget() {
+        let mut link = link(25., 1., 1);
+        let inflow = link.inflow_cap.as_ref().unwrap().accumulated();
+        link.push_veh(vehicle(1, 2.5, false), 0, LinkPosition::Waiting);
+        link.do_sim_step(0, &mut Default::default());
+        assert_eq!(1, link.buffer.len());
+        assert_eq!(0., link.storage_cap.used());
+        assert_eq!(inflow, link.inflow_cap.as_ref().unwrap().accumulated());
+        assert!(link.update_and_is_available(0));
+    }
+
+    #[deterministic_id_test]
+    fn local_and_split_storage_admit_on_identical_ticks() {
+        for ticks in [1, 4, 10] {
+            for length in [0., 0.01, 25., 25.01] {
+                for sample in [0.1, 1.] {
+                    let mut local = link(length, sample, ticks);
+                    let mut incoming = SplitInLink::new(0, link(length, sample, ticks));
+                    let mut outgoing = SplitOutLink {
+                        id: local.id.clone(),
+                        from: local.from.clone(),
+                        to_part: 1,
+                        q: VecDeque::new(),
+                        storage_cap: local.storage_cap.clone(),
+                        inflow_cap: local.inflow_cap.clone(),
+                    };
+                    // Fill storage, including oversubscription by a large vehicle. Both admission
+                    // sides consume the identical entry budget, the receiver only moves the queue.
+                    let pce = local.storage_cap.max().max(2.5);
+                    local.push_veh(vehicle(1, pce, true), 0, LinkPosition::QStart);
+                    outgoing.push_veh(vehicle(1, pce, true), LinkPosition::QStart, Tick::zero());
+                    assert_eq!(1, outgoing.take_veh().len());
+                    incoming
+                        .local_link
+                        .push_veh(vehicle(1, pce, true), 0, LinkPosition::QStart);
+                    let due = local.q.front().unwrap().earliest_exit_time;
+                    local.do_sim_step(due, &mut Default::default());
+                    let mut releases = Vec::new();
+                    incoming.do_sim_step(due, &mut Default::default(), |release| {
+                        releases.push(release);
+                    });
+                    assert!(!incoming.local_link.is_active());
+                    assert_eq!(1, releases.len());
+                    // The message is applied after this tick's node/link phases, as in LegEngine.
+                    for release in releases {
+                        outgoing.apply_storage_cap_update(release.pce, release.available_at);
+                    }
+                    incoming.do_sim_step(due.next(), &mut Default::default(), |_| {
+                        panic!("An empty link must not report a release again");
+                    });
+                    let gap_arrival = local.storage_cap.release_tick(due);
+                    assert!(!local.storage_cap.update_and_is_available(due));
+                    assert!(!outgoing.storage_cap.update_and_is_available(due));
+                    let mut first = None;
+                    for now in due.value() + 1..=10_000 {
+                        // Check storage separately so a depleted inflow budget cannot hide an
+                        // extra transport tick, especially on very short links.
+                        let storage = local.storage_cap.update_and_is_available(Tick::new(now));
+                        assert_eq!(now >= gap_arrival.value(), storage);
+                        assert_eq!(
+                            storage,
+                            outgoing.storage_cap.update_and_is_available(Tick::new(now))
+                        );
+                        let available = local.update_and_is_available(now);
+                        assert_eq!(
+                            available,
+                            outgoing.update_and_is_available(Tick::new(now)),
+                            "length={length}, ticks={ticks}, sample={sample}, now={now}"
+                        );
+                        if available {
+                            first = Some(now);
+                            break;
+                        }
+                    }
+                    assert!(first.is_some());
+                    assert_eq!(0., local.storage_cap.used());
+                    assert_eq!(0., outgoing.storage_cap.used());
+                }
+            }
+        }
+    }
+
+    #[deterministic_id_test]
+    fn split_link_reports_queue_exits_once_and_excludes_waiting_departures() {
+        for dynamics in [TrafficDynamics::Queue, TrafficDynamics::KinematicWaves] {
+            let mut incoming = SplitInLink::new(0, link_with_dynamics(25., 1., 1, dynamics));
+            let mut env = Default::default();
+            assert!(
+                incoming
+                    .do_sim_step(0, &mut env, |_| panic!("An empty link releases no storage"))
+                    .is_empty()
+            );
+            incoming
+                .local_link
+                .push_veh(vehicle(1, 1., true), 0, LinkPosition::QStart);
+            incoming
+                .local_link
+                .push_veh(vehicle(2, 2.5, false), 0, LinkPosition::QStart);
+            assert!(
+                incoming
+                    .do_sim_step(3, &mut env, |_| panic!("Vehicles are not due yet"))
+                    .is_empty()
+            );
+            // Waiting-list arrivals never consumed storage, so they must not release it.
+            incoming
+                .local_link
+                .push_veh(vehicle(3, 0.5, true), 4, LinkPosition::Waiting);
+
+            let mut releases = Vec::new();
+            let ended = incoming.do_sim_step(4, &mut env, |release| releases.push(release));
+            assert_eq!(2, ended.len());
+            assert_eq!(1, incoming.local_link.buffer.len());
+            match dynamics {
+                TrafficDynamics::Queue => assert_eq!(
+                    releases,
+                    [StorageRelease {
+                        pce: 3.5,
+                        available_at: Tick::new(4),
+                    }]
+                ),
+                TrafficDynamics::KinematicWaves => assert_eq!(
+                    releases,
+                    [
+                        StorageRelease {
+                            pce: 1.,
+                            available_at: Tick::new(10),
+                        },
+                        StorageRelease {
+                            pce: 2.5,
+                            available_at: Tick::new(10),
+                        },
+                    ]
+                ),
+            }
+
+            // Expiring old gaps and moving a link with only a buffer creates no new release.
+            incoming.local_link.update_and_is_available(10);
+            assert!(
+                incoming
+                    .do_sim_step(10, &mut env, |_| panic!(
+                        "Queue exits were already reported"
+                    ))
+                    .is_empty()
+            );
+        }
+    }
+
+    #[deterministic_id_test]
+    fn inflow_refills_while_the_downstream_buffer_remains_occupied() {
+        let mut link = link(100., 1., 1);
+        link.push_veh(vehicle(1, 1., false), 0, LinkPosition::QStart);
+        link.do_sim_step(16, &mut Default::default());
+        assert_eq!(1, link.buffer.len());
+        assert!(link.update_and_is_available(20));
+        assert_eq!(0.25, link.inflow_cap.as_ref().unwrap().accumulated());
     }
 }

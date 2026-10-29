@@ -1,18 +1,27 @@
 use crate::simulation::InternalAttributes;
 use crate::simulation::config;
+use crate::simulation::config::TrafficDynamics;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::{Link, Network};
+use crate::simulation::time::{SimClock, Tick};
 use nohash_hasher::IntMap;
+use std::collections::VecDeque;
 
 use super::STORAGE_CAPACITY_USED_IN_QSIM;
+
+/// Backward wave speed, independent of sampling (15 km/h).
+pub(super) const GAP_SPEED: f64 = 15.0 / 3.6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct StorageCapacityDefinition {
     qsim_override: Option<f64>,
     original: f64,
+    gap_travel_ticks: Option<Tick>,
+    inflow_per_tick: Option<f64>,
 }
 
 impl StorageCapacityDefinition {
+    #[cfg(test)]
     pub(crate) fn build(
         length: f64,
         perm_lanes: f64,
@@ -21,6 +30,27 @@ impl StorageCapacityDefinition {
         effective_cell_size: f64,
         free_speed: f64,
     ) -> Self {
+        Self::build_with_dynamics(
+            length,
+            perm_lanes,
+            capacity_h,
+            sample_size,
+            effective_cell_size,
+            free_speed,
+            &config::QSim::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_with_dynamics(
+        length: f64,
+        perm_lanes: f64,
+        capacity_h: f64,
+        sample_size: f64,
+        effective_cell_size: f64,
+        free_speed: f64,
+        config: &config::QSim,
+    ) -> Self {
         let flow_cap_s = capacity_h * sample_size / 3600.;
         let cap = length * perm_lanes * sample_size / effective_cell_size;
 
@@ -28,15 +58,34 @@ impl StorageCapacityDefinition {
         let max_storage_cap = flow_cap_s.max(cap);
 
         let freespeed_travel_time = length / free_speed;
-        let temp_storage_cap = freespeed_travel_time * flow_cap_s;
+        let kinematic = config.traffic_dynamics == TrafficDynamics::KinematicWaves;
+        let gap_travel_time = if kinematic { length / GAP_SPEED } else { 0.0 };
+        //TODO check if adding the gap time is correct.
+        let temp_storage_cap = (freespeed_travel_time + gap_travel_time) * flow_cap_s;
 
         // set storage capacity to at least the freespeed travel time * flow capacity. Otherwise, the flow capacity would never be fully used,
         // because vehicles would need at least need freespeed travel time to reach the end of the link.
+        // With kinematic waves, include the time until the gap reaches the upstream end as well.
         let adjusted = (max_storage_cap < temp_storage_cap).then_some(temp_storage_cap);
 
+        // A release in the link phase is usable in a later node phase. Rounding upwards
+        // prevents early release; a minimum of one tick also covers zero-length links.
+        let gap_travel_ticks = kinematic.then(|| {
+            SimClock::new(config.ticks_per_second)
+                .secs_to_ticks_ceil(gap_travel_time)
+                .max(Tick::new(1))
+        });
+
+        // TODO understand this formula
+        let inflow_per_tick = kinematic.then(|| {
+            (perm_lanes / effective_cell_size) / (1.0 / GAP_SPEED + 1.0 / free_speed) * sample_size
+                / f64::from(config.ticks_per_second)
+        });
         Self {
             qsim_override: adjusted,
             original: max_storage_cap,
+            gap_travel_ticks,
+            inflow_per_tick,
         }
     }
 
@@ -52,6 +101,10 @@ impl StorageCapacityDefinition {
     pub(crate) fn max(&self) -> f64 {
         self.qsim_override.unwrap_or(self.original)
     }
+
+    pub(super) fn inflow_per_tick(&self) -> Option<f64> {
+        self.inflow_per_tick
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -66,13 +119,14 @@ impl LinkStorageCapacities {
             .links()
             .into_iter()
             .map(|link| {
-                let definition = StorageCapacityDefinition::build(
+                let definition = StorageCapacityDefinition::build_with_dynamics(
                     link.length,
                     link.permlanes,
                     link.capacity,
                     config.sample_size,
                     effective_cell_size,
                     link.freespeed,
+                    config,
                 );
                 (link.id.clone(), definition)
             })
@@ -101,32 +155,58 @@ impl LinkStorageCapacities {
     }
 }
 
-/// StorageCap tracks changes in storage capacity for a link.
-/// First of all it stores the maximum available storage capacity for a link.
-/// Also, consumed and released capacity during a simulation time step is tracked
-/// and can be queried separately. Once the time step is finished, the temporary
-/// Bookkeeping can be applied to the overall consumed capacity by using the 'apply_updates'
-/// method.
-///
-/// Consumed capacity can be queried immediately via 'currently_used', while released capacity
-/// is treated separately. This is because we want vehicles which enter a link consume capacity
-/// immediately, but capacity freed by vehicles leaving a link should only take effect in the next
-/// simulation time step.
-///
-/// The consumed and released capacities are also tracked, so that we can figure out which
-/// SplitInLinks must send storage capacity updates to upstream partitions. This logic
-/// can be found in SimNetwork::move_links.
+/// Storage capacity consumed at entry. Queue releases immediately in the link phase, after the
+/// node phase. Kinematic waves reserve that space until the backward-moving gap arrives.
 #[derive(Debug, Clone)]
-pub struct StorageCap {
+pub enum StorageCap {
+    Queue(QueueStorageCap),
+    Kinematic(KinematicStorageCap),
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueStorageCap {
     max: f64,
     used: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct KinematicStorageCap {
+    reserved: QueueStorageCap,
+    gap_travel_ticks: Tick,
+    pending: VecDeque<StorageRelease>,
+}
+
+impl KinematicStorageCap {
+    fn update(&mut self, now: Tick) {
+        while self
+            .pending
+            .front()
+            .is_some_and(|gap| gap.available_at <= now)
+        {
+            self.reserved.used -= self.pending.pop_front().unwrap().pce;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct StorageRelease {
+    pub pce: f64,
+    pub available_at: Tick,
+}
+
 impl StorageCap {
     pub(crate) fn from_definition(definition: &StorageCapacityDefinition) -> Self {
-        Self {
+        let reserved = QueueStorageCap {
             max: definition.max(),
             used: 0.0,
+        };
+        match definition.gap_travel_ticks {
+            None => Self::Queue(reserved),
+            Some(gap_travel_ticks) => Self::Kinematic(KinematicStorageCap {
+                reserved,
+                gap_travel_ticks,
+                pending: VecDeque::new(),
+            }),
         }
     }
 
@@ -151,12 +231,18 @@ impl StorageCap {
     }
 
     pub fn used(&self) -> f64 {
-        self.used
+        match self {
+            Self::Queue(cap) => cap.used,
+            Self::Kinematic(cap) => cap.reserved.used,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn max(&self) -> f64 {
-        self.max
+        match self {
+            Self::Queue(cap) => cap.max,
+            Self::Kinematic(cap) => cap.reserved.max,
+        }
     }
 
     /// Consumes storage capacity on a link
@@ -166,25 +252,72 @@ impl StorageCap {
     /// # Parameters
     /// * 'value' storage capacity to be consumed
     pub fn consume(&mut self, value: f64) {
-        self.used += value;
+        match self {
+            Self::Queue(cap) => cap.used += value,
+            Self::Kinematic(cap) => cap.reserved.used += value,
+        }
     }
 
     /// Releases storage capacity on a link
     ///
     /// This method should be called when a vehicle leaves a link
-    pub fn release(&mut self, value: f64) {
-        self.used -= value;
+    pub fn release(&mut self, pce: f64, now: Tick) {
+        // SplitInLinks never perform admission queries. Expiring older gaps on a new release
+        // bounds their bookkeeping without keeping them active just for moving gaps.
+        if let Self::Kinematic(cap) = self {
+            cap.update(now);
+        }
+        self.apply_release(pce, self.release_tick(now));
     }
 
-    /// Tests whether there is storage capacity available on the link.
-    pub fn is_available(&self) -> bool {
-        let available_cap = self.max - self.used;
-        available_cap > 0.0
+    pub(super) fn release_tick(&self, now: Tick) -> Tick {
+        match self {
+            Self::Queue(_) => now,
+            Self::Kinematic(cap) => now.saturating_add(cap.gap_travel_ticks),
+        }
+    }
+
+    /// Applies a storage release according to the traffic dynamics.
+    /// Queue releases immediately and ignores `available_at`. Kinematic waves use the sender's
+    /// absolute arrival tick. Never add another gap travel time on receipt.
+    pub(super) fn apply_release(&mut self, pce: f64, available_at: Tick) {
+        match self {
+            Self::Queue(cap) => cap.used -= pce,
+            Self::Kinematic(cap) => {
+                let release = StorageRelease { pce, available_at };
+                // Releases on one link normally arrive in order. Also accept batches received
+                // out of order without hiding an earlier gap behind a later one.
+                if cap
+                    .pending
+                    .back()
+                    .is_none_or(|gap| gap.available_at <= available_at)
+                {
+                    cap.pending.push_back(release);
+                } else {
+                    let index = cap
+                        .pending
+                        .partition_point(|gap| gap.available_at <= available_at);
+                    cap.pending.insert(index, release);
+                }
+            }
+        }
+    }
+
+    pub fn update_and_is_available(&mut self, now: Tick) -> bool {
+        let cap = match self {
+            Self::Queue(cap) => cap,
+            Self::Kinematic(cap) => {
+                cap.update(now);
+                &mut cap.reserved
+            }
+        };
+        cap.max - cap.used > 0.0
     }
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::simulation::config;
     use crate::simulation::id::Id;
     use crate::simulation::network::STORAGE_CAPACITY_USED_IN_QSIM;
@@ -195,10 +328,107 @@ mod test {
     use crate::simulation::scenario::network::{Link, Network, Node};
     use macros::deterministic_id_test;
 
+    fn kinematic_definition(length: f64, sample: f64, ticks: u32) -> StorageCapacityDefinition {
+        let config = config::QSim {
+            traffic_dynamics: TrafficDynamics::KinematicWaves,
+            ticks_per_second: ticks,
+            ..Default::default()
+        };
+        StorageCapacityDefinition::build_with_dynamics(length, 1., 3600., sample, 7.5, 10., &config)
+    }
+
+    #[test]
+    fn kinematic_capacity_includes_gap_time_and_scales_only_capacities() {
+        let full = kinematic_definition(100., 1., 1);
+        let sampled = kinematic_definition(100., 0.1, 4);
+        assert_eq!(Some(34.), full.qsim_override());
+        assert!((sampled.qsim_override().unwrap() - 3.4).abs() < 1e-12);
+        assert_eq!(Some(Tick::new(24)), full.gap_travel_ticks);
+        assert_eq!(Some(Tick::new(96)), sampled.gap_travel_ticks);
+        let rate = (1. / 7.5) / (1. / GAP_SPEED + 1. / 10.);
+        assert!((full.inflow_per_tick().unwrap() - rate).abs() < 1e-12);
+        assert!((sampled.inflow_per_tick().unwrap() - rate * 0.1 / 4.).abs() < 1e-12);
+    }
+
+    #[test]
+    fn gap_is_released_before_at_and_after_its_arrival() {
+        let mut cap = StorageCap::from_definition(&kinematic_definition(100., 1., 1));
+        cap.consume(cap.max());
+        cap.release(1.5, Tick::new(10));
+        assert!(!cap.update_and_is_available(Tick::new(33)));
+        assert!(cap.update_and_is_available(Tick::new(34)));
+        assert_eq!(32.5, cap.used());
+        assert!(cap.update_and_is_available(Tick::new(35)));
+        assert_eq!(32.5, cap.used());
+    }
+
+    #[test]
+    fn several_future_gaps_keep_their_pce_and_absolute_arrival() {
+        let mut cap = StorageCap::from_definition(&kinematic_definition(100., 1., 1));
+        cap.consume(34.);
+        // Model a received batch, including an earlier timestamp arriving after a later one.
+        cap.apply_release(2.5, Tick::new(50));
+        cap.apply_release(0.5, Tick::new(30));
+        cap.apply_release(1.0, Tick::new(50));
+        assert!(!cap.update_and_is_available(Tick::new(29)));
+        assert!(cap.update_and_is_available(Tick::new(30)));
+        assert_eq!(33.5, cap.used());
+        assert!(cap.update_and_is_available(Tick::new(49)));
+        assert_eq!(33.5, cap.used());
+        assert!(cap.update_and_is_available(Tick::new(50)));
+        assert_eq!(30.0, cap.used());
+        assert!(cap.update_and_is_available(Tick::new(1_000_000)));
+        assert!(cap.update_and_is_available(Tick::new(1_000_000)));
+        assert_eq!(30.0, cap.used());
+    }
+
+    #[test]
+    fn gap_duration_rounds_up_including_exact_and_short_links() {
+        for ticks in [1, 4, 10] {
+            for (length, expected) in [
+                (0., 1),
+                (0.01, 1),
+                (25., 6 * ticks as u64),
+                (25.01, 6 * ticks as u64 + 1),
+            ] {
+                let definition = kinematic_definition(length, 1., ticks);
+                assert_eq!(Some(Tick::new(expected)), definition.gap_travel_ticks);
+                let mut cap = StorageCap::from_definition(&definition);
+                cap.consume(cap.max() + 1.);
+                cap.release(2., Tick::new(100));
+                assert!(!cap.update_and_is_available(Tick::new(100 + expected - 1)));
+                assert!(cap.update_and_is_available(Tick::new(100 + expected)));
+            }
+        }
+    }
+
+    #[test]
+    fn queue_release_is_immediate() {
+        let mut cap = StorageCap::build(100., 1., 3600., 1., 7.5, 10.);
+        cap.consume(cap.max());
+        cap.release(1., Tick::new(5));
+        assert!(cap.update_and_is_available(Tick::new(5)));
+    }
+
+    #[test]
+    fn receiver_bookkeeping_is_bounded_without_admission_queries() {
+        let mut cap = StorageCap::from_definition(&kinematic_definition(25., 1., 1));
+        for now in 0..1_000 {
+            cap.consume(1.);
+            cap.release(1., Tick::new(now));
+        }
+        let StorageCap::Kinematic(state) = &cap else {
+            unreachable!()
+        };
+        assert_eq!(6, state.pending.len());
+        assert!(cap.update_and_is_available(Tick::new(2_000)));
+        assert_eq!(0., cap.used());
+    }
+
     #[test]
     fn storage_capacity_definition_without_adjustment() {
         let cap = StorageCap::build(100., 3., 1., 0.2, 7.5, 10.);
-        assert_eq!(8., cap.max);
+        assert_eq!(8., cap.max());
     }
 
     #[test]
