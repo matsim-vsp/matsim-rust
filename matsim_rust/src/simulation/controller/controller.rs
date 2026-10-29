@@ -43,10 +43,6 @@ use std::time::Duration;
 use std::{fs, mem};
 use tracing::info;
 
-#[cfg(test)]
-#[path = "berlin_performance.rs"]
-mod berlin_performance;
-
 #[derive(Debug)]
 pub struct Controller {
     scenario: ControllerScenario,

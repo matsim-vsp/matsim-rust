@@ -60,6 +60,7 @@ impl StorageCapacityDefinition {
         let freespeed_travel_time = length / free_speed;
         let kinematic = config.traffic_dynamics == TrafficDynamics::KinematicWaves;
         let gap_travel_time = if kinematic { length / GAP_SPEED } else { 0.0 };
+        //TODO check if adding the gap time is correct.
         let temp_storage_cap = (freespeed_travel_time + gap_travel_time) * flow_cap_s;
 
         // set storage capacity to at least the freespeed travel time * flow capacity. Otherwise, the flow capacity would never be fully used,
@@ -67,21 +68,24 @@ impl StorageCapacityDefinition {
         // With kinematic waves, include the time until the gap reaches the upstream end as well.
         let adjusted = (max_storage_cap < temp_storage_cap).then_some(temp_storage_cap);
 
+        // A release in the link phase is usable in a later node phase. Rounding upwards
+        // prevents early release; a minimum of one tick also covers zero-length links.
+        let gap_travel_ticks = kinematic.then(|| {
+            SimClock::new(config.ticks_per_second)
+                .secs_to_ticks_ceil(gap_travel_time)
+                .max(Tick::new(1))
+        });
+
+        // TODO understand this formula
+        let inflow_per_tick = kinematic.then(|| {
+            (perm_lanes / effective_cell_size) / (1.0 / GAP_SPEED + 1.0 / free_speed) * sample_size
+                / f64::from(config.ticks_per_second)
+        });
         Self {
             qsim_override: adjusted,
             original: max_storage_cap,
-            // A release in the link phase is usable in a later node phase. Rounding upwards
-            // prevents early release; a minimum of one tick also covers zero-length links.
-            gap_travel_ticks: kinematic.then(|| {
-                SimClock::new(config.ticks_per_second)
-                    .secs_to_ticks_ceil(gap_travel_time)
-                    .max(Tick::new(1))
-            }),
-            inflow_per_tick: kinematic.then(|| {
-                (perm_lanes / effective_cell_size) / (1.0 / GAP_SPEED + 1.0 / free_speed)
-                    * sample_size
-                    / f64::from(config.ticks_per_second)
-            }),
+            gap_travel_ticks,
+            inflow_per_tick,
         }
     }
 
@@ -153,8 +157,6 @@ impl LinkStorageCapacities {
 
 /// Storage capacity consumed at entry. Queue releases immediately in the link phase, after the
 /// node phase. Kinematic waves reserve that space until the backward-moving gap arrives.
-/// SplitInLinks report newly created gaps, rather than changes caused by later availability
-/// queries; see `SimNetworkPartition::move_in_link`.
 #[derive(Debug, Clone)]
 pub enum StorageCap {
     Queue(QueueStorageCap),
@@ -259,27 +261,12 @@ impl StorageCap {
     /// Releases storage capacity on a link
     ///
     /// This method should be called when a vehicle leaves a link
-    pub fn release(&mut self, value: f64, now: Tick) {
-        // SplitInLinks never perform admission queries. Expiring older gaps on a new release
-        // bounds their bookkeeping without keeping them active just for moving gaps.
-        if let Self::Kinematic(cap) = self {
-            cap.update(now);
-        }
-        self.release_at(value, self.release_tick(now));
-    }
-
-    pub(super) fn release_tick(&self, now: Tick) -> Tick {
-        match self {
-            Self::Queue(_) => now,
-            Self::Kinematic(cap) => now.saturating_add(cap.gap_travel_ticks),
-        }
-    }
-
-    /// Apply the sender's absolute arrival tick. Never add another gap travel time on receipt.
-    pub(super) fn release_at(&mut self, pce: f64, available_at: Tick) {
+    pub fn release(&mut self, pce: f64, now: Tick) {
         match self {
             Self::Queue(cap) => cap.used -= pce,
             Self::Kinematic(cap) => {
+                cap.update(now);
+                let available_at = now.saturating_add(cap.gap_travel_ticks);
                 let release = StorageRelease { pce, available_at };
                 // Releases on one link normally arrive in order. Also accept batches received
                 // out of order without hiding an earlier gap behind a later one.
@@ -299,8 +286,7 @@ impl StorageCap {
         }
     }
 
-    /// Tests whether there is storage capacity available on the link.
-    pub fn is_available(&mut self, now: Tick) -> bool {
+    pub fn update_and_is_available(&mut self, now: Tick) -> bool {
         let cap = match self {
             Self::Queue(cap) => cap,
             Self::Kinematic(cap) => {
@@ -352,10 +338,10 @@ mod test {
         let mut cap = StorageCap::from_definition(&kinematic_definition(100., 1., 1));
         cap.consume(cap.max());
         cap.release(1.5, Tick::new(10));
-        assert!(!cap.is_available(Tick::new(33)));
-        assert!(cap.is_available(Tick::new(34)));
+        assert!(!cap.update_and_is_available(Tick::new(33)));
+        assert!(cap.update_and_is_available(Tick::new(34)));
         assert_eq!(32.5, cap.used());
-        assert!(cap.is_available(Tick::new(35)));
+        assert!(cap.update_and_is_available(Tick::new(35)));
         assert_eq!(32.5, cap.used());
     }
 
@@ -367,15 +353,15 @@ mod test {
         cap.release_at(2.5, Tick::new(50));
         cap.release_at(0.5, Tick::new(30));
         cap.release_at(1.0, Tick::new(50));
-        assert!(!cap.is_available(Tick::new(29)));
-        assert!(cap.is_available(Tick::new(30)));
+        assert!(!cap.update_and_is_available(Tick::new(29)));
+        assert!(cap.update_and_is_available(Tick::new(30)));
         assert_eq!(33.5, cap.used());
-        assert!(cap.is_available(Tick::new(49)));
+        assert!(cap.update_and_is_available(Tick::new(49)));
         assert_eq!(33.5, cap.used());
-        assert!(cap.is_available(Tick::new(50)));
+        assert!(cap.update_and_is_available(Tick::new(50)));
         assert_eq!(30.0, cap.used());
-        assert!(cap.is_available(Tick::new(1_000_000)));
-        assert!(cap.is_available(Tick::new(1_000_000)));
+        assert!(cap.update_and_is_available(Tick::new(1_000_000)));
+        assert!(cap.update_and_is_available(Tick::new(1_000_000)));
         assert_eq!(30.0, cap.used());
     }
 
@@ -393,8 +379,8 @@ mod test {
                 let mut cap = StorageCap::from_definition(&definition);
                 cap.consume(cap.max() + 1.);
                 cap.release(2., Tick::new(100));
-                assert!(!cap.is_available(Tick::new(100 + expected - 1)));
-                assert!(cap.is_available(Tick::new(100 + expected)));
+                assert!(!cap.update_and_is_available(Tick::new(100 + expected - 1)));
+                assert!(cap.update_and_is_available(Tick::new(100 + expected)));
             }
         }
     }
@@ -404,7 +390,7 @@ mod test {
         let mut cap = StorageCap::build(100., 1., 3600., 1., 7.5, 10.);
         cap.consume(cap.max());
         cap.release(1., Tick::new(5));
-        assert!(cap.is_available(Tick::new(5)));
+        assert!(cap.update_and_is_available(Tick::new(5)));
     }
 
     #[test]
@@ -418,7 +404,7 @@ mod test {
             unreachable!()
         };
         assert_eq!(6, state.pending.len());
-        assert!(cap.is_available(Tick::new(2_000)));
+        assert!(cap.update_and_is_available(Tick::new(2_000)));
         assert_eq!(0., cap.used());
     }
 

@@ -523,6 +523,8 @@ impl SimNetworkPartition {
         let result = Self::move_local_link(&mut link.local_link, active_nodes, now, events);
         let link_id = link.local_link.id.clone();
         let from_part = link.from_part;
+
+        // Register every new gap as capacity early, since the link might get empty and thus deactivated now.
         if let Some(releases) = link.drain_storage_releases() {
             // Transfer every new gap before deactivation, even if the link is now empty.
             // Its arrival is handled lazily by the upstream mirror, not by moving this link.
@@ -710,8 +712,11 @@ impl SimNetworkPartition {
             return FrontDecision::Abort;
         }
         let is_stuck = in_link.is_veh_stuck(now);
-        let next_id = next_id.clone();
-        if links.get_mut(&next_id).unwrap().is_available(now) {
+        if links
+            .get_mut(&next_id.clone())
+            .unwrap()
+            .update_and_is_available(now)
+        {
             FrontDecision::MoveNormally
         } else if is_stuck {
             FrontDecision::MoveAlthoughStuck
@@ -1333,7 +1338,7 @@ mod tests {
                 .links
                 .get_mut(&Id::create("C"))
                 .unwrap()
-                .is_available(0)
+                .update_and_is_available(0)
         );
 
         network.move_nodes(&mut env, 1);
@@ -1660,7 +1665,11 @@ mod tests {
             network.move_nodes(&mut env, now);
             network.move_links(&mut env, now);
 
-            let link3_available = network.links.get_mut(&id_3).unwrap().is_available(now);
+            let link3_available = network
+                .links
+                .get_mut(&id_3)
+                .unwrap()
+                .update_and_is_available(now);
             let link1 = network.links.get(&id_1).unwrap();
             let link2 = network.links.get(&id_2).unwrap();
 
@@ -1757,7 +1766,11 @@ mod tests {
             network.move_nodes(&mut env, now);
             network.move_links(&mut env, now);
 
-            let link3_available = network.links.get_mut(&id_3).unwrap().is_available(now);
+            let link3_available = network
+                .links
+                .get_mut(&id_3)
+                .unwrap()
+                .update_and_is_available(now);
             let link1 = network.links.get(&id_1).unwrap();
             let link2 = network.links.get(&id_2).unwrap();
 
@@ -2058,7 +2071,7 @@ mod tests {
         upstream.apply_storage_cap_updates(updates);
         let mirror = upstream.links.get_mut(&link_id).unwrap();
         for (now, expected) in [(7, 3.5), (8, 2.5), (8, 2.5), (9, 0.), (100, 0.)] {
-            let _ = mirror.is_available(now);
+            let _ = mirror.update_and_is_available(now);
             assert_eq!(expected, mirror.used_storage());
         }
     }
