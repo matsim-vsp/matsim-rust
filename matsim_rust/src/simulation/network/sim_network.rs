@@ -495,6 +495,15 @@ impl SimNetworkPartition {
         comp_env: &mut ThreadLocalComputationalEnvironment,
     ) -> MoveSingleLinkResult {
         let vehicles_end_leg = link.do_sim_step(now, comp_env);
+        Self::finish_link_step(link, active_nodes, now, vehicles_end_leg)
+    }
+
+    fn finish_link_step(
+        link: &mut LocalLink,
+        active_nodes: &mut ActiveCache<Node>,
+        now: Tick,
+        vehicles_end_leg: Vec<SimulationVehicle>,
+    ) -> MoveSingleLinkResult {
         if link.to_nodes_active() {
             active_nodes.activate(link.to.clone());
         }
@@ -519,41 +528,21 @@ impl SimNetworkPartition {
     ) -> MoveSingleLinkResult {
         // if anything has changed on the link, we want to report the updated storage capacity to the
         // upstream partition.
-        let before = link.occupied_storage();
-        let result = Self::move_local_link(&mut link.local_link, active_nodes, now, events);
         let link_id = link.local_link.id.clone();
         let from_part = link.from_part;
 
         // Register every new gap as capacity early, since the link might get empty and thus deactivated now.
-        if let Some(releases) = link.drain_storage_releases() {
+        let vehicles_end_leg = link.do_sim_step(now, events, |release| {
             // Transfer every new gap before deactivation, even if the link is now empty.
             // Its arrival is handled lazily by the upstream mirror, not by moving this link.
-            storage_cap_updates.extend(releases.map(|release| StorageUpdate {
+            storage_cap_updates.push(StorageUpdate {
                 link_id: link_id.clone(),
                 from_part,
                 released: release.pce,
                 available_at: release.available_at,
-            }));
-            return result;
-        }
-        let diff = before - link.occupied_storage();
-
-        assert!(
-            diff.partial_cmp(&0.0).unwrap().is_ge(),
-            "The occupied storage on link {:?} cannot increase when moving vehicles.",
-            link.local_link.id
-        );
-
-        if diff > 0. {
-            storage_cap_updates.push(StorageUpdate {
-                link_id: link.local_link.id.clone(),
-                from_part: link.from_part,
-                released: diff,
-                available_at: now,
-            })
-        }
-
-        result
+            });
+        });
+        Self::finish_link_step(&mut link.local_link, active_nodes, now, vehicles_end_leg)
     }
 
     fn move_out_link(

@@ -262,11 +262,28 @@ impl StorageCap {
     ///
     /// This method should be called when a vehicle leaves a link
     pub fn release(&mut self, pce: f64, now: Tick) {
+        // SplitInLinks never perform admission queries. Expiring older gaps on a new release
+        // bounds their bookkeeping without keeping them active just for moving gaps.
+        if let Self::Kinematic(cap) = self {
+            cap.update(now);
+        }
+        self.apply_release(pce, self.release_tick(now));
+    }
+
+    pub(super) fn release_tick(&self, now: Tick) -> Tick {
+        match self {
+            Self::Queue(_) => now,
+            Self::Kinematic(cap) => now.saturating_add(cap.gap_travel_ticks),
+        }
+    }
+
+    /// Applies a storage release according to the traffic dynamics.
+    /// Queue releases immediately and ignores `available_at`. Kinematic waves use the sender's
+    /// absolute arrival tick. Never add another gap travel time on receipt.
+    pub(super) fn apply_release(&mut self, pce: f64, available_at: Tick) {
         match self {
             Self::Queue(cap) => cap.used -= pce,
             Self::Kinematic(cap) => {
-                cap.update(now);
-                let available_at = now.saturating_add(cap.gap_travel_ticks);
                 let release = StorageRelease { pce, available_at };
                 // Releases on one link normally arrive in order. Also accept batches received
                 // out of order without hiding an earlier gap behind a later one.
@@ -350,9 +367,9 @@ mod test {
         let mut cap = StorageCap::from_definition(&kinematic_definition(100., 1., 1));
         cap.consume(34.);
         // Model a received batch, including an earlier timestamp arriving after a later one.
-        cap.release_at(2.5, Tick::new(50));
-        cap.release_at(0.5, Tick::new(30));
-        cap.release_at(1.0, Tick::new(50));
+        cap.apply_release(2.5, Tick::new(50));
+        cap.apply_release(0.5, Tick::new(30));
+        cap.apply_release(1.0, Tick::new(50));
         assert!(!cap.update_and_is_available(Tick::new(29)));
         assert!(cap.update_and_is_available(Tick::new(30)));
         assert_eq!(33.5, cap.used());

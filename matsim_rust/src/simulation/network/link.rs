@@ -206,8 +206,6 @@ pub struct LocalLink {
     storage_cap: StorageCap,
     flow_cap: Flowcap,
     inflow_cap: Option<Flowcap>,
-    // Only the receiving half of a kinematic split link records releases for transmission.
-    new_releases: Option<Vec<StorageRelease>>,
     stuck_timer: StuckTimer,
     clock: SimClock,
     // The link does not need to be moved before this tick, see `fall_asleep`.
@@ -301,7 +299,6 @@ impl LocalLink {
             storage_cap,
             flow_cap: Flowcap::new(capacity_per_tick),
             inflow_cap: storage_capacity.inflow_per_tick().map(Flowcap::new),
-            new_releases: None,
             stuck_timer: StuckTimer::new(clock.secs_to_tick(config.stuck_threshold as u64)),
             clock,
             sleeping_until: None,
@@ -360,7 +357,16 @@ impl LocalLink {
         now: impl Into<Tick>,
         comp_env: &mut ThreadLocalComputationalEnvironment,
     ) -> Vec<SimulationVehicle> {
-        let now = now.into();
+        self.do_sim_step_with_releases(now.into(), comp_env, |_| {})
+    }
+
+    /// If `handle_storage_release` is no No-op, it is normally used to forward storage releases to the partition's storage-update buffer.
+    fn do_sim_step_with_releases(
+        &mut self,
+        now: Tick,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        mut handle_storage_release: impl FnMut(StorageRelease),
+    ) -> Vec<SimulationVehicle> {
         let buffer_was_empty = self.buffer.is_empty();
         self.update_flow_cap(now);
 
@@ -376,7 +382,7 @@ impl LocalLink {
 
         let now_time = self.clock.tick_to_time(now);
         let mut ending_vehicles = self.add_waiting_to_buffer(comp_env, now);
-        ending_vehicles.append(&mut self.add_queue_to_buffer(now));
+        ending_vehicles.append(&mut self.add_queue_to_buffer(now, &mut handle_storage_release));
         if buffer_was_empty && !self.buffer.is_empty() {
             self.restart_stuck_timer(now);
         }
@@ -398,7 +404,11 @@ impl LocalLink {
         ending_vehicles
     }
 
-    fn add_queue_to_buffer(&mut self, now: Tick) -> Vec<SimulationVehicle> {
+    fn add_queue_to_buffer(
+        &mut self,
+        now: Tick,
+        handle_storage_release: &mut impl FnMut(StorageRelease),
+    ) -> Vec<SimulationVehicle> {
         let mut released_vehicles = vec![];
 
         loop {
@@ -422,7 +432,7 @@ impl LocalLink {
             // If the vehicle wants to arrive, remove it from the queue
             if arrive {
                 let veh = self.q.pop_front().unwrap().vehicle;
-                self.release_storage(veh.pce(), now);
+                self.release_storage(veh.pce(), now, handle_storage_release);
                 released_vehicles.push(veh);
                 continue;
             }
@@ -430,7 +440,7 @@ impl LocalLink {
             // If the vehicle wants to move to another link, put it into buffer
             if capacity_left {
                 let veh = self.q.pop_front().unwrap().vehicle;
-                self.release_storage(veh.pce(), now);
+                self.release_storage(veh.pce(), now, handle_storage_release);
                 self.push_to_buffer(veh);
             } else {
                 break;
@@ -553,13 +563,16 @@ impl LocalLink {
         storage && inflow
     }
 
-    fn release_storage(&mut self, pce: f64, now: Tick) {
-        if let Some(releases) = &mut self.new_releases {
-            releases.push(StorageRelease {
-                pce,
-                available_at: self.storage_cap.release_tick(now),
-            });
-        }
+    fn release_storage(
+        &mut self,
+        pce: f64,
+        now: Tick,
+        handle_storage_release: &mut impl FnMut(StorageRelease),
+    ) {
+        handle_storage_release(StorageRelease {
+            pce,
+            available_at: self.storage_cap.release_tick(now),
+        });
         self.storage_cap.release(pce, now);
     }
 
@@ -660,7 +673,7 @@ impl SplitOutLink {
     }
 
     pub fn apply_storage_cap_update(&mut self, released: f64, available_at: Tick) {
-        self.storage_cap.release_at(released, available_at);
+        self.storage_cap.apply_release(released, available_at);
     }
 
     pub fn update_and_is_available(&mut self, now: Tick) -> bool {
@@ -696,25 +709,46 @@ pub struct SplitInLink {
 }
 
 impl SplitInLink {
-    pub(super) fn new(from_part: u32, mut local_link: LocalLink) -> Self {
-        if matches!(&local_link.storage_cap, StorageCap::Kinematic(_)) {
-            local_link.new_releases = Some(Vec::new());
-        }
+    pub(super) fn new(from_part: u32, local_link: LocalLink) -> Self {
         SplitInLink {
             from_part,
             local_link,
         }
     }
 
-    pub(super) fn occupied_storage(&self) -> f64 {
-        self.local_link.storage_cap.used()
-    }
-
-    pub(super) fn drain_storage_releases(&mut self) -> Option<std::vec::Drain<'_, StorageRelease>> {
-        self.local_link
-            .new_releases
-            .as_mut()
-            .map(|releases| releases.drain(..))
+    /// Forwards storage releases directly to the caller during this step.
+    pub(super) fn do_sim_step(
+        &mut self,
+        now: impl Into<Tick>,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        mut handle_storage_release: impl FnMut(StorageRelease),
+    ) -> Vec<SimulationVehicle> {
+        let now = now.into();
+        match self.local_link.storage_cap {
+            StorageCap::Queue(_) => {
+                // This is a shortcut of `self.local_link.do_sim_step_with_releases` since we only need one release message per step in case of asd
+                // Preserve Queue's per-step net release, including its floating-point accumulation order.
+                let before = self.local_link.storage_cap.used();
+                let vehicles_end_leg = self.local_link.do_sim_step(now, comp_env);
+                let diff = before - self.local_link.storage_cap.used();
+                assert!(
+                    diff.partial_cmp(&0.0).unwrap().is_ge(),
+                    "The occupied storage on link {:?} cannot increase when moving vehicles.",
+                    self.local_link.id
+                );
+                if diff > 0. {
+                    handle_storage_release(StorageRelease {
+                        pce: diff,
+                        available_at: now,
+                    });
+                }
+                vehicles_end_leg
+            }
+            StorageCap::Kinematic(_) => {
+                self.local_link
+                    .do_sim_step_with_releases(now, comp_env, handle_storage_release)
+            }
+        }
     }
 }
 
@@ -1300,11 +1334,20 @@ mod kinematic_tests {
     use macros::deterministic_id_test;
 
     fn link(length: f64, sample: f64, ticks: u32) -> LocalLink {
+        link_with_dynamics(length, sample, ticks, TrafficDynamics::KinematicWaves)
+    }
+
+    fn link_with_dynamics(
+        length: f64,
+        sample: f64,
+        ticks: u32,
+        dynamics: TrafficDynamics,
+    ) -> LocalLink {
         let mut config = test_utils::qsim_config();
-        config.traffic_dynamics = TrafficDynamics::KinematicWaves;
+        config.traffic_dynamics = dynamics;
         config.sample_size = sample;
         config.ticks_per_second = ticks;
-        // q_in = (1 / 10) / (0.24 + 0.16) = 0.25 PCE/s before sampling.
+        // With kinematic waves, q_in = (1 / 10) / (0.24 + 0.16) = 0.25 PCE/s before sampling.
         LocalLink::build(
             Id::create("waves-link"),
             900.,
@@ -1419,17 +1462,19 @@ mod kinematic_tests {
                         .push_veh(vehicle(1, pce, true), 0, LinkPosition::QStart);
                     let due = local.q.front().unwrap().earliest_exit_time;
                     local.do_sim_step(due, &mut Default::default());
-                    incoming
-                        .local_link
-                        .do_sim_step(due, &mut Default::default());
+                    let mut releases = Vec::new();
+                    incoming.do_sim_step(due, &mut Default::default(), |release| {
+                        releases.push(release);
+                    });
                     assert!(!incoming.local_link.is_active());
-                    let releases: Vec<_> = incoming.drain_storage_releases().unwrap().collect();
                     assert_eq!(1, releases.len());
                     // The message is applied after this tick's node/link phases, as in LegEngine.
                     for release in releases {
                         outgoing.apply_storage_cap_update(release.pce, release.available_at);
                     }
-                    assert!(incoming.drain_storage_releases().unwrap().next().is_none());
+                    incoming.do_sim_step(due.next(), &mut Default::default(), |_| {
+                        panic!("An empty link must not report a release again");
+                    });
                     let gap_arrival = local.storage_cap.release_tick(due);
                     assert!(!local.storage_cap.update_and_is_available(due));
                     assert!(!outgoing.storage_cap.update_and_is_available(due));
@@ -1459,6 +1504,71 @@ mod kinematic_tests {
                     assert_eq!(0., outgoing.storage_cap.used());
                 }
             }
+        }
+    }
+
+    #[deterministic_id_test]
+    fn split_link_reports_queue_exits_once_and_excludes_waiting_departures() {
+        for dynamics in [TrafficDynamics::Queue, TrafficDynamics::KinematicWaves] {
+            let mut incoming = SplitInLink::new(0, link_with_dynamics(25., 1., 1, dynamics));
+            let mut env = Default::default();
+            assert!(
+                incoming
+                    .do_sim_step(0, &mut env, |_| panic!("An empty link releases no storage"))
+                    .is_empty()
+            );
+            incoming
+                .local_link
+                .push_veh(vehicle(1, 1., true), 0, LinkPosition::QStart);
+            incoming
+                .local_link
+                .push_veh(vehicle(2, 2.5, false), 0, LinkPosition::QStart);
+            assert!(
+                incoming
+                    .do_sim_step(3, &mut env, |_| panic!("Vehicles are not due yet"))
+                    .is_empty()
+            );
+            // Waiting-list arrivals never consumed storage, so they must not release it.
+            incoming
+                .local_link
+                .push_veh(vehicle(3, 0.5, true), 4, LinkPosition::Waiting);
+
+            let mut releases = Vec::new();
+            let ended = incoming.do_sim_step(4, &mut env, |release| releases.push(release));
+            assert_eq!(2, ended.len());
+            assert_eq!(1, incoming.local_link.buffer.len());
+            match dynamics {
+                TrafficDynamics::Queue => assert_eq!(
+                    releases,
+                    [StorageRelease {
+                        pce: 3.5,
+                        available_at: Tick::new(4),
+                    }]
+                ),
+                TrafficDynamics::KinematicWaves => assert_eq!(
+                    releases,
+                    [
+                        StorageRelease {
+                            pce: 1.,
+                            available_at: Tick::new(10),
+                        },
+                        StorageRelease {
+                            pce: 2.5,
+                            available_at: Tick::new(10),
+                        },
+                    ]
+                ),
+            }
+
+            // Expiring old gaps and moving a link with only a buffer creates no new release.
+            incoming.local_link.update_and_is_available(10);
+            assert!(
+                incoming
+                    .do_sim_step(10, &mut env, |_| panic!(
+                        "Queue exits were already reported"
+                    ))
+                    .is_empty()
+            );
         }
     }
 
