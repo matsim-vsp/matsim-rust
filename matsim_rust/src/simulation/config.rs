@@ -900,11 +900,20 @@ register_override!(
     }
 );
 
+#[derive(Serialize, Deserialize, Clone, Debug, Copy, PartialEq, Eq, Default)]
+pub enum ActivityScoring {
+    #[default]
+    ConsiderFullActivity,
+    Ignore,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActivityParameter {
     pub activity_type: String,
     #[serde(default = "f64_value_1_0")]
     pub typical_duration_s: f64,
+    #[serde(default)]
+    pub activity_scoring: ActivityScoring,
 }
 
 impl ActivityParameter {
@@ -912,6 +921,7 @@ impl ActivityParameter {
         Self {
             activity_type: activity_type.to_string(),
             typical_duration_s: 1.0,
+            activity_scoring: ActivityScoring::ConsiderFullActivity,
         }
     }
 }
@@ -1733,10 +1743,11 @@ mod tests {
     use crate::simulation::config::Profiling;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
-        ActivityParameter, AgentParameter, CommandLineArgs, CompressionType, ComputationalSetup,
-        Config, Controller, EdgeWeight, MetisOptions, ModeParameter, NonMainModeLinks,
-        PartitionMethod, Partitioning, QSim, Replanning, Routing, Scoring, ScoringMode,
-        StrategySetting, TeleportedParams, TravelTimeCalculator, VertexWeight, parse_key_val,
+        ActivityParameter, ActivityScoring, AgentParameter, CommandLineArgs, CompressionType,
+        ComputationalSetup, Config, Controller, EdgeWeight, MetisOptions, ModeParameter,
+        NonMainModeLinks, PartitionMethod, Partitioning, QSim, Replanning, Routing, Scoring,
+        ScoringMode, StrategySetting, TeleportedParams, TravelTimeCalculator, VertexWeight,
+        parse_key_val,
     };
     use crate::simulation::config::{Ids, Network, Population, Transit, Vehicles};
     use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
@@ -2148,6 +2159,7 @@ mod tests {
             activity_params: vec![ActivityParameter {
                 activity_type: "home".to_string(),
                 typical_duration_s: 43_200.0,
+                activity_scoring: ActivityScoring::ConsiderFullActivity,
             }],
             mode_params: vec![ModeParameter {
                 mode: "car".to_string(),
