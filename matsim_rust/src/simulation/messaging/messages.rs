@@ -1,7 +1,7 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::EndTime;
 use crate::simulation::agents::{TeleportationAgent, TeleportationLogic};
-use crate::simulation::engines::teleportation_engine::TeleportationAgentWrapper;
+use crate::simulation::engines::teleportation_engine::TeleportationAgentWithFixedEnd;
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeAttachments;
 use crate::simulation::network::sim_network::StorageUpdate;
@@ -22,8 +22,8 @@ pub(crate) struct TeleportationMessage {
     attachments: PartitionChangeAttachments,
 }
 
-impl From<TeleportationAgentWrapper> for TeleportationMessage {
-    fn from(teleported_agent: TeleportationAgentWrapper) -> Self {
+impl From<TeleportationAgentWithFixedEnd> for TeleportationMessage {
+    fn from(teleported_agent: TeleportationAgentWithFixedEnd) -> Self {
         Self {
             agent: teleported_agent.agent,
             end_time: teleported_agent.end_time,

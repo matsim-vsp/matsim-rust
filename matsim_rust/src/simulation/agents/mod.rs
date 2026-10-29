@@ -19,12 +19,19 @@ pub trait SimulationAgentLogic: Identifiable<InternalPerson> + Send {
     fn into_person(self: Box<Self>) -> Option<InternalPerson>;
 }
 
-impl Debug for dyn SimulationAgentLogic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Simulation Agent Logic for agent with id {}",
-            self.id().external()
-        )
-    }
+macro_rules! debug_agent_logic {
+    ($($logic:ident),+ $(,)?) => {$(
+        impl Debug for dyn $logic {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "Simulation Agent Logic for agent with id {}", self.id().external())
+            }
+        }
+    )+};
 }
+debug_agent_logic!(
+    SimulationAgentLogic,
+    ActivityLogic,
+    LegLogic,
+    NetworkDriverLogic,
+    TeleportationLogic
+);

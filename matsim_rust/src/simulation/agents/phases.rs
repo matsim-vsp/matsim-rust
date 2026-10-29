@@ -82,19 +82,3 @@ pub struct TransitTeleportation<'a> {
     pub access_facility: &'a str,
     pub egress_facility: &'a str,
 }
-
-macro_rules! debug_role {
-    ($($role:ident),+ $(,)?) => {$(
-        impl std::fmt::Debug for dyn $role {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "Simulation Agent Logic for agent with id {}", self.id().external())
-            }
-        }
-    )+};
-}
-debug_role!(
-    ActivityLogic,
-    LegLogic,
-    NetworkDriverLogic,
-    TeleportationLogic
-);

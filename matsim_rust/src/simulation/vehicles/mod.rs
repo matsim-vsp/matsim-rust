@@ -1,5 +1,5 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{LegAgent, NetworkDriverAgent};
+use crate::simulation::agents::{LegAgent, NetworkDriverAgent, NetworkDriverLogic};
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -40,14 +40,14 @@ impl SimulationVehicle {
         )
     }
 
-    pub fn driver_mut(&mut self) -> &mut dyn crate::simulation::agents::NetworkDriverLogic {
+    pub fn driver_mut(&mut self) -> &mut dyn NetworkDriverLogic {
         self.driver
             .as_mut()
             .expect("SimulationVehicle has no driver.")
             .as_mut()
     }
 
-    pub fn driver(&self) -> &dyn crate::simulation::agents::NetworkDriverLogic {
+    pub fn driver(&self) -> &dyn NetworkDriverLogic {
         self.driver
             .as_ref()
             .expect("SimulationVehicle has no driver.")
@@ -97,6 +97,11 @@ impl SimulationVehicle {
 impl SimulationVehicle {
     /// Moves the driver over the node onto `next_link`. As in MATSim, passengers keep their own
     /// position until they leave the vehicle; their arrival link is the vehicle's link.
+    // TODO(pt): A passenger's `curr_link_id()` still returns its departure link after arrival,
+    // because nothing moves its route cursor. Arrival events use the vehicle's link, but a Stuck
+    // event for a passenger who arrives in the last tick would report the departure link. MATSim
+    // sets the position on arrival (`notifyArrivalOnLinkByNonNetworkMode`). Do the same when PT
+    // passengers are introduced; today `unpark_veh` creates vehicles without passengers.
     pub fn move_over_node(&mut self, next_link: &Id<Link>, now: SimTime) {
         self.driver_mut().notify_move_over_node(next_link, now);
     }

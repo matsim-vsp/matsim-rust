@@ -81,7 +81,6 @@ impl<C: SimCommunicator> LegEngine<C> {
 
         let departure_handler = VehicularDepartureHandler {
             comp_env: comp_env.clone(),
-            main_modes: main_modes.clone(),
         };
 
         LegEngine {
@@ -330,7 +329,6 @@ impl<C: SimCommunicator> LegEngine<C> {
 
 struct VehicularDepartureHandler {
     comp_env: ThreadLocalComputationalEnvironment,
-    main_modes: IntSet<Id<String>>,
 }
 
 impl VehicularDepartureHandler {
@@ -352,16 +350,14 @@ impl VehicularDepartureHandler {
             ))
         };
 
-        if self.main_modes.contains(leg.mode()) {
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &PersonEntersVehicleEventBuilder::default()
-                    .time(now)
-                    .person(agent.id().clone())
-                    .vehicle(veh_id.clone())
-                    .build()
-                    .unwrap(),
-            );
-        }
+        self.comp_env.events_manager_borrow_mut().process_event(
+            &PersonEntersVehicleEventBuilder::default()
+                .time(now)
+                .person(agent.id().clone())
+                .vehicle(veh_id.clone())
+                .build()
+                .unwrap(),
+        );
 
         Some(garage.unpark_veh(agent, veh_id))
     }

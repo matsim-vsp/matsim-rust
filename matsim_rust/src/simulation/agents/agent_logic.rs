@@ -12,7 +12,7 @@ use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalRoute,
+    InternalActivity, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement, InternalRoute,
 };
 use crate::simulation::scenario::trip_structure_utils::{
     find_trip_span_starting_at_activity_default, identify_main_mode,
@@ -39,6 +39,13 @@ pub struct PlanBasedSimulationLogic {
     has_network_route: bool,
 }
 
+// TODO Design thought: the adaptive agent is a decorator. It embeds the plan agent and forwards every
+// capability trait to it, overriding only the activity callbacks. Each new role (e.g. a PT
+// passenger or driver) therefore needs another set of forwarding methods here, and each consuming
+// conversion must return `self`, not the delegate, or the decorator silently drops out of the
+// agent. If more within-day behaviors follow, a single plan agent with an optional strategy that
+// receives the activity callbacks (e.g. `Option<Box<dyn WithinDayReplanner>>`) may scale better
+// than further decorators.
 pub struct AdaptivePlanBasedSimulationLogic {
     delegate: PlanBasedSimulationLogic,
     route_receiver: Option<Receiver<InternalRoutingResponse>>,
@@ -93,21 +100,29 @@ impl PlanBasedSimulationLogic {
         }
     }
 
+    fn plan(&self) -> &InternalPlan {
+        &self.basic_agent_delegate.plans()[self.selected_plan]
+    }
+
+    fn plan_mut(&mut self) -> &mut InternalPlan {
+        &mut self.basic_agent_delegate.plans_mut()[self.selected_plan]
+    }
+
     fn plan_element_at(&self, index: usize) -> Option<&InternalPlanElement> {
-        self.basic_agent_delegate.plans()[self.selected_plan]
-            .elements
-            .get(index)
+        self.plan().elements.get(index)
     }
 
     fn is_activity(&self) -> bool {
         self.curr_plan_element.is_multiple_of(2)
     }
 
+    // Both agents' phase transitions end here; the adaptive agent calls it on its delegate
+    // because it cannot call the consuming trait methods. Keep transition logic in this method.
     fn advance(&mut self, now: SimTime) {
         self.curr_plan_element += 1;
         self.curr_route_element = 0;
         assert!(
-            self.curr_plan_element < self.basic_agent_delegate.total_elements(),
+            self.curr_plan_element < self.plan().elements.len(),
             "Cannot advance plan of agents {:?} beyond its last element.",
             self.id()
         );
@@ -358,12 +373,7 @@ impl AdaptivePlanBasedSimulationLogic {
         let (send, recv) = tokio::sync::oneshot::channel();
 
         let trip_span = find_trip_span_starting_at_activity_default(
-            &self
-                .delegate
-                .basic_agent_delegate
-                .selected_plan()
-                .unwrap()
-                .elements,
+            &self.delegate.plan().elements,
             self.delegate.curr_plan_element,
         )
         .unwrap_or_else(|| {
@@ -375,12 +385,7 @@ impl AdaptivePlanBasedSimulationLogic {
             )
         });
 
-        let plan_elements = &self
-            .delegate
-            .basic_agent_delegate
-            .selected_plan()
-            .unwrap()
-            .elements;
+        let plan_elements = &self.delegate.plan().elements;
         let origin = trip_span.origin(plan_elements);
         let destination = trip_span.destination(plan_elements);
 
@@ -461,8 +466,8 @@ impl AdaptivePlanBasedSimulationLogic {
             return;
         }
 
-        let plan = self.delegate.basic_agent_delegate.selected_plan_mut();
         let start_index = self.delegate.curr_plan_element;
+        let plan = self.delegate.plan_mut();
 
         let span = find_trip_span_starting_at_activity_default(&plan.elements, start_index)
             .expect("No trip found starting at the current plan element");
@@ -909,6 +914,7 @@ mod tests {
     #[deterministic_id_test]
     fn owned_roles_follow_route_capabilities_and_preserve_allocation() {
         use crate::simulation::scenario::population::{
+
             InternalNetworkRoute, InternalPtRoute, InternalPtRouteDescription,
         };
         let pt = InternalRoute::Pt(InternalPtRoute {
@@ -961,6 +967,7 @@ mod tests {
     #[deterministic_id_test]
     fn pt_routes_only_offer_teleportation_and_keep_their_metadata() {
         use crate::simulation::scenario::population::{
+
             InternalPtRoute, InternalPtRouteDescription,
         };
         let route = InternalRoute::Pt(InternalPtRoute {

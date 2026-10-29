@@ -19,12 +19,12 @@ use crate::simulation::simulation::Simulation;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 
-pub(crate) struct TeleportationAgentWrapper {
+pub(crate) struct TeleportationAgentWithFixedEnd {
     pub(crate) agent: TeleportationAgent,
     pub(crate) end_time: SimTime,
 }
 
-impl TeleportationAgentWrapper {
+impl TeleportationAgentWithFixedEnd {
     fn new(agent: TeleportationAgent, end_time: SimTime) -> Self {
         Self { agent, end_time }
     }
@@ -38,13 +38,13 @@ impl TeleportationAgentWrapper {
     }
 }
 
-impl EndTime for TeleportationAgentWrapper {
+impl EndTime for TeleportationAgentWithFixedEnd {
     fn end_time(&self, _: SimTime) -> SimTime {
         self.end_time
     }
 }
 
-impl From<TeleportationMessage> for TeleportationAgentWrapper {
+impl From<TeleportationMessage> for TeleportationAgentWithFixedEnd {
     fn from(message: TeleportationMessage) -> Self {
         let time = message.end_time();
         Self::new(message.into_agent(), time)
@@ -52,7 +52,7 @@ impl From<TeleportationMessage> for TeleportationAgentWrapper {
 }
 
 pub(crate) struct TeleportationEngine {
-    queue: TimeQueue<TeleportationAgentWrapper, InternalPerson>,
+    queue: TimeQueue<TeleportationAgentWithFixedEnd, InternalPerson>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
 }
@@ -83,7 +83,7 @@ impl TeleportationEngine {
         let now_time = self.clock.tick_to_time(now);
         agent.notify_begin_teleportation(now_time);
         let end_time = agent.arrival_time(now_time);
-        let teleportation = TeleportationAgentWrapper::new(agent, end_time);
+        let teleportation = TeleportationAgentWithFixedEnd::new(agent, end_time);
 
         if Simulation::is_local_route(teleportation.agent(), net_message_broker) {
             self.enqueue(teleportation, now_time);
@@ -116,7 +116,7 @@ impl TeleportationEngine {
     pub(crate) fn receive_remote_agent(
         &mut self,
         now: Tick,
-        teleported_agent: TeleportationAgentWrapper,
+        teleported_agent: TeleportationAgentWithFixedEnd,
         from: u32,
         to: u32,
     ) {
@@ -145,7 +145,7 @@ impl TeleportationEngine {
         self.enqueue(teleported_agent, now_time);
     }
 
-    fn enqueue(&mut self, teleportation: TeleportationAgentWrapper, now: SimTime) {
+    fn enqueue(&mut self, teleportation: TeleportationAgentWithFixedEnd, now: SimTime) {
         // Using the internal id is stable since...
         // ... either proto ids were used (by definition stable)
         // ... or the agent was loaded via XML and sorted by external id before creating internal ids. paul, jul'26
@@ -217,7 +217,7 @@ impl TeleportationEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::{TeleportationAgentWrapper, TeleportationEngine};
+    use super::{TeleportationAgentWithFixedEnd, TeleportationEngine};
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
@@ -244,7 +244,7 @@ mod tests {
         let due_time = SimTime::from_nanos(350_000_000);
 
         engine.queue.add(
-            TeleportationAgentWrapper::new(agent, due_time),
+            TeleportationAgentWithFixedEnd::new(agent, due_time),
             SimTime::from_nanos(0),
         );
 
@@ -264,7 +264,7 @@ mod tests {
 
         engine.receive_remote_agent(
             Tick::new(3),
-            TeleportationAgentWrapper::new(agent, sender_end_time),
+            TeleportationAgentWithFixedEnd::new(agent, sender_end_time),
             1,
             2,
         );
@@ -284,7 +284,7 @@ mod tests {
             let mut engine = TeleportationEngine::new(Default::default(), clock);
             engine.receive_remote_agent(
                 Tick::new(receive_tick),
-                TeleportationAgentWrapper::new(
+                TeleportationAgentWithFixedEnd::new(
                     create_generic_route_agent(id),
                     SimTime::from_secs(4),
                 ),
@@ -304,7 +304,10 @@ mod tests {
         let mut engine = TeleportationEngine::new(Default::default(), clock);
         engine.receive_remote_agent(
             Tick::new(receive_tick),
-            TeleportationAgentWrapper::new(create_generic_route_agent(id), SimTime::from_secs(4)),
+            TeleportationAgentWithFixedEnd::new(
+                create_generic_route_agent(id),
+                SimTime::from_secs(4),
+            ),
             1,
             2,
         );
@@ -323,7 +326,7 @@ mod tests {
 
         for agent in [agent_3, agent_1, agent_2] {
             engine.enqueue(
-                TeleportationAgentWrapper::new(agent, SimTime::from_secs(10)),
+                TeleportationAgentWithFixedEnd::new(agent, SimTime::from_secs(10)),
                 SimTime::default(),
             );
         }
@@ -351,7 +354,7 @@ mod tests {
         let mut engine = TeleportationEngine::new(Default::default(), clock);
         engine.receive_remote_agent(
             Tick::new(2),
-            TeleportationAgentWrapper::new(agent, SimTime::from_secs(4)),
+            TeleportationAgentWithFixedEnd::new(agent, SimTime::from_secs(4)),
             1,
             2,
         );

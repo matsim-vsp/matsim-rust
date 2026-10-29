@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 /// Unlike compare_event_folder, this records the order of simultaneous events as well.
 #[deterministic_id_test(matsim_rust)]
-fn agent_phase_refactor_preserves_ordered_events() {
+fn agent_events_keep_their_order_within_a_tick() {
     let expected = vec![
         (32400, "actend"),
         (32400, "departure"),
