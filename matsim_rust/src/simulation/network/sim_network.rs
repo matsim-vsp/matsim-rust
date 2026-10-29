@@ -1045,68 +1045,6 @@ mod tests {
         assert_eq!(*moved_onto.lock().unwrap(), vec!["X"]);
     }
 
-    /// Measures the actual node/link hot path, excluding construction, ID creation and file I/O.
-    /// Run with `cargo test -p matsim-rust --release --lib agent_network_benchmark -- --ignored --nocapture --test-threads=1`.
-    /// Save the baseline test executable before changing the implementation to compare both binaries.
-    #[deterministic_id_test]
-    #[ignore = "release benchmark"]
-    fn agent_network_benchmark() {
-        use std::hint::black_box;
-        use std::time::Instant;
-
-        assert!(
-            !cfg!(debug_assertions),
-            "Run this benchmark in release mode"
-        );
-        const LINKS: usize = 64;
-        const VEHICLES: u64 = 1024;
-        let samples = std::env::var("MATSIM_AGENT_BENCH_SAMPLES")
-            .map(|value| value.parse::<usize>().unwrap())
-            .unwrap_or(10);
-        let node_ids: Vec<_> = (0..=LINKS).map(|i| format!("node-{i}")).collect();
-        let link_ids: Vec<_> = (0..LINKS).map(|i| format!("link-{i}")).collect();
-        let route: Vec<_> = link_ids.iter().map(String::as_str).collect();
-        let mut global_network = Network::new();
-        add_test_nodes(
-            &mut global_network,
-            &node_ids.iter().map(String::as_str).collect::<Vec<_>>(),
-        );
-        for i in 0..LINKS {
-            add_test_link(
-                &mut global_network,
-                &link_ids[i],
-                &node_ids[i],
-                &node_ids[i + 1],
-                100.0,
-                36_000_000.0,
-                100.0,
-            );
-        }
-        // Avoid storage-capacity congestion so that each sample performs the same link movements.
-        let mut config = test_utils::config();
-        config.qsim_mut().sample_size = 1000.0;
-        for sample in 0..samples + 3 {
-            let mut network =
-                SimNetworkPartition::from_network_for_test(&global_network, 0, &config);
-            let mut env = ThreadLocalComputationalEnvironment::default();
-            for id in 0..VEHICLES {
-                network.send_veh_en_route(test_vehicle(id, route.clone()), None, 0);
-            }
-            let mut ended = Vec::with_capacity(VEHICLES as usize);
-            let start = Instant::now();
-            for tick in 0..=2 * LINKS as u64 + 2 {
-                network.move_nodes(&mut env, tick);
-                ended.extend(network.move_links(&mut env, tick).vehicles_end_leg);
-            }
-            let elapsed = start.elapsed();
-            assert_eq!(ended.len(), VEHICLES as usize);
-            black_box(&ended);
-            if sample >= 3 {
-                println!("agent_network_ns={}", elapsed.as_nanos());
-            }
-        }
-    }
-
     fn push_vehicle_to_queue(
         network: &mut SimNetworkPartition,
         link: &str,
