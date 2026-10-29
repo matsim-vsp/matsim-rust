@@ -66,7 +66,13 @@ impl SimulationAgentLogic for PlanBasedSimulationLogic {
 }
 
 impl PlanBasedSimulationLogic {
-    pub fn new(basic_agent_delegate: InternalPerson) -> Self {
+    /// Creates an agent that starts with the first activity of the person's selected plan.
+    pub fn new_agent(person: InternalPerson) -> ActivityAgent {
+        Box::new(Self::new(person))
+    }
+
+    // Private, so that a new plan agent can only enter the simulation as an activity.
+    fn new(basic_agent_delegate: InternalPerson) -> Self {
         // The selected plan is fixed during mobsim; adaptive routing only replaces its elements.
         let selected_plan = basic_agent_delegate
             .plans()
@@ -302,7 +308,13 @@ impl TeleportationLogic for PlanBasedSimulationLogic {
 }
 
 impl AdaptivePlanBasedSimulationLogic {
-    pub fn new(person: InternalPerson) -> Self {
+    /// Creates an agent that starts with the first activity of the person's selected plan.
+    pub fn new_agent(person: InternalPerson) -> ActivityAgent {
+        Box::new(Self::new(person))
+    }
+
+    // Private for the same reason as `PlanBasedSimulationLogic::new`.
+    fn new(person: InternalPerson) -> Self {
         Self {
             delegate: PlanBasedSimulationLogic::new(person),
             route_receiver: None,
@@ -783,14 +795,13 @@ mod tests {
 
     #[deterministic_id_test]
     fn phases_preserve_times_and_materialize_the_complete_person() {
-        use crate::simulation::agents::agent::SimulationAgent;
         for adaptive in [false, true] {
             let person = person_with_leg(InternalRoute::Generic(generic_route()));
             let expected = person.clone();
             let mut agent = if adaptive {
-                SimulationAgent::new_adaptive_plan_based(person)
+                AdaptivePlanBasedSimulationLogic::new_agent(person)
             } else {
-                SimulationAgent::new_plan_based(person)
+                PlanBasedSimulationLogic::new_agent(person)
             };
             let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
             let activity = agent.as_ref();
@@ -843,7 +854,6 @@ mod tests {
 
     #[deterministic_id_test]
     fn network_roles_follow_route_positions_including_round_trips_and_single_link_routes() {
-        use crate::simulation::agents::agent::SimulationAgent;
         use crate::simulation::scenario::population::InternalNetworkRoute;
         for adaptive in [false, true] {
             for links in [vec!["l1"], vec!["l1", "l2"], vec!["l1", "l2", "l1"]] {
@@ -860,9 +870,9 @@ mod tests {
                 ));
                 let person = person_with_leg(route);
                 let agent = if adaptive {
-                    SimulationAgent::new_adaptive_plan_based(person)
+                    AdaptivePlanBasedSimulationLogic::new_agent(person)
                 } else {
-                    SimulationAgent::new_plan_based(person)
+                    PlanBasedSimulationLogic::new_agent(person)
                 };
                 let agent = agent.start_next_leg(SimTime::default());
                 let mut agent = agent.try_into_network().unwrap();
@@ -898,7 +908,6 @@ mod tests {
 
     #[deterministic_id_test]
     fn owned_roles_follow_route_capabilities_and_preserve_allocation() {
-        use crate::simulation::agents::agent::SimulationAgent;
         use crate::simulation::scenario::population::{
             InternalNetworkRoute, InternalPtRoute, InternalPtRouteDescription,
         };
@@ -924,9 +933,9 @@ mod tests {
             for adaptive in [false, true] {
                 let person = person_with_leg(route.clone());
                 let agent = if adaptive {
-                    SimulationAgent::new_adaptive_plan_based(person)
+                    AdaptivePlanBasedSimulationLogic::new_agent(person)
                 } else {
-                    SimulationAgent::new_plan_based(person)
+                    PlanBasedSimulationLogic::new_agent(person)
                 };
                 let agent = agent.start_next_leg(SimTime::default());
                 let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
@@ -951,7 +960,6 @@ mod tests {
 
     #[deterministic_id_test]
     fn pt_routes_only_offer_teleportation_and_keep_their_metadata() {
-        use crate::simulation::agents::agent::SimulationAgent;
         use crate::simulation::scenario::population::{
             InternalPtRoute, InternalPtRouteDescription,
         };
@@ -965,7 +973,7 @@ mod tests {
                 egress_facility_id: "to".into(),
             },
         });
-        let agent = SimulationAgent::new_plan_based(person_with_leg(route.clone()));
+        let agent = PlanBasedSimulationLogic::new_agent(person_with_leg(route.clone()));
         let agent = agent.start_next_leg(SimTime::default());
         let mut agent = agent
             .try_into_network()
@@ -1024,7 +1032,6 @@ mod tests {
 
     #[deterministic_id_test]
     fn materialization_preserves_unfinished_routes_and_all_plans() {
-        use crate::simulation::agents::agent::SimulationAgent;
         use crate::simulation::scenario::population::InternalNetworkRoute;
         for adaptive in [false, true] {
             let mut plan = InternalPlan::default();
@@ -1046,9 +1053,9 @@ mod tests {
             person.plans_mut().insert(0, unselected);
             let expected = person.clone();
             let agent = if adaptive {
-                SimulationAgent::new_adaptive_plan_based(person)
+                AdaptivePlanBasedSimulationLogic::new_agent(person)
             } else {
-                SimulationAgent::new_plan_based(person)
+                PlanBasedSimulationLogic::new_agent(person)
             };
             let agent = agent.start_next_leg(SimTime::from_secs(5));
             let mut agent = agent.try_into_network().unwrap();
@@ -1126,14 +1133,13 @@ mod tests {
 
     #[deterministic_id_test]
     fn rejected_conversion_keeps_owner_and_current_leg() {
-        use crate::simulation::agents::agent::SimulationAgent;
         for adaptive in [false, true] {
             let person = person_with_leg(InternalRoute::Generic(generic_route()));
             let expected = person.clone();
             let activity = if adaptive {
-                SimulationAgent::new_adaptive_plan_based(person)
+                AdaptivePlanBasedSimulationLogic::new_agent(person)
             } else {
-                SimulationAgent::new_plan_based(person)
+                PlanBasedSimulationLogic::new_agent(person)
             };
             let original = std::ptr::from_ref(activity.as_ref()).cast::<()>();
             let agent = activity.start_next_leg(SimTime::default());

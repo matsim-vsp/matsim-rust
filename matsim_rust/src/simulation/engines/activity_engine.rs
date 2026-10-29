@@ -272,7 +272,9 @@ mod tests {
         InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
     };
     use crate::simulation::agents::ActivityAgent;
-    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::agent_logic::{
+        AdaptivePlanBasedSimulationLogic, PlanBasedSimulationLogic,
+    };
     use crate::simulation::config::Config;
     use crate::simulation::controller::{
         RequestSender, ThreadLocalComputationalEnvironment,
@@ -309,7 +311,7 @@ mod tests {
     fn test_activity_engine_wake_up_plan() {
         let plan = create_plan();
 
-        let agent = SimulationAgent::new_plan_based(InternalPerson::new(Id::create("1"), plan));
+        let agent = PlanBasedSimulationLogic::new_agent(InternalPerson::new(Id::create("1"), plan));
         let agents = vec![agent];
 
         let mut engine = create_engine(agents, Default::default());
@@ -327,7 +329,7 @@ mod tests {
     #[deterministic_id_test]
     fn test_activity_engine_wake_up_subsecond_due_time() {
         let plan = create_plan();
-        let agent = SimulationAgent::new_plan_based(InternalPerson::new(Id::create("1"), plan));
+        let agent = PlanBasedSimulationLogic::new_agent(InternalPerson::new(Id::create("1"), plan));
         let mut engine = create_engine(vec![], Default::default());
         let asleep_agent = AsleepSimulationAgent {
             agent,
@@ -350,7 +352,7 @@ mod tests {
     fn test_activity_engine_end() {
         let plan = create_plan();
 
-        let agent = SimulationAgent::new_plan_based(InternalPerson::new(Id::create("1"), plan));
+        let agent = PlanBasedSimulationLogic::new_agent(InternalPerson::new(Id::create("1"), plan));
         let agents = vec![agent];
 
         let mut engine = create_engine(agents, Default::default());
@@ -489,7 +491,7 @@ mod tests {
         comp_env: ThreadLocalComputationalEnvironment,
     ) -> Vec<ActivityAgent> {
         let agent =
-            SimulationAgent::new_adaptive_plan_based(InternalPerson::new(Id::create("1"), plan));
+            AdaptivePlanBasedSimulationLogic::new_agent(InternalPerson::new(Id::create("1"), plan));
         let agents = vec![agent];
         let mut engine = create_engine(agents, comp_env);
         {

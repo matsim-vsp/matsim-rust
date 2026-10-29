@@ -219,7 +219,7 @@ impl TeleportationEngine {
 mod tests {
     use super::{TeleportationAgentWrapper, TeleportationEngine};
     use crate::simulation::Identifiable;
-    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
         ActivityAgent, LegAgent, LegLogic, NetworkDriverAgent, SimulationAgentLogic,
         TeleportationAgent, TeleportationLogic, TransitTeleportation,
@@ -449,7 +449,7 @@ mod tests {
         plan.add_act(act);
         plan.add_leg(leg);
         let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
-        let agent = SimulationAgent::new_plan_based(person).start_next_leg(SimTime::default());
+        let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
         agent.try_into_teleportation().unwrap()
     }
 }

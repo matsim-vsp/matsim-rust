@@ -313,7 +313,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
     use crate::simulation::io::xml::vehicles::{
@@ -398,7 +398,7 @@ mod tests {
         garage.add_veh_by_type(&person_id, &type_id);
         let vehicle_id = garage.veh_id(&person_id, &type_id);
         let garage = Arc::new(garage);
-        let agent = SimulationAgent::new_plan_based(person("person"))
+        let agent = PlanBasedSimulationLogic::new_agent(person("person"))
             .start_next_leg(crate::simulation::time::SimTime::default())
             .try_into_network()
             .unwrap();

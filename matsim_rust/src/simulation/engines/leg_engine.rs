@@ -372,7 +372,7 @@ mod tests {
     use super::*;
     use crate::simulation::Identifiable;
     use crate::simulation::agents::SimulationAgentLogic;
-    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::scenario::population::{
         InternalGenericRoute, InternalPerson, InternalRoute,
     };
@@ -413,7 +413,7 @@ mod tests {
             None,
             None,
         )));
-        let agent = SimulationAgent::new_plan_based(person).start_next_leg(SimTime::default());
+        let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
         let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
         let Teleportation(agent) = select_execution(agent, true) else {
             panic!("Expected teleportation")

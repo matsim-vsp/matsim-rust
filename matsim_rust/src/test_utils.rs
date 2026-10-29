@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::simulation::agents::NetworkDriverAgent;
-use crate::simulation::agents::agent::SimulationAgent;
+use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::population::{
@@ -52,7 +52,7 @@ pub fn create_agent(id: u64, route: Vec<&str>) -> NetworkDriverAgent {
     plan.add_leg(leg);
     let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
 
-    let agent = SimulationAgent::new_plan_based(person).start_next_leg(SimTime::default());
+    let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
 
     agent.try_into_network().unwrap()
 }
