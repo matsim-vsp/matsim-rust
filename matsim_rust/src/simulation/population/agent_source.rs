@@ -1,3 +1,4 @@
+use crate::simulation::agents::ActivityAgent;
 use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::config::{Config, RoutingMode};
 use crate::simulation::id::Id;
@@ -9,7 +10,7 @@ use std::sync::Arc;
 
 // needs to be an Arc since agents are inserted on every partition.
 pub type DynAgentSource = Arc<dyn AgentSource + Send + Sync>;
-pub type AgentSet = IntMap<Id<InternalPerson>, SimulationAgent>;
+pub type AgentSet = IntMap<Id<InternalPerson>, ActivityAgent>;
 
 pub trait AgentSource {
     fn create_agents(
@@ -84,7 +85,7 @@ impl AgentSource for PreplanningHorizonAgentSource {
 }
 
 fn identify_logic_and_insert(
-    agents: &mut IntMap<Id<InternalPerson>, SimulationAgent>,
+    agents: &mut IntMap<Id<InternalPerson>, ActivityAgent>,
     id: Id<InternalPerson>,
     person: InternalPerson,
     config: &Config,

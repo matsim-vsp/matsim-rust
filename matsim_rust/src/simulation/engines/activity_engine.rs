@@ -1,9 +1,5 @@
-use crate::simulation::Identifiable;
-use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{
-    ActivityStartedEvent, AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic,
-    WokeUpEvent,
-};
+use crate::simulation::agents::EndTime;
+use crate::simulation::agents::{ActivityAgent, LegAgent};
 use crate::simulation::config::Config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{ActivityEndEventBuilder, ActivityStartEventBuilder};
@@ -34,7 +30,7 @@ impl ActivityEngine {
         }
     }
 
-    pub(crate) fn drain(&mut self) -> Vec<SimulationAgent> {
+    pub(crate) fn drain(&mut self) -> Vec<ActivityAgent> {
         self.awake_q
             .drain(..)
             .map(|a| a.agent)
@@ -47,12 +43,12 @@ impl ActivityEngine {
     pub(crate) fn do_step(
         &mut self,
         now: impl Into<Tick>,
-        agents: Vec<SimulationAgent>,
-    ) -> Vec<SimulationAgent> {
+        agents: Vec<LegAgent>,
+    ) -> Vec<ActivityAgent> {
         let now = now.into();
         let now_time = self.clock.tick_to_time(now);
-        for mut agent in agents {
-            agent.advance_plan(now_time);
+        for agent in agents {
+            let agent = agent.start_next_activity(now_time);
             self.receive_agent(now, AsleepSimulationAgent::build(agent, now_time));
         }
 
@@ -71,21 +67,22 @@ impl ActivityEngine {
     fn notify_end_all(
         &mut self,
         now: SimTime,
-        end_after_wake_up: Vec<SimulationAgent>,
-        end_from_awake: Vec<SimulationAgent>,
-    ) -> Vec<SimulationAgent> {
+        end_after_wake_up: Vec<ActivityAgent>,
+        end_from_awake: Vec<ActivityAgent>,
+    ) -> Vec<ActivityAgent> {
         let mut res = Vec::with_capacity(end_after_wake_up.len() + end_from_awake.len());
         for mut agent in end_after_wake_up
             .into_iter()
             .chain(end_from_awake.into_iter())
         {
+            let act = agent.as_ref();
             self.comp_env.events_manager_borrow_mut().process_event(
                 &ActivityEndEventBuilder::default()
                     .time(now)
                     .person(agent.id().clone())
-                    .link(agent.curr_act().link_id().clone())
-                    .act_type(agent.curr_act().act_type.clone())
-                    .coordinate(agent.curr_act().coord().clone())
+                    .link(act.link_id().clone())
+                    .act_type(act.act_type().clone())
+                    .coordinate(act.coord().clone())
                     .build()
                     .unwrap(),
             );
@@ -100,7 +97,7 @@ impl ActivityEngine {
         skip(self, end_after_wake_up),
         fields(now_ns = now.as_nanos())
     )]
-    fn notify_wakeup_all(&mut self, now: SimTime, end_after_wake_up: &mut [SimulationAgent]) {
+    fn notify_wakeup_all(&mut self, now: SimTime, end_after_wake_up: &mut [ActivityAgent]) {
         // Keep `now` as a regular span field for readability and add `now_ns` so the profiling
         // layer can reconstruct the exact `SimTime` without parsing `Debug` output.
         // inform agents about wakeup
@@ -119,29 +116,24 @@ impl ActivityEngine {
     fn receive_agent(&mut self, now: Tick, mut agent: AsleepSimulationAgent) {
         // emmit act start event
         let now_time = self.clock.tick_to_time(now);
-        let act = agent.agent.curr_act();
+        let act = agent.agent.as_ref();
         self.comp_env.events_manager_borrow_mut().process_event(
             &ActivityStartEventBuilder::default()
                 .time(now_time)
                 .person(agent.agent.id().clone())
                 .link(act.link_id().clone())
-                .act_type(act.act_type.clone())
+                .act_type(act.act_type().clone())
                 .coordinate(act.coord().clone())
                 .build()
                 .unwrap(),
         );
 
-        agent.agent.notify_event(
-            &mut AgentEvent::ActivityStarted(ActivityStartedEvent {
-                agent: &mut self.comp_env,
-            }),
-            now_time,
-        );
+        agent.agent.notify_started(&mut self.comp_env, now_time);
         self.asleep_q.add(agent, now_time);
     }
 
     /// Pushes agents whose wakeup time is reached into the awake queue and returns agents whose end time is already reached.
-    fn wake_up(&mut self, now: SimTime) -> Vec<SimulationAgent> {
+    fn wake_up(&mut self, now: SimTime) -> Vec<ActivityAgent> {
         let mut end_agents = Vec::new();
         let wake_up = self.asleep_q.pop(now);
 
@@ -158,7 +150,7 @@ impl ActivityEngine {
         end_agents
     }
 
-    fn end(&mut self, now: SimTime) -> Vec<SimulationAgent> {
+    fn end(&mut self, now: SimTime) -> Vec<ActivityAgent> {
         let mut agents = Vec::new();
 
         let mut i = 0;
@@ -176,35 +168,32 @@ impl ActivityEngine {
 
     fn notify_wakeup(
         comp_env: &mut ThreadLocalComputationalEnvironment,
-        agent: &mut SimulationAgent,
+        agent: &mut ActivityAgent,
         end_time: SimTime,
         now: SimTime,
     ) {
-        agent.notify_event(
-            &mut AgentEvent::WokeUp(WokeUpEvent { comp_env, end_time }),
-            now,
-        );
+        agent.notify_wakeup(comp_env, end_time, now);
     }
 
-    fn notify_act_end(agent: &mut SimulationAgent, now: SimTime) {
-        agent.notify_event(&mut AgentEvent::ActivityFinished(), now);
+    fn notify_act_end(agent: &mut ActivityAgent, now: SimTime) {
+        agent.notify_finished(now);
     }
 
     #[cfg(test)]
-    fn awake_agents(&self) -> Vec<&SimulationAgent> {
+    fn awake_agents(&self) -> Vec<&ActivityAgent> {
         self.awake_q.iter().map(|a| &a.agent).collect()
     }
 }
 
 pub struct ActivityEngineBuilder<'c> {
-    agents: Vec<SimulationAgent>,
+    agents: Vec<ActivityAgent>,
     config: &'c Config,
     comp_env: ThreadLocalComputationalEnvironment,
 }
 
 impl<'c> ActivityEngineBuilder<'c> {
     pub fn new(
-        agents: Vec<SimulationAgent>,
+        agents: Vec<ActivityAgent>,
         config: &'c Config,
         comp_env: ThreadLocalComputationalEnvironment,
     ) -> Self {
@@ -231,7 +220,7 @@ impl<'c> ActivityEngineBuilder<'c> {
 }
 
 struct AwakeSimulationAgent {
-    agent: SimulationAgent,
+    agent: ActivityAgent,
     begin_time: SimTime,
 }
 
@@ -252,14 +241,14 @@ impl EndTime for AwakeSimulationAgent {
 }
 
 struct AsleepSimulationAgent {
-    agent: SimulationAgent,
+    agent: ActivityAgent,
     wakeup_time: SimTime,
     // we need to keep track of the begin time, because this will be used for the awake agent queue to determine the end time of the agent.
     begin_time: SimTime,
 }
 
 impl AsleepSimulationAgent {
-    fn build(agent: SimulationAgent, now: SimTime) -> Self {
+    fn build(agent: ActivityAgent, now: SimTime) -> Self {
         let wakeup_time = agent.wakeup_time(now);
         AsleepSimulationAgent {
             agent,
@@ -282,8 +271,7 @@ mod tests {
     use crate::external_services::routing::{
         InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
     };
-    use crate::simulation::Identifiable;
-    use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::ActivityAgent;
     use crate::simulation::agents::agent::SimulationAgent;
     use crate::simulation::config::Config;
     use crate::simulation::controller::{
@@ -397,18 +385,23 @@ mod tests {
         let agents = test_adaptive(plan, env);
         let agent = agents.first().unwrap();
 
-        assert_eq!(agent.curr_act().act_type, Id::get_from_ext("home"));
-        assert_eq!(agent.curr_act().link_id, Some(Id::get_from_ext("start")));
-        assert_eq!(agent.next_act().act_type, Id::get_from_ext("work"));
-        assert_eq!(agent.next_act().link_id, Some(Id::get_from_ext("end")));
+        assert_eq!(agent.act_type(), &Id::get_from_ext("home"));
+        assert_eq!(agent.link_id(), &Id::get_from_ext("start"));
+        assert!(agent.has_next_leg());
 
-        let leg = agent.next_leg().unwrap();
+        handle.join().unwrap();
+        // The agent has finished its first activity, so the replaced trip follows element 0.
+        let person = agents.into_iter().next().unwrap().into_person().unwrap();
+        let elements = &person.selected_plan().unwrap().elements;
+        let next_act = elements[2].as_activity().unwrap();
+        assert_eq!(next_act.act_type, Id::get_from_ext("work"));
+        assert_eq!(next_act.link_id, Some(Id::get_from_ext("end")));
+
+        let leg = elements[1].as_leg().unwrap();
 
         assert_eq!(leg.mode, Id::get_from_ext("new_mode"));
         assert!(&leg.mode.external().eq("new_mode"));
         assert_eq!(leg, &new_leg());
-
-        handle.join().unwrap();
     }
 
     fn routing_env(
@@ -494,7 +487,7 @@ mod tests {
     fn test_adaptive(
         plan: InternalPlan,
         comp_env: ThreadLocalComputationalEnvironment,
-    ) -> Vec<SimulationAgent> {
+    ) -> Vec<ActivityAgent> {
         let agent =
             SimulationAgent::new_adaptive_plan_based(InternalPerson::new(Id::create("1"), plan));
         let agents = vec![agent];
@@ -520,7 +513,7 @@ mod tests {
     }
 
     fn create_engine(
-        agents: Vec<SimulationAgent>,
+        agents: Vec<ActivityAgent>,
         comp_env: ThreadLocalComputationalEnvironment,
     ) -> ActivityEngine {
         ActivityEngineBuilder::new(agents, &Config::default(), comp_env).build()

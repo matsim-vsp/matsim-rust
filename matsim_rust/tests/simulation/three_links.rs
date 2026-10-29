@@ -11,6 +11,84 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// Unlike compare_event_folder, this records the order of simultaneous events as well.
+#[deterministic_id_test(matsim_rust)]
+fn agent_phase_refactor_preserves_ordered_events() {
+    let expected = vec![
+        (32400, "actend"),
+        (32400, "departure"),
+        (32408, "travelled"),
+        (32408, "arrival"),
+        (32409, "actstart"),
+        (32409, "actend"),
+        (32409, "departure"),
+        (32409, "PersonEntersVehicle"),
+        (32409, "vehicle enters traffic"),
+        (32410, "left link"),
+        (32410, "entered link"),
+        (32511, "left link"),
+        (32511, "entered link"),
+        (32521, "vehicle leaves traffic"),
+        (32521, "PersonLeavesVehicle"),
+        (32521, "arrival"),
+        (32522, "actstart"),
+        (32522, "actend"),
+        (32522, "departure"),
+        (32538, "travelled"),
+        (32538, "arrival"),
+        (32539, "actstart"),
+    ];
+    assert_eq!(
+        ordered_agent_events(32_540),
+        expected
+            .into_iter()
+            .map(|(t, kind)| (t, kind.to_owned()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn arrival_at_simulation_end_is_stuck_until_next_activity_starts() {
+    let trace = ordered_agent_events(32_538);
+    assert_eq!(
+        &trace[trace.len() - 3..],
+        &[
+            (32538, "travelled".to_owned()),
+            (32538, "arrival".to_owned()),
+            (32538, "stuckAndAbort".to_owned()),
+        ]
+    );
+}
+
+fn ordered_agent_events(end_time: u32) -> Vec<(u64, String)> {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/3-links/3-links-config-1.yml",
+    ));
+    config.qsim_mut().start_time = 32_400;
+    config.qsim_mut().end_time = end_time;
+    config.output_mut().write_events = WriteEvents::None;
+    config.output_mut().output_dir = PathBuf::from(format!(
+        "./test_output/simulation/agent_phase_trace_{end_time}"
+    ));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = events.clone();
+    let register: Box<WorkerListenerRegisterFunction> = Box::new(move |manager, _, _, _| {
+        manager.on_any(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.time().as_secs(), event.type_().to_owned()));
+        });
+    });
+    let scenario = Scenario::load(config);
+    ControllerBuilder::default_with_scenario(scenario)
+        .worker_listener_register_fn(HashMap::from([(0, vec![register])]))
+        .build()
+        .unwrap()
+        .run();
+    Arc::try_unwrap(events).unwrap().into_inner().unwrap()
+}
+
 #[deterministic_id_test(matsim_rust)]
 fn three_links_single_part_matches_expected_events() {
     let config_args =

@@ -1,6 +1,6 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
+use crate::simulation::agents::{LegAgent, TeleportationLogic};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
@@ -78,8 +78,14 @@ where
             .activity_engine
             .drain()
             .into_iter()
-            .chain(self.leg_engine.drain())
-            .chain(agents_changing_engine)
+            .map(SimulationAgent::Activity)
+            .chain(
+                self.leg_engine
+                    .drain()
+                    .into_iter()
+                    .map(SimulationAgent::Leg),
+            )
+            .chain(agents_changing_engine.into_iter().map(SimulationAgent::Leg))
             .collect::<Vec<_>>();
 
         // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
@@ -90,18 +96,18 @@ where
     fn emit_stuck_events(&mut self, time: SimTime, agents: &[SimulationAgent]) {
         let mut events = agents
             .iter()
-            .filter_map(|agent| match agent.state() {
-                SimulationAgentState::ACTIVITY if agent.next_leg().is_none() => None,
-                SimulationAgentState::LEG => Some(
+            .filter_map(|agent| match agent {
+                SimulationAgent::Activity(activity) if !activity.has_next_leg() => None,
+                SimulationAgent::Leg(leg) => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
                         .person(agent.id().clone())
-                        .link(agent.curr_link_id().cloned())
-                        .leg_mode(Some(agent.curr_leg().mode.clone()))
+                        .link(leg.curr_link_id().cloned())
+                        .leg_mode(Some(leg.mode().clone()))
                         .build()
                         .unwrap(),
                 ),
-                SimulationAgentState::ACTIVITY | SimulationAgentState::STUCK => Some(
+                SimulationAgent::Activity(_) => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
                         .person(agent.id().clone())
@@ -122,7 +128,7 @@ where
     /// Performs a sim step for the activity engine and the leg engine.
     /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
     #[hotpath::measure]
-    fn do_sim_step(&mut self, now: Tick, agents: Vec<SimulationAgent>) -> Vec<SimulationAgent> {
+    fn do_sim_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
         let agents_act_to_leg = self.activity_engine.do_step(now, agents);
         let agents_leg_to_act = self.leg_engine.do_step(now, agents_act_to_leg);
         agents_leg_to_act
@@ -137,12 +143,10 @@ where
     }
 
     pub(crate) fn is_local_route(
-        agent: &SimulationAgent,
+        agent: &dyn TeleportationLogic,
         message_broker: &NetMessageBroker<C>,
     ) -> bool {
-        let leg = agent.curr_leg();
-        let route = leg.route.as_ref().unwrap();
-        let to = message_broker.rank_for_link(route.end_link());
+        let to = message_broker.rank_for_link(agent.destination_link());
         message_broker.rank() == to
     }
 }

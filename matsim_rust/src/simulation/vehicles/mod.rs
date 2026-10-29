@@ -1,7 +1,5 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::SimulationAgentLogic;
-use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{AgentEvent, EnvironmentalEventObserver};
+use crate::simulation::agents::{LegAgent, NetworkDriverAgent};
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -10,15 +8,15 @@ use crate::simulation::time::SimTime;
 #[derive(Debug)]
 pub struct SimulationVehicle {
     pub(super) vehicle: InternalVehicle,
-    pub(super) driver: Option<SimulationAgent>,
-    pub(super) passengers: Vec<SimulationAgent>,
+    pub(super) driver: Option<NetworkDriverAgent>,
+    pub(super) passengers: Vec<LegAgent>,
 }
 
 impl SimulationVehicle {
     pub fn new(
         vehicle: InternalVehicle,
-        driver: Option<SimulationAgent>,
-        passengers: Vec<SimulationAgent>,
+        driver: Option<NetworkDriverAgent>,
+        passengers: Vec<LegAgent>,
     ) -> Self {
         Self {
             vehicle,
@@ -33,7 +31,7 @@ impl SimulationVehicle {
         veh_type: u64,
         max_v: f64,
         pce: f64,
-        driver: SimulationAgent,
+        driver: NetworkDriverAgent,
     ) -> Self {
         Self::new(
             InternalVehicle::new(id, veh_type, max_v, pce),
@@ -42,19 +40,21 @@ impl SimulationVehicle {
         )
     }
 
-    pub fn driver_mut(&mut self) -> &mut SimulationAgent {
+    pub fn driver_mut(&mut self) -> &mut dyn crate::simulation::agents::NetworkDriverLogic {
         self.driver
             .as_mut()
             .expect("SimulationVehicle has no driver.")
+            .as_mut()
     }
 
-    pub fn driver(&self) -> &SimulationAgent {
+    pub fn driver(&self) -> &dyn crate::simulation::agents::NetworkDriverLogic {
         self.driver
             .as_ref()
             .expect("SimulationVehicle has no driver.")
+            .as_ref()
     }
 
-    pub fn passengers(&self) -> &Vec<SimulationAgent> {
+    pub fn passengers(&self) -> &Vec<LegAgent> {
         &self.passengers
     }
 
@@ -82,24 +82,23 @@ impl SimulationVehicle {
         &self.vehicle
     }
 
-    pub fn into_agents(mut self) -> Vec<SimulationAgent> {
+    pub fn into_agents(mut self) -> Vec<LegAgent> {
         let mut agents = Vec::with_capacity(1 + self.passengers.len());
         let driver = self
             .driver
             .take()
             .expect("SimulationVehicle has no driver.");
-        agents.push(driver);
+        agents.push(driver as LegAgent);
         agents.extend(self.passengers);
         agents
     }
 }
 
-impl EnvironmentalEventObserver for SimulationVehicle {
-    fn notify_event(&mut self, event: &mut AgentEvent, now: SimTime) {
-        self.driver_mut().notify_event(event, now);
-        self.passengers.iter_mut().for_each(|p| {
-            p.notify_event(event, now);
-        });
+impl SimulationVehicle {
+    /// Moves the driver over the node onto `next_link`. As in MATSim, passengers keep their own
+    /// position until they leave the vehicle; their arrival link is the vehicle's link.
+    pub fn move_over_node(&mut self, next_link: &Id<Link>, now: SimTime) {
+        self.driver_mut().notify_move_over_node(next_link, now);
     }
 }
 

@@ -1,6 +1,4 @@
-use crate::simulation::Identifiable;
 use crate::simulation::agents::SimulationAgentLogic;
-use crate::simulation::agents::agent::SimulationAgent;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::framework_events::{
     AgentEntersPartitionEvent, AgentLeavesPartitionEvent, PartitionEvent,
@@ -31,13 +29,13 @@ fn emit_partition_leave_events_for_vehicle(
         ));
     emit_partition_leave_events_for_agent(comp_env, vehicle.driver(), to, now);
     for passenger in vehicle.passengers() {
-        emit_partition_leave_events_for_agent(comp_env, passenger, to, now);
+        emit_partition_leave_events_for_agent(comp_env, passenger.as_ref(), to, now);
     }
 }
 
 fn emit_partition_leave_events_for_agent(
     comp_env: &mut ThreadLocalComputationalEnvironment,
-    agent: &SimulationAgent,
+    agent: &dyn SimulationAgentLogic,
     to: u32,
     now: SimTime,
 ) {
@@ -63,20 +61,20 @@ fn emit_partition_enter_events_for_vehicle(
         .process_event(PartitionEvent::VehicleEntersPartition(
             VehicleEntersPartitionEvent {
                 vehicle_id: vehicle.id().clone(),
-                network_mode: vehicle.driver().curr_leg().mode.clone(),
+                network_mode: vehicle.driver().mode().clone(),
                 from,
                 time: now,
             },
         ));
     emit_partition_enter_events_for_agent(comp_env, vehicle.driver(), from, now);
     for passenger in vehicle.passengers() {
-        emit_partition_enter_events_for_agent(comp_env, passenger, from, now);
+        emit_partition_enter_events_for_agent(comp_env, passenger.as_ref(), from, now);
     }
 }
 
 fn emit_partition_enter_events_for_agent(
     comp_env: &mut ThreadLocalComputationalEnvironment,
-    agent: &SimulationAgent,
+    agent: &dyn SimulationAgentLogic,
     from: u32,
     now: SimTime,
 ) {
