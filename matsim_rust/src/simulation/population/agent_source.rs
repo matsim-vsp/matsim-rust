@@ -1,4 +1,7 @@
-use crate::simulation::agents::agent::SimulationAgent;
+use crate::simulation::agents::ActivityAgent;
+use crate::simulation::agents::agent_logic::{
+    AdaptivePlanBasedSimulationLogic, PlanBasedSimulationLogic,
+};
 use crate::simulation::config::{Config, RoutingMode};
 use crate::simulation::id::Id;
 use crate::simulation::scenario::population::InternalPerson;
@@ -9,7 +12,7 @@ use std::sync::Arc;
 
 // needs to be an Arc since agents are inserted on every partition.
 pub type DynAgentSource = Arc<dyn AgentSource + Send + Sync>;
-pub type AgentSet = IntMap<Id<InternalPerson>, SimulationAgent>;
+pub type AgentSet = IntMap<Id<InternalPerson>, ActivityAgent>;
 
 pub trait AgentSource {
     fn create_agents(
@@ -59,7 +62,7 @@ impl AgentSource for PopulationAgentSource {
         let mut agents = IntMap::with_capacity(persons.len());
 
         for (id, person) in persons {
-            agents.insert(id, SimulationAgent::new_plan_based(person));
+            agents.insert(id, PlanBasedSimulationLogic::new_agent(person));
         }
         agents
     }
@@ -84,13 +87,13 @@ impl AgentSource for PreplanningHorizonAgentSource {
 }
 
 fn identify_logic_and_insert(
-    agents: &mut IntMap<Id<InternalPerson>, SimulationAgent>,
+    agents: &mut IntMap<Id<InternalPerson>, ActivityAgent>,
     id: Id<InternalPerson>,
     person: InternalPerson,
     config: &Config,
 ) {
     if config.routing().mode == RoutingMode::UsePlans {
-        agents.insert(id, SimulationAgent::new_plan_based(person));
+        agents.insert(id, PlanBasedSimulationLogic::new_agent(person));
         return;
     }
 
@@ -108,11 +111,11 @@ fn identify_logic_and_insert(
         });
 
     if has_at_least_one_preplanning_horizon {
-        agents.insert(id, SimulationAgent::new_adaptive_plan_based(person));
+        agents.insert(id, AdaptivePlanBasedSimulationLogic::new_agent(person));
     } else {
         // if there is no rolling horizon logic, we assume that the person has a plan logic
         // and we create a InternalSimulationAgent with plan logic
-        agents.insert(id, SimulationAgent::new_plan_based(person));
+        agents.insert(id, PlanBasedSimulationLogic::new_agent(person));
     }
 }
 

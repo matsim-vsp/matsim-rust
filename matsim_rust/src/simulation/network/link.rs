@@ -1,5 +1,3 @@
-use crate::simulation::Identifiable;
-use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{
@@ -395,7 +393,7 @@ impl LocalLink {
                     .link(self.id.clone())
                     .person(v.driver().id().clone())
                     .time(now_time)
-                    .network_mode(v.driver().curr_leg().mode.clone())
+                    .network_mode(v.driver().mode().clone())
                     .build()
                     .unwrap(),
             );
@@ -500,7 +498,7 @@ impl LocalLink {
                 .link(self.id.clone())
                 .person(vehicle.driver().id().clone())
                 .time(now_time)
-                .network_mode(vehicle.driver().curr_leg().mode.clone())
+                .network_mode(vehicle.driver().mode().clone())
                 .build()
                 .unwrap(),
         );

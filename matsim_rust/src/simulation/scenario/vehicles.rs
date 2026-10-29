@@ -1,6 +1,6 @@
 use crate::generated::vehicles::{Vehicle, VehicleType};
 use crate::simulation::InternalAttributes;
-use crate::simulation::agents::agent::SimulationAgent;
+use crate::simulation::agents::{LegAgent, NetworkDriverAgent};
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_vehicles::{load_from_proto, write_to_proto};
 use crate::simulation::io::xml::vehicles::{
@@ -265,8 +265,8 @@ impl Garage {
 
     pub fn unpark_veh_with_passengers(
         &self,
-        agent: SimulationAgent,
-        passengers: Vec<SimulationAgent>,
+        agent: NetworkDriverAgent,
+        passengers: Vec<LegAgent>,
         id: Id<InternalVehicle>,
     ) -> SimulationVehicle {
         let vehicle = self
@@ -292,7 +292,11 @@ impl Garage {
         // vehicle
     }
 
-    pub fn unpark_veh(&self, agent: SimulationAgent, id: Id<InternalVehicle>) -> SimulationVehicle {
+    pub fn unpark_veh(
+        &self,
+        agent: NetworkDriverAgent,
+        id: Id<InternalVehicle>,
+    ) -> SimulationVehicle {
         self.unpark_veh_with_passengers(agent, vec![], id)
     }
 
@@ -309,7 +313,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
     use crate::simulation::io::xml::vehicles::{
@@ -394,7 +398,10 @@ mod tests {
         garage.add_veh_by_type(&person_id, &type_id);
         let vehicle_id = garage.veh_id(&person_id, &type_id);
         let garage = Arc::new(garage);
-        let agent = SimulationAgent::new_plan_based(person("person"));
+        let agent = PlanBasedSimulationLogic::new_agent(person("person"))
+            .start_next_leg(crate::simulation::time::SimTime::default())
+            .try_into_network()
+            .unwrap();
 
         let vehicle = garage.unpark_veh(agent, vehicle_id);
 
@@ -440,6 +447,9 @@ mod tests {
     }
 
     fn person(id: &str) -> InternalPerson {
+        use crate::simulation::scenario::population::{
+            InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalRoute,
+        };
         let mut plan = InternalPlan::default();
         plan.add_act(InternalActivity::new(
             Some(Coordinate::default()),
@@ -447,6 +457,18 @@ mod tests {
             Id::<Link>::create("link"),
             None,
             None,
+            None,
+        ));
+        let link = Id::<Link>::get_from_ext("link");
+        let route = InternalNetworkRoute::new(
+            InternalGenericRoute::new(link.clone(), link.clone(), None, None, None),
+            vec![link],
+        );
+        plan.add_leg(InternalLeg::new(
+            InternalRoute::Network(route),
+            "car",
+            "car",
+            std::time::Duration::default(),
             None,
         ));
         InternalPerson::new(Id::create(id), plan)

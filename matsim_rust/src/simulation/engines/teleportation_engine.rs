@@ -1,8 +1,5 @@
-use crate::simulation::Identifiable;
-use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{
-    AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic,
-};
+use crate::simulation::agents::{EndTime, TransitTeleportation};
+use crate::simulation::agents::{LegAgent, TeleportationAgent, TeleportationLogic};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::{
     emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
@@ -17,37 +14,37 @@ use crate::simulation::messaging::partition_change::{
 };
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
-use crate::simulation::scenario::population::{InternalPerson, InternalRoute};
+use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::simulation::Simulation;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 
-pub(crate) struct TeleportedAgent {
-    pub(crate) agent: SimulationAgent,
+pub(crate) struct TeleportationAgentWithFixedEnd {
+    pub(crate) agent: TeleportationAgent,
     pub(crate) end_time: SimTime,
 }
 
-impl TeleportedAgent {
-    fn new(agent: SimulationAgent, end_time: SimTime) -> Self {
+impl TeleportationAgentWithFixedEnd {
+    fn new(agent: TeleportationAgent, end_time: SimTime) -> Self {
         Self { agent, end_time }
     }
 
-    fn into_agent(self) -> SimulationAgent {
+    fn into_agent(self) -> TeleportationAgent {
         self.agent
     }
 
-    fn agent(&self) -> &SimulationAgent {
-        &self.agent
+    fn agent(&self) -> &dyn TeleportationLogic {
+        self.agent.as_ref()
     }
 }
 
-impl EndTime for TeleportedAgent {
+impl EndTime for TeleportationAgentWithFixedEnd {
     fn end_time(&self, _: SimTime) -> SimTime {
         self.end_time
     }
 }
 
-impl From<TeleportationMessage> for TeleportedAgent {
+impl From<TeleportationMessage> for TeleportationAgentWithFixedEnd {
     fn from(message: TeleportationMessage) -> Self {
         let time = message.end_time();
         Self::new(message.into_agent(), time)
@@ -55,7 +52,7 @@ impl From<TeleportationMessage> for TeleportedAgent {
 }
 
 pub(crate) struct TeleportationEngine {
-    queue: TimeQueue<TeleportedAgent, InternalPerson>,
+    queue: TimeQueue<TeleportationAgentWithFixedEnd, InternalPerson>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
 }
@@ -69,34 +66,29 @@ impl TeleportationEngine {
         }
     }
 
-    pub(crate) fn drain(&mut self) -> Vec<SimulationAgent> {
+    pub(crate) fn drain(&mut self) -> Vec<LegAgent> {
         self.queue
             .drain()
             .into_iter()
-            .map(TeleportedAgent::into_agent)
+            .map(|agent| agent.into_agent() as LegAgent)
             .collect()
     }
 
     pub(crate) fn receive_agent<C: SimCommunicator>(
         &mut self,
         now: Tick,
-        mut agent: SimulationAgent,
+        mut agent: TeleportationAgent,
         net_message_broker: &mut NetMessageBroker<C>,
     ) {
         let now_time = self.clock.tick_to_time(now);
-        agent.notify_event(&mut AgentEvent::TeleportationStarted(), now_time);
-        let end_time = agent.end_time(now_time);
-        let teleportation = TeleportedAgent::new(agent, end_time);
+        agent.notify_begin_teleportation(now_time);
+        let end_time = agent.arrival_time(now_time);
+        let teleportation = TeleportationAgentWithFixedEnd::new(agent, end_time);
 
         if Simulation::is_local_route(teleportation.agent(), net_message_broker) {
             self.enqueue(teleportation, now_time);
         } else {
-            let to = net_message_broker.rank_for_link(
-                teleportation
-                    .agent()
-                    .curr_link_id()
-                    .expect("Remote teleported vehicles must have a destination link"),
-            );
+            let to = net_message_broker.rank_for_link(teleportation.agent().destination_link());
             emit_partition_leave_events_for_agent(
                 &mut self.comp_env,
                 teleportation.agent(),
@@ -124,7 +116,7 @@ impl TeleportationEngine {
     pub(crate) fn receive_remote_agent(
         &mut self,
         now: Tick,
-        teleported_agent: TeleportedAgent,
+        teleported_agent: TeleportationAgentWithFixedEnd,
         from: u32,
         to: u32,
     ) {
@@ -153,7 +145,7 @@ impl TeleportationEngine {
         self.enqueue(teleported_agent, now_time);
     }
 
-    fn enqueue(&mut self, teleportation: TeleportedAgent, now: SimTime) {
+    fn enqueue(&mut self, teleportation: TeleportationAgentWithFixedEnd, now: SimTime) {
         // Using the internal id is stable since...
         // ... either proto ids were used (by definition stable)
         // ... or the agent was loaded via XML and sorted by external id before creating internal ids. paul, jul'26
@@ -162,86 +154,56 @@ impl TeleportationEngine {
     }
 
     #[hotpath::measure]
-    pub fn do_step(&mut self, now: Tick) -> Vec<SimulationAgent> {
+    pub fn do_step(&mut self, now: Tick) -> Vec<LegAgent> {
         let mut teleportation_agents = self.queue.pop(self.clock.tick_to_time(now));
         for teleporting_agent in &mut teleportation_agents {
             let agent = teleporting_agent.agent();
 
-            match agent.curr_leg().route.as_ref().unwrap() {
-                InternalRoute::Generic(_) => self.emit_travelled(now, agent),
-                InternalRoute::Network(_) => self.emit_travelled(now, agent),
-                InternalRoute::Pt(_) => self.emit_travelled_with_pt(now, agent),
+            match agent.transit() {
+                Some(transit) => self.emit_travelled_with_pt(now, agent, transit),
+                None => self.emit_travelled(now, agent),
             }
         }
         teleportation_agents
             .into_iter()
-            .map(TeleportedAgent::into_agent)
+            .map(|agent| agent.into_agent() as LegAgent)
             .collect()
     }
 
-    fn emit_travelled(&mut self, now: Tick, agent: &SimulationAgent) {
+    fn emit_travelled(&mut self, now: Tick, agent: &dyn TeleportationLogic) {
         let now_time = self.clock.tick_to_time(now);
-        let leg = agent.curr_leg();
-        let route = leg.route.as_ref().unwrap();
         self.comp_env.events_manager_borrow_mut().process_event(
             &TeleportationArrivalEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .mode(leg.mode.clone())
-                .distance(
-                    route
-                        .as_generic()
-                        .distance()
-                        .expect("Route distance needs to be set."),
-                )
+                .mode(agent.mode().clone())
+                .distance(agent.distance().expect("Route distance needs to be set."))
                 .build()
                 .unwrap(),
         );
     }
 
-    fn emit_travelled_with_pt(&mut self, now: Tick, agent: &SimulationAgent) {
+    fn emit_travelled_with_pt(
+        &mut self,
+        now: Tick,
+        agent: &dyn TeleportationLogic,
+        transit: TransitTeleportation<'_>,
+    ) {
         let now_time = self.clock.tick_to_time(now);
-        let leg = agent.curr_leg();
-        let route = leg.route.as_ref().unwrap();
-        let transit_line_id =
-            Id::<String>::get_from_ext(route.as_pt().unwrap().description.transit_line_id.as_str());
-        let transit_route_id = Id::<String>::get_from_ext(
-            route.as_pt().unwrap().description.transit_route_id.as_str(),
-        );
-        let boarding_time = route
-            .as_pt()
-            .unwrap()
-            .description
+        let transit_line_id = Id::<String>::get_from_ext(transit.line);
+        let transit_route_id = Id::<String>::get_from_ext(transit.route);
+        let boarding_time = transit
             .boarding_time
             .expect("Boarding time needs to be set.");
-        let access_facility = Id::<String>::get_from_ext(
-            route
-                .as_pt()
-                .unwrap()
-                .description
-                .access_facility_id
-                .as_str(),
-        );
-        let egress_facility = Id::<String>::get_from_ext(
-            route
-                .as_pt()
-                .unwrap()
-                .description
-                .egress_facility_id
-                .as_str(),
-        );
+        let access_facility = Id::<String>::get_from_ext(transit.access_facility);
+        let egress_facility = Id::<String>::get_from_ext(transit.egress_facility);
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PtTeleportationArrivalEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .mode(leg.mode.clone())
-                .distance(
-                    route
-                        .as_generic()
-                        .distance()
-                        .expect("Route distance needs to be set."),
-                )
+                .mode(agent.mode().clone())
+                .distance(agent.distance().expect("Route distance needs to be set."))
                 .line(transit_line_id)
                 .route(transit_route_id)
                 .boarding_time(boarding_time)
@@ -255,11 +217,12 @@ impl TeleportationEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::{TeleportationEngine, TeleportedAgent};
+    use super::{TeleportationAgentWithFixedEnd, TeleportationEngine};
     use crate::simulation::Identifiable;
-    use crate::simulation::agents::agent::SimulationAgent;
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
-        AgentEvent, EndTime, EnvironmentalEventObserver, SimulationAgentLogic, SimulationAgentState,
+        ActivityAgent, LegAgent, LegLogic, NetworkDriverAgent, SimulationAgentLogic,
+        TeleportationAgent, TeleportationLogic, TransitTeleportation,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
@@ -281,7 +244,7 @@ mod tests {
         let due_time = SimTime::from_nanos(350_000_000);
 
         engine.queue.add(
-            TeleportedAgent::new(agent, due_time),
+            TeleportationAgentWithFixedEnd::new(agent, due_time),
             SimTime::from_nanos(0),
         );
 
@@ -301,7 +264,7 @@ mod tests {
 
         engine.receive_remote_agent(
             Tick::new(3),
-            TeleportedAgent::new(agent, sender_end_time),
+            TeleportationAgentWithFixedEnd::new(agent, sender_end_time),
             1,
             2,
         );
@@ -321,7 +284,10 @@ mod tests {
             let mut engine = TeleportationEngine::new(Default::default(), clock);
             engine.receive_remote_agent(
                 Tick::new(receive_tick),
-                TeleportedAgent::new(create_generic_route_agent(id), SimTime::from_secs(4)),
+                TeleportationAgentWithFixedEnd::new(
+                    create_generic_route_agent(id),
+                    SimTime::from_secs(4),
+                ),
                 1,
                 2,
             );
@@ -338,7 +304,10 @@ mod tests {
         let mut engine = TeleportationEngine::new(Default::default(), clock);
         engine.receive_remote_agent(
             Tick::new(receive_tick),
-            TeleportedAgent::new(create_generic_route_agent(id), SimTime::from_secs(4)),
+            TeleportationAgentWithFixedEnd::new(
+                create_generic_route_agent(id),
+                SimTime::from_secs(4),
+            ),
             1,
             2,
         );
@@ -357,7 +326,7 @@ mod tests {
 
         for agent in [agent_3, agent_1, agent_2] {
             engine.enqueue(
-                TeleportedAgent::new(agent, SimTime::from_secs(10)),
+                TeleportationAgentWithFixedEnd::new(agent, SimTime::from_secs(10)),
                 SimTime::default(),
             );
         }
@@ -377,18 +346,15 @@ mod tests {
             delegate: create_generic_route_agent(1),
             started: Arc::clone(&started),
         };
-        let mut agent = SimulationAgent::new(Box::new(logic));
-        agent.notify_event(
-            &mut AgentEvent::TeleportationStarted(),
-            SimTime::from_secs(1),
-        );
+        let mut agent: TeleportationAgent = Box::new(logic);
+        agent.notify_begin_teleportation(SimTime::from_secs(1));
         assert_eq!(started.load(Ordering::SeqCst), 1);
 
         let clock = SimClock::new(1);
         let mut engine = TeleportationEngine::new(Default::default(), clock);
         engine.receive_remote_agent(
             Tick::new(2),
-            TeleportedAgent::new(agent, SimTime::from_secs(4)),
+            TeleportationAgentWithFixedEnd::new(agent, SimTime::from_secs(4)),
             1,
             2,
         );
@@ -400,14 +366,8 @@ mod tests {
     }
 
     struct CountingTeleportationLogic {
-        delegate: SimulationAgent,
+        delegate: TeleportationAgent,
         started: Arc<AtomicUsize>,
-    }
-
-    impl EndTime for CountingTeleportationLogic {
-        fn end_time(&self, now: SimTime) -> SimTime {
-            self.delegate.end_time(now)
-        }
     }
 
     impl Identifiable<InternalPerson> for CountingTeleportationLogic {
@@ -416,62 +376,56 @@ mod tests {
         }
     }
 
-    impl EnvironmentalEventObserver for CountingTeleportationLogic {
-        fn notify_event(&mut self, event: &mut AgentEvent, now: SimTime) {
-            if matches!(event, AgentEvent::TeleportationStarted()) {
-                self.started.fetch_add(1, Ordering::SeqCst);
-            }
-            self.delegate.notify_event(event, now);
-        }
-    }
-
     impl SimulationAgentLogic for CountingTeleportationLogic {
-        fn curr_act(&self) -> &InternalActivity {
-            self.delegate.curr_act()
-        }
-
-        fn next_act(&self) -> &InternalActivity {
-            self.delegate.next_act()
-        }
-
-        fn curr_leg(&self) -> &InternalLeg {
-            self.delegate.curr_leg()
-        }
-
-        fn next_leg(&self) -> Option<&InternalLeg> {
-            self.delegate.next_leg()
-        }
-
-        fn advance_plan(&mut self, now: SimTime) {
-            self.delegate.advance_plan(now);
-        }
-
-        fn state(&self) -> SimulationAgentState {
-            self.delegate.state()
-        }
-
-        fn is_wanting_to_arrive_on_current_link(&self) -> bool {
-            self.delegate.is_wanting_to_arrive_on_current_link()
-        }
-
-        fn curr_link_id(&self) -> Option<&Id<Link>> {
-            self.delegate.curr_link_id()
-        }
-
-        fn peek_next_link_id(&self) -> Option<&Id<Link>> {
-            self.delegate.peek_next_link_id()
-        }
-
-        fn wakeup_time(&self, now: SimTime) -> SimTime {
-            self.delegate.wakeup_time(now)
-        }
-
         fn into_person(self: Box<Self>) -> Option<InternalPerson> {
             self.delegate.into_person()
         }
     }
 
-    fn create_generic_route_agent(id: u64) -> SimulationAgent {
+    impl LegLogic for CountingTeleportationLogic {
+        fn mode(&self) -> &Id<String> {
+            self.delegate.mode()
+        }
+        fn routing_mode(&self) -> Option<&Id<String>> {
+            self.delegate.routing_mode()
+        }
+        fn departure_link(&self) -> &Id<Link> {
+            self.delegate.departure_link()
+        }
+        fn curr_link_id(&self) -> Option<&Id<Link>> {
+            self.delegate.curr_link_id()
+        }
+        fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
+            Ok(self)
+        }
+        fn start_next_activity(self: Box<Self>, now: SimTime) -> ActivityAgent {
+            self.delegate.start_next_activity(now)
+        }
+    }
+
+    impl TeleportationLogic for CountingTeleportationLogic {
+        fn destination_link(&self) -> &Id<Link> {
+            self.delegate.destination_link()
+        }
+        fn arrival_time(&self, departure: SimTime) -> SimTime {
+            self.delegate.arrival_time(departure)
+        }
+        fn distance(&self) -> Option<f64> {
+            self.delegate.distance()
+        }
+        fn transit(&self) -> Option<TransitTeleportation<'_>> {
+            self.delegate.transit()
+        }
+        fn notify_begin_teleportation(&mut self, now: SimTime) {
+            self.started.fetch_add(1, Ordering::SeqCst);
+            self.delegate.notify_begin_teleportation(now);
+        }
+    }
+
+    fn create_generic_route_agent(id: u64) -> TeleportationAgent {
         let route = InternalRoute::Generic(InternalGenericRoute::new(
             Id::create("start"),
             Id::create("end"),
@@ -498,8 +452,7 @@ mod tests {
         plan.add_act(act);
         plan.add_leg(leg);
         let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
-        let mut agent = SimulationAgent::new_plan_based(person);
-        agent.advance_plan(SimTime::default());
-        agent
+        let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
+        agent.try_into_teleportation().unwrap()
     }
 }

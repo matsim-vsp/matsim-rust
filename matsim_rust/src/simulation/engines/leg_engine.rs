@@ -1,10 +1,10 @@
-use crate::simulation::Identifiable;
-use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{SimulationAgentLogic, SimulationAgentState};
+use crate::simulation::agents::{
+    ActivityAgent, LegAgent, LegLogic, NetworkDriverAgent, TeleportationAgent,
+};
 use crate::simulation::config::QSim;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
-use crate::simulation::engines::leg_engine::ResponsibleEngine::{Leg, Teleportation};
+use crate::simulation::engines::leg_engine::ResponsibleEngine::{Network, Teleportation};
 use crate::simulation::engines::network_engine::NetworkEngine;
 use crate::simulation::engines::teleportation_engine::TeleportationEngine;
 use crate::simulation::events::{
@@ -19,7 +19,7 @@ use crate::simulation::messaging::partition_change::{
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::network::sim_network::SimNetworkPartition;
-use crate::simulation::scenario::population::InternalRoute;
+use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::vehicles::SimulationVehicle;
@@ -28,8 +28,29 @@ use std::sync::Arc;
 use tracing::instrument;
 
 enum ResponsibleEngine {
-    Leg,
-    Teleportation,
+    Network(NetworkDriverAgent),
+    Teleportation(TeleportationAgent),
+}
+
+/// Policy belongs to the engine; capability conversion belongs to the current agent.
+fn select_execution(agent: LegAgent, main_mode: bool) -> ResponsibleEngine {
+    // If the leg mode is not a main mode, use teleportation in every case.
+    // Otherwise only an available network-driver capability permits network execution.
+    let agent = if main_mode {
+        match agent.try_into_network() {
+            Ok(driver) => return Network(driver),
+            Err(agent) => agent,
+        }
+    } else {
+        agent
+    };
+    match agent.try_into_teleportation() {
+        Ok(agent) => Teleportation(agent),
+        Err(agent) => panic!(
+            "Agent {}: no permitted leg execution capability",
+            agent.id()
+        ),
+    }
 }
 
 pub struct LegEngine<C: SimCommunicator> {
@@ -60,7 +81,6 @@ impl<C: SimCommunicator> LegEngine<C> {
 
         let departure_handler = VehicularDepartureHandler {
             comp_env: comp_env.clone(),
-            main_modes: main_modes.clone(),
         };
 
         LegEngine {
@@ -75,7 +95,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         }
     }
 
-    pub(crate) fn drain(&mut self) -> Vec<SimulationAgent> {
+    pub(crate) fn drain(&mut self) -> Vec<LegAgent> {
         self.network_engine
             .drain()
             .into_iter()
@@ -104,11 +124,7 @@ impl<C: SimCommunicator> LegEngine<C> {
     /// `move_nodes`. For all travel times greater than this, it is the same.
     #[hotpath::measure]
     #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
-    pub(crate) fn do_step(
-        &mut self,
-        now: Tick,
-        agents: Vec<SimulationAgent>,
-    ) -> Vec<SimulationAgent> {
+    pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<ActivityAgent>) -> Vec<LegAgent> {
         self.receive_agents(now, agents);
 
         self.network_engine.move_nodes(now);
@@ -173,7 +189,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         self.net_message_broker.send_recv(now)
     }
 
-    fn receive_agents(&mut self, now: Tick, agents: Vec<SimulationAgent>) {
+    fn receive_agents(&mut self, now: Tick, agents: Vec<ActivityAgent>) {
         for agent in agents {
             self.receive_agent(now, agent);
         }
@@ -183,7 +199,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         &mut self,
         now: Tick,
         vehicles: Vec<SimulationVehicle>,
-    ) -> Vec<SimulationAgent> {
+    ) -> Vec<LegAgent> {
         let now_time = self.clock.tick_to_time(now);
         let mut agents = vec![];
         for veh in vehicles {
@@ -207,18 +223,11 @@ impl<C: SimCommunicator> LegEngine<C> {
                 );
             }
 
-            let leg = veh.driver().curr_leg();
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &PersonArrivalEventBuilder::default()
-                    .time(now_time)
-                    .person(veh.driver().id().clone())
-                    .link(veh.curr_link_id().unwrap().clone())
-                    .leg_mode(leg.mode.clone())
-                    .build()
-                    .unwrap(),
-            );
+            // Passengers do not move along their own route, so everyone arrives on the vehicle's link.
+            let link = veh.curr_link_id().unwrap();
+            self.publish_person_arrival(now_time, veh.driver(), link);
             for passenger in veh.passengers() {
-                self.publish_person_arrival(now_time.clone(), passenger);
+                self.publish_person_arrival(now_time, passenger.as_ref(), link);
             }
 
             agents.extend(veh.into_agents());
@@ -226,83 +235,68 @@ impl<C: SimCommunicator> LegEngine<C> {
         agents
     }
 
-    fn publish_teleported_end_events(
-        &mut self,
-        now: Tick,
-        agents: Vec<SimulationAgent>,
-    ) -> Vec<SimulationAgent> {
+    fn publish_teleported_end_events(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
         let now_time = self.clock.tick_to_time(now);
         let mut ret_agents = Vec::with_capacity(agents.len());
         for agent in agents {
-            self.publish_person_arrival(now_time.clone(), &agent);
+            self.publish_person_arrival(now_time, agent.as_ref(), agent.curr_link_id().unwrap());
             ret_agents.push(agent);
         }
         ret_agents
     }
 
-    fn publish_person_arrival(&mut self, now_time: SimTime, agent: &SimulationAgent) {
-        let leg = agent.curr_leg();
+    fn publish_person_arrival(&mut self, now_time: SimTime, agent: &dyn LegLogic, link: &Id<Link>) {
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonArrivalEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .link(agent.curr_link_id().unwrap().clone())
-                .leg_mode(leg.mode.clone())
+                .link(link.clone())
+                .leg_mode(agent.mode().clone())
                 .build()
                 .unwrap(),
         );
     }
 
-    pub(crate) fn receive_agent(&mut self, now: Tick, mut agent: SimulationAgent) {
+    pub(crate) fn receive_agent(&mut self, now: Tick, agent: ActivityAgent) {
         let now_time = self.clock.tick_to_time(now);
-        agent.advance_plan(now_time);
+        let agent = agent.start_next_leg(now_time);
 
-        let leg = agent.curr_leg();
-        let route = leg.route.as_ref().unwrap();
+        let leg = agent.as_ref();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonDepartureEventBuilder::default()
                 .time(now_time)
                 .person(agent.id().clone())
-                .link(route.start_link().clone())
-                .leg_mode(leg.mode.clone())
+                .link(leg.departure_link().clone())
+                .leg_mode(leg.mode().clone())
                 .routing_mode(
-                    leg.routing_mode
-                        .as_ref()
-                        .unwrap_or_else(|| panic!("Missing routing mode for leg {:?}", leg))
+                    leg.routing_mode()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Missing routing mode for {} leg of agent {}",
+                                leg.mode(),
+                                agent.id()
+                            )
+                        })
                         .clone(),
                 )
                 .build()
                 .unwrap(),
         );
 
-        match self.find_responsible_engine(&agent) {
-            Leg => self.pass_to_leg(now, agent, true),
-            Teleportation => self.pass_to_teleportation(now, agent),
+        let main_mode = self.main_modes.contains(agent.mode());
+        match select_execution(agent, main_mode) {
+            Network(agent) => self.pass_to_leg(now, agent, true),
+            Teleportation(agent) => self.pass_to_teleportation(now, agent),
         }
     }
 
-    fn find_responsible_engine(&self, agent: &SimulationAgent) -> ResponsibleEngine {
-        let leg = agent.curr_leg();
-
-        // If mode of leg is not main mode, teleport vehicle in every case
-        if !self.main_modes.contains(&leg.mode) {
-            return Teleportation;
-        }
-
-        // Otherwise, make the decision based on the route type
-        match leg.route.as_ref().unwrap() {
-            InternalRoute::Network(_) => Leg,
-            _ => Teleportation,
-        }
-    }
-
-    fn pass_to_teleportation(&mut self, now: Tick, agent: SimulationAgent) {
+    fn pass_to_teleportation(&mut self, now: Tick, agent: TeleportationAgent) {
         self.teleportation_engine
             .receive_agent(now, agent, &mut self.net_message_broker);
     }
 
-    fn pass_to_leg(&mut self, now: Tick, agent: SimulationAgent, route_begin: bool) {
+    fn pass_to_leg(&mut self, now: Tick, agent: NetworkDriverAgent, route_begin: bool) {
         let now_time = self.clock.tick_to_time(now);
 
         let agent_id = agent.id().clone();
@@ -335,50 +329,132 @@ impl<C: SimCommunicator> LegEngine<C> {
 
 struct VehicularDepartureHandler {
     comp_env: ThreadLocalComputationalEnvironment,
-    main_modes: IntSet<Id<String>>,
 }
 
 impl VehicularDepartureHandler {
     fn handle_departure(
         &mut self,
         now: SimTime,
-        agent: SimulationAgent,
+        agent: NetworkDriverAgent,
         garage: &Garage,
     ) -> Option<SimulationVehicle> {
-        assert_eq!(agent.state(), SimulationAgentState::LEG);
+        let leg = agent.as_ref();
 
-        let leg = agent.curr_leg();
-        let route = leg
-            .route
-            .as_ref()
-            .unwrap_or_else(|| panic!("Missing route for agent {} at leg {:?}", agent.id(), leg));
-
-        let veh_id = if let Some(v) = route.as_generic().vehicle().as_ref() {
+        let veh_id = if let Some(v) = leg.planned_vehicle_id() {
             v.clone()
         } else {
             Id::get_from_ext(&format!(
                 "{}_{}",
                 agent.id().external(),
-                leg.mode.external()
+                leg.mode().external()
             ))
         };
 
-        if self.main_modes.contains(&leg.mode) {
-            assert!(
-                route.as_network().is_some(),
-                "{} is set as main mode but route is not network route",
-                leg.mode
-            );
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &PersonEntersVehicleEventBuilder::default()
-                    .time(now)
-                    .person(agent.id().clone())
-                    .vehicle(veh_id.clone())
-                    .build()
-                    .unwrap(),
-            );
-        }
+        self.comp_env.events_manager_borrow_mut().process_event(
+            &PersonEntersVehicleEventBuilder::default()
+                .time(now)
+                .person(agent.id().clone())
+                .vehicle(veh_id.clone())
+                .build()
+                .unwrap(),
+        );
 
         Some(garage.unpark_veh(agent, veh_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::Identifiable;
+    use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
+    use crate::simulation::scenario::population::{
+        InternalGenericRoute, InternalPerson, InternalRoute,
+    };
+    use crate::test_utils::create_agent;
+    use macros::deterministic_id_test;
+
+    #[deterministic_id_test]
+    fn main_mode_uses_network_when_available() {
+        let agent: LegAgent = create_agent(1, vec!["a", "b"]);
+        let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
+        let Network(driver) = select_execution(agent, true) else {
+            panic!("Expected network")
+        };
+        assert_eq!(address, std::ptr::from_ref(driver.as_ref()).cast::<()>());
+    }
+
+    #[deterministic_id_test]
+    fn non_main_mode_teleports_even_a_network_route() {
+        let agent: LegAgent = create_agent(1, vec!["a", "b"]);
+        let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
+        let Teleportation(agent) = select_execution(agent, false) else {
+            panic!("Expected teleportation")
+        };
+        assert_eq!(agent.destination_link().external(), "b");
+        assert_eq!(address, std::ptr::from_ref(agent.as_ref()).cast::<()>());
+    }
+
+    #[deterministic_id_test]
+    fn main_mode_falls_back_to_an_available_teleportation_role() {
+        let mut person = create_agent(1, vec!["a", "b"]).into_person().unwrap();
+        person.plans_mut()[0].elements[1]
+            .as_leg_mut()
+            .unwrap()
+            .route = Some(InternalRoute::Generic(InternalGenericRoute::new(
+            Id::get_from_ext("a"),
+            Id::get_from_ext("b"),
+            None,
+            None,
+            None,
+        )));
+        let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
+        let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
+        let Teleportation(agent) = select_execution(agent, true) else {
+            panic!("Expected teleportation")
+        };
+        assert_eq!(address, std::ptr::from_ref(agent.as_ref()).cast::<()>());
+    }
+
+    struct Unsupported(LegAgent);
+    impl Identifiable<InternalPerson> for Unsupported {
+        fn id(&self) -> &Id<InternalPerson> {
+            self.0.id()
+        }
+    }
+    impl SimulationAgentLogic for Unsupported {
+        fn into_person(self: Box<Self>) -> Option<InternalPerson> {
+            self.0.into_person()
+        }
+    }
+    impl LegLogic for Unsupported {
+        fn mode(&self) -> &Id<String> {
+            self.0.mode()
+        }
+        fn routing_mode(&self) -> Option<&Id<String>> {
+            self.0.routing_mode()
+        }
+        fn departure_link(&self) -> &Id<Link> {
+            self.0.departure_link()
+        }
+        fn curr_link_id(&self) -> Option<&Id<Link>> {
+            self.0.curr_link_id()
+        }
+        fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
+            Err(self)
+        }
+        fn start_next_activity(self: Box<Self>, now: SimTime) -> ActivityAgent {
+            self.0.start_next_activity(now)
+        }
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "Agent 1: no permitted leg execution capability")]
+    fn missing_execution_capabilities_report_the_agent_id() {
+        select_execution(Box::new(Unsupported(create_agent(1, vec!["a"]))), true);
     }
 }

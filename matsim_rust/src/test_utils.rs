@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::simulation::agents::SimulationAgentLogic;
-use crate::simulation::agents::agent::SimulationAgent;
+use crate::simulation::agents::NetworkDriverAgent;
+use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::population::{
@@ -14,12 +14,12 @@ use crate::simulation::time::SimTime;
 use crate::simulation::{InternalAttributes, config};
 use std::time::Duration;
 
-pub fn create_agent_without_route(id: u64) -> SimulationAgent {
+pub fn create_agent_without_route(id: u64) -> NetworkDriverAgent {
     //inserting a dummy route
     create_agent(id, vec!["0", "1"])
 }
 
-pub fn create_agent(id: u64, route: Vec<&str>) -> SimulationAgent {
+pub fn create_agent(id: u64, route: Vec<&str>) -> NetworkDriverAgent {
     let generic_route = InternalGenericRoute::new(
         Id::create(route.first().unwrap()),
         Id::create(route.last().unwrap()),
@@ -52,10 +52,9 @@ pub fn create_agent(id: u64, route: Vec<&str>) -> SimulationAgent {
     plan.add_leg(leg);
     let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
 
-    let mut agent = SimulationAgent::new_plan_based(person);
-    agent.advance_plan(SimTime::default());
+    let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
 
-    agent
+    agent.try_into_network().unwrap()
 }
 
 pub fn create_folders(path: PathBuf) -> PathBuf {

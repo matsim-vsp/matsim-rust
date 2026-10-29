@@ -1,4 +1,3 @@
-use crate::simulation::Identifiable;
 use crate::simulation::events::{
     ActivityEndEvent, ActivityStartEvent, LinkEnterEvent, PersonArrivalEvent, PersonDepartureEvent,
     PersonEntersVehicleEvent, PersonLeavesVehicleEvent, PersonStuckEvent,
@@ -212,7 +211,7 @@ impl BackpackingDataCollector {
     fn person_ids(entity: PartitionChangeEntity<'_>) -> Vec<Id<InternalPerson>> {
         match entity {
             PartitionChangeEntity::Vehicle(vehicle) => std::iter::once(vehicle.driver().id())
-                .chain(vehicle.passengers().iter().map(Identifiable::id))
+                .chain(vehicle.passengers().iter().map(|agent| agent.id()))
                 .cloned()
                 .collect(),
             PartitionChangeEntity::TeleportationAgent(agent) => vec![agent.id().clone()],

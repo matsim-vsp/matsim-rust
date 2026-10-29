@@ -1,7 +1,7 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::EndTime;
-use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::engines::teleportation_engine::TeleportedAgent;
+use crate::simulation::agents::{TeleportationAgent, TeleportationLogic};
+use crate::simulation::engines::teleportation_engine::TeleportationAgentWithFixedEnd;
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeAttachments;
 use crate::simulation::network::sim_network::StorageUpdate;
@@ -17,13 +17,13 @@ pub enum InternalSimMessage {
 
 #[derive(Debug)]
 pub(crate) struct TeleportationMessage {
-    agent: SimulationAgent,
+    agent: TeleportationAgent,
     end_time: SimTime,
     attachments: PartitionChangeAttachments,
 }
 
-impl From<TeleportedAgent> for TeleportationMessage {
-    fn from(teleported_agent: TeleportedAgent) -> Self {
+impl From<TeleportationAgentWithFixedEnd> for TeleportationMessage {
+    fn from(teleported_agent: TeleportationAgentWithFixedEnd) -> Self {
         Self {
             agent: teleported_agent.agent,
             end_time: teleported_agent.end_time,
@@ -34,7 +34,7 @@ impl From<TeleportedAgent> for TeleportationMessage {
 
 impl TeleportationMessage {
     #[cfg(test)]
-    pub(crate) fn new(agent: SimulationAgent, end_time: SimTime) -> Self {
+    pub(crate) fn new(agent: TeleportationAgent, end_time: SimTime) -> Self {
         Self {
             agent,
             end_time,
@@ -42,15 +42,15 @@ impl TeleportationMessage {
         }
     }
 
-    pub(crate) fn agent(&self) -> &SimulationAgent {
-        &self.agent
+    pub(crate) fn agent(&self) -> &dyn TeleportationLogic {
+        self.agent.as_ref()
     }
 
     pub(crate) fn end_time(&self) -> SimTime {
         self.end_time
     }
 
-    pub(crate) fn into_agent(self) -> SimulationAgent {
+    pub(crate) fn into_agent(self) -> TeleportationAgent {
         self.agent
     }
 
@@ -266,7 +266,8 @@ mod tests {
             move |_, attachment, _| *arrival_received.borrow_mut() = attachment,
         );
 
-        let mut teleportation = TeleportationMessage::new(agent, end_time);
+        let mut teleportation =
+            TeleportationMessage::new(agent.try_into_teleportation().unwrap(), end_time);
         let attachments = manager.send(
             PartitionChangeEntity::TeleportationAgent(teleportation.agent()),
             &context,
