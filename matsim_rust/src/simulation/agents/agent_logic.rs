@@ -5,7 +5,7 @@ use crate::external_services::routing::{
 use crate::simulation::Identifiable;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
-    SimulationAgentLogic, TeleportationAgent, TeleportationLogic, TransitTeleportation,
+    NextPhase, SimulationAgentLogic, TeleportationAgent, TeleportationLogic, TransitTeleportation,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
@@ -228,9 +228,9 @@ impl ActivityLogic for PlanBasedSimulationLogic {
     ) {
     }
     fn notify_finished(&mut self, _now: SimTime) {}
-    fn start_next_leg(mut self: Box<Self>, now: SimTime) -> LegAgent {
+    fn finish_activity(mut self: Box<Self>, now: SimTime) -> NextPhase {
         self.advance(now);
-        self
+        NextPhase::Leg(self)
     }
 }
 
@@ -257,9 +257,9 @@ impl LegLogic for PlanBasedSimulationLogic {
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
         Ok(self)
     }
-    fn start_next_activity(mut self: Box<Self>, now: SimTime) -> ActivityAgent {
+    fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
         self.advance(now);
-        self
+        NextPhase::Activity(self)
     }
 }
 
@@ -546,9 +546,9 @@ impl ActivityLogic for AdaptivePlanBasedSimulationLogic {
         self.replace_route(now);
         self.delegate.notify_finished(now);
     }
-    fn start_next_leg(mut self: Box<Self>, now: SimTime) -> LegAgent {
+    fn finish_activity(mut self: Box<Self>, now: SimTime) -> NextPhase {
         self.delegate.advance(now);
-        self
+        NextPhase::Leg(self)
     }
 }
 
@@ -575,9 +575,9 @@ impl LegLogic for AdaptivePlanBasedSimulationLogic {
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
         Ok(self)
     }
-    fn start_next_activity(mut self: Box<Self>, now: SimTime) -> ActivityAgent {
+    fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
         self.delegate.advance(now);
-        self
+        NextPhase::Activity(self)
     }
 }
 
@@ -825,7 +825,7 @@ mod tests {
             agent.notify_finished(SimTime::from_secs(10));
             // Completion callbacks do not switch phase before the receiving engine runs.
             assert_eq!(agent.act_type().external(), "home");
-            let agent = agent.start_next_leg(SimTime::from_secs(10));
+            let agent = agent.finish_activity(SimTime::from_secs(10)).expect_leg();
             let leg = agent.as_ref();
             assert_eq!(leg.mode().external(), "car");
             assert_eq!(leg.routing_mode().map(Id::external), Some("car"));
@@ -845,7 +845,7 @@ mod tests {
             agent.notify_begin_teleportation(SimTime::from_secs(10));
             assert_eq!(agent.curr_link_id(), Some(&Id::get_from_ext("l2")));
             assert_eq!(agent.mode().external(), "car");
-            let agent = agent.start_next_activity(SimTime::from_secs(21));
+            let agent = agent.finish_leg(SimTime::from_secs(21)).expect_activity();
             assert_eq!(
                 agent.end_time(SimTime::from_secs(100)),
                 SimTime::from_secs(28)
@@ -879,7 +879,7 @@ mod tests {
                 } else {
                     PlanBasedSimulationLogic::new_agent(person)
                 };
-                let agent = agent.start_next_leg(SimTime::default());
+                let agent = agent.finish_activity(SimTime::default()).expect_leg();
                 let mut agent = agent.try_into_network().unwrap();
                 assert_eq!(
                     agent.planned_vehicle_id().map(Id::external),
@@ -942,7 +942,7 @@ mod tests {
                 } else {
                     PlanBasedSimulationLogic::new_agent(person)
                 };
-                let agent = agent.start_next_leg(SimTime::default());
+                let agent = agent.finish_activity(SimTime::default()).expect_leg();
                 let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
                 let agent: LegAgent = match agent.try_into_network() {
                     Ok(driver) => {
@@ -979,7 +979,7 @@ mod tests {
             },
         });
         let agent = PlanBasedSimulationLogic::new_agent(person_with_leg(route.clone()));
-        let agent = agent.start_next_leg(SimTime::default());
+        let agent = agent.finish_activity(SimTime::default()).expect_leg();
         let mut agent = agent
             .try_into_network()
             .unwrap_err()
@@ -1062,7 +1062,7 @@ mod tests {
             } else {
                 PlanBasedSimulationLogic::new_agent(person)
             };
-            let agent = agent.start_next_leg(SimTime::from_secs(5));
+            let agent = agent.finish_activity(SimTime::from_secs(5)).expect_leg();
             let mut agent = agent.try_into_network().unwrap();
             agent.notify_move_over_node(&Id::get_from_ext("b"), SimTime::from_secs(6));
             assert_eq!(agent.curr_link_id().unwrap().external(), "b");
@@ -1103,15 +1103,16 @@ mod tests {
             };
             let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
             let mut driver = agent
-                .start_next_leg(SimTime::default())
+                .finish_activity(SimTime::default())
+                .expect_leg()
                 .try_into_network()
                 .unwrap();
             assert_eq!(original, std::ptr::from_ref(driver.as_ref()).cast::<()>());
             driver.notify_move_over_node(&Id::get_from_ext("b"), SimTime::from_secs(1));
-            let mut activity = driver.start_next_activity(SimTime::from_secs(2));
+            let mut activity = driver.finish_leg(SimTime::from_secs(2)).expect_activity();
             assert_eq!(original, std::ptr::from_ref(activity.as_ref()).cast::<()>());
             activity.notify_finished(SimTime::from_secs(3));
-            let leg = activity.start_next_leg(SimTime::from_secs(3));
+            let leg = activity.finish_activity(SimTime::from_secs(3)).expect_leg();
             assert_eq!(
                 leg.mode().external(),
                 if adaptive { "bike" } else { "walk" }
@@ -1119,7 +1120,7 @@ mod tests {
             let mut traveler = leg.try_into_teleportation().unwrap();
             assert_eq!(original, std::ptr::from_ref(traveler.as_ref()).cast::<()>());
             traveler.notify_begin_teleportation(SimTime::from_secs(3));
-            let final_activity = traveler.start_next_activity(SimTime::from_secs(4));
+            let final_activity = traveler.finish_leg(SimTime::from_secs(4)).expect_activity();
             assert_eq!(
                 original,
                 std::ptr::from_ref(final_activity.as_ref()).cast::<()>()
@@ -1147,7 +1148,7 @@ mod tests {
                 PlanBasedSimulationLogic::new_agent(person)
             };
             let original = std::ptr::from_ref(activity.as_ref()).cast::<()>();
-            let agent = activity.start_next_leg(SimTime::default());
+            let agent = activity.finish_activity(SimTime::default()).expect_leg();
             let agent = agent.try_into_network().unwrap_err();
             assert_eq!(original, std::ptr::from_ref(agent.as_ref()).cast::<()>());
             assert_eq!(agent.mode().external(), "car");

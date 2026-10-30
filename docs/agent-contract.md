@@ -126,7 +126,6 @@ The following rules are not implemented yet:
 | Rule         | Current state                                                                                                         |
 |--------------|-----------------------------------------------------------------------------------------------------------------------|
 | `P1`, `P3`   | `SimulationAgent` has no stuck variant.                                                                               |
-| `P2`         | `start_next_leg` and `start_next_activity` fix the next phase, and the engines call them.                             |
 | `P4`, `P5`   | Agents become stuck only at the end of the mobsim, in `Simulation::emit_stuck_events`.                                |
 | `D2`         | The rows for waiting and riding have no implementation, because schedule-based transit does not exist yet.            |
 | `D2`, `D5`   | A route cannot change after its leg has started; `notify_move_over_node` only confirms the planned link.              |

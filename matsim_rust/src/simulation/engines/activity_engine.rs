@@ -1,5 +1,5 @@
+use crate::simulation::agents::ActivityAgent;
 use crate::simulation::agents::EndTime;
-use crate::simulation::agents::{ActivityAgent, LegAgent};
 use crate::simulation::config::Config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{ActivityEndEventBuilder, ActivityStartEventBuilder};
@@ -43,12 +43,11 @@ impl ActivityEngine {
     pub(crate) fn do_step(
         &mut self,
         now: impl Into<Tick>,
-        agents: Vec<LegAgent>,
+        agents: Vec<ActivityAgent>,
     ) -> Vec<ActivityAgent> {
         let now = now.into();
         let now_time = self.clock.tick_to_time(now);
         for agent in agents {
-            let agent = agent.start_next_activity(now_time);
             self.receive_agent(now, AsleepSimulationAgent::build(agent, now_time));
         }
 

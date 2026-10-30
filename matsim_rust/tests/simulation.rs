@@ -8,6 +8,8 @@ mod equil;
 mod equil_teleport;
 #[path = "simulation/iterations.rs"]
 mod iterations;
+#[path = "simulation/phases.rs"]
+mod phases;
 #[path = "simulation/pt.rs"]
 mod pt;
 #[path = "simulation/three_links.rs"]

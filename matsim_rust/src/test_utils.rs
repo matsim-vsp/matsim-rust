@@ -52,7 +52,9 @@ pub fn create_agent(id: u64, route: Vec<&str>) -> NetworkDriverAgent {
     plan.add_leg(leg);
     let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
 
-    let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
+    let agent = PlanBasedSimulationLogic::new_agent(person)
+        .finish_activity(SimTime::default())
+        .expect_leg();
 
     agent.try_into_network().unwrap()
 }

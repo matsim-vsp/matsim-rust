@@ -221,7 +221,7 @@ mod tests {
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
-        ActivityAgent, LegAgent, LegLogic, NetworkDriverAgent, SimulationAgentLogic,
+        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, SimulationAgentLogic,
         TeleportationAgent, TeleportationLogic, TransitTeleportation,
     };
     use crate::simulation::id::Id;
@@ -401,8 +401,8 @@ mod tests {
         fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
             Ok(self)
         }
-        fn start_next_activity(self: Box<Self>, now: SimTime) -> ActivityAgent {
-            self.delegate.start_next_activity(now)
+        fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {
+            self.delegate.finish_leg(now)
         }
     }
 
@@ -452,7 +452,9 @@ mod tests {
         plan.add_act(act);
         plan.add_leg(leg);
         let person = InternalPerson::new(Id::create(id.to_string().as_str()), plan);
-        let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
+        let agent = PlanBasedSimulationLogic::new_agent(person)
+            .finish_activity(SimTime::default())
+            .expect_leg();
         agent.try_into_teleportation().unwrap()
     }
 }

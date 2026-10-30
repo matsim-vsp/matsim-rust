@@ -17,6 +17,30 @@ pub type LegAgent = Box<dyn LegLogic>;
 pub type NetworkDriverAgent = Box<dyn NetworkDriverLogic>;
 pub type TeleportationAgent = Box<dyn TeleportationLogic>;
 
+/// What an agent does after a phase. Only the agent decides this; the simulation carries it out.
+#[derive(Debug)]
+pub enum NextPhase {
+    Activity(ActivityAgent),
+    Leg(LegAgent),
+}
+
+#[cfg(test)]
+impl NextPhase {
+    pub fn expect_activity(self) -> ActivityAgent {
+        match self {
+            Self::Activity(agent) => agent,
+            next => panic!("Expected an activity, but got {next:?}"),
+        }
+    }
+
+    pub fn expect_leg(self) -> LegAgent {
+        match self {
+            Self::Leg(agent) => agent,
+            next => panic!("Expected a leg, but got {next:?}"),
+        }
+    }
+}
+
 /// Observations and commands valid throughout an activity, including the final activity.
 pub trait ActivityLogic: SimulationAgentLogic {
     fn act_type(&self) -> &Id<String>;
@@ -38,7 +62,7 @@ pub trait ActivityLogic: SimulationAgentLogic {
         now: SimTime,
     );
     fn notify_finished(&mut self, now: SimTime);
-    fn start_next_leg(self: Box<Self>, now: SimTime) -> LegAgent;
+    fn finish_activity(self: Box<Self>, now: SimTime) -> NextPhase;
 }
 
 /// Observations and commands valid throughout a leg. The roles tell which engines can simulate it;
@@ -52,7 +76,7 @@ pub trait LegLogic: SimulationAgentLogic {
     fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent>;
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent>;
 
-    fn start_next_activity(self: Box<Self>, now: SimTime) -> ActivityAgent;
+    fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase;
 }
 
 /// The driver part of MATSim's `DriverAgent`. Mode and position belong to the leg.
