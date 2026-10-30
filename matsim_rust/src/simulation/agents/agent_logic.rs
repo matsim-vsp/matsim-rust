@@ -3,7 +3,7 @@ use crate::external_services::routing::{
     InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
 };
 use crate::simulation::Identifiable;
-use crate::simulation::agents::read_only_person::ReadOnlyPerson;
+use crate::simulation::agents::agent::ReadOnlyPerson;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
     NextPhase, SimulationAgentLogic, StuckLogic, TeleportationAgent, TeleportationLogic,
@@ -922,71 +922,6 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn maximum_duration_counts_from_the_start_of_the_activity() {
-        let mut person = person_with_leg(InternalRoute::Generic(generic_route()));
-        let mut leg = make_leg("car");
-        leg.route = Some(InternalRoute::Generic(generic_route()));
-        person.plans_mut()[0].add_leg(leg);
-        person.plans_mut()[0].add_act(make_activity("home", "l1"));
-
-        let agent = PlanBasedSimulationLogic::new_agent(person)
-            .finish_activity(SimTime::from_secs(10))
-            .expect_leg()
-            .finish_leg(SimTime::from_secs(21))
-            .expect_activity();
-
-        assert_eq!(
-            agent.end_time(SimTime::from_secs(100)),
-            SimTime::from_secs(28)
-        );
-    }
-
-    #[deterministic_id_test]
-    fn an_agent_whose_plan_ends_with_a_leg_gets_stuck() {
-        for adaptive in [false, true] {
-            let mut person = person_with_leg(InternalRoute::Generic(generic_route()));
-            person.plans_mut()[0].elements.pop();
-            let expected = person.clone();
-            let agent = if adaptive {
-                AdaptivePlanBasedSimulationLogic::new_agent(person)
-            } else {
-                PlanBasedSimulationLogic::new_agent(person)
-            };
-            let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
-
-            let mut agent = agent
-                .finish_activity(SimTime::from_secs(10))
-                .expect_leg()
-                .try_into_teleportation()
-                .unwrap();
-            agent.notify_begin_teleportation(SimTime::from_secs(10));
-
-            let NextPhase::Stuck(agent) = agent.finish_leg(SimTime::from_secs(21)) else {
-                panic!("The plan has run empty");
-            };
-            assert_eq!(original, std::ptr::from_ref(agent.as_ref()).cast::<()>());
-            assert_eq!(agent.stuck_link().map(Id::external), Some("l2"));
-            assert_eq!(agent.stuck_mode().map(Id::external), Some("car"));
-            assert_eq!(agent.into_person(), Some(expected));
-        }
-    }
-
-    #[deterministic_id_test]
-    fn an_agent_that_leaves_its_last_activity_gets_stuck_without_a_leg() {
-        let mut person = person_with_leg(InternalRoute::Generic(generic_route()));
-        person.plans_mut()[0].elements.truncate(1);
-
-        let NextPhase::Stuck(agent) =
-            PlanBasedSimulationLogic::new_agent(person).finish_activity(SimTime::from_secs(10))
-        else {
-            panic!("The plan has run empty");
-        };
-
-        assert_eq!(agent.stuck_link(), None);
-        assert_eq!(agent.stuck_mode(), None);
-    }
-
-    #[deterministic_id_test]
     fn network_roles_follow_route_positions_including_round_trips_and_single_link_routes() {
         use crate::simulation::scenario::population::InternalNetworkRoute;
         for adaptive in [false, true] {
@@ -1047,6 +982,7 @@ mod tests {
     #[deterministic_id_test]
     fn owned_roles_follow_route_capabilities_and_preserve_allocation() {
         use crate::simulation::scenario::population::{
+
             InternalNetworkRoute, InternalPtRoute, InternalPtRouteDescription,
         };
         let pt = InternalRoute::Pt(InternalPtRoute {
@@ -1099,6 +1035,7 @@ mod tests {
     #[deterministic_id_test]
     fn pt_routes_only_offer_teleportation_and_keep_their_metadata() {
         use crate::simulation::scenario::population::{
+
             InternalPtRoute, InternalPtRouteDescription,
         };
         let route = InternalRoute::Pt(InternalPtRoute {

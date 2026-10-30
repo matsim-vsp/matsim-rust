@@ -1,7 +1,7 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::{ActivityAgent, LegAgent, StuckAgent};
 use crate::simulation::id::Id;
-use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::population::{InternalPerson, InternalPlan};
 
 /// A heterogeneous owner for cleanup and population materialization only.
 /// Engine queues keep their specialized owned capabilities instead.
@@ -35,5 +35,29 @@ impl Identifiable<InternalPerson> for SimulationAgent {
             Self::Leg(agent) => agent.id(),
             Self::Stuck(agent) => agent.id(),
         }
+    }
+}
+
+/// The person of an agent during mobsim. Plan changes apply to the current iteration only, so the
+/// agent can read its person but not change it. An agent that replans works on a copy of its plan.
+#[derive(Debug, PartialEq, Clone)]
+pub(in crate::simulation::agents) struct ReadOnlyPerson(InternalPerson);
+
+impl ReadOnlyPerson {
+    pub(in crate::simulation::agents) fn new(person: InternalPerson) -> Self {
+        Self(person)
+    }
+
+    pub(in crate::simulation::agents) fn id(&self) -> &Id<InternalPerson> {
+        self.0.id()
+    }
+
+    pub(in crate::simulation::agents) fn plans(&self) -> &[InternalPlan] {
+        self.0.plans()
+    }
+
+    /// Hands the person back after mobsim.
+    pub(in crate::simulation::agents) fn into_inner(self) -> InternalPerson {
+        self.0
     }
 }
