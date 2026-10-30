@@ -9,6 +9,8 @@ The core implementation of the Rust QSim is oriented towards [MATSim Java](https
 In particular, we tried to minimize the differences between the physics of both simulations, including link dynamics
 and output of events.
 
+The rules between agents and engines are stated in [agent-contract.md](agent-contract.md).
+
 ### General Scenario Handling
 
 Starting the simulation mostly works as in MATSim Java. All XML input files need to be converted into protobuf for
