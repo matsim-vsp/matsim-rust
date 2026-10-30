@@ -1,5 +1,6 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::{LegAgent, NetworkDriverAgent, NetworkDriverLogic};
+use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -102,8 +103,14 @@ impl SimulationVehicle {
     // event for a passenger who arrives in the last tick would report the departure link. MATSim
     // sets the position on arrival (`notifyArrivalOnLinkByNonNetworkMode`). Do the same when PT
     // passengers are introduced; today `unpark_veh` creates vehicles without passengers.
-    pub fn move_over_node(&mut self, next_link: &Id<Link>, now: SimTime) {
-        self.driver_mut().notify_move_over_node(next_link, now);
+    pub fn move_over_node(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        next_link: &Id<Link>,
+        now: SimTime,
+    ) {
+        self.driver_mut()
+            .notify_move_over_node(comp_env, next_link, now);
     }
 }
 

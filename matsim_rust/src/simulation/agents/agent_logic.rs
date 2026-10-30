@@ -3,16 +3,18 @@ use crate::external_services::routing::{
     InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
 };
 use crate::simulation::Identifiable;
+use crate::simulation::agents::agent::ReadOnlyPerson;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
-    SimulationAgentLogic, TeleportationAgent, TeleportationLogic, TransitTeleportation,
+    NextPhase, SimulationAgentLogic, StuckLogic, TeleportationAgent, TeleportationLogic,
+    TransitTeleportation,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement, InternalRoute,
+    InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalRoute,
 };
 use crate::simulation::scenario::trip_structure_utils::{
     find_trip_span_starting_at_activity_default, identify_main_mode,
@@ -24,13 +26,17 @@ use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
-use tracing::trace;
+use tracing::{trace, warn};
 
 // The plan-based agent owns the shared state directly. Adaptive agents embed it by value.
 #[derive(Debug, PartialEq, Clone)]
 pub struct PlanBasedSimulationLogic {
-    basic_agent_delegate: InternalPerson,
+    person: ReadOnlyPerson,
     selected_plan: usize,
+    // Replanning applies to the current iteration only, so it never reaches the person. This copy
+    // of the selected plan's elements is created at the first change, and it is dropped with the
+    // agent. Agents that do not replan pay nothing for this.
+    replanned_elements: Option<Vec<InternalPlanElement>>,
     curr_plan_element: usize,
     curr_route_element: usize,
     activity_end_time: Option<SimTime>,
@@ -62,13 +68,13 @@ impl Debug for AdaptivePlanBasedSimulationLogic {
 
 impl Identifiable<InternalPerson> for PlanBasedSimulationLogic {
     fn id(&self) -> &Id<InternalPerson> {
-        self.basic_agent_delegate.id()
+        self.person.id()
     }
 }
 
 impl SimulationAgentLogic for PlanBasedSimulationLogic {
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        Some(self.basic_agent_delegate)
+        Some(self.person.into_inner())
     }
 }
 
@@ -79,57 +85,69 @@ impl PlanBasedSimulationLogic {
     }
 
     // Private, so that a new plan agent can only enter the simulation as an activity.
-    fn new(basic_agent_delegate: InternalPerson) -> Self {
-        // The selected plan is fixed during mobsim; adaptive routing only replaces its elements.
-        let selected_plan = basic_agent_delegate
+    fn new(person: InternalPerson) -> Self {
+        let selected_plan = person
             .plans()
             .iter()
             .position(|plan| plan.selected)
             .expect("Simulation agent must have a selected plan");
-        let first_act_end = basic_agent_delegate.plans()[selected_plan].elements[0]
-            .as_activity()
-            .unwrap()
-            .cmp_end_time(SimTime::default());
-        Self {
-            basic_agent_delegate,
+        let mut agent = Self {
+            person: ReadOnlyPerson::new(person),
             selected_plan,
+            replanned_elements: None,
             curr_plan_element: 0,
             curr_route_element: 0,
-            activity_end_time: Some(first_act_end),
+            activity_end_time: None,
             has_network_route: false,
+        };
+        agent.activity_end_time = Some(agent.curr_act_end_time(SimTime::default()));
+        agent
+    }
+
+    fn elements(&self) -> &[InternalPlanElement] {
+        match &self.replanned_elements {
+            Some(elements) => elements,
+            None => &self.person.plans()[self.selected_plan].elements,
         }
     }
 
-    fn plan(&self) -> &InternalPlan {
-        &self.basic_agent_delegate.plans()[self.selected_plan]
-    }
-
-    fn plan_mut(&mut self) -> &mut InternalPlan {
-        &mut self.basic_agent_delegate.plans_mut()[self.selected_plan]
+    fn elements_mut(&mut self) -> &mut Vec<InternalPlanElement> {
+        self.replanned_elements
+            .get_or_insert_with(|| self.person.plans()[self.selected_plan].elements.clone())
     }
 
     fn plan_element_at(&self, index: usize) -> Option<&InternalPlanElement> {
-        self.plan().elements.get(index)
+        self.elements().get(index)
     }
 
     fn is_activity(&self) -> bool {
         self.curr_plan_element.is_multiple_of(2)
     }
 
+    // As in MATSim, the last activity of a plan never ends, even if the plan gives it an end time.
+    fn curr_act_end_time(&self, begin: SimTime) -> SimTime {
+        if self.curr_plan_element + 1 == self.elements().len() {
+            SimTime::from_nanos(u64::MAX)
+        } else {
+            self.curr_act().cmp_end_time(begin)
+        }
+    }
+
     // Both agents' phase transitions end here; the adaptive agent calls it on its delegate
     // because it cannot call the consuming trait methods. Keep transition logic in this method.
-    fn advance(&mut self, now: SimTime) {
+    // Returns false if the plan has run empty, as MATSim does in `advancePlan`. The cursors then
+    // stay on the last element, so that the agent can still tell where it got stuck.
+    fn advance(&mut self, now: SimTime) -> bool {
+        if self.curr_plan_element + 1 == self.elements().len() {
+            warn!("Plan of agent {} has run empty.", self.id());
+            return false;
+        }
         self.curr_plan_element += 1;
         self.curr_route_element = 0;
-        assert!(
-            self.curr_plan_element < self.plan().elements.len(),
-            "Cannot advance plan of agents {:?} beyond its last element.",
-            self.id()
-        );
         // Every plan element remains in the person. Transitions only change the cursors and
-        // cached activity time/capability; materialization needs no restoration step.
+        // cached activity time/capability; materialization needs no restoration step for them.
         if self.is_activity() {
-            self.activity_end_time = Some(self.curr_act().cmp_end_time(now));
+            self.activity_end_time = Some(self.curr_act_end_time(now));
             self.has_network_route = false;
         } else {
             self.activity_end_time = None;
@@ -139,6 +157,7 @@ impl PlanBasedSimulationLogic {
                 .as_ref()
                 .is_some_and(|route| matches!(route, InternalRoute::Network(_)));
         }
+        true
     }
 
     fn curr_act(&self) -> &InternalActivity {
@@ -228,9 +247,12 @@ impl ActivityLogic for PlanBasedSimulationLogic {
     ) {
     }
     fn notify_finished(&mut self, _now: SimTime) {}
-    fn start_next_leg(mut self: Box<Self>, now: SimTime) -> LegAgent {
-        self.advance(now);
-        self
+    fn finish_activity(mut self: Box<Self>, now: SimTime) -> NextPhase {
+        if self.advance(now) {
+            NextPhase::Leg(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -257,9 +279,12 @@ impl LegLogic for PlanBasedSimulationLogic {
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
         Ok(self)
     }
-    fn start_next_activity(mut self: Box<Self>, now: SimTime) -> ActivityAgent {
-        self.advance(now);
-        self
+    fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
+        if self.advance(now) {
+            NextPhase::Activity(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -276,7 +301,12 @@ impl NetworkDriverLogic for PlanBasedSimulationLogic {
     fn is_wanting_to_arrive_on_current_link(&self) -> bool {
         self.peek_next_link_id().is_none()
     }
-    fn notify_move_over_node(&mut self, next_link: &Id<Link>, _now: SimTime) {
+    fn notify_move_over_node(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        next_link: &Id<Link>,
+        _now: SimTime,
+    ) {
         debug_assert_eq!(
             self.peek_next_link_id(),
             Some(next_link),
@@ -319,6 +349,19 @@ impl TeleportationLogic for PlanBasedSimulationLogic {
     }
     fn notify_begin_teleportation(&mut self, _now: SimTime) {
         self.set_curr_route_element_to_last();
+    }
+}
+
+impl StuckLogic for PlanBasedSimulationLogic {
+    fn stuck_link(&self) -> Option<&Id<Link>> {
+        if self.is_activity() {
+            None
+        } else {
+            self.current_link()
+        }
+    }
+    fn stuck_mode(&self) -> Option<&Id<String>> {
+        (!self.is_activity()).then(|| &self.curr_leg().mode)
     }
 }
 
@@ -373,7 +416,7 @@ impl AdaptivePlanBasedSimulationLogic {
         let (send, recv) = tokio::sync::oneshot::channel();
 
         let trip_span = find_trip_span_starting_at_activity_default(
-            &self.delegate.plan().elements,
+            self.delegate.elements(),
             self.delegate.curr_plan_element,
         )
         .unwrap_or_else(|| {
@@ -385,7 +428,7 @@ impl AdaptivePlanBasedSimulationLogic {
             )
         });
 
-        let plan_elements = &self.delegate.plan().elements;
+        let plan_elements = self.delegate.elements();
         let origin = trip_span.origin(plan_elements);
         let destination = trip_span.destination(plan_elements);
 
@@ -467,13 +510,13 @@ impl AdaptivePlanBasedSimulationLogic {
         }
 
         let start_index = self.delegate.curr_plan_element;
-        let plan = self.delegate.plan_mut();
+        let elements = self.delegate.elements_mut();
 
-        let span = find_trip_span_starting_at_activity_default(&plan.elements, start_index)
+        let span = find_trip_span_starting_at_activity_default(elements, start_index)
             .expect("No trip found starting at the current plan element");
 
         // Replace the trip elements (legs and intermediate activities) with the new response
-        span.replace_trip_elements(&mut plan.elements, response.elements);
+        span.replace_trip_elements(elements, response.elements);
     }
 }
 
@@ -485,7 +528,7 @@ impl Identifiable<InternalPerson> for AdaptivePlanBasedSimulationLogic {
 
 impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        Some(self.delegate.basic_agent_delegate)
+        Some(self.delegate.person.into_inner())
     }
 }
 
@@ -546,9 +589,12 @@ impl ActivityLogic for AdaptivePlanBasedSimulationLogic {
         self.replace_route(now);
         self.delegate.notify_finished(now);
     }
-    fn start_next_leg(mut self: Box<Self>, now: SimTime) -> LegAgent {
-        self.delegate.advance(now);
-        self
+    fn finish_activity(mut self: Box<Self>, now: SimTime) -> NextPhase {
+        if self.delegate.advance(now) {
+            NextPhase::Leg(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -575,9 +621,12 @@ impl LegLogic for AdaptivePlanBasedSimulationLogic {
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
         Ok(self)
     }
-    fn start_next_activity(mut self: Box<Self>, now: SimTime) -> ActivityAgent {
-        self.delegate.advance(now);
-        self
+    fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
+        if self.delegate.advance(now) {
+            NextPhase::Activity(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -591,8 +640,13 @@ impl NetworkDriverLogic for AdaptivePlanBasedSimulationLogic {
     fn is_wanting_to_arrive_on_current_link(&self) -> bool {
         self.delegate.is_wanting_to_arrive_on_current_link()
     }
-    fn notify_move_over_node(&mut self, next: &Id<Link>, now: SimTime) {
-        self.delegate.notify_move_over_node(next, now);
+    fn notify_move_over_node(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        next: &Id<Link>,
+        now: SimTime,
+    ) {
+        self.delegate.notify_move_over_node(comp_env, next, now);
     }
 }
 
@@ -611,6 +665,15 @@ impl TeleportationLogic for AdaptivePlanBasedSimulationLogic {
     }
     fn notify_begin_teleportation(&mut self, now: SimTime) {
         self.delegate.notify_begin_teleportation(now);
+    }
+}
+
+impl StuckLogic for AdaptivePlanBasedSimulationLogic {
+    fn stuck_link(&self) -> Option<&Id<Link>> {
+        self.delegate.stuck_link()
+    }
+    fn stuck_mode(&self) -> Option<&Id<String>> {
+        self.delegate.stuck_mode()
     }
 }
 
@@ -825,7 +888,7 @@ mod tests {
             agent.notify_finished(SimTime::from_secs(10));
             // Completion callbacks do not switch phase before the receiving engine runs.
             assert_eq!(agent.act_type().external(), "home");
-            let agent = agent.start_next_leg(SimTime::from_secs(10));
+            let agent = agent.finish_activity(SimTime::from_secs(10)).expect_leg();
             let leg = agent.as_ref();
             assert_eq!(leg.mode().external(), "car");
             assert_eq!(leg.routing_mode().map(Id::external), Some("car"));
@@ -845,10 +908,11 @@ mod tests {
             agent.notify_begin_teleportation(SimTime::from_secs(10));
             assert_eq!(agent.curr_link_id(), Some(&Id::get_from_ext("l2")));
             assert_eq!(agent.mode().external(), "car");
-            let agent = agent.start_next_activity(SimTime::from_secs(21));
+            let agent = agent.finish_leg(SimTime::from_secs(21)).expect_activity();
+            // The last activity never ends, although the plan gives it a maximum duration.
             assert_eq!(
                 agent.end_time(SimTime::from_secs(100)),
-                SimTime::from_secs(28)
+                SimTime::from_nanos(u64::MAX)
             );
             assert_eq!(agent.act_type().external(), "work");
             assert!(!agent.has_next_leg());
@@ -879,7 +943,7 @@ mod tests {
                 } else {
                     PlanBasedSimulationLogic::new_agent(person)
                 };
-                let agent = agent.start_next_leg(SimTime::default());
+                let agent = agent.finish_activity(SimTime::default()).expect_leg();
                 let mut agent = agent.try_into_network().unwrap();
                 assert_eq!(
                     agent.planned_vehicle_id().map(Id::external),
@@ -897,7 +961,11 @@ mod tests {
                         links.get(index + 1).copied()
                     );
                     if let Some(next) = driver.peek_next_link_id().cloned() {
-                        agent.notify_move_over_node(&next, SimTime::default());
+                        agent.notify_move_over_node(
+                            &mut Default::default(),
+                            &next,
+                            SimTime::default(),
+                        );
                     }
                 }
                 let mut agent = agent.try_into_teleportation().unwrap();
@@ -942,7 +1010,7 @@ mod tests {
                 } else {
                     PlanBasedSimulationLogic::new_agent(person)
                 };
-                let agent = agent.start_next_leg(SimTime::default());
+                let agent = agent.finish_activity(SimTime::default()).expect_leg();
                 let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
                 let agent: LegAgent = match agent.try_into_network() {
                     Ok(driver) => {
@@ -979,7 +1047,7 @@ mod tests {
             },
         });
         let agent = PlanBasedSimulationLogic::new_agent(person_with_leg(route.clone()));
-        let agent = agent.start_next_leg(SimTime::default());
+        let agent = agent.finish_activity(SimTime::default()).expect_leg();
         let mut agent = agent
             .try_into_network()
             .unwrap_err()
@@ -1062,9 +1130,13 @@ mod tests {
             } else {
                 PlanBasedSimulationLogic::new_agent(person)
             };
-            let agent = agent.start_next_leg(SimTime::from_secs(5));
+            let agent = agent.finish_activity(SimTime::from_secs(5)).expect_leg();
             let mut agent = agent.try_into_network().unwrap();
-            agent.notify_move_over_node(&Id::get_from_ext("b"), SimTime::from_secs(6));
+            agent.notify_move_over_node(
+                &mut Default::default(),
+                &Id::get_from_ext("b"),
+                SimTime::from_secs(6),
+            );
             assert_eq!(agent.curr_link_id().unwrap().external(), "b");
             assert_eq!(agent.into_person(), Some(expected));
         }
@@ -1103,15 +1175,20 @@ mod tests {
             };
             let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
             let mut driver = agent
-                .start_next_leg(SimTime::default())
+                .finish_activity(SimTime::default())
+                .expect_leg()
                 .try_into_network()
                 .unwrap();
             assert_eq!(original, std::ptr::from_ref(driver.as_ref()).cast::<()>());
-            driver.notify_move_over_node(&Id::get_from_ext("b"), SimTime::from_secs(1));
-            let mut activity = driver.start_next_activity(SimTime::from_secs(2));
+            driver.notify_move_over_node(
+                &mut Default::default(),
+                &Id::get_from_ext("b"),
+                SimTime::from_secs(1),
+            );
+            let mut activity = driver.finish_leg(SimTime::from_secs(2)).expect_activity();
             assert_eq!(original, std::ptr::from_ref(activity.as_ref()).cast::<()>());
             activity.notify_finished(SimTime::from_secs(3));
-            let leg = activity.start_next_leg(SimTime::from_secs(3));
+            let leg = activity.finish_activity(SimTime::from_secs(3)).expect_leg();
             assert_eq!(
                 leg.mode().external(),
                 if adaptive { "bike" } else { "walk" }
@@ -1119,19 +1196,20 @@ mod tests {
             let mut traveler = leg.try_into_teleportation().unwrap();
             assert_eq!(original, std::ptr::from_ref(traveler.as_ref()).cast::<()>());
             traveler.notify_begin_teleportation(SimTime::from_secs(3));
-            let final_activity = traveler.start_next_activity(SimTime::from_secs(4));
+            let final_activity = traveler.finish_leg(SimTime::from_secs(4)).expect_activity();
             assert_eq!(
                 original,
                 std::ptr::from_ref(final_activity.as_ref()).cast::<()>()
             );
             assert!(!final_activity.has_next_leg());
+            // The agent took the replaced leg, but the person keeps its plan.
             assert_eq!(
                 final_activity.into_person().unwrap().plans()[0].elements[3]
                     .as_leg()
                     .unwrap()
                     .mode
                     .external(),
-                if adaptive { "bike" } else { "walk" }
+                "walk"
             );
         }
     }
@@ -1147,7 +1225,7 @@ mod tests {
                 PlanBasedSimulationLogic::new_agent(person)
             };
             let original = std::ptr::from_ref(activity.as_ref()).cast::<()>();
-            let agent = activity.start_next_leg(SimTime::default());
+            let agent = activity.finish_activity(SimTime::default()).expect_leg();
             let agent = agent.try_into_network().unwrap_err();
             assert_eq!(original, std::ptr::from_ref(agent.as_ref()).cast::<()>());
             assert_eq!(agent.mode().external(), "car");
@@ -1175,12 +1253,7 @@ mod tests {
         };
 
         logic.replace_next_trip(response.clone(), SimTime::default());
-        let elements = &logic
-            .delegate
-            .basic_agent_delegate
-            .selected_plan()
-            .unwrap()
-            .elements;
+        let elements = logic.delegate.elements();
 
         assert_eq!(
             elements[0].as_activity().unwrap().act_type.external(),
@@ -1196,5 +1269,31 @@ mod tests {
             elements[4].as_activity().unwrap().act_type.external(),
             "home"
         );
+
+        // The replaced trip is gone after the iteration.
+        let person = Box::new(logic).into_person().unwrap();
+        let elements = &person.selected_plan().unwrap().elements;
+        assert_eq!(elements[1].as_leg().unwrap().mode.external(), "car");
+    }
+
+    #[deterministic_id_test]
+    fn an_agent_copies_its_plan_only_when_it_changes_it() {
+        let person = person_with_leg(InternalRoute::Generic(generic_route()));
+        let mut logic = AdaptivePlanBasedSimulationLogic::new(person);
+        assert!(logic.delegate.replanned_elements.is_none());
+
+        let empty_response = InternalRoutingResponse {
+            elements: vec![],
+            request_id: Uuid::now_v7(),
+        };
+        logic.replace_next_trip(empty_response, SimTime::default());
+        assert!(logic.delegate.replanned_elements.is_none());
+
+        let response = InternalRoutingResponse {
+            elements: vec![InternalPlanElement::Leg(make_leg("bike"))],
+            request_id: Uuid::now_v7(),
+        };
+        logic.replace_next_trip(response, SimTime::default());
+        assert!(logic.delegate.replanned_elements.is_some());
     }
 }

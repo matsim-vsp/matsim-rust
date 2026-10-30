@@ -1,6 +1,4 @@
-use crate::simulation::agents::{
-    ActivityAgent, LegAgent, LegLogic, NetworkDriverAgent, TeleportationAgent,
-};
+use crate::simulation::agents::{LegAgent, LegLogic, NetworkDriverAgent, TeleportationAgent};
 use crate::simulation::config::QSim;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
@@ -124,7 +122,7 @@ impl<C: SimCommunicator> LegEngine<C> {
     /// `move_nodes`. For all travel times greater than this, it is the same.
     #[hotpath::measure]
     #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
-    pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<ActivityAgent>) -> Vec<LegAgent> {
+    pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
         self.receive_agents(now, agents);
 
         self.network_engine.move_nodes(now);
@@ -189,7 +187,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         self.net_message_broker.send_recv(now)
     }
 
-    fn receive_agents(&mut self, now: Tick, agents: Vec<ActivityAgent>) {
+    fn receive_agents(&mut self, now: Tick, agents: Vec<LegAgent>) {
         for agent in agents {
             self.receive_agent(now, agent);
         }
@@ -257,9 +255,8 @@ impl<C: SimCommunicator> LegEngine<C> {
         );
     }
 
-    pub(crate) fn receive_agent(&mut self, now: Tick, agent: ActivityAgent) {
+    pub(crate) fn receive_agent(&mut self, now: Tick, agent: LegAgent) {
         let now_time = self.clock.tick_to_time(now);
-        let agent = agent.start_next_leg(now_time);
 
         let leg = agent.as_ref();
 
@@ -367,8 +364,8 @@ impl VehicularDepartureHandler {
 mod tests {
     use super::*;
     use crate::simulation::Identifiable;
-    use crate::simulation::agents::SimulationAgentLogic;
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
+    use crate::simulation::agents::{NextPhase, SimulationAgentLogic};
     use crate::simulation::scenario::population::{
         InternalGenericRoute, InternalPerson, InternalRoute,
     };
@@ -409,7 +406,9 @@ mod tests {
             None,
             None,
         )));
-        let agent = PlanBasedSimulationLogic::new_agent(person).start_next_leg(SimTime::default());
+        let agent = PlanBasedSimulationLogic::new_agent(person)
+            .finish_activity(SimTime::default())
+            .expect_leg();
         let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
         let Teleportation(agent) = select_execution(agent, true) else {
             panic!("Expected teleportation")
@@ -447,8 +446,8 @@ mod tests {
         fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
             Err(self)
         }
-        fn start_next_activity(self: Box<Self>, now: SimTime) -> ActivityAgent {
-            self.0.start_next_activity(now)
+        fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {
+            self.0.finish_leg(now)
         }
     }
 

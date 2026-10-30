@@ -399,7 +399,8 @@ mod tests {
         let vehicle_id = garage.veh_id(&person_id, &type_id);
         let garage = Arc::new(garage);
         let agent = PlanBasedSimulationLogic::new_agent(person("person"))
-            .start_next_leg(crate::simulation::time::SimTime::default())
+            .finish_activity(crate::simulation::time::SimTime::default())
+            .expect_leg()
             .try_into_network()
             .unwrap();
 

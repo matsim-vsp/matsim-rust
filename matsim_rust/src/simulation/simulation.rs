@@ -1,6 +1,8 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{LegAgent, TeleportationLogic};
+use crate::simulation::agents::{
+    ActivityAgent, LegAgent, NextPhase, StuckAgent, TeleportationLogic,
+};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};
 use crate::simulation::engines::leg_engine::LegEngine;
@@ -19,6 +21,11 @@ use tracing::info;
 pub struct Simulation<C: SimCommunicator> {
     activity_engine: ActivityEngine,
     leg_engine: LegEngine<C>,
+    // Agents that followed an activity with another activity. The activity engine has already run
+    // in that step, so they start in the next one.
+    pending_activities: Vec<ActivityAgent>,
+    // Agents that gave up. They stay here until they are materialized after mobsim.
+    stuck_agents: Vec<StuckAgent>,
     comp_env: ThreadLocalComputationalEnvironment,
     start_tick: Tick,
     end_tick: Tick,
@@ -86,6 +93,12 @@ where
                     .map(SimulationAgent::Leg),
             )
             .chain(agents_changing_engine.into_iter().map(SimulationAgent::Leg))
+            .chain(
+                self.pending_activities
+                    .drain(..)
+                    .map(SimulationAgent::Activity),
+            )
+            .chain(self.stuck_agents.drain(..).map(SimulationAgent::Stuck))
             .collect::<Vec<_>>();
 
         // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
@@ -98,6 +111,8 @@ where
             .iter()
             .filter_map(|agent| match agent {
                 SimulationAgent::Activity(activity) if !activity.has_next_leg() => None,
+                // These agents have already emitted their event when they got stuck.
+                SimulationAgent::Stuck(_) => None,
                 SimulationAgent::Leg(leg) => Some(
                     PersonStuckEventBuilder::default()
                         .time(time)
@@ -127,11 +142,51 @@ where
 
     /// Performs a sim step for the activity engine and the leg engine.
     /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
+    /// This is the only place where agents change their phase: engines return the agents whose
+    /// phase has ended, and the agents choose what follows.
     #[hotpath::measure]
-    fn do_sim_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
-        let agents_act_to_leg = self.activity_engine.do_step(now, agents);
-        let agents_leg_to_act = self.leg_engine.do_step(now, agents_act_to_leg);
-        agents_leg_to_act
+    fn do_sim_step(&mut self, now: Tick, finished_legs: Vec<LegAgent>) -> Vec<LegAgent> {
+        let now_time = self.clock.tick_to_time(now);
+
+        let mut activities = std::mem::take(&mut self.pending_activities);
+        activities.reserve(finished_legs.len());
+        let mut legs = Vec::new();
+
+        for agent in finished_legs {
+            match agent.finish_leg(now_time) {
+                // most of the calls will go here, since normally a leg follows an activity
+                NextPhase::Activity(agent) => activities.push(agent),
+                NextPhase::Leg(agent) => legs.push(agent),
+                NextPhase::Stuck(agent) => self.receive_stuck_agent(agent, now_time),
+            }
+        }
+
+        // Perform the activity step
+        let finished_activities = self.activity_engine.do_step(now, activities);
+        legs.reserve(finished_activities.len());
+        for agent in finished_activities {
+            match agent.finish_activity(now_time) {
+                NextPhase::Leg(agent) => legs.push(agent),
+                NextPhase::Activity(agent) => self.pending_activities.push(agent),
+                NextPhase::Stuck(agent) => self.receive_stuck_agent(agent, now_time),
+            }
+        }
+
+        // Perform the leg step
+        self.leg_engine.do_step(now, legs)
+    }
+
+    fn receive_stuck_agent(&mut self, agent: StuckAgent, now: SimTime) {
+        self.comp_env.events_manager_borrow_mut().process_event(
+            &PersonStuckEventBuilder::default()
+                .time(now)
+                .person(agent.id().clone())
+                .link(agent.stuck_link().cloned())
+                .leg_mode(agent.stuck_mode().cloned())
+                .build()
+                .unwrap(),
+        );
+        self.stuck_agents.push(agent);
     }
 
     /// Returns the messages this partition received but never processed. Must be called by all partitions after [`Simulation::run`],
@@ -214,6 +269,8 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         Simulation {
             activity_engine,
             leg_engine,
+            pending_activities: Vec::new(),
+            stuck_agents: Vec::new(),
             comp_env: self.comp_env,
             start_tick: clock.secs_to_tick(scenario.config.qsim().start_time as u64),
             end_tick: clock.secs_to_tick(scenario.config.qsim().end_time as u64),
