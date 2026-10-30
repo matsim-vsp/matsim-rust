@@ -20,14 +20,15 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
 
 ## Ownership
 
-- **O1** Every agent has exactly one owner at any time: an engine, a vehicle held by an engine, or `Simulation`.
-  `Simulation` only holds agents that are changing between engines and agents that are stuck.
+- **O1** Every agent has exactly one owner at any time: an engine, a vehicle held by an engine, `Simulation`, or a message
+  on its way to another partition. `Simulation` only holds agents that are changing between engines and agents that are
+  stuck.
 - **O2** An engine only calls engines it contains. Agents move between engines through return values, via the level
   above. There is no reentrant call like `InternalInterface.arrangeNextAgentState` in MATSim.
 - **O3** The owned capability in an engine's queue is the permission to be there. The `LegEngine` decides which engine
   simulates a leg; the agent decides which capabilities it offers (see `select_execution`).
 - **O4** At the end of the mobsim, every engine returns all agents it owns (`drain`), including those in vehicles. Only
-  agents without a person may be dropped.
+  agents without a person may be dropped. An agent in a message that is never read is lost, so the controller panics.
 - **O5** An engine that sends an agent or a vehicle to another partition passes it through the
   `PartitionChangeExtensionsManager`, so that attachments such as backpacks move with it.
 
@@ -48,10 +49,11 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
 ## Time
 
 - **T1** A tick runs in a fixed order:
-  1. The `ActivityEngine` receives the agents that ended a leg in the previous tick, starts their activities, delivers
-     wake-ups and ends the activities that are due.
-  2. The `LegEngine` starts the legs of the agents that ended an activity in step 1, moves nodes and links, exchanges
-     messages with other partitions and ends the legs that are due.
+  1. `Simulation` asks the agents that ended a leg in the previous tick for their next phase. The `ActivityEngine` starts
+     the chosen activities, delivers wake-ups and ends the activities that are due.
+  2. `Simulation` asks the agents that ended an activity in step 1 for their next phase. The `LegEngine` starts the chosen
+     legs, moves nodes and links, exchanges messages with other partitions and ends the legs that are due. An activity
+     chosen in this step starts in the next tick.
 - **T2** In one tick, an agent passes step 1 and step 2 of `T1` at most once. A chain of elements without duration
   therefore advances by one activity and one leg per tick. It cannot loop within a tick, and no call recurses.
 
@@ -99,8 +101,9 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
 
 ## Determinism
 
-- **R1** Agents at the same time are processed in an order given by stable keys. The order never depends on the arrival
-  order of messages or on the iteration order of hash collections.
+- **R1** Whatever can change an outcome is processed in an order given by stable keys, e.g. the agents handed from one
+  engine to the next. This order never depends on the arrival order of messages or on the iteration order of hash
+  collections. The order of events within a tick may depend on both.
 - **R2** The partitioning does not change when a phase ends or what an agent decides.
 - **R3** An engine that sends an entity with a fixed due time to another partition checks on receipt that the due time
   has not passed (see `TeleportationEngine::receive_remote_agent`).
