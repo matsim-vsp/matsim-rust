@@ -147,27 +147,32 @@ where
     #[hotpath::measure]
     fn do_sim_step(&mut self, now: Tick, finished_legs: Vec<LegAgent>) -> Vec<LegAgent> {
         let now_time = self.clock.tick_to_time(now);
+
         let mut activities = std::mem::take(&mut self.pending_activities);
-        let mut legs = Vec::new();
         activities.reserve(finished_legs.len());
+        let mut legs = Vec::new();
+
         for agent in finished_legs {
             match agent.finish_leg(now_time) {
+                // most of the calls will go here, since normally a leg follows an activity
                 NextPhase::Activity(agent) => activities.push(agent),
                 NextPhase::Leg(agent) => legs.push(agent),
                 NextPhase::Stuck(agent) => self.receive_stuck_agent(agent, now_time),
             }
         }
 
+        // Perform the activity step
         let finished_activities = self.activity_engine.do_step(now, activities);
         legs.reserve(finished_activities.len());
         for agent in finished_activities {
             match agent.finish_activity(now_time) {
-                NextPhase::Activity(agent) => self.pending_activities.push(agent),
                 NextPhase::Leg(agent) => legs.push(agent),
+                NextPhase::Activity(agent) => self.pending_activities.push(agent),
                 NextPhase::Stuck(agent) => self.receive_stuck_agent(agent, now_time),
             }
         }
 
+        // Perform the leg step
         self.leg_engine.do_step(now, legs)
     }
 
