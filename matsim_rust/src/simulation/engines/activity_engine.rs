@@ -392,17 +392,22 @@ mod tests {
 
         handle.join().unwrap();
         // The agent has finished its first activity, so the replaced trip follows element 0.
-        let person = agents.into_iter().next().unwrap().into_person().unwrap();
+        let leg = agents
+            .into_iter()
+            .next()
+            .unwrap()
+            .finish_activity(SimTime::from_secs(10))
+            .expect_leg();
+        assert_eq!(leg.mode(), &Id::get_from_ext("new_mode"));
+        assert!(leg.mode().external().eq("new_mode"));
+
+        // The replaced trip applies to this iteration only.
+        let person = leg.into_person().unwrap();
         let elements = &person.selected_plan().unwrap().elements;
         let next_act = elements[2].as_activity().unwrap();
         assert_eq!(next_act.act_type, Id::get_from_ext("work"));
         assert_eq!(next_act.link_id, Some(Id::get_from_ext("end")));
-
-        let leg = elements[1].as_leg().unwrap();
-
-        assert_eq!(leg.mode, Id::get_from_ext("new_mode"));
-        assert!(&leg.mode.external().eq("new_mode"));
-        assert_eq!(leg, &new_leg());
+        assert_eq!(elements[1].as_leg().unwrap().mode, Id::get_from_ext("mode"));
     }
 
     fn routing_env(

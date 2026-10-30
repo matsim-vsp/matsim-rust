@@ -50,6 +50,10 @@ pub struct PlanBasedSimulationLogic {
 pub struct AdaptivePlanBasedSimulationLogic {
     delegate: PlanBasedSimulationLogic,
     route_receiver: Option<Receiver<InternalRoutingResponse>>,
+    // Replanning applies to the current iteration only. This agent changes the plan of its person
+    // and restores these elements when it is materialized. Only this agent replans, so plan-based
+    // agents pay nothing for this.
+    original_elements: Vec<InternalPlanElement>,
 }
 
 impl Debug for AdaptivePlanBasedSimulationLogic {
@@ -136,7 +140,7 @@ impl PlanBasedSimulationLogic {
         self.curr_plan_element += 1;
         self.curr_route_element = 0;
         // Every plan element remains in the person. Transitions only change the cursors and
-        // cached activity time/capability; materialization needs no restoration step.
+        // cached activity time/capability; materialization needs no restoration step for them.
         if self.is_activity() {
             self.activity_end_time = Some(self.curr_act_end_time(now));
             self.has_network_route = false;
@@ -359,9 +363,12 @@ impl AdaptivePlanBasedSimulationLogic {
 
     // Private for the same reason as `PlanBasedSimulationLogic::new`.
     fn new(person: InternalPerson) -> Self {
+        let delegate = PlanBasedSimulationLogic::new(person);
+        let original_elements = delegate.plan().elements.clone();
         Self {
-            delegate: PlanBasedSimulationLogic::new(person),
+            delegate,
             route_receiver: None,
+            original_elements,
         }
     }
 
@@ -514,7 +521,13 @@ impl Identifiable<InternalPerson> for AdaptivePlanBasedSimulationLogic {
 
 impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        Some(self.delegate.basic_agent_delegate)
+        let Self {
+            mut delegate,
+            original_elements,
+            ..
+        } = *self;
+        delegate.plan_mut().elements = original_elements;
+        Some(delegate.basic_agent_delegate)
     }
 }
 
@@ -1236,13 +1249,14 @@ mod tests {
                 std::ptr::from_ref(final_activity.as_ref()).cast::<()>()
             );
             assert!(!final_activity.has_next_leg());
+            // The agent took the replaced leg, but the person keeps its plan.
             assert_eq!(
                 final_activity.into_person().unwrap().plans()[0].elements[3]
                     .as_leg()
                     .unwrap()
                     .mode
                     .external(),
-                if adaptive { "bike" } else { "walk" }
+                "walk"
             );
         }
     }
@@ -1307,5 +1321,10 @@ mod tests {
             elements[4].as_activity().unwrap().act_type.external(),
             "home"
         );
+
+        // The replaced trip is gone after the iteration.
+        let person = Box::new(logic).into_person().unwrap();
+        let elements = &person.selected_plan().unwrap().elements;
+        assert_eq!(elements[1].as_leg().unwrap().mode.external(), "car");
     }
 }

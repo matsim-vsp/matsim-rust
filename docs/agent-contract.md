@@ -91,9 +91,9 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
 - **D5** Replanning only changes what lies behind the cursor, which includes the remaining route of the current leg. A
   leg ends earlier than planned only if the owner offers that at a decision point, e.g. by asking a passenger at a stop
   before its planned one.
-- **D6** Plan changes apply to the current iteration only. The selected plan in the population stays unchanged: the agent
-  works on a copy that it creates at its first change, so that agents that do not replan pay nothing. The score of the
-  experienced plan, including the effect of the changes, goes to the selected plan.
+- **D6** Plan changes apply to the current iteration only. The selected plan in the population stays unchanged: an agent
+  that can replan works on a copy, so that all other agents pay nothing. The score of the experienced plan, including the
+  effect of the changes, goes to the selected plan.
 - **D7** An agent reads the response of a service only at a simulation time fixed before the response arrives, and
   blocks until it is there. It never polls. Otherwise, the result would depend on how long the service took.
 
@@ -128,4 +128,3 @@ The following rules are not implemented yet:
 | `D2`         | The rows for waiting and riding have no implementation, because schedule-based transit does not exist yet.            |
 | `D2`, `D5`   | A route cannot change after its leg has started; `notify_move_over_node` only confirms the planned link.              |
 | `D4`         | The `ActivityEngine` calls `notify_wakeup` in every tick for every agent in `awake_q`.                                |
-| `D6`         | `replace_next_trip` writes into the selected plan and `into_person` returns it; a test in `agent_logic.rs` expects it. |
