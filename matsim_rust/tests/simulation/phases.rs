@@ -1,18 +1,25 @@
 use macros::deterministic_id_test;
+use matsim_rust::external_services::routing::{InternalRoutingRequest, InternalRoutingResponse};
+use matsim_rust::external_services::{
+    AdapterHandleBuilder, AsyncExecutor, ExternalServiceType, RequestAdapter, RequestAdapterFactory,
+};
 use matsim_rust::simulation::Identifiable;
 use matsim_rust::simulation::agents::{
     ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NextPhase, SimulationAgentLogic,
     StuckLogic, TeleportationAgent, TeleportationLogic, TransitTeleportation,
 };
-use matsim_rust::simulation::config::{CommandLineArgs, Config, WriteEvents};
-use matsim_rust::simulation::controller::ThreadLocalComputationalEnvironment;
+use matsim_rust::simulation::config::{CommandLineArgs, Config, RoutingMode, WriteEvents};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
+use matsim_rust::simulation::controller::{RequestSender, ThreadLocalComputationalEnvironment};
 use matsim_rust::simulation::framework_events::WorkerListenerRegisterFunction;
 use matsim_rust::simulation::id::Id;
-use matsim_rust::simulation::population::agent_source::{AgentSet, AgentSource};
+use matsim_rust::simulation::population::agent_source::{
+    AgentSet, AgentSource, PreplanningHorizonAgentSource,
+};
 use matsim_rust::simulation::scenario::network::Link;
 use matsim_rust::simulation::scenario::population::{
-    InternalPerson, InternalPlan, InternalPlanElement,
+    InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement,
+    InternalRoute, PREPLANNING_HORIZON,
 };
 use matsim_rust::simulation::scenario::{
     Coordinate, MobsimScenarioPartition, PopulationShard, Scenario,
@@ -21,7 +28,7 @@ use matsim_rust::simulation::scoring::PlanScorer;
 use matsim_rust::simulation::time::SimTime;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
@@ -218,6 +225,61 @@ impl PlanScorer for RecordingScorer {
     }
 }
 
+/// Records the number of legs of every experienced plan.
+#[derive(Clone, Default)]
+struct LegCountingScorer(Arc<Mutex<Vec<usize>>>);
+
+impl PlanScorer for LegCountingScorer {
+    fn score(
+        &self,
+        _person_id: &Id<InternalPerson>,
+        _subpopulation: &str,
+        experienced_plan: &InternalPlan,
+    ) -> Result<f64, String> {
+        self.0.lock().unwrap().push(experienced_plan.legs().len());
+        Ok(0.0)
+    }
+}
+
+/// Creates adaptive agents and records the selected plan they start each iteration with.
+#[derive(Clone, Default)]
+struct PlanRecordingSource(Arc<Mutex<Vec<Vec<InternalPlanElement>>>>);
+
+impl AgentSource for PlanRecordingSource {
+    fn create_agents(
+        &self,
+        population: PopulationShard,
+        partition: &MobsimScenarioPartition,
+    ) -> AgentSet {
+        self.0.lock().unwrap().extend(
+            population
+                .population
+                .persons
+                .values()
+                .map(|person| person.selected_plan().unwrap().elements.clone()),
+        );
+        PreplanningHorizonAgentSource.create_agents(population, partition)
+    }
+}
+
+/// Answers every routing request with the same leg.
+struct OneLegRouter(InternalLeg);
+
+impl RequestAdapterFactory<InternalRoutingRequest> for OneLegRouter {
+    async fn build(self) -> impl RequestAdapter<InternalRoutingRequest> {
+        self
+    }
+}
+
+impl RequestAdapter<InternalRoutingRequest> for OneLegRouter {
+    fn on_request(&mut self, req: InternalRoutingRequest) {
+        let leg = InternalPlanElement::Leg(self.0.clone());
+        req.response_tx
+            .send(InternalRoutingResponse::new(vec![leg], req.payload.uuid))
+            .unwrap();
+    }
+}
+
 type Events = Arc<Mutex<Vec<(u64, String)>>>;
 
 fn register_event_capture(
@@ -406,4 +468,74 @@ fn the_last_activity_never_ends() {
 
     assert_eq!(events.last().unwrap(), &(32539, "actstart".to_owned()));
     assert_eq!(aborted, vec![false]);
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn plan_changes_do_not_outlive_the_iteration() {
+    let mut config = load_config(
+        "./tests/resources/3-links/3-links-config-1.yml",
+        "plan_changes",
+        0,
+        32_700,
+    );
+    config.routing_mut().mode = RoutingMode::AdHoc;
+    config.controller_mut().last_iteration = 1;
+
+    let barrier = Arc::new(Barrier::new((config.partitioning().num_parts + 1) as usize));
+    let executor = AsyncExecutor::from_config(&config, barrier.clone());
+
+    let mut scenario = Scenario::load(config);
+    for person in scenario.population.persons.values_mut() {
+        person.plans_mut()[0].acts_mut()[0]
+            .attributes
+            .insert(PREPLANNING_HORIZON, 600);
+    }
+
+    // The planned trip has three legs. The router replaces it with a single one.
+    let route = InternalGenericRoute::new(
+        Id::get_from_ext("link1"),
+        Id::get_from_ext("link3"),
+        Some(Duration::from_secs(60)),
+        Some(1200.0),
+        None,
+    );
+    let leg = InternalLeg::new(
+        InternalRoute::Generic(route),
+        "walk",
+        "walk",
+        Duration::from_secs(60),
+        None,
+    );
+    let (handle, send, shutdown) = executor.spawn_thread("routing_adapter", OneLegRouter(leg));
+    let mut services: HashMap<ExternalServiceType, RequestSender> = HashMap::new();
+    services.insert(
+        ExternalServiceType::Routing("car".to_string()),
+        Arc::new(send).into(),
+    );
+
+    let plans = PlanRecordingSource::default();
+    let scorer = LegCountingScorer::default();
+    ControllerBuilder::default_with_scenario(scenario)
+        .agent_source(plans.clone())
+        .scoring_function(Box::new(scorer.clone()))
+        .external_services(services.into())
+        .adapter_handles(vec![
+            AdapterHandleBuilder::default()
+                .handle(handle)
+                .shutdown_sender(shutdown)
+                .build()
+                .unwrap(),
+        ])
+        .global_barrier(barrier)
+        .build()
+        .unwrap()
+        .run();
+
+    // The agent took the replaced trip in both iterations ...
+    assert_eq!(*scorer.0.lock().unwrap(), vec![1, 1]);
+    // ... but it started both from the unchanged plan.
+    let plans = plans.0.lock().unwrap();
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].len(), 7);
+    assert_eq!(plans[0], plans[1]);
 }

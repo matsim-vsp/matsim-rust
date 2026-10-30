@@ -94,8 +94,9 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
   leg ends earlier than planned only if the owner offers that at a decision point, e.g. by asking a passenger at a stop
   before its planned one.
 - **D6** Plan changes apply to the current iteration only. The selected plan in the population stays unchanged: an agent
-  that can replan works on a copy, so that all other agents pay nothing. The score of the experienced plan, including the
-  effect of the changes, goes to the selected plan.
+  that changes its plan works on a copy, which it creates at the first change, so that all other agents pay nothing.
+  Plan-based agents hold their person as a `ReadOnlyPerson`, so the compiler enforces this for them. The score of the
+  experienced plan, including the effect of the changes, goes to the selected plan.
 - **D7** An agent reads the response of a service only at a simulation time fixed before the response arrives, and
   blocks until it is there. It never polls. Otherwise, the result would depend on how long the service took.
 

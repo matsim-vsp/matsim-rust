@@ -3,6 +3,7 @@ use crate::external_services::routing::{
     InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
 };
 use crate::simulation::Identifiable;
+use crate::simulation::agents::read_only_person::ReadOnlyPerson;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
     NextPhase, SimulationAgentLogic, StuckLogic, TeleportationAgent, TeleportationLogic,
@@ -13,7 +14,7 @@ use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement, InternalRoute,
+    InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalRoute,
 };
 use crate::simulation::scenario::trip_structure_utils::{
     find_trip_span_starting_at_activity_default, identify_main_mode,
@@ -30,8 +31,12 @@ use tracing::{trace, warn};
 // The plan-based agent owns the shared state directly. Adaptive agents embed it by value.
 #[derive(Debug, PartialEq, Clone)]
 pub struct PlanBasedSimulationLogic {
-    basic_agent_delegate: InternalPerson,
+    person: ReadOnlyPerson,
     selected_plan: usize,
+    // Replanning applies to the current iteration only, so it never reaches the person. This copy
+    // of the selected plan's elements is created at the first change, and it is dropped with the
+    // agent. Agents that do not replan pay nothing for this.
+    replanned_elements: Option<Vec<InternalPlanElement>>,
     curr_plan_element: usize,
     curr_route_element: usize,
     activity_end_time: Option<SimTime>,
@@ -50,10 +55,6 @@ pub struct PlanBasedSimulationLogic {
 pub struct AdaptivePlanBasedSimulationLogic {
     delegate: PlanBasedSimulationLogic,
     route_receiver: Option<Receiver<InternalRoutingResponse>>,
-    // Replanning applies to the current iteration only. This agent changes the plan of its person
-    // and restores these elements when it is materialized. Only this agent replans, so plan-based
-    // agents pay nothing for this.
-    original_elements: Vec<InternalPlanElement>,
 }
 
 impl Debug for AdaptivePlanBasedSimulationLogic {
@@ -67,13 +68,13 @@ impl Debug for AdaptivePlanBasedSimulationLogic {
 
 impl Identifiable<InternalPerson> for PlanBasedSimulationLogic {
     fn id(&self) -> &Id<InternalPerson> {
-        self.basic_agent_delegate.id()
+        self.person.id()
     }
 }
 
 impl SimulationAgentLogic for PlanBasedSimulationLogic {
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        Some(self.basic_agent_delegate)
+        Some(self.person.into_inner())
     }
 }
 
@@ -84,16 +85,16 @@ impl PlanBasedSimulationLogic {
     }
 
     // Private, so that a new plan agent can only enter the simulation as an activity.
-    fn new(basic_agent_delegate: InternalPerson) -> Self {
-        // The selected plan is fixed during mobsim; adaptive routing only replaces its elements.
-        let selected_plan = basic_agent_delegate
+    fn new(person: InternalPerson) -> Self {
+        let selected_plan = person
             .plans()
             .iter()
             .position(|plan| plan.selected)
             .expect("Simulation agent must have a selected plan");
         let mut agent = Self {
-            basic_agent_delegate,
+            person: ReadOnlyPerson::new(person),
             selected_plan,
+            replanned_elements: None,
             curr_plan_element: 0,
             curr_route_element: 0,
             activity_end_time: None,
@@ -103,16 +104,20 @@ impl PlanBasedSimulationLogic {
         agent
     }
 
-    fn plan(&self) -> &InternalPlan {
-        &self.basic_agent_delegate.plans()[self.selected_plan]
+    fn elements(&self) -> &[InternalPlanElement] {
+        match &self.replanned_elements {
+            Some(elements) => elements,
+            None => &self.person.plans()[self.selected_plan].elements,
+        }
     }
 
-    fn plan_mut(&mut self) -> &mut InternalPlan {
-        &mut self.basic_agent_delegate.plans_mut()[self.selected_plan]
+    fn elements_mut(&mut self) -> &mut Vec<InternalPlanElement> {
+        self.replanned_elements
+            .get_or_insert_with(|| self.person.plans()[self.selected_plan].elements.clone())
     }
 
     fn plan_element_at(&self, index: usize) -> Option<&InternalPlanElement> {
-        self.plan().elements.get(index)
+        self.elements().get(index)
     }
 
     fn is_activity(&self) -> bool {
@@ -121,7 +126,7 @@ impl PlanBasedSimulationLogic {
 
     // As in MATSim, the last activity of a plan never ends, even if the plan gives it an end time.
     fn curr_act_end_time(&self, begin: SimTime) -> SimTime {
-        if self.curr_plan_element + 1 == self.plan().elements.len() {
+        if self.curr_plan_element + 1 == self.elements().len() {
             SimTime::from_nanos(u64::MAX)
         } else {
             self.curr_act().cmp_end_time(begin)
@@ -133,7 +138,7 @@ impl PlanBasedSimulationLogic {
     // Returns false if the plan has run empty, as MATSim does in `advancePlan`. The cursors then
     // stay on the last element, so that the agent can still tell where it got stuck.
     fn advance(&mut self, now: SimTime) -> bool {
-        if self.curr_plan_element + 1 == self.plan().elements.len() {
+        if self.curr_plan_element + 1 == self.elements().len() {
             warn!("Plan of agent {} has run empty.", self.id());
             return false;
         }
@@ -368,12 +373,9 @@ impl AdaptivePlanBasedSimulationLogic {
 
     // Private for the same reason as `PlanBasedSimulationLogic::new`.
     fn new(person: InternalPerson) -> Self {
-        let delegate = PlanBasedSimulationLogic::new(person);
-        let original_elements = delegate.plan().elements.clone();
         Self {
-            delegate,
+            delegate: PlanBasedSimulationLogic::new(person),
             route_receiver: None,
-            original_elements,
         }
     }
 
@@ -414,7 +416,7 @@ impl AdaptivePlanBasedSimulationLogic {
         let (send, recv) = tokio::sync::oneshot::channel();
 
         let trip_span = find_trip_span_starting_at_activity_default(
-            &self.delegate.plan().elements,
+            self.delegate.elements(),
             self.delegate.curr_plan_element,
         )
         .unwrap_or_else(|| {
@@ -426,7 +428,7 @@ impl AdaptivePlanBasedSimulationLogic {
             )
         });
 
-        let plan_elements = &self.delegate.plan().elements;
+        let plan_elements = self.delegate.elements();
         let origin = trip_span.origin(plan_elements);
         let destination = trip_span.destination(plan_elements);
 
@@ -508,13 +510,13 @@ impl AdaptivePlanBasedSimulationLogic {
         }
 
         let start_index = self.delegate.curr_plan_element;
-        let plan = self.delegate.plan_mut();
+        let elements = self.delegate.elements_mut();
 
-        let span = find_trip_span_starting_at_activity_default(&plan.elements, start_index)
+        let span = find_trip_span_starting_at_activity_default(elements, start_index)
             .expect("No trip found starting at the current plan element");
 
         // Replace the trip elements (legs and intermediate activities) with the new response
-        span.replace_trip_elements(&mut plan.elements, response.elements);
+        span.replace_trip_elements(elements, response.elements);
     }
 }
 
@@ -526,13 +528,7 @@ impl Identifiable<InternalPerson> for AdaptivePlanBasedSimulationLogic {
 
 impl SimulationAgentLogic for AdaptivePlanBasedSimulationLogic {
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
-        let Self {
-            mut delegate,
-            original_elements,
-            ..
-        } = *self;
-        delegate.plan_mut().elements = original_elements;
-        Some(delegate.basic_agent_delegate)
+        Some(self.delegate.person.into_inner())
     }
 }
 
@@ -1322,12 +1318,7 @@ mod tests {
         };
 
         logic.replace_next_trip(response.clone(), SimTime::default());
-        let elements = &logic
-            .delegate
-            .basic_agent_delegate
-            .selected_plan()
-            .unwrap()
-            .elements;
+        let elements = logic.delegate.elements();
 
         assert_eq!(
             elements[0].as_activity().unwrap().act_type.external(),
@@ -1348,5 +1339,26 @@ mod tests {
         let person = Box::new(logic).into_person().unwrap();
         let elements = &person.selected_plan().unwrap().elements;
         assert_eq!(elements[1].as_leg().unwrap().mode.external(), "car");
+    }
+
+    #[deterministic_id_test]
+    fn an_agent_copies_its_plan_only_when_it_changes_it() {
+        let person = person_with_leg(InternalRoute::Generic(generic_route()));
+        let mut logic = AdaptivePlanBasedSimulationLogic::new(person);
+        assert!(logic.delegate.replanned_elements.is_none());
+
+        let empty_response = InternalRoutingResponse {
+            elements: vec![],
+            request_id: Uuid::now_v7(),
+        };
+        logic.replace_next_trip(empty_response, SimTime::default());
+        assert!(logic.delegate.replanned_elements.is_none());
+
+        let response = InternalRoutingResponse {
+            elements: vec![InternalPlanElement::Leg(make_leg("bike"))],
+            request_id: Uuid::now_v7(),
+        };
+        logic.replace_next_trip(response, SimTime::default());
+        assert!(logic.delegate.replanned_elements.is_some());
     }
 }

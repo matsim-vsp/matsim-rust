@@ -60,6 +60,15 @@ pub struct InternalRoutingResponse {
     pub(crate) request_id: Uuid,
 }
 
+impl InternalRoutingResponse {
+    pub fn new(elements: Vec<InternalPlanElement>, request_id: Uuid) -> Self {
+        Self {
+            elements,
+            request_id,
+        }
+    }
+}
+
 impl From<InternalRoutingRequestPayload> for Request {
     fn from(req: InternalRoutingRequestPayload) -> Self {
         Request {
