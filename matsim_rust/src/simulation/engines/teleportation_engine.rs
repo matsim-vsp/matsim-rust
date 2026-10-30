@@ -74,29 +74,39 @@ impl TeleportationEngine {
             .collect()
     }
 
+    /// Starts the teleportation of an agent at `now`. `earliest_end` is the first tick in which
+    /// the leg engine moves the agent: `now` for a leg that starts before the move of this tick,
+    /// and the next tick for a leg that starts after it (step 3 of `T1`). The teleportation ends
+    /// no earlier than that. An agent for another partition is sent with the messages of
+    /// `earliest_end`, because the messages of an earlier tick may already have been exchanged.
     pub(crate) fn receive_agent<C: SimCommunicator>(
         &mut self,
         now: Tick,
+        earliest_end: Tick,
         mut agent: TeleportationAgent,
         net_message_broker: &mut NetMessageBroker<C>,
     ) {
         let now_time = self.clock.tick_to_time(now);
+        let earliest_end_time = self.clock.tick_to_time(earliest_end);
         agent.notify_begin_teleportation(now_time);
-        let end_time = agent.arrival_time(now_time);
+        // Without the lower bound, a leg of zero seconds that starts after the exchange of this
+        // tick would reach another partition after its end, but end locally in the next tick.
+        let end_time = agent.arrival_time(now_time).max(earliest_end_time);
         let teleportation = TeleportationAgentWithFixedEnd::new(agent, end_time);
 
         if Simulation::is_local_route(teleportation.agent(), net_message_broker) {
             self.enqueue(teleportation, now_time);
         } else {
             let to = net_message_broker.rank_for_link(teleportation.agent().destination_link());
+            // The agent changes the partition when the message is exchanged.
             emit_partition_leave_events_for_agent(
                 &mut self.comp_env,
                 teleportation.agent(),
                 to,
-                now_time,
+                earliest_end_time,
             );
             let context = PartitionChangeContext {
-                time: now_time,
+                time: earliest_end_time,
                 from: net_message_broker.rank(),
                 to,
             };
@@ -109,7 +119,7 @@ impl TeleportationEngine {
                 );
             let mut message = TeleportationMessage::from(teleportation);
             message.set_attachments(attachments);
-            net_message_broker.add_teleportation(message, now);
+            net_message_broker.add_teleportation(message, earliest_end);
         }
     }
 

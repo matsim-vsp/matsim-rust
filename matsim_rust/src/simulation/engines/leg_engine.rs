@@ -120,6 +120,8 @@ impl<C: SimCommunicator> LegEngine<C> {
     ///
     /// So, minimal time on a link is `2` steps. Thus, in the upper case without partitions, the link travel time is 1 time step + 1 time step due to
     /// `move_nodes`. For all travel times greater than this, it is the same.
+    ///
+    /// Legs that start after this step, i.e. after the end of a leg in this tick, go to [`LegEngine::accept_agents`].
     #[hotpath::measure]
     #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
     pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
@@ -189,7 +191,19 @@ impl<C: SimCommunicator> LegEngine<C> {
 
     fn receive_agents(&mut self, now: Tick, agents: Vec<LegAgent>) {
         for agent in agents {
-            self.receive_agent(now, agent);
+            self.receive_agent(now, now, agent);
+        }
+    }
+
+    /// Accepts legs that start after [`LegEngine::do_step`] of this tick, i.e. step 3 of `T1`.
+    /// The agents depart now, but they are moved, exchanged with other partitions and end their
+    /// leg from the next tick on. A departing vehicle thus goes through the same steps as one that
+    /// departs before the move of the next tick.
+    #[hotpath::measure]
+    #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
+    pub(crate) fn accept_agents(&mut self, now: Tick, agents: Vec<LegAgent>) {
+        for agent in agents {
+            self.receive_agent(now, now.next(), agent);
         }
     }
 
@@ -255,7 +269,9 @@ impl<C: SimCommunicator> LegEngine<C> {
         );
     }
 
-    pub(crate) fn receive_agent(&mut self, now: Tick, agent: LegAgent) {
+    /// `earliest_end` is the first tick in which the leg can end, see
+    /// [`TeleportationEngine::receive_agent`].
+    pub(crate) fn receive_agent(&mut self, now: Tick, earliest_end: Tick, agent: LegAgent) {
         let now_time = self.clock.tick_to_time(now);
 
         let leg = agent.as_ref();
@@ -283,14 +299,20 @@ impl<C: SimCommunicator> LegEngine<C> {
 
         let main_mode = self.main_modes.contains(agent.mode());
         match select_execution(agent, main_mode) {
+            // A vehicle in the waiting list moves in the next `move_links`, so it cannot end its
+            // leg before `earliest_end` either.
             Network(agent) => self.pass_to_leg(now, agent, true),
-            Teleportation(agent) => self.pass_to_teleportation(now, agent),
+            Teleportation(agent) => self.pass_to_teleportation(now, earliest_end, agent),
         }
     }
 
-    fn pass_to_teleportation(&mut self, now: Tick, agent: TeleportationAgent) {
-        self.teleportation_engine
-            .receive_agent(now, agent, &mut self.net_message_broker);
+    fn pass_to_teleportation(&mut self, now: Tick, earliest_end: Tick, agent: TeleportationAgent) {
+        self.teleportation_engine.receive_agent(
+            now,
+            earliest_end,
+            agent,
+            &mut self.net_message_broker,
+        );
     }
 
     fn pass_to_leg(&mut self, now: Tick, agent: NetworkDriverAgent, route_begin: bool) {

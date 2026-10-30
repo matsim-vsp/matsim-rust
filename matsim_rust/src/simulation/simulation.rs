@@ -21,8 +21,8 @@ use tracing::info;
 pub struct Simulation<C: SimCommunicator> {
     activity_engine: ActivityEngine,
     leg_engine: LegEngine<C>,
-    // Agents that followed an activity with another activity. The activity engine has already run
-    // in that step, so they start in the next one.
+    // Agents that followed an activity with another activity after the leg step. The activity
+    // engine has already run in that step, so they start in the next one.
     pending_activities: Vec<ActivityAgent>,
     // Agents that gave up. They stay here until they are materialized after mobsim.
     stuck_agents: Vec<StuckAgent>,
@@ -51,8 +51,6 @@ where
             end_time,
         );
 
-        let mut agents_changing_engine = vec![];
-
         while now <= self.end_tick {
             let now_time = self.clock.tick_to_time(now);
             let outward_now = self.clock.tick_to_secs(now);
@@ -72,7 +70,7 @@ where
                 );
             }
 
-            agents_changing_engine = self.do_sim_step(now, agents_changing_engine);
+            self.do_sim_step(now);
 
             self.comp_env
                 .mobsim_events_manager_borrow_mut()
@@ -92,7 +90,6 @@ where
                     .into_iter()
                     .map(SimulationAgent::Leg),
             )
-            .chain(agents_changing_engine.into_iter().map(SimulationAgent::Leg))
             .chain(
                 self.pending_activities
                     .drain(..)
@@ -101,7 +98,8 @@ where
             .chain(self.stuck_agents.drain(..).map(SimulationAgent::Stuck))
             .collect::<Vec<_>>();
 
-        // Note that agents who just ended a leg but haven't started the last activity yet are considered stuck.
+        // Note that agents who ended a leg in the last tick have already started their next activity, so they are only
+        // considered stuck if that activity has a next leg. Agents whose next leg started in the last tick are stuck.
         self.emit_stuck_events(self.clock.tick_to_time(self.end_tick), &agents);
         agents
     }
@@ -140,18 +138,32 @@ where
         }
     }
 
-    /// Performs a sim step for the activity engine and the leg engine.
-    /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the next time step.
+    /// Performs a sim step for the activity engine and the leg engine in the three steps of `T1`.
+    /// If an agent switches from leg engine to activity engine (i.e., ends a leg), the activity starts in the same time
+    /// step. A leg that follows directly departs in the same time step, but moves from the next one on.
     /// This is the only place where agents change their phase: engines return the agents whose
     /// phase has ended, and the agents choose what follows.
     #[hotpath::measure]
-    fn do_sim_step(&mut self, now: Tick, finished_legs: Vec<LegAgent>) -> Vec<LegAgent> {
+    fn do_sim_step(&mut self, now: Tick) {
         let now_time = self.clock.tick_to_time(now);
 
-        let mut activities = std::mem::take(&mut self.pending_activities);
-        activities.reserve(finished_legs.len());
-        let mut legs = Vec::new();
+        // Step 1: perform the activity step
+        let activities = std::mem::take(&mut self.pending_activities);
+        let finished_activities = self.activity_engine.do_step(now, activities);
+        let mut legs = Vec::with_capacity(finished_activities.len());
+        // Activities that follow an activity start in step 3.
+        let mut activities = Vec::new();
+        self.finish_activities(now_time, finished_activities, &mut legs, &mut activities);
 
+        // Step 2: perform the leg step
+        let finished_legs = self.leg_engine.do_step(now, legs);
+
+        // Step 3: start the activities after the legs that ended in this step, and accept the legs that follow
+        if finished_legs.is_empty() && activities.is_empty() {
+            return;
+        }
+        let mut legs = Vec::new();
+        activities.reserve(finished_legs.len());
         for agent in finished_legs {
             match agent.finish_leg(now_time) {
                 // most of the calls will go here, since normally a leg follows an activity
@@ -161,19 +173,36 @@ where
             }
         }
 
-        // Perform the activity step
-        let finished_activities = self.activity_engine.do_step(now, activities);
+        let finished_activities = self.activity_engine.start_activities(now, activities);
+        // The activity engine has already run in this step, so activities that follow an activity start in the next one.
+        let mut pending_activities = std::mem::take(&mut self.pending_activities);
+        self.finish_activities(
+            now_time,
+            finished_activities,
+            &mut legs,
+            &mut pending_activities,
+        );
+        self.pending_activities = pending_activities;
+
+        self.leg_engine.accept_agents(now, legs);
+    }
+
+    /// Asks the agents that ended an activity for their next phase.
+    fn finish_activities(
+        &mut self,
+        now: SimTime,
+        finished_activities: Vec<ActivityAgent>,
+        legs: &mut Vec<LegAgent>,
+        activities: &mut Vec<ActivityAgent>,
+    ) {
         legs.reserve(finished_activities.len());
         for agent in finished_activities {
-            match agent.finish_activity(now_time) {
+            match agent.finish_activity(now) {
                 NextPhase::Leg(agent) => legs.push(agent),
-                NextPhase::Activity(agent) => self.pending_activities.push(agent),
-                NextPhase::Stuck(agent) => self.receive_stuck_agent(agent, now_time),
+                NextPhase::Activity(agent) => activities.push(agent),
+                NextPhase::Stuck(agent) => self.receive_stuck_agent(agent, now),
             }
         }
-
-        // Perform the leg step
-        self.leg_engine.do_step(now, legs)
     }
 
     fn receive_stuck_agent(&mut self, agent: StuckAgent, now: SimTime) {

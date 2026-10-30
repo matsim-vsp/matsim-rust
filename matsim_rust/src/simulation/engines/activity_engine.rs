@@ -48,6 +48,28 @@ impl ActivityEngine {
         self.notify_end_all(now_time, end_agents)
     }
 
+    /// Starts the activities of agents that chose an activity after the activity step of this
+    /// tick, i.e. step 3 of `T1`. Like `do_step`, it delivers the wake-ups that are due for these
+    /// agents and returns those whose activity ends right away. Unlike `do_step`, it leaves the
+    /// agents in the queue alone: their wake-ups and ends of this tick were handled in step 1, and
+    /// a second wake-up in the same tick would break the contract of `next_wakeup`.
+    #[hotpath::measure]
+    #[instrument(level = "trace", skip(self, now, agents))]
+    pub(crate) fn start_activities(
+        &mut self,
+        now: impl Into<Tick>,
+        agents: Vec<ActivityAgent>,
+    ) -> Vec<ActivityAgent> {
+        let now = now.into();
+        let now_time = self.clock.tick_to_time(now);
+        let mut end_agents = Vec::new();
+        for agent in agents {
+            let agent = self.start(now, agent);
+            end_agents.extend(self.wake_up_agent(agent, now_time));
+        }
+        self.notify_end_all(now_time, end_agents)
+    }
+
     #[instrument(
         level = "trace",
         skip(self, end_agents),
@@ -75,7 +97,14 @@ impl ActivityEngine {
         end_agents
     }
 
-    fn receive_agent(&mut self, now: Tick, mut agent: ActivityAgent) {
+    fn receive_agent(&mut self, now: Tick, agent: ActivityAgent) {
+        let now_time = self.clock.tick_to_time(now);
+        let agent = self.start(now, agent);
+        self.asleep_q.add(agent, now_time);
+    }
+
+    /// Starts the activity of an agent. The caller decides when the agent goes into the queue.
+    fn start(&mut self, now: Tick, mut agent: ActivityAgent) -> AsleepSimulationAgent {
         // emmit act start event
         let now_time = self.clock.tick_to_time(now);
         let act = agent.as_ref();
@@ -91,8 +120,7 @@ impl ActivityEngine {
         );
 
         agent.notify_started(&mut self.comp_env, now_time);
-        self.asleep_q
-            .add(AsleepSimulationAgent::build(agent, now_time), now_time);
+        AsleepSimulationAgent::build(agent, now_time)
     }
 
     /// Delivers the wake-ups that are due and returns the agents whose end time is reached. All
@@ -101,21 +129,32 @@ impl ActivityEngine {
     fn wake_up(&mut self, now: SimTime) -> Vec<ActivityAgent> {
         let mut end_agents = Vec::new();
 
-        for mut agent in self.asleep_q.pop(now) {
-            if agent.next_wakeup.is_some_and(|wakeup| wakeup <= now) {
-                // "True" wakeup: inform about wakeup and assign next wakeup.
-                let end_time = agent.activity_end().max(now);
-                ActivityEngine::notify_wakeup(&mut self.comp_env, &mut agent.agent, end_time, now);
-                agent.next_wakeup = agent.agent.next_wakeup(now);
-            }
-
-            if agent.activity_end() <= now {
-                end_agents.push(agent.agent);
-            } else {
-                self.asleep_q.add(agent, now);
-            }
+        for agent in self.asleep_q.pop(now) {
+            end_agents.extend(self.wake_up_agent(agent, now));
         }
         end_agents
+    }
+
+    /// Delivers the wake-up of one agent if it is due. Returns the agent if its end time is
+    /// reached; otherwise, the agent goes back into the queue.
+    fn wake_up_agent(
+        &mut self,
+        mut agent: AsleepSimulationAgent,
+        now: SimTime,
+    ) -> Option<ActivityAgent> {
+        if agent.next_wakeup.is_some_and(|wakeup| wakeup <= now) {
+            // "True" wakeup: inform about wakeup and assign next wakeup.
+            let end_time = agent.activity_end().max(now);
+            ActivityEngine::notify_wakeup(&mut self.comp_env, &mut agent.agent, end_time, now);
+            agent.next_wakeup = agent.agent.next_wakeup(now);
+        }
+
+        if agent.activity_end() <= now {
+            Some(agent.agent)
+        } else {
+            self.asleep_q.add(agent, now);
+            None
+        }
     }
 
     fn notify_wakeup(
@@ -466,6 +505,62 @@ mod tests {
         assert_eq!(engine.do_step(20, vec![agent]).len(), 1);
         // The agent leaves now, so it must not plan with the end time that has passed.
         assert_eq!(*calls.lock().unwrap(), [wakeup(20, 20), finished(20)]);
+    }
+
+    #[deterministic_id_test]
+    fn an_activity_without_duration_started_after_the_step_ends_in_the_same_tick() {
+        let calls = Calls::default();
+        let agent = scripted_agent("1", &[], 20, &calls);
+        let mut engine = create_engine(vec![], Default::default());
+
+        assert!(engine.do_step(20, vec![]).is_empty());
+        assert_eq!(engine.start_activities(20, vec![agent]).len(), 1);
+        assert_eq!(*calls.lock().unwrap(), [finished(20)]);
+        assert_eq!(engine.asleep_q.len(), 0);
+    }
+
+    #[deterministic_id_test]
+    fn an_overdue_wakeup_comes_before_the_end_when_started_after_the_step() {
+        let calls = Calls::default();
+        let agent = scripted_agent("1", &[5], 10, &calls);
+        let mut engine = create_engine(vec![], Default::default());
+
+        assert_eq!(engine.start_activities(20, vec![agent]).len(), 1);
+        assert_eq!(*calls.lock().unwrap(), [wakeup(20, 20), finished(20)]);
+    }
+
+    #[deterministic_id_test]
+    fn an_activity_started_after_the_step_waits_in_the_queue() {
+        let calls = Calls::default();
+        let agent = scripted_agent("1", &[25], 30, &calls);
+        let mut engine = create_engine(vec![], Default::default());
+
+        assert!(engine.start_activities(20, vec![agent]).is_empty());
+        assert_eq!(engine.asleep_q.len(), 1);
+        step_without_end(&mut engine, 21..30);
+        assert_eq!(engine.do_step(30, vec![]).len(), 1);
+        assert_eq!(*calls.lock().unwrap(), [wakeup(30, 25), finished(30)]);
+    }
+
+    #[deterministic_id_test]
+    fn starting_activities_after_the_step_does_not_wake_up_agents_in_the_queue_again() {
+        let queued_calls = Calls::default();
+        let queued = scripted_agent("1", &[5, 5], 10, &queued_calls);
+        let started_calls = Calls::default();
+        let started = scripted_agent("2", &[], 10, &started_calls);
+        let mut engine = create_engine(vec![], Default::default());
+
+        assert!(engine.do_step(5, vec![queued]).is_empty());
+        // The agent asked for a time that has passed, so it is due again in the queue.
+        assert!(engine.start_activities(5, vec![started]).is_empty());
+        assert_eq!(*queued_calls.lock().unwrap(), [wakeup(10, 5)]);
+        assert!(started_calls.lock().unwrap().is_empty());
+
+        step_without_end(&mut engine, 6..7);
+        assert_eq!(
+            *queued_calls.lock().unwrap(),
+            [wakeup(10, 5), wakeup(10, 6)]
+        );
     }
 
     #[deterministic_id_test]

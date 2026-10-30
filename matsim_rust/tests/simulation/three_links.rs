@@ -19,10 +19,11 @@ fn agent_events_keep_their_order_within_a_tick() {
         (32400, "departure"),
         (32408, "travelled"),
         (32408, "arrival"),
-        (32409, "actstart"),
-        (32409, "actend"),
-        (32409, "departure"),
-        (32409, "PersonEntersVehicle"),
+        (32408, "actstart"),
+        (32408, "actend"),
+        (32408, "departure"),
+        (32408, "PersonEntersVehicle"),
+        // The car leg departs after the move of this tick, so the vehicle moves in the next one.
         (32409, "vehicle enters traffic"),
         (32410, "left link"),
         (32410, "entered link"),
@@ -31,12 +32,12 @@ fn agent_events_keep_their_order_within_a_tick() {
         (32521, "vehicle leaves traffic"),
         (32521, "PersonLeavesVehicle"),
         (32521, "arrival"),
-        (32522, "actstart"),
-        (32522, "actend"),
-        (32522, "departure"),
-        (32538, "travelled"),
-        (32538, "arrival"),
-        (32539, "actstart"),
+        (32521, "actstart"),
+        (32521, "actend"),
+        (32521, "departure"),
+        (32537, "travelled"),
+        (32537, "arrival"),
+        (32537, "actstart"),
     ];
     assert_eq!(
         ordered_agent_events(32_540),
@@ -48,14 +49,29 @@ fn agent_events_keep_their_order_within_a_tick() {
 }
 
 #[deterministic_id_test(matsim_rust)]
-fn arrival_at_simulation_end_is_stuck_until_next_activity_starts() {
-    let trace = ordered_agent_events(32_538);
+fn arrival_at_simulation_end_starts_the_last_activity() {
+    let trace = ordered_agent_events(32_537);
     assert_eq!(
         &trace[trace.len() - 3..],
         &[
-            (32538, "travelled".to_owned()),
-            (32538, "arrival".to_owned()),
-            (32538, "stuckAndAbort".to_owned()),
+            (32537, "travelled".to_owned()),
+            (32537, "arrival".to_owned()),
+            (32537, "actstart".to_owned()),
+        ]
+    );
+    assert!(!trace.iter().any(|(_, kind)| kind == "stuckAndAbort"));
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn departure_at_simulation_end_is_stuck() {
+    let trace = ordered_agent_events(32_521);
+    assert_eq!(
+        &trace[trace.len() - 4..],
+        &[
+            (32521, "actstart".to_owned()),
+            (32521, "actend".to_owned()),
+            (32521, "departure".to_owned()),
+            (32521, "stuckAndAbort".to_owned()),
         ]
     );
 }
