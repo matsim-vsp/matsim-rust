@@ -87,7 +87,14 @@ pub trait NetworkDriverLogic: LegLogic {
     fn planned_vehicle_id(&self) -> Option<&Id<InternalVehicle>>;
     fn peek_next_link_id(&self) -> Option<&Id<Link>>;
     fn is_wanting_to_arrive_on_current_link(&self) -> bool;
-    fn notify_move_over_node(&mut self, next_link: &Id<Link>, now: SimTime);
+    /// The agent has moved onto `next_link`. This is its decision point on the network: it may
+    /// change its remaining route, which the network reads through `peek_next_link_id`.
+    fn notify_move_over_node(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        next_link: &Id<Link>,
+        now: SimTime,
+    );
 }
 
 pub trait TeleportationLogic: LegLogic {

@@ -126,5 +126,4 @@ The following rules are not implemented yet:
 | Rule         | Current state                                                                                                         |
 |--------------|-----------------------------------------------------------------------------------------------------------------------|
 | `D2`         | The rows for waiting and riding have no implementation, because schedule-based transit does not exist yet.            |
-| `D2`, `D5`   | A route cannot change after its leg has started; `notify_move_over_node` only confirms the planned link.              |
 | `D4`         | The `ActivityEngine` calls `notify_wakeup` in every tick for every agent in `awake_q`.                                |

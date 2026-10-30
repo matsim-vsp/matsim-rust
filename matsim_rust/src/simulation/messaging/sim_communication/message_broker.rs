@@ -273,7 +273,7 @@ mod tests {
                 assert_eq!(1, msg.vehicles().len());
                 let (mut vehicle, attachments) = msg.vehicles_mut().remove(0).into_parts();
                 let next_link = vehicle.peek_next_route_element().unwrap().clone();
-                vehicle.move_over_node(&next_link, SimTime::default());
+                vehicle.move_over_node(&mut Default::default(), &next_link, SimTime::default());
                 broker.add_veh(VehicleMessage::with_attachments(vehicle, attachments), 1);
             } else {
                 for msg in result_0 {

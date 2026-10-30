@@ -783,7 +783,7 @@ impl SimNetworkPartition {
         // Reuse the destination whose connectivity/capacity was checked before popping the
         // vehicle. The driver is told which link it moves onto, so the network needs no second
         // phase/role projection to discover the same destination again.
-        vehicle.move_over_node(&next_link, now_time);
+        vehicle.move_over_node(comp_env, &next_link, now_time);
         // A link whose to node equals its from node can be the old and the new link at once. In
         // that case, the vehicle has just been pushed onto the old link, so it stays active.
         let old_link_stays_active = old_link_active || next_link == *old_link_id;
@@ -956,6 +956,8 @@ mod tests {
         route: Vec<Id<Link>>,
         position: usize,
         moved_onto: Arc<Mutex<Vec<String>>>,
+        // When the driver moves onto the first link, it continues on the second instead of its route.
+        diversion: Option<(Id<Link>, Id<Link>)>,
     }
 
     impl Identifiable<InternalPerson> for RecordingDriver {
@@ -1004,12 +1006,23 @@ mod tests {
         fn is_wanting_to_arrive_on_current_link(&self) -> bool {
             self.peek_next_link_id().is_none()
         }
-        fn notify_move_over_node(&mut self, next_link: &Id<Link>, _now: SimTime) {
+        fn notify_move_over_node(
+            &mut self,
+            _comp_env: &mut ThreadLocalComputationalEnvironment,
+            next_link: &Id<Link>,
+            _now: SimTime,
+        ) {
             self.moved_onto
                 .lock()
                 .unwrap()
                 .push(next_link.external().to_owned());
             self.position += 1;
+            if let Some((link, instead)) = &self.diversion
+                && link == next_link
+            {
+                self.route.truncate(self.position + 1);
+                self.route.push(instead.clone());
+            }
         }
     }
 
@@ -1028,6 +1041,7 @@ mod tests {
             route: vec![Id::get_from_ext("A"), Id::get_from_ext("X")],
             position: 0,
             moved_onto: moved_onto.clone(),
+            diversion: None,
         };
         let vehicle = SimulationVehicle::from_parts(1, 0, 100.0, 1.0, Box::new(driver));
         network.send_veh_en_route(vehicle, None, 0);
@@ -1043,6 +1057,90 @@ mod tests {
         assert_eq!(local_vehicle_count(&network, "X"), 1);
         assert_eq!(local_vehicle_count(&network, "Y"), 0);
         assert_eq!(*moved_onto.lock().unwrap(), vec!["X"]);
+    }
+
+    /// A network S -A-> K -B-> M, where the links X and Y leave M. The destination of Y lies on
+    /// `partition_of_y`.
+    fn network_with_a_choice_at_m(partition_of_y: u32) -> Network {
+        let mut network = Network::new();
+        add_test_nodes(&mut network, &["S", "K", "M", "TX"]);
+        let mut to_y = Node::new(Id::create("TY"), Coordinate::default(), 0, 1);
+        to_y.partition = partition_of_y;
+        network.add_node(to_y);
+        add_test_link(&mut network, "A", "S", "K", 1.0, 3600.0, 100.0);
+        add_test_link(&mut network, "B", "K", "M", 1.0, 3600.0, 100.0);
+        add_test_link(&mut network, "X", "M", "TX", 1.0, 3600.0, 100.0);
+        network.add_link(Link {
+            id: Id::create("Y"),
+            from: Id::create("M"),
+            to: Id::create("TY"),
+            length: 1.0,
+            capacity: 3600.0,
+            freespeed: 100.0,
+            permlanes: 1.0,
+            modes: Default::default(),
+            partition: partition_of_y,
+            attributes: Default::default(),
+        });
+        network
+    }
+
+    /// A vehicle on the route A, B, X whose driver changes to Y when it moves onto B.
+    fn vehicle_diverting_at_b(moved_onto: Arc<Mutex<Vec<String>>>) -> SimulationVehicle {
+        let driver = RecordingDriver {
+            delegate: test_utils::create_agent(1, vec!["A", "B", "X"]),
+            route: ["A", "B", "X"].into_iter().map(Id::get_from_ext).collect(),
+            position: 0,
+            moved_onto,
+            diversion: Some((Id::get_from_ext("B"), Id::get_from_ext("Y"))),
+        };
+        SimulationVehicle::from_parts(1, 0, 100.0, 1.0, Box::new(driver))
+    }
+
+    #[deterministic_id_test]
+    fn driver_can_change_its_route_at_a_node() {
+        let global_network = network_with_a_choice_at_m(0);
+        let mut network =
+            SimNetworkPartition::from_network_for_test(&global_network, 0, &test_utils::config());
+        let moved_onto = Arc::new(Mutex::new(Vec::new()));
+        network.send_veh_en_route(vehicle_diverting_at_b(moved_onto.clone()), None, 0);
+        let mut env = Default::default();
+
+        let mut arrived = Vec::new();
+        for now in 0..10 {
+            network.move_nodes(&mut env, now);
+            arrived.extend(network.move_links(&mut env, now).vehicles_end_leg);
+        }
+
+        assert_eq!(*moved_onto.lock().unwrap(), vec!["B", "Y"]);
+        assert_eq!(arrived.len(), 1);
+        assert_eq!(arrived[0].curr_link_id().map(Id::external), Some("Y"));
+    }
+
+    #[deterministic_id_test]
+    fn driver_can_change_its_route_towards_another_partition() {
+        let global_network = network_with_a_choice_at_m(1);
+        let config = test_utils::config();
+        let mut first = SimNetworkPartition::from_network_for_test(&global_network, 0, &config);
+        let mut second = SimNetworkPartition::from_network_for_test(&global_network, 1, &config);
+        let moved_onto = Arc::new(Mutex::new(Vec::new()));
+        first.send_veh_en_route(vehicle_diverting_at_b(moved_onto.clone()), None, 0);
+        let mut env: ThreadLocalComputationalEnvironment = Default::default();
+
+        let mut arrived = Vec::new();
+        for now in 0..10 {
+            first.move_nodes(&mut env, now);
+            let exited = first.move_links(&mut env, now).vehicles_exit_partition;
+            for vehicle in exited {
+                assert_eq!(vehicle.curr_link_id().map(Id::external), Some("Y"));
+                second.send_veh_en_route(vehicle, Some(env.events_manager()), now);
+            }
+            second.move_nodes(&mut env, now);
+            arrived.extend(second.move_links(&mut env, now).vehicles_end_leg);
+        }
+
+        assert_eq!(*moved_onto.lock().unwrap(), vec!["B", "Y"]);
+        assert_eq!(arrived.len(), 1);
     }
 
     fn push_vehicle_to_queue(

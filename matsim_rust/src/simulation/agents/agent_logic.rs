@@ -296,7 +296,12 @@ impl NetworkDriverLogic for PlanBasedSimulationLogic {
     fn is_wanting_to_arrive_on_current_link(&self) -> bool {
         self.peek_next_link_id().is_none()
     }
-    fn notify_move_over_node(&mut self, next_link: &Id<Link>, _now: SimTime) {
+    fn notify_move_over_node(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        next_link: &Id<Link>,
+        _now: SimTime,
+    ) {
         debug_assert_eq!(
             self.peek_next_link_id(),
             Some(next_link),
@@ -639,8 +644,13 @@ impl NetworkDriverLogic for AdaptivePlanBasedSimulationLogic {
     fn is_wanting_to_arrive_on_current_link(&self) -> bool {
         self.delegate.is_wanting_to_arrive_on_current_link()
     }
-    fn notify_move_over_node(&mut self, next: &Id<Link>, now: SimTime) {
-        self.delegate.notify_move_over_node(next, now);
+    fn notify_move_over_node(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        next: &Id<Link>,
+        now: SimTime,
+    ) {
+        self.delegate.notify_move_over_node(comp_env, next, now);
     }
 }
 
@@ -1020,7 +1030,11 @@ mod tests {
                         links.get(index + 1).copied()
                     );
                     if let Some(next) = driver.peek_next_link_id().cloned() {
-                        agent.notify_move_over_node(&next, SimTime::default());
+                        agent.notify_move_over_node(
+                            &mut Default::default(),
+                            &next,
+                            SimTime::default(),
+                        );
                     }
                 }
                 let mut agent = agent.try_into_teleportation().unwrap();
@@ -1187,7 +1201,11 @@ mod tests {
             };
             let agent = agent.finish_activity(SimTime::from_secs(5)).expect_leg();
             let mut agent = agent.try_into_network().unwrap();
-            agent.notify_move_over_node(&Id::get_from_ext("b"), SimTime::from_secs(6));
+            agent.notify_move_over_node(
+                &mut Default::default(),
+                &Id::get_from_ext("b"),
+                SimTime::from_secs(6),
+            );
             assert_eq!(agent.curr_link_id().unwrap().external(), "b");
             assert_eq!(agent.into_person(), Some(expected));
         }
@@ -1231,7 +1249,11 @@ mod tests {
                 .try_into_network()
                 .unwrap();
             assert_eq!(original, std::ptr::from_ref(driver.as_ref()).cast::<()>());
-            driver.notify_move_over_node(&Id::get_from_ext("b"), SimTime::from_secs(1));
+            driver.notify_move_over_node(
+                &mut Default::default(),
+                &Id::get_from_ext("b"),
+                SimTime::from_secs(1),
+            );
             let mut activity = driver.finish_leg(SimTime::from_secs(2)).expect_activity();
             assert_eq!(original, std::ptr::from_ref(activity.as_ref()).cast::<()>());
             activity.notify_finished(SimTime::from_secs(3));
