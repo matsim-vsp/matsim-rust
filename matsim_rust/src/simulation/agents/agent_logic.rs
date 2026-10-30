@@ -230,8 +230,8 @@ impl ActivityLogic for PlanBasedSimulationLogic {
         // The end time is fixed when the activity starts, see `advance`.
         self.activity_end_time.unwrap()
     }
-    fn wakeup_time(&self, _: SimTime) -> SimTime {
-        self.activity_end_time.unwrap()
+    fn next_wakeup(&self, _: SimTime) -> Option<SimTime> {
+        None
     }
     fn notify_started(
         &mut self,
@@ -379,6 +379,17 @@ impl AdaptivePlanBasedSimulationLogic {
         }
     }
 
+    // Decides both whether the agent wants a wake-up and whether it reacts to one. If these two
+    // differed, an agent would ask for the same wake-up forever.
+    fn preplanning_horizon(&self) -> Option<u32> {
+        // no need to wake up if there is no other leg.
+        self.delegate.next_leg()?;
+        self.delegate
+            .curr_act()
+            .attributes
+            .get(crate::simulation::scenario::population::PREPLANNING_HORIZON)
+    }
+
     fn react_to_woke_up(
         &mut self,
         comp_env: &mut ThreadLocalComputationalEnvironment,
@@ -390,15 +401,7 @@ impl AdaptivePlanBasedSimulationLogic {
             return;
         }
 
-        let preplan = self.delegate.next_leg().is_some()
-            && self
-                .delegate
-                .curr_act()
-                .attributes
-                .get::<u32>(crate::simulation::scenario::population::PREPLANNING_HORIZON)
-                .is_some();
-
-        if !preplan {
+        if self.preplanning_horizon().is_none() {
             // No reason to call the router if we are not preplanning.
             return;
         }
@@ -549,27 +552,16 @@ impl ActivityLogic for AdaptivePlanBasedSimulationLogic {
         self.delegate.end_time(activity_start)
     }
 
-    fn wakeup_time(&self, now: SimTime) -> SimTime {
-        let mut end = self.delegate.wakeup_time(now);
-        if self.delegate.next_leg().is_none() {
-            // no need to wake up if there is no other leg.
-            return end;
+    fn next_wakeup(&self, _: SimTime) -> Option<SimTime> {
+        if self.route_receiver.is_some() {
+            // The response is read in `notify_finished`, so another wake-up has nothing to do.
+            return None;
         }
-        let horizon: Option<u32> = self
-            .delegate
-            .curr_act()
-            .attributes
-            .get(crate::simulation::scenario::population::PREPLANNING_HORIZON);
-        if let Some(h) = horizon {
-            if SimTime::from_secs(h as u64) > end {
-                // if horizon is larger than the current end time, then end - h would be negative (might be the case at the very beginning of the simulation)
-                // and thus there would be an error.
-                end = SimTime::default();
-            } else {
-                end = end.saturating_sub(Duration::from_secs(h as u64));
-            }
-        }
-        end
+        let horizon = self.preplanning_horizon()?;
+        let end = self.delegate.activity_end_time.unwrap();
+        // if horizon is larger than the current end time, then end - h would be negative (might be the case at the very beginning of the simulation)
+        // and thus the subtraction saturates at zero, so that the agent wakes up right away.
+        Some(end.saturating_sub(Duration::from_secs(horizon as u64)))
     }
 
     // The adaptive logic reacts first and then lets the plan logic handle the same callback.
@@ -881,10 +873,7 @@ mod tests {
                 activity.end_time(SimTime::default()),
                 SimTime::from_secs(10)
             );
-            assert_eq!(
-                activity.wakeup_time(SimTime::default()),
-                SimTime::from_secs(10)
-            );
+            assert_eq!(activity.next_wakeup(SimTime::default()), None);
             agent.notify_finished(SimTime::from_secs(10));
             // Completion callbacks do not switch phase before the receiving engine runs.
             assert_eq!(agent.act_type().external(), "home");
@@ -1067,6 +1056,72 @@ mod tests {
         assert_eq!(agent.destination_link(), route.end_link());
         agent.notify_begin_teleportation(SimTime::default());
         assert_eq!(agent.curr_link_id(), Some(route.end_link()));
+    }
+
+    fn make_activity_with_horizon(act_type: &str, link: &str, horizon: u32) -> InternalActivity {
+        let mut activity = make_activity(act_type, link);
+        activity.max_dur = Some(Duration::from_secs(10));
+        activity.attributes.add(
+            crate::simulation::scenario::population::PREPLANNING_HORIZON,
+            horizon,
+        );
+        activity
+    }
+
+    fn person_with_horizon(horizon: u32) -> InternalPerson {
+        let mut plan = InternalPlan::default();
+        plan.add_act(make_activity_with_horizon("home", "1", horizon));
+        plan.add_leg(make_leg("car"));
+        plan.add_act(make_activity_with_horizon("work", "2", horizon));
+        InternalPerson::new(Id::create("p1"), plan)
+    }
+
+    #[deterministic_id_test]
+    fn plan_agent_requests_no_wakeup() {
+        let logic = PlanBasedSimulationLogic::new(person_with_horizon(3));
+        assert_eq!(logic.next_wakeup(SimTime::default()), None);
+    }
+
+    #[deterministic_id_test]
+    fn adaptive_agent_requests_a_wakeup_at_its_preplanning_horizon() {
+        let logic = AdaptivePlanBasedSimulationLogic::new(person_with_horizon(3));
+        assert_eq!(
+            logic.next_wakeup(SimTime::default()),
+            Some(SimTime::from_secs(7))
+        );
+    }
+
+    #[deterministic_id_test]
+    fn adaptive_agent_with_a_horizon_beyond_its_end_requests_a_wakeup_at_zero() {
+        let logic = AdaptivePlanBasedSimulationLogic::new(person_with_horizon(30));
+        assert_eq!(
+            logic.next_wakeup(SimTime::default()),
+            Some(SimTime::default())
+        );
+    }
+
+    #[deterministic_id_test]
+    fn adaptive_agent_without_horizon_requests_no_wakeup() {
+        let person = person_with_leg(InternalRoute::Generic(generic_route()));
+        let logic = AdaptivePlanBasedSimulationLogic::new(person);
+        assert_eq!(logic.next_wakeup(SimTime::default()), None);
+    }
+
+    #[deterministic_id_test]
+    fn adaptive_agent_requests_no_wakeup_for_its_last_activity() {
+        let mut plan = InternalPlan::default();
+        plan.add_act(make_activity_with_horizon("home", "1", 3));
+        let logic =
+            AdaptivePlanBasedSimulationLogic::new(InternalPerson::new(Id::create("p1"), plan));
+        assert_eq!(logic.next_wakeup(SimTime::default()), None);
+    }
+
+    #[deterministic_id_test]
+    fn adaptive_agent_requests_no_wakeup_while_a_route_is_pending() {
+        let mut logic = AdaptivePlanBasedSimulationLogic::new(person_with_horizon(3));
+        let (_send, recv) = tokio::sync::oneshot::channel();
+        logic.route_receiver = Some(recv);
+        assert_eq!(logic.next_wakeup(SimTime::default()), None);
     }
 
     #[deterministic_id_test]

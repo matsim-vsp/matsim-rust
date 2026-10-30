@@ -53,7 +53,12 @@ pub trait ActivityLogic: SimulationAgentLogic {
     /// `activity_start` is the time when the activity engine received the agent. An activity with
     /// only a maximum duration may derive its end from it.
     fn end_time(&self, activity_start: SimTime) -> SimTime;
-    fn wakeup_time(&self, now: SimTime) -> SimTime;
+    /// The next time the agent wants to be woken up, or `None` if it wants no wake-up. The engine
+    /// asks when the activity starts and after each wake-up, and not in between. A time that is not
+    /// after `now` is due in the same tick at the start of the activity and in the next tick after a
+    /// wake-up. A wake-up that is due in the tick in which the activity ends comes before the end. A
+    /// later one is not delivered.
+    fn next_wakeup(&self, now: SimTime) -> Option<SimTime>;
 
     fn notify_started(&mut self, comp_env: &mut ThreadLocalComputationalEnvironment, now: SimTime);
     // The engine retains the departure time for the wakeup callback contract.
