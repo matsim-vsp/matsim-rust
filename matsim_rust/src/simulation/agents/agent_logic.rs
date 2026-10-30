@@ -5,7 +5,8 @@ use crate::external_services::routing::{
 use crate::simulation::Identifiable;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
-    NextPhase, SimulationAgentLogic, TeleportationAgent, TeleportationLogic, TransitTeleportation,
+    NextPhase, SimulationAgentLogic, StuckLogic, TeleportationAgent, TeleportationLogic,
+    TransitTeleportation,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
@@ -24,7 +25,7 @@ use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
-use tracing::trace;
+use tracing::{trace, warn};
 
 // The plan-based agent owns the shared state directly. Adaptive agents embed it by value.
 #[derive(Debug, PartialEq, Clone)]
@@ -86,18 +87,16 @@ impl PlanBasedSimulationLogic {
             .iter()
             .position(|plan| plan.selected)
             .expect("Simulation agent must have a selected plan");
-        let first_act_end = basic_agent_delegate.plans()[selected_plan].elements[0]
-            .as_activity()
-            .unwrap()
-            .cmp_end_time(SimTime::default());
-        Self {
+        let mut agent = Self {
             basic_agent_delegate,
             selected_plan,
             curr_plan_element: 0,
             curr_route_element: 0,
-            activity_end_time: Some(first_act_end),
+            activity_end_time: None,
             has_network_route: false,
-        }
+        };
+        agent.activity_end_time = Some(agent.curr_act_end_time(SimTime::default()));
+        agent
     }
 
     fn plan(&self) -> &InternalPlan {
@@ -116,20 +115,30 @@ impl PlanBasedSimulationLogic {
         self.curr_plan_element.is_multiple_of(2)
     }
 
+    // As in MATSim, the last activity of a plan never ends, even if the plan gives it an end time.
+    fn curr_act_end_time(&self, begin: SimTime) -> SimTime {
+        if self.curr_plan_element + 1 == self.plan().elements.len() {
+            SimTime::from_nanos(u64::MAX)
+        } else {
+            self.curr_act().cmp_end_time(begin)
+        }
+    }
+
     // Both agents' phase transitions end here; the adaptive agent calls it on its delegate
     // because it cannot call the consuming trait methods. Keep transition logic in this method.
-    fn advance(&mut self, now: SimTime) {
+    // Returns false if the plan has run empty, as MATSim does in `advancePlan`. The cursors then
+    // stay on the last element, so that the agent can still tell where it got stuck.
+    fn advance(&mut self, now: SimTime) -> bool {
+        if self.curr_plan_element + 1 == self.plan().elements.len() {
+            warn!("Plan of agent {} has run empty.", self.id());
+            return false;
+        }
         self.curr_plan_element += 1;
         self.curr_route_element = 0;
-        assert!(
-            self.curr_plan_element < self.plan().elements.len(),
-            "Cannot advance plan of agents {:?} beyond its last element.",
-            self.id()
-        );
         // Every plan element remains in the person. Transitions only change the cursors and
         // cached activity time/capability; materialization needs no restoration step.
         if self.is_activity() {
-            self.activity_end_time = Some(self.curr_act().cmp_end_time(now));
+            self.activity_end_time = Some(self.curr_act_end_time(now));
             self.has_network_route = false;
         } else {
             self.activity_end_time = None;
@@ -139,6 +148,7 @@ impl PlanBasedSimulationLogic {
                 .as_ref()
                 .is_some_and(|route| matches!(route, InternalRoute::Network(_)));
         }
+        true
     }
 
     fn curr_act(&self) -> &InternalActivity {
@@ -229,8 +239,11 @@ impl ActivityLogic for PlanBasedSimulationLogic {
     }
     fn notify_finished(&mut self, _now: SimTime) {}
     fn finish_activity(mut self: Box<Self>, now: SimTime) -> NextPhase {
-        self.advance(now);
-        NextPhase::Leg(self)
+        if self.advance(now) {
+            NextPhase::Leg(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -258,8 +271,11 @@ impl LegLogic for PlanBasedSimulationLogic {
         Ok(self)
     }
     fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
-        self.advance(now);
-        NextPhase::Activity(self)
+        if self.advance(now) {
+            NextPhase::Activity(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -319,6 +335,19 @@ impl TeleportationLogic for PlanBasedSimulationLogic {
     }
     fn notify_begin_teleportation(&mut self, _now: SimTime) {
         self.set_curr_route_element_to_last();
+    }
+}
+
+impl StuckLogic for PlanBasedSimulationLogic {
+    fn stuck_link(&self) -> Option<&Id<Link>> {
+        if self.is_activity() {
+            None
+        } else {
+            self.current_link()
+        }
+    }
+    fn stuck_mode(&self) -> Option<&Id<String>> {
+        (!self.is_activity()).then(|| &self.curr_leg().mode)
     }
 }
 
@@ -547,8 +576,11 @@ impl ActivityLogic for AdaptivePlanBasedSimulationLogic {
         self.delegate.notify_finished(now);
     }
     fn finish_activity(mut self: Box<Self>, now: SimTime) -> NextPhase {
-        self.delegate.advance(now);
-        NextPhase::Leg(self)
+        if self.delegate.advance(now) {
+            NextPhase::Leg(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -576,8 +608,11 @@ impl LegLogic for AdaptivePlanBasedSimulationLogic {
         Ok(self)
     }
     fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
-        self.delegate.advance(now);
-        NextPhase::Activity(self)
+        if self.delegate.advance(now) {
+            NextPhase::Activity(self)
+        } else {
+            NextPhase::Stuck(self)
+        }
     }
 }
 
@@ -611,6 +646,15 @@ impl TeleportationLogic for AdaptivePlanBasedSimulationLogic {
     }
     fn notify_begin_teleportation(&mut self, now: SimTime) {
         self.delegate.notify_begin_teleportation(now);
+    }
+}
+
+impl StuckLogic for AdaptivePlanBasedSimulationLogic {
+    fn stuck_link(&self) -> Option<&Id<Link>> {
+        self.delegate.stuck_link()
+    }
+    fn stuck_mode(&self) -> Option<&Id<String>> {
+        self.delegate.stuck_mode()
     }
 }
 
@@ -846,15 +890,81 @@ mod tests {
             assert_eq!(agent.curr_link_id(), Some(&Id::get_from_ext("l2")));
             assert_eq!(agent.mode().external(), "car");
             let agent = agent.finish_leg(SimTime::from_secs(21)).expect_activity();
+            // The last activity never ends, although the plan gives it a maximum duration.
             assert_eq!(
                 agent.end_time(SimTime::from_secs(100)),
-                SimTime::from_secs(28)
+                SimTime::from_nanos(u64::MAX)
             );
             assert_eq!(agent.act_type().external(), "work");
             assert!(!agent.has_next_leg());
             assert_eq!(original, std::ptr::from_ref(agent.as_ref()).cast::<()>());
             assert_eq!(agent.into_person(), Some(expected));
         }
+    }
+
+    #[deterministic_id_test]
+    fn maximum_duration_counts_from_the_start_of_the_activity() {
+        let mut person = person_with_leg(InternalRoute::Generic(generic_route()));
+        let mut leg = make_leg("car");
+        leg.route = Some(InternalRoute::Generic(generic_route()));
+        person.plans_mut()[0].add_leg(leg);
+        person.plans_mut()[0].add_act(make_activity("home", "l1"));
+
+        let agent = PlanBasedSimulationLogic::new_agent(person)
+            .finish_activity(SimTime::from_secs(10))
+            .expect_leg()
+            .finish_leg(SimTime::from_secs(21))
+            .expect_activity();
+
+        assert_eq!(
+            agent.end_time(SimTime::from_secs(100)),
+            SimTime::from_secs(28)
+        );
+    }
+
+    #[deterministic_id_test]
+    fn an_agent_whose_plan_ends_with_a_leg_gets_stuck() {
+        for adaptive in [false, true] {
+            let mut person = person_with_leg(InternalRoute::Generic(generic_route()));
+            person.plans_mut()[0].elements.pop();
+            let expected = person.clone();
+            let agent = if adaptive {
+                AdaptivePlanBasedSimulationLogic::new_agent(person)
+            } else {
+                PlanBasedSimulationLogic::new_agent(person)
+            };
+            let original = std::ptr::from_ref(agent.as_ref()).cast::<()>();
+
+            let mut agent = agent
+                .finish_activity(SimTime::from_secs(10))
+                .expect_leg()
+                .try_into_teleportation()
+                .unwrap();
+            agent.notify_begin_teleportation(SimTime::from_secs(10));
+
+            let NextPhase::Stuck(agent) = agent.finish_leg(SimTime::from_secs(21)) else {
+                panic!("The plan has run empty");
+            };
+            assert_eq!(original, std::ptr::from_ref(agent.as_ref()).cast::<()>());
+            assert_eq!(agent.stuck_link().map(Id::external), Some("l2"));
+            assert_eq!(agent.stuck_mode().map(Id::external), Some("car"));
+            assert_eq!(agent.into_person(), Some(expected));
+        }
+    }
+
+    #[deterministic_id_test]
+    fn an_agent_that_leaves_its_last_activity_gets_stuck_without_a_leg() {
+        let mut person = person_with_leg(InternalRoute::Generic(generic_route()));
+        person.plans_mut()[0].elements.truncate(1);
+
+        let NextPhase::Stuck(agent) =
+            PlanBasedSimulationLogic::new_agent(person).finish_activity(SimTime::from_secs(10))
+        else {
+            panic!("The plan has run empty");
+        };
+
+        assert_eq!(agent.stuck_link(), None);
+        assert_eq!(agent.stuck_mode(), None);
     }
 
     #[deterministic_id_test]

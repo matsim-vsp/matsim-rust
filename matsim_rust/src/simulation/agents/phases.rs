@@ -16,12 +16,15 @@ pub type ActivityAgent = Box<dyn ActivityLogic>;
 pub type LegAgent = Box<dyn LegLogic>;
 pub type NetworkDriverAgent = Box<dyn NetworkDriverLogic>;
 pub type TeleportationAgent = Box<dyn TeleportationLogic>;
+pub type StuckAgent = Box<dyn StuckLogic>;
 
 /// What an agent does after a phase. Only the agent decides this; the simulation carries it out.
 #[derive(Debug)]
 pub enum NextPhase {
     Activity(ActivityAgent),
     Leg(LegAgent),
+    /// The agent gives up and takes no further part in the simulation.
+    Stuck(StuckAgent),
 }
 
 #[cfg(test)]
@@ -95,6 +98,14 @@ pub trait TeleportationLogic: LegLogic {
     /// `Some` for a PT route, whose arrival event carries the transit data.
     fn transit(&self) -> Option<TransitTeleportation<'_>>;
     fn notify_begin_teleportation(&mut self, now: SimTime);
+}
+
+/// The final phase. A stuck agent receives no further calls and is materialized after mobsim.
+pub trait StuckLogic: SimulationAgentLogic {
+    /// The link where the agent got stuck, if it was on a leg.
+    fn stuck_link(&self) -> Option<&Id<Link>>;
+    /// The mode of the leg on which the agent got stuck, if it was on a leg.
+    fn stuck_mode(&self) -> Option<&Id<String>>;
 }
 
 /// The data of a PT teleportation arrival event, without exposing the route type.

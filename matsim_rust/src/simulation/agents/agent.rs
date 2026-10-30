@@ -1,5 +1,5 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{ActivityAgent, LegAgent};
+use crate::simulation::agents::{ActivityAgent, LegAgent, StuckAgent};
 use crate::simulation::id::Id;
 use crate::simulation::scenario::population::InternalPerson;
 
@@ -9,6 +9,7 @@ use crate::simulation::scenario::population::InternalPerson;
 pub enum SimulationAgent {
     Activity(ActivityAgent),
     Leg(LegAgent),
+    Stuck(StuckAgent),
 }
 
 impl PartialEq for SimulationAgent {
@@ -22,6 +23,7 @@ impl SimulationAgent {
         match self {
             Self::Activity(agent) => agent.into_person(),
             Self::Leg(agent) => agent.into_person(),
+            Self::Stuck(agent) => agent.into_person(),
         }
     }
 }
@@ -31,6 +33,7 @@ impl Identifiable<InternalPerson> for SimulationAgent {
         match self {
             Self::Activity(agent) => agent.id(),
             Self::Leg(agent) => agent.id(),
+            Self::Stuck(agent) => agent.id(),
         }
     }
 }
