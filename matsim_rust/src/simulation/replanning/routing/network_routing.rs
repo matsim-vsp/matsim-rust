@@ -513,6 +513,7 @@ mod tests {
                 transit_schedule: Arc::new(
                     crate::simulation::scenario::transit::TransitSchedule::default(),
                 ),
+                transit_sim_schedule: Arc::default(),
                 facilities: Arc::new(ActivityFacilities::default()),
                 config: Arc::new(Config::default()),
             },
