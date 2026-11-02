@@ -70,8 +70,9 @@ creation index of an id and never depend on hashing.
 
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
-(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
-mutable `Population`.
+(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSimSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
+mutable `Population`. The transit schedule as read from the files stays with `Scenario`: it is only needed to build the
+dense `TransitSimSchedule`.
 
 Input data is converted into internal types without deriving missing values. Fields that can be derived stay `Option`
 after the conversion and are resolved during preparation; code running afterward uses accessors such as

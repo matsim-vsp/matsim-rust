@@ -11,8 +11,9 @@ use std::time::Duration;
 use tracing::info;
 
 /// Dense, simulation-ready view of the transit schedule. It is built once, before the first
-/// iteration, and shared by all partitions. The maps of [`TransitSchedule`] are only read while
-/// building it.
+/// iteration, and shared by all partitions. [`TransitSchedule`] stays the model of the input and
+/// output files, like [`Network`] beside the network partitions of the mobsim; its maps are only
+/// read while building this schedule.
 ///
 /// Routes are sorted by the external ids of line and route, departures by the external id of
 /// their driver. A departure's index is therefore a stable order for simultaneous events, which
@@ -21,7 +22,6 @@ use tracing::info;
 /// Offsets are stored as given in the schedule. Like SBB's transit engine, transit drivers clamp
 /// the resulting times: a vehicle never arrives before it left the previous stop and never
 /// departs before its scheduled departure.
-/// TODO: why do we need the TransitSchedule any more? couldn't we delete it and use just this one here? moreover, all functions should take ids instead of strings.
 #[derive(Debug, Default)]
 pub struct TransitSimSchedule {
     routes: Vec<SimTransitRoute>,

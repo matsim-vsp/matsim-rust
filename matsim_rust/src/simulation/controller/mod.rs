@@ -922,9 +922,6 @@ mod tests {
         let scenario_core = ScenarioCore {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
-            transit_schedule: Arc::new(
-                crate::simulation::scenario::transit::TransitSchedule::default(),
-            ),
             transit_sim_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
@@ -972,9 +969,6 @@ mod tests {
         let scenario_core = ScenarioCore {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
-            transit_schedule: Arc::new(
-                crate::simulation::scenario::transit::TransitSchedule::default(),
-            ),
             transit_sim_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),

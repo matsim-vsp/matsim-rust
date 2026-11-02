@@ -268,9 +268,9 @@ impl Scenario {
 pub struct ScenarioCore {
     pub network: Arc<Network>,
     pub garage: Arc<Garage>,
-    pub transit_schedule: Arc<TransitSchedule>,
     /// Dense schedule for the transit engine. Empty unless transit is simulated
-    /// [schedule based](TransitSimulation::ScheduleBased).
+    /// [schedule based](TransitSimulation::ScheduleBased). The schedule as read from the input
+    /// files is only needed to build it and stays with [`Scenario`].
     pub transit_sim_schedule: Arc<TransitSimSchedule>,
     /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
     pub facilities: Arc<ActivityFacilities>,
@@ -332,7 +332,6 @@ impl From<Scenario> for ControllerScenario {
             core: ScenarioCore {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
-                transit_schedule: Arc::new(scenario.transit_schedule),
                 transit_sim_schedule: Arc::new(transit_sim_schedule),
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
@@ -443,14 +442,7 @@ mod tests {
         assert!(scenario.transit_schedule.facilities().is_empty());
 
         let controller_scenario: ControllerScenario = scenario.into();
-        assert!(controller_scenario.core.transit_schedule.lines().is_empty());
-        assert!(
-            controller_scenario
-                .core
-                .transit_schedule
-                .facilities()
-                .is_empty()
-        );
+        assert!(controller_scenario.core.transit_sim_schedule.is_empty());
     }
 
     #[deterministic_id_test]
