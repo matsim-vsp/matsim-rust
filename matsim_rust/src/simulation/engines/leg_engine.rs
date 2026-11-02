@@ -1,10 +1,12 @@
 use crate::simulation::agents::{
-    LegAgent, LegLogic, NetworkDriverAgent, PassengerAgent, TeleportationAgent,
+    LegAgent, LegLogic, NetworkDriverAgent, PassengerAgent, TeleportationAgent, TransitDriverAgent,
 };
 use crate::simulation::config::{self, QSim, TransitSimulation};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
-use crate::simulation::engines::leg_engine::ResponsibleEngine::{Network, Teleportation, Transit};
+use crate::simulation::engines::leg_engine::ResponsibleEngine::{
+    Network, Teleportation, Transit, TransitDriver,
+};
 use crate::simulation::engines::network_engine::NetworkEngine;
 use crate::simulation::engines::teleportation_engine::TeleportationEngine;
 use crate::simulation::engines::transit_engine::TransitEngine;
@@ -33,6 +35,7 @@ enum ResponsibleEngine {
     Network(NetworkDriverAgent),
     Teleportation(TeleportationAgent),
     Transit(PassengerAgent),
+    TransitDriver(TransitDriverAgent),
 }
 
 /// The engine that the leg engine prefers for the mode of a leg.
@@ -45,6 +48,11 @@ enum PreferredEngine {
 
 /// Policy belongs to the engine; capability conversion belongs to the current agent.
 fn select_execution(agent: LegAgent, preferred: PreferredEngine) -> ResponsibleEngine {
+    // Transit drivers drive their vehicles in the transit engine, whatever the mode of their route.
+    let agent = match agent.try_into_transit_driver() {
+        Ok(driver) => return TransitDriver(driver),
+        Err(agent) => agent,
+    };
     // A main mode prefers the network, a transit passenger mode the transit engine. Only an
     // available role permits that. Otherwise, and for all other modes, the leg is teleported.
     let agent = match preferred {
@@ -239,17 +247,9 @@ impl<C: SimCommunicator> LegEngine<C> {
         let mut agents = vec![];
         agents.extend(self.publish_vehicular_end_events(now, network_vehicles));
         agents.extend(self.publish_teleported_end_events(now, teleported_vehicles));
-        // Passengers have left their vehicle already, so they only arrive, like teleported agents.
-        agents.extend(
-            self.publish_teleported_end_events(
-                now,
-                transit
-                    .alighted
-                    .into_iter()
-                    .map(|agent| agent as LegAgent)
-                    .collect(),
-            ),
-        );
+        // Passengers and drivers have left their vehicles already, so they only arrive, like
+        // teleported agents.
+        agents.extend(self.publish_teleported_end_events(now, transit.arrived));
         agents
     }
 
@@ -327,14 +327,37 @@ impl<C: SimCommunicator> LegEngine<C> {
     }
 
     pub(crate) fn receive_agent(&mut self, now: Tick, agent: LegAgent) {
-        let now_time = self.clock.tick_to_time(now);
+        let preferred = if self.transit_modes.contains(agent.mode()) {
+            PreferredEngine::Transit
+        } else if self.main_modes.contains(agent.mode()) {
+            PreferredEngine::Network
+        } else {
+            PreferredEngine::Teleportation
+        };
+        // The engine is selected before the departure is emitted, so that the transit engine can
+        // emit the departure of a driver after the start of its departure, as MATSim does.
+        match select_execution(agent, preferred) {
+            Network(agent) => {
+                self.publish_departure(now, agent.as_ref());
+                self.pass_to_network(now, agent, true);
+            }
+            Teleportation(agent) => {
+                self.publish_departure(now, agent.as_ref());
+                self.pass_to_teleportation(now, agent);
+            }
+            Transit(agent) => {
+                self.publish_departure(now, agent.as_ref());
+                self.transit_engine.receive_agent(agent);
+            }
+            TransitDriver(driver) => self.transit_engine.receive_driver(now, driver),
+        }
+    }
 
-        let leg = agent.as_ref();
-
+    fn publish_departure(&mut self, now: Tick, leg: &dyn LegLogic) {
         self.comp_env.events_manager_borrow_mut().process_event(
             &PersonDepartureEventBuilder::default()
-                .time(now_time)
-                .person(agent.id().clone())
+                .time(self.clock.tick_to_time(now))
+                .person(leg.id().clone())
                 .link(leg.departure_link().clone())
                 .leg_mode(leg.mode().clone())
                 .routing_mode(Some(
@@ -343,7 +366,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                             panic!(
                                 "Missing routing mode for {} leg of agent {}",
                                 leg.mode(),
-                                agent.id()
+                                leg.id()
                             )
                         })
                         .clone(),
@@ -351,19 +374,6 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .build()
                 .unwrap(),
         );
-
-        let preferred = if self.transit_modes.contains(agent.mode()) {
-            PreferredEngine::Transit
-        } else if self.main_modes.contains(agent.mode()) {
-            PreferredEngine::Network
-        } else {
-            PreferredEngine::Teleportation
-        };
-        match select_execution(agent, preferred) {
-            Network(agent) => self.pass_to_network(now, agent, true),
-            Teleportation(agent) => self.pass_to_teleportation(now, agent),
-            Transit(agent) => self.transit_engine.receive_agent(agent),
-        }
     }
 
     fn pass_to_teleportation(&mut self, now: Tick, agent: TeleportationAgent) {
@@ -506,6 +516,9 @@ mod tests {
             Err(self)
         }
         fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent> {
             Err(self)
         }
         fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {

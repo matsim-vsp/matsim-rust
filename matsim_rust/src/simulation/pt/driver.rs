@@ -1,13 +1,30 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{SimulationAgentLogic, TransitDriverLogic};
+use crate::simulation::agents::{
+    ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NextPhase,
+    PassengerAgent, SimulationAgentLogic, TeleportationAgent, TransitDriverAgent,
+    TransitDriverLogic,
+};
+use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::pt::schedule::{
     DepartureIndex, SimDeparture, SimRouteStop, TransitSimSchedule,
 };
+use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
-use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
+use crate::simulation::scenario::transit::{
+    TransitDeparture, TransitLine, TransitRoute, TransitStopFacility,
+};
+use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
+use std::sync::Arc;
+
+/// The activities of drivers emit no events, so their coordinate is never reported.
+static NO_COORDINATE: Coordinate = Coordinate {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+};
 
 /// Arrival and departure at a stop.
 #[derive(Clone, Copy)]
@@ -35,6 +52,87 @@ fn stop_times(scheduled: StopTimes, earliest_arrival: SimTime) -> StopTimes {
     }
 }
 
+/// A driver before its departure. Like MATSim's `TransitDriverAgentImpl`, it waits in an activity
+/// at the start link of the route until the departure time. Then it copies its departure into a
+/// [`PlannedDriver`]. Until then, it only holds the schedule and the index of its departure.
+pub struct WaitingDriver {
+    schedule: Arc<TransitSimSchedule>,
+    departure: DepartureIndex,
+}
+
+impl WaitingDriver {
+    pub fn new_agent(
+        schedule: Arc<TransitSimSchedule>,
+        departure: DepartureIndex,
+    ) -> ActivityAgent {
+        Box::new(Self {
+            schedule,
+            departure,
+        })
+    }
+
+    fn departure(&self) -> &SimDeparture {
+        self.schedule.departure(self.departure)
+    }
+}
+
+impl Identifiable<InternalPerson> for WaitingDriver {
+    fn id(&self) -> &Id<InternalPerson> {
+        &self.departure().driver
+    }
+}
+
+impl SimulationAgentLogic for WaitingDriver {
+    fn into_person(self: Box<Self>) -> Option<InternalPerson> {
+        None
+    }
+}
+
+impl ActivityLogic for WaitingDriver {
+    fn act_type(&self) -> &Id<String> {
+        self.schedule.driver_activity_type()
+    }
+    fn link_id(&self) -> &Id<Link> {
+        &self.schedule.route(self.departure().route).start_link
+    }
+    fn coord(&self) -> &Coordinate {
+        &NO_COORDINATE
+    }
+    fn has_next_leg(&self) -> bool {
+        true
+    }
+    fn has_activity_events(&self) -> bool {
+        false
+    }
+    fn end_time(&self, _activity_start: SimTime) -> SimTime {
+        self.departure().time
+    }
+    fn next_wakeup(&self, _now: SimTime) -> Option<SimTime> {
+        None
+    }
+    fn notify_started(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        _now: SimTime,
+    ) {
+    }
+    fn notify_wakeup(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        _end_time: SimTime,
+        _now: SimTime,
+    ) {
+    }
+    fn notify_finished(&mut self, _now: SimTime) {}
+    fn finish_activity(self: Box<Self>, now: SimTime) -> NextPhase {
+        NextPhase::Leg(Box::new(PlannedDriver::new(
+            &self.schedule,
+            self.departure,
+            now,
+        )))
+    }
+}
+
 /// A driver with a plan of its own, which it copies from the schedule when its departure starts.
 /// Afterwards, it does not depend on the schedule. Like the drivers of SBB's deterministic transit
 /// engine, it follows the scheduled times.
@@ -46,14 +144,21 @@ pub struct PlannedDriver {
     next_time: SimTime,
 }
 
-/// The departure of a driver: what its events need and, for each stop, the facility and the
-/// scheduled times.
+/// The departure of a driver: what its leg and its events need and, for each stop, the facility,
+/// the link and the scheduled times.
 struct DriverPlan {
     id: Id<InternalPerson>,
     mode: Id<String>,
-    destination_link: Id<Link>,
+    vehicle: Id<InternalVehicle>,
     line: Id<TransitLine>,
+    route: Id<TransitRoute>,
+    departure: Id<TransitDeparture>,
+    start_link: Id<Link>,
+    destination_link: Id<Link>,
+    /// The type of the activity after the departure.
+    activity_type: Id<String>,
     stops: Vec<Id<TransitStopFacility>>,
+    stop_links: Vec<Id<Link>>,
     scheduled: Vec<StopTimes>,
 }
 
@@ -65,9 +170,15 @@ impl PlannedDriver {
         let plan = DriverPlan {
             id: departure.driver.clone(),
             mode: route.mode.clone(),
-            destination_link: route.end_link.clone(),
+            vehicle: departure.vehicle.clone(),
             line: route.line.clone(),
+            route: route.route.clone(),
+            departure: departure.id.clone(),
+            start_link: route.start_link.clone(),
+            destination_link: route.end_link.clone(),
+            activity_type: schedule.driver_activity_type().clone(),
             stops: route.stop_facilities.clone(),
+            stop_links: route.stops.iter().map(|stop| stop.link.clone()).collect(),
             scheduled: route
                 .stops
                 .iter()
@@ -95,17 +206,61 @@ impl SimulationAgentLogic for PlannedDriver {
     }
 }
 
-impl TransitDriverLogic for PlannedDriver {
+impl LegLogic for PlannedDriver {
     fn mode(&self) -> &Id<String> {
         &self.plan.mode
     }
+    fn routing_mode(&self) -> Option<&Id<String>> {
+        // Like in MATSim, transit drivers have no routing mode.
+        None
+    }
+    fn departure_link(&self) -> &Id<Link> {
+        &self.plan.start_link
+    }
+    /// The link of the current stop. From the last stop on, the link where the leg ends.
+    fn curr_link_id(&self) -> Option<&Id<Link>> {
+        if self.upcoming_stops().is_empty() {
+            Some(&self.plan.destination_link)
+        } else {
+            Some(&self.plan.stop_links[self.stop])
+        }
+    }
+    fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent> {
+        Err(self)
+    }
+    fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
+        Err(self)
+    }
+    fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+        Err(self)
+    }
+    fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent> {
+        Ok(self)
+    }
+    fn finish_leg(self: Box<Self>, _now: SimTime) -> NextPhase {
+        NextPhase::Activity(Box::new(FinishedDriver {
+            id: self.plan.id,
+            act_type: self.plan.activity_type,
+            link: self.plan.destination_link,
+        }))
+    }
+}
 
-    fn destination_link(&self) -> &Id<Link> {
-        &self.plan.destination_link
+impl TransitDriverLogic for PlannedDriver {
+    fn vehicle(&self) -> &Id<InternalVehicle> {
+        &self.plan.vehicle
     }
 
     fn line(&self) -> &Id<TransitLine> {
         &self.plan.line
+    }
+
+    fn route(&self) -> &Id<TransitRoute> {
+        &self.plan.route
+    }
+
+    fn departure(&self) -> &Id<TransitDeparture> {
+        &self.plan.departure
     }
 
     fn stop(&self) -> &Id<TransitStopFacility> {
@@ -135,11 +290,72 @@ impl TransitDriverLogic for PlannedDriver {
     }
 }
 
+/// A driver after its departure. Like MATSim's `TransitDriverAgentImpl`, it stays in an activity
+/// without end at the end link of the route. The mobsim drops it at its end, since it has no person.
+struct FinishedDriver {
+    id: Id<InternalPerson>,
+    act_type: Id<String>,
+    link: Id<Link>,
+}
+
+impl Identifiable<InternalPerson> for FinishedDriver {
+    fn id(&self) -> &Id<InternalPerson> {
+        &self.id
+    }
+}
+
+impl SimulationAgentLogic for FinishedDriver {
+    fn into_person(self: Box<Self>) -> Option<InternalPerson> {
+        None
+    }
+}
+
+impl ActivityLogic for FinishedDriver {
+    fn act_type(&self) -> &Id<String> {
+        &self.act_type
+    }
+    fn link_id(&self) -> &Id<Link> {
+        &self.link
+    }
+    fn coord(&self) -> &Coordinate {
+        &NO_COORDINATE
+    }
+    fn has_next_leg(&self) -> bool {
+        false
+    }
+    fn has_activity_events(&self) -> bool {
+        false
+    }
+    fn end_time(&self, _activity_start: SimTime) -> SimTime {
+        SimTime::max()
+    }
+    fn next_wakeup(&self, _now: SimTime) -> Option<SimTime> {
+        None
+    }
+    fn notify_started(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        _now: SimTime,
+    ) {
+    }
+    fn notify_wakeup(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        _end_time: SimTime,
+        _now: SimTime,
+    ) {
+    }
+    fn notify_finished(&mut self, _now: SimTime) {}
+    fn finish_activity(self: Box<Self>, _now: SimTime) -> NextPhase {
+        panic!("Transit driver {} has finished its departure.", self.id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::PlannedDriver;
+    use super::{PlannedDriver, WaitingDriver};
     use crate::simulation::agents::TransitDriverAgent;
-    use crate::simulation::pt::schedule::TransitSimSchedule;
+    use crate::simulation::pt::schedule::{DepartureIndex, TransitSimSchedule};
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
     use crate::simulation::scenario::transit::TransitSchedule;
@@ -147,12 +363,13 @@ mod tests {
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     const SIX: u64 = 6 * 3600;
 
-    /// The driver of the 06:00 departure of route 1to3: stop 1 (departure offset 0), stop 2a
-    /// (arrival 200 s, departure 240 s) and stop 3 (arrival 540 s).
-    fn driver(now: u64) -> TransitDriverAgent {
+    /// The tutorial schedule and the 06:00 departure of route 1to3: stop 1 (departure offset 0),
+    /// stop 2a (arrival 200 s, departure 240 s) and stop 3 (arrival 540 s).
+    fn tutorial_departure() -> (TransitSimSchedule, DepartureIndex) {
         let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
         let schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
@@ -163,6 +380,12 @@ mod tests {
             .indexed_departures()
             .find(|(_, departure)| departure.driver.external() == "pt_Blue Line_1to3_01")
             .unwrap();
+        (schedule, index)
+    }
+
+    /// The driver of the 06:00 departure of route 1to3, which it starts at `now`.
+    fn driver(now: u64) -> TransitDriverAgent {
+        let (schedule, index) = tutorial_departure();
         Box::new(PlannedDriver::new(
             &schedule,
             index,
@@ -204,7 +427,8 @@ mod tests {
 
         arrived(driver, SIX + 540);
         assert_eq!(("3", SIX + 540), state(driver));
-        assert_eq!("33", driver.destination_link().external());
+        // From the last stop on, the driver is on the last link of the route.
+        assert_eq!("33", driver.curr_link_id().unwrap().external());
     }
 
     #[deterministic_id_test]
@@ -223,5 +447,35 @@ mod tests {
     #[deterministic_id_test]
     fn driver_started_late_arrives_at_first_stop_right_away() {
         assert_eq!(("1", SIX + 10), state(&driver(SIX + 10)));
+    }
+
+    /// Like MATSim's drivers, a driver waits in an activity until its departure, drives it as its
+    /// leg and then stays in an activity without end. Its activities emit no events.
+    #[deterministic_id_test]
+    fn driver_waits_drives_its_departure_and_stays() {
+        let (schedule, index) = tutorial_departure();
+        let waiting = WaitingDriver::new_agent(Arc::new(schedule), index);
+        assert_eq!("pt_Blue Line_1to3_01", waiting.id().external());
+        assert_eq!("11", waiting.link_id().external());
+        assert_eq!(SIX, waiting.end_time(SimTime::default()).as_secs());
+        assert!(waiting.has_next_leg());
+        assert!(!waiting.has_activity_events());
+
+        let leg = waiting
+            .finish_activity(SimTime::from_secs(SIX))
+            .expect_leg();
+        assert_eq!("11", leg.departure_link().external());
+        assert_eq!(None, leg.routing_mode());
+        let driver = leg.try_into_transit_driver().unwrap();
+        assert_eq!("tr_1", driver.vehicle().external());
+        assert_eq!(("1", SIX), state(&driver));
+
+        let finished = driver
+            .finish_leg(SimTime::from_secs(SIX + 540))
+            .expect_activity();
+        assert_eq!("33", finished.link_id().external());
+        assert!(!finished.has_next_leg());
+        assert!(!finished.has_activity_events());
+        assert_eq!(None, finished.into_person());
     }
 }

@@ -9,7 +9,9 @@ use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
-use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitStopFacility};
+use crate::simulation::scenario::transit::{
+    TransitDeparture, TransitLine, TransitRoute, TransitStopFacility,
+};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 
@@ -53,6 +55,9 @@ pub trait ActivityLogic: SimulationAgentLogic {
     fn link_id(&self) -> &Id<Link>;
     fn coord(&self) -> &Coordinate;
     fn has_next_leg(&self) -> bool;
+    /// Whether the activity engine emits the start and the end of this activity. Transit drivers
+    /// wait in activities without events, as in MATSim.
+    fn has_activity_events(&self) -> bool;
     /// `activity_start` is the time when the activity engine received the agent. An activity with
     /// only a maximum duration may derive its end from it.
     fn end_time(&self, activity_start: SimTime) -> SimTime;
@@ -87,6 +92,7 @@ pub trait LegLogic: SimulationAgentLogic {
     fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent>;
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent>;
     fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent>;
+    fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent>;
 
     fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase;
 }
@@ -146,12 +152,14 @@ pub trait StuckLogic: SimulationAgentLogic {
     fn stuck_mode(&self) -> Option<&Id<String>>;
 }
 
-pub trait TransitDriverLogic: SimulationAgentLogic {
-    /// The mode of the driver's leg, for its arrival at the end of the departure.
-    fn mode(&self) -> &Id<String>;
-    /// The link where the driver's leg ends, for its arrival at the end of the departure.
-    fn destination_link(&self) -> &Id<Link>;
+/// The leg of a transit driver is one departure. The mode and the links of the leg come from
+/// [`LegLogic`]; at the last stop, the current link is the link where the leg ends.
+pub trait TransitDriverLogic: LegLogic {
+    fn vehicle(&self) -> &Id<InternalVehicle>;
     fn line(&self) -> &Id<TransitLine>;
+    /// The route and the departure, for the event of the start of the departure.
+    fn route(&self) -> &Id<TransitRoute>;
+    fn departure(&self) -> &Id<TransitDeparture>;
     /// The stop at which the vehicle halts or which it approaches.
     fn stop(&self) -> &Id<TransitStopFacility>;
     fn upcoming_stops(&self) -> &[Id<TransitStopFacility>];

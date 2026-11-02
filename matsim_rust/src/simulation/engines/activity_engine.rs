@@ -60,16 +60,18 @@ impl ActivityEngine {
     ) -> Vec<ActivityAgent> {
         for agent in &mut end_agents {
             let act = agent.as_ref();
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &ActivityEndEventBuilder::default()
-                    .time(now)
-                    .person(agent.id().clone())
-                    .link(act.link_id().clone())
-                    .act_type(act.act_type().clone())
-                    .coordinate(act.coord().clone())
-                    .build()
-                    .unwrap(),
-            );
+            if act.has_activity_events() {
+                self.comp_env.events_manager_borrow_mut().process_event(
+                    &ActivityEndEventBuilder::default()
+                        .time(now)
+                        .person(agent.id().clone())
+                        .link(act.link_id().clone())
+                        .act_type(act.act_type().clone())
+                        .coordinate(act.coord().clone())
+                        .build()
+                        .unwrap(),
+                );
+            }
             ActivityEngine::notify_act_end(agent, now);
         }
         end_agents
@@ -79,16 +81,18 @@ impl ActivityEngine {
         // emmit act start event
         let now_time = self.clock.tick_to_time(now);
         let act = agent.as_ref();
-        self.comp_env.events_manager_borrow_mut().process_event(
-            &ActivityStartEventBuilder::default()
-                .time(now_time)
-                .person(agent.id().clone())
-                .link(act.link_id().clone())
-                .act_type(act.act_type().clone())
-                .coordinate(act.coord().clone())
-                .build()
-                .unwrap(),
-        );
+        if act.has_activity_events() {
+            self.comp_env.events_manager_borrow_mut().process_event(
+                &ActivityStartEventBuilder::default()
+                    .time(now_time)
+                    .person(agent.id().clone())
+                    .link(act.link_id().clone())
+                    .act_type(act.act_type().clone())
+                    .coordinate(act.coord().clone())
+                    .build()
+                    .unwrap(),
+            );
+        }
 
         agent.notify_started(&mut self.comp_env, now_time);
         self.asleep_q
@@ -288,6 +292,9 @@ mod tests {
         }
         fn has_next_leg(&self) -> bool {
             false
+        }
+        fn has_activity_events(&self) -> bool {
+            true
         }
         fn end_time(&self, _activity_start: SimTime) -> SimTime {
             self.end

@@ -7,7 +7,7 @@ use crate::simulation::agents::agent::ReadOnlyPerson;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
     NextPhase, PassengerAgent, PassengerLogic, SimulationAgentLogic, StuckLogic,
-    TeleportationAgent, TeleportationLogic, TransitTeleportation,
+    TeleportationAgent, TeleportationLogic, TransitDriverAgent, TransitTeleportation,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
@@ -243,6 +243,9 @@ impl ActivityLogic for PlanBasedSimulationLogic {
     fn has_next_leg(&self) -> bool {
         self.next_leg().is_some()
     }
+    fn has_activity_events(&self) -> bool {
+        true
+    }
     fn end_time(&self, _activity_start: SimTime) -> SimTime {
         // The end time is fixed when the activity starts, see `advance`.
         self.activity_end_time.unwrap()
@@ -302,6 +305,9 @@ impl LegLogic for PlanBasedSimulationLogic {
         } else {
             Err(self)
         }
+    }
+    fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent> {
+        Err(self)
     }
     fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
         if self.advance(now) {
@@ -607,6 +613,9 @@ impl ActivityLogic for AdaptivePlanBasedSimulationLogic {
     fn has_next_leg(&self) -> bool {
         self.delegate.has_next_leg()
     }
+    fn has_activity_events(&self) -> bool {
+        self.delegate.has_activity_events()
+    }
     fn end_time(&self, activity_start: SimTime) -> SimTime {
         self.delegate.end_time(activity_start)
     }
@@ -678,6 +687,9 @@ impl LegLogic for AdaptivePlanBasedSimulationLogic {
         } else {
             Err(self)
         }
+    }
+    fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent> {
+        Err(self)
     }
     fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
         if self.delegate.advance(now) {

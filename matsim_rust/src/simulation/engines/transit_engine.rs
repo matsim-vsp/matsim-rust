@@ -1,20 +1,18 @@
-use crate::simulation::agents::{EndTime, LegAgent, PassengerAgent};
+use crate::simulation::agents::{EndTime, LegAgent, PassengerAgent, TransitDriverAgent};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::{
     emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
 };
 use crate::simulation::events::{
-    AgentWaitingForPtEventBuilder, PersonArrivalEventBuilder, PersonDepartureEventBuilder,
-    PersonEntersVehicleEventBuilder, PersonLeavesVehicleEventBuilder,
-    TransitDriverStartsEventBuilder, VehicleArrivesAtFacilityEventBuilder,
-    VehicleDepartsAtFacilityEventBuilder,
+    AgentWaitingForPtEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
+    PersonLeavesVehicleEventBuilder, TransitDriverStartsEventBuilder,
+    VehicleArrivesAtFacilityEventBuilder, VehicleDepartsAtFacilityEventBuilder,
 };
 use crate::simulation::messaging::messages::TransitVehicleMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
-use crate::simulation::pt::driver::PlannedDriver;
-use crate::simulation::pt::schedule::{DepartureIndex, TransitSimSchedule};
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::TransitVehicle;
@@ -29,10 +27,6 @@ pub(crate) struct TransitEngine {
     rank: u32,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
-    /// Departures whose first stop is on this partition, sorted by time and departure index.
-    /// TODO: This should not be done by the transit engine. PT agents should start with an activity. They start their leg when their first leg is scheduled.
-    starts: Vec<DepartureIndex>,
-    next_start: usize,
     /// Vehicles on their way to a stop, due at their arrival.
     approaching: TimeQueue<TransitVehicle, ()>,
     /// Vehicles that halt at a stop, due at their departure.
@@ -46,8 +40,8 @@ pub(crate) struct TransitEngine {
 /// What leaves the transit engine in a step.
 #[derive(Default)]
 pub(crate) struct TransitStepResult {
-    /// Passengers who alighted. They end their leg.
-    pub(crate) alighted: Vec<PassengerAgent>,
+    /// Passengers who alighted and drivers whose departure ended. They end their leg.
+    pub(crate) arrived: Vec<LegAgent>,
     /// Vehicles that left for a stop on another partition, with that partition.
     pub(crate) leaving: Vec<(u32, TransitVehicleMessage)>,
 }
@@ -97,13 +91,6 @@ impl TransitEngine {
         comp_env: ThreadLocalComputationalEnvironment,
         clock: SimClock,
     ) -> Self {
-        let mut starts: Vec<_> = schedule
-            .indexed_departures()
-            .filter(|(_, departure)| schedule.route(departure.route).stops[0].partition == rank)
-            .map(|(index, _)| index)
-            .collect();
-        starts.sort_by_key(|&index| (schedule.departure(index).time, index));
-
         // Create empty state for each stop.
         let stops = std::iter::repeat_with(StopState::default)
             .take(schedule.num_stops())
@@ -114,8 +101,6 @@ impl TransitEngine {
             rank,
             comp_env,
             clock,
-            starts,
-            next_start: 0,
             approaching: TimeQueue::new(),
             departing: TimeQueue::new(),
             stops,
@@ -158,20 +143,19 @@ impl TransitEngine {
         self.approaching.add_with_order(vehicle, now, order);
     }
 
-    /// Performs one step and returns the passengers who alighted and the vehicles that left for
-    /// another partition.
+    /// Performs one step and returns the agents who arrived and the vehicles that left for another
+    /// partition.
     #[hotpath::measure]
     pub(crate) fn do_step(&mut self, now: Tick) -> TransitStepResult {
         let now = self.clock.tick_to_time(now);
         let mut result = TransitStepResult::default();
 
-        self.start_departures(now);
         self.start_waiting(now);
         for vehicle in self.approaching.pop(now) {
-            self.arrive(vehicle, now, &mut result.alighted);
+            self.arrive(vehicle, now, &mut result.arrived);
         }
         for halting in self.departing.pop(now) {
-            self.depart(halting, now, &mut result.leaving);
+            self.depart(halting, now, &mut result);
         }
         result
     }
@@ -194,60 +178,48 @@ impl TransitEngine {
         agents.into_iter().map(|agent| agent as LegAgent).collect()
     }
 
-    fn start_departures(&mut self, now: SimTime) {
-        let schedule = self.schedule.clone();
-        while let Some(&index) = self.starts.get(self.next_start) {
-            let departure = schedule.departure(index);
-            if departure.time > now {
-                break;
-            }
-            self.next_start += 1;
+    /// A driver starts its departure. It enters its vehicle, which approaches the first stop. The
+    /// engine emits the start of the departure, the departure of the driver's leg and its entering
+    /// the vehicle, in this order as MATSim does.
+    pub(crate) fn receive_driver(&mut self, now: Tick, driver: TransitDriverAgent) {
+        let now = self.clock.tick_to_time(now);
+        let mut events = self.comp_env.events_manager_borrow_mut();
+        events.process_event(
+            &TransitDriverStartsEventBuilder::default()
+                .time(now)
+                .driver(driver.id().clone())
+                .vehicle(driver.vehicle().clone())
+                .transit_line(driver.line().clone())
+                .transit_route(driver.route().clone())
+                .departure(driver.departure().clone())
+                .build()
+                .unwrap(),
+        );
+        events.process_event(
+            &PersonDepartureEventBuilder::default()
+                .time(now)
+                .person(driver.id().clone())
+                .link(driver.departure_link().clone())
+                .leg_mode(driver.mode().clone())
+                .build()
+                .unwrap(),
+        );
+        events.process_event(
+            &PersonEntersVehicleEventBuilder::default()
+                .time(now)
+                .person(driver.id().clone())
+                .vehicle(driver.vehicle().clone())
+                .build()
+                .unwrap(),
+        );
+        drop(events);
 
-            let route = schedule.route(departure.route);
-            let mut events = self.comp_env.events_manager_borrow_mut();
-            events.process_event(
-                &TransitDriverStartsEventBuilder::default()
-                    .time(now)
-                    .driver(departure.driver.clone())
-                    .vehicle(departure.vehicle.clone())
-                    .transit_line(route.line.clone())
-                    .transit_route(route.route.clone())
-                    .departure(departure.id.clone())
-                    .build()
-                    .unwrap(),
-            );
-            events.process_event(
-                &PersonDepartureEventBuilder::default()
-                    .time(now)
-                    .person(departure.driver.clone())
-                    .link(route.start_link.clone())
-                    .leg_mode(route.mode.clone())
-                    .build()
-                    .unwrap(),
-            );
-            events.process_event(
-                &PersonEntersVehicleEventBuilder::default()
-                    .time(now)
-                    .person(departure.driver.clone())
-                    .vehicle(departure.vehicle.clone())
-                    .build()
-                    .unwrap(),
-            );
-            drop(events);
-
-            let driver = Box::new(PlannedDriver::new(&schedule, index, now));
-            let vehicle = TransitVehicle::new(departure.vehicle.clone(), driver);
-            let order = order(&vehicle);
-            self.approaching.add_with_order(vehicle, now, order);
-        }
+        let vehicle = TransitVehicle::new(driver.vehicle().clone(), driver);
+        let order = order(&vehicle);
+        self.approaching.add_with_order(vehicle, now, order);
     }
 
-    fn arrive(
-        &mut self,
-        mut vehicle: TransitVehicle,
-        now: SimTime,
-        alighted: &mut Vec<PassengerAgent>,
-    ) {
+    fn arrive(&mut self, mut vehicle: TransitVehicle, now: SimTime, alighted: &mut Vec<LegAgent>) {
         let stop = vehicle.driver().stop().clone();
         self.comp_env.events_manager_borrow_mut().process_event(
             &VehicleArrivesAtFacilityEventBuilder::default()
@@ -271,7 +243,7 @@ impl TransitEngine {
                         .unwrap(),
                 );
                 passenger.notify_left_vehicle(now);
-                alighted.push(passenger);
+                alighted.push(passenger as LegAgent);
             } else {
                 vehicle.add_passenger(passenger);
             }
@@ -289,12 +261,7 @@ impl TransitEngine {
         self.departing.add_with_order(halting, now, order);
     }
 
-    fn depart(
-        &mut self,
-        halting: HaltingVehicle,
-        now: SimTime,
-        leaving: &mut Vec<(u32, TransitVehicleMessage)>,
-    ) {
+    fn depart(&mut self, halting: HaltingVehicle, now: SimTime, result: &mut TransitStepResult) {
         let HaltingVehicle {
             mut vehicle,
             stop,
@@ -313,7 +280,7 @@ impl TransitEngine {
         );
 
         if vehicle.driver().upcoming_stops().is_empty() {
-            self.finish(vehicle, now);
+            result.arrived.push(self.finish(vehicle, now));
             return;
         }
 
@@ -328,7 +295,7 @@ impl TransitEngine {
             let order = order(&vehicle);
             self.approaching.add_with_order(vehicle, now, order);
         } else {
-            leaving.push((to, self.send(vehicle, to, now)));
+            result.leaving.push((to, self.send(vehicle, to, now)));
         }
     }
 
@@ -350,8 +317,9 @@ impl TransitEngine {
         TransitVehicleMessage::new(vehicle, attachments)
     }
 
-    /// The vehicle left its last stop: the driver leaves the vehicle and ends its leg.
-    fn finish(&mut self, vehicle: TransitVehicle, now: SimTime) {
+    /// The vehicle left its last stop: the driver leaves the vehicle and ends its leg. The vehicle
+    /// is dropped.
+    fn finish(&mut self, vehicle: TransitVehicle, now: SimTime) -> LegAgent {
         assert!(
             vehicle.passengers().is_empty(),
             "Passengers {:?} are still in transit vehicle {} after its last stop.",
@@ -362,25 +330,15 @@ impl TransitEngine {
                 .collect::<Vec<_>>(),
             vehicle.id()
         );
-        let driver = vehicle.driver();
-        let mut events = self.comp_env.events_manager_borrow_mut();
-        events.process_event(
+        self.comp_env.events_manager_borrow_mut().process_event(
             &PersonLeavesVehicleEventBuilder::default()
                 .time(now)
-                .person(driver.id().clone())
+                .person(vehicle.driver().id().clone())
                 .vehicle(vehicle.id().clone())
                 .build()
                 .unwrap(),
         );
-        events.process_event(
-            &PersonArrivalEventBuilder::default()
-                .time(now)
-                .person(driver.id().clone())
-                .link(driver.destination_link().clone())
-                .leg_mode(driver.mode().clone())
-                .build()
-                .unwrap(),
-        );
+        vehicle.into_driver()
     }
 
     /// Lets the passengers at `stop` board who want to take `vehicle`, in the order in which they
@@ -469,16 +427,17 @@ impl TransitEngine {
 #[cfg(test)]
 mod tests {
     use super::TransitEngine;
-    use crate::simulation::agents::PassengerAgent;
+    use crate::simulation::agents::{LegAgent, PassengerAgent};
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{PersonEntersVehicleEvent, PersonLeavesVehicleEvent};
     use crate::simulation::id::Id;
+    use crate::simulation::pt::driver::PlannedDriver;
     use crate::simulation::pt::schedule::TransitSimSchedule;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
     use crate::simulation::scenario::transit::TransitSchedule;
     use crate::simulation::scenario::vehicles::Garage;
-    use crate::simulation::time::{SimClock, Tick};
+    use crate::simulation::time::{SimClock, SimTime, Tick};
     use crate::test_utils::create_pt_agent;
     use macros::deterministic_id_test;
     use std::cell::RefCell;
@@ -545,6 +504,19 @@ mod tests {
             .collect()
     }
 
+    /// Starts the departures of `tick` whose first stop is on the partition of `engine`, as the
+    /// leg engine does when the activities of their drivers end.
+    fn start_drivers(engine: &mut TransitEngine, tick: u64) {
+        let now = SimTime::from_secs(tick);
+        let schedule = engine.schedule.clone();
+        for (index, departure) in schedule.departures_starting_on(engine.rank) {
+            if departure.time == now {
+                let driver = Box::new(PlannedDriver::new(&schedule, index, now));
+                engine.receive_driver(Tick::new(tick), driver);
+            }
+        }
+    }
+
     /// Runs the engines, one per partition, from 06:00 up to and including `until`. Each
     /// passenger starts its leg in its tick on the partition of its stop. Vehicles that leave for
     /// another partition arrive there after the step of the same tick, as with `send_recv`.
@@ -553,10 +525,13 @@ mod tests {
         engines: &mut [TransitEngine],
         mut passengers: Vec<(u64, PassengerAgent)>,
         until: u64,
-    ) -> Vec<(u64, PassengerAgent)> {
+    ) -> Vec<(u64, LegAgent)> {
         let mut alighted = Vec::new();
         for tick in SIX..=until {
             let now = Tick::new(tick);
+            for engine in engines.iter_mut() {
+                start_drivers(engine, tick);
+            }
             for (_, passenger) in passengers.extract_if(.., |(start, _)| *start == tick) {
                 let engine = engines
                     .iter_mut()
@@ -569,7 +544,11 @@ mod tests {
             let mut leaving = Vec::new();
             for (from, engine) in engines.iter_mut().enumerate() {
                 let step = engine.do_step(now);
-                alighted.extend(step.alighted.into_iter().map(|passenger| (tick, passenger)));
+                let passengers = step
+                    .arrived
+                    .into_iter()
+                    .filter(|agent| !agent.id().external().starts_with("pt_"));
+                alighted.extend(passengers.map(|passenger| (tick, passenger)));
                 leaving.extend(step.leaving.into_iter().map(|left| (from, left)));
             }
             for (from, (to, message)) in leaving {
@@ -678,6 +657,7 @@ mod tests {
         // The 06:00 departure leaves stop 2a at 06:04 for stop 3 on partition 1.
         let mut leaving = Vec::new();
         for tick in SIX..=SIX + 240 {
+            start_drivers(&mut engines[0], tick);
             leaving.extend(engines[0].do_step(Tick::new(tick)).leaving);
         }
         assert_eq!(leaving.len(), 1);

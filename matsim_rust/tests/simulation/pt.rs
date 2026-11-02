@@ -115,7 +115,7 @@ fn test_pt_adaptive(pop_path: PathBuf) {
     let controller = ControllerBuilder::default_with_scenario(scenario)
         .external_services(services)
         .global_barrier(global_barrier)
-        .agent_source(PreplanningHorizonAgentSource)
+        .agent_sources(vec![Arc::new(PreplanningHorizonAgentSource)])
         .adapter_handles(vec![
             AdapterHandleBuilder::default()
                 .shutdown_sender(shutdown)

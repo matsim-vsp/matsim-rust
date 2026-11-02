@@ -222,7 +222,7 @@ mod tests {
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
         LegAgent, LegLogic, NetworkDriverAgent, NextPhase, PassengerAgent, SimulationAgentLogic,
-        TeleportationAgent, TeleportationLogic, TransitTeleportation,
+        TeleportationAgent, TeleportationLogic, TransitDriverAgent, TransitTeleportation,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
@@ -402,6 +402,9 @@ mod tests {
             Ok(self)
         }
         fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent> {
             Err(self)
         }
         fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {

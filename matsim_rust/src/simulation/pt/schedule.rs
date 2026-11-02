@@ -10,6 +10,9 @@ use itertools::Itertools;
 use std::time::Duration;
 use tracing::info;
 
+/// MATSim's `PtConstants.TRANSIT_ACTIVITY_TYPE`, which MATSim's transit drivers use as well.
+const DRIVER_ACTIVITY_TYPE: &str = "pt interaction";
+
 /// Dense, simulation-ready view of the transit schedule. It is built once, before the first
 /// iteration, and shared by all partitions. [`TransitSchedule`] stays the model of the input and
 /// output files, like [`Network`] beside the network partitions of the mobsim; its maps are only
@@ -29,6 +32,8 @@ pub struct TransitSimSchedule {
     /// The partition of each stop facility, indexed by its internal id. `None` for facilities that
     /// no route serves.
     stop_partitions: Vec<Option<u32>>,
+    /// See [`Self::driver_activity_type`]. `None` for the empty schedule.
+    driver_activity_type: Option<Id<String>>,
 }
 
 /// Index of a route in [`TransitSimSchedule::routes`]. Only the schedule creates such indices, so
@@ -180,6 +185,9 @@ impl TransitSimSchedule {
             routes: sim_routes,
             departures,
             stop_partitions,
+            // Created here, so that the id does not depend on which partition creates its drivers
+            // first.
+            driver_activity_type: Some(Id::create(DRIVER_ACTIVITY_TYPE)),
         };
         result.assert_vehicles_are_not_shared_at_the_same_time();
         info!(
@@ -204,6 +212,24 @@ impl TransitSimSchedule {
 
     pub fn departure(&self, index: DepartureIndex) -> &SimDeparture {
         &self.departures[index.0 as usize]
+    }
+
+    /// The departures whose first stop is on `partition`, with their indices. Their drivers start
+    /// there.
+    pub fn departures_starting_on(
+        &self,
+        partition: u32,
+    ) -> impl Iterator<Item = (DepartureIndex, &SimDeparture)> {
+        self.indexed_departures().filter(move |(_, departure)| {
+            self.route(departure.route).stops[0].partition == partition
+        })
+    }
+
+    /// The type of the activities in which drivers wait for their departure and stay after it.
+    pub fn driver_activity_type(&self) -> &Id<String> {
+        self.driver_activity_type
+            .as_ref()
+            .expect("The empty transit schedule has no drivers.")
     }
 
     /// All departures with their indices, in the order of the indices.

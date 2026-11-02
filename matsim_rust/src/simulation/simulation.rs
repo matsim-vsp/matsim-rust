@@ -11,8 +11,8 @@ use crate::simulation::framework_events::MobsimEvent;
 use crate::simulation::messaging::messages::InternalSyncMessage;
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
-use crate::simulation::population::agent_source::DynAgentSource;
-use crate::simulation::scenario::{MobsimInput, MobsimScenarioPartition};
+use crate::simulation::population::agent_source::{AgentSet, DynAgentSource};
+use crate::simulation::scenario::{MobsimInput, MobsimScenarioPartition, PopulationShard};
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -206,6 +206,44 @@ where
     }
 }
 
+/// Asks the agent sources one after the other. Every person of `population` must end up with exactly
+/// one agent, and every transit departure that starts on the partition with its driver.
+fn create_agents(
+    sources: &[DynAgentSource],
+    population: &mut PopulationShard,
+    partition: &MobsimScenarioPartition,
+) -> AgentSet {
+    let mut agents = AgentSet::default();
+    for source in sources {
+        for (id, agent) in source.create_agents(population, partition) {
+            assert!(
+                !agents.contains_key(&id),
+                "Two agent sources created an agent with id {id}."
+            );
+            agents.insert(id, agent);
+        }
+    }
+    assert!(
+        population.population.persons.is_empty(),
+        "No agent source created agents for {} persons, e.g. {}.",
+        population.population.persons.len(),
+        population.population.persons.keys().next().unwrap()
+    );
+    for (_, departure) in partition
+        .scenario
+        .transit_sim_schedule
+        .departures_starting_on(partition.rank)
+    {
+        assert!(
+            agents.contains_key(&departure.driver),
+            "No agent source created transit driver {}. Add TransitDriverAgentSource to the agent \
+             sources.",
+            departure.driver
+        );
+    }
+    agents
+}
+
 impl<C: SimCommunicator + 'static> Debug for Simulation<C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -220,7 +258,7 @@ pub struct SimulationBuilder<C: SimCommunicator> {
     input: MobsimInput,
     net_message_broker: NetMessageBroker<C>,
     comp_env: ThreadLocalComputationalEnvironment,
-    agent_source: DynAgentSource,
+    agent_sources: Vec<DynAgentSource>,
 }
 
 impl<C: SimCommunicator> SimulationBuilder<C> {
@@ -228,28 +266,30 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         input: MobsimInput,
         net_message_broker: NetMessageBroker<C>,
         comp_env: ThreadLocalComputationalEnvironment,
-        agent_source: DynAgentSource,
+        agent_sources: Vec<DynAgentSource>,
     ) -> Self {
         SimulationBuilder {
             input,
             net_message_broker,
             comp_env,
-            agent_source,
+            agent_sources,
         }
     }
 
     pub fn build(self) -> Simulation<C> {
-        let clock = SimClock::new(self.input.partition.scenario.config.qsim().ticks_per_second);
+        let MobsimInput {
+            partition,
+            mut population,
+        } = self.input;
+        let clock = SimClock::new(partition.scenario.config.qsim().ticks_per_second);
 
-        let agents = self
-            .agent_source
-            .create_agents(self.input.population, &self.input.partition);
+        let agents = create_agents(&self.agent_sources, &mut population, &partition);
 
         let MobsimScenarioPartition {
             scenario,
             network_partition,
             ..
-        } = self.input.partition;
+        } = partition;
 
         let activity_engine = ActivityEngineBuilder::new(
             agents.into_values().collect(),

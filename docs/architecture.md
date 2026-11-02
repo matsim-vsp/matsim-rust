@@ -196,24 +196,35 @@ link and its offsets. Building the schedule panics if it cannot be simulated, e.
 serves two departures at the same time. Plan preparation requires no travel times for transit legs, but a transit route
 that the schedule serves.
 
+Each departure has a driver, an agent without a person. Like the drivers of MATSim's transit engines, it passes through
+three phases: it waits in a `pt interaction` activity at the start link of its route until the departure time, drives
+the departure as its leg and then stays in an activity without end until the mobsim drops it. Its activities emit no
+events. `TransitDriverAgentSource` creates the drivers of the departures whose first stop is on a partition. A mobsim
+asks a list of agent sources one after the other, by default `PopulationAgentSource` and `TransitDriverAgentSource`;
+each source takes the persons of the population for which it creates agents. A driver that is still waiting when the
+mobsim ends becomes stuck, as in MATSim's activity engine.
+
 The `TransitEngine` is part of the `LegEngine` and runs after the network moves and before the messages are exchanged.
-At each departure, it creates a driver and a `TransitVehicle`. There are no vehicle blocks (`Umlauf` in MATSim): a
-vehicle that serves several departures is created anew for each of them. The driver is an agent without a person
-(`TransitDriverLogic`). When its departure starts, it copies the departure from the schedule into a plan of its own and
-no longer depends on the schedule. It knows its stops and tells the engine when the vehicle arrives and departs: at the
-departure time plus the arrival offset, but not before the earliest arrival the engine allows, and at the departure time
-plus the departure offset, but not before the arrival. At the last stop, the driver leaves the vehicle and is dropped.
+The `LegEngine` passes it every agent that offers the role of a driver (`TransitDriverLogic`), whatever its mode, and
+the legs of passenger modes that offer the role of a passenger (`PassengerLogic`). When a driver's leg starts, the
+engine creates a `TransitVehicle` for it. There are no vehicle blocks (`Umlauf` in MATSim): a vehicle that serves
+several departures is created anew for each of them. When its activity ends, the driver copies its departure from the
+schedule into a plan of its own and no longer depends on the schedule. It knows its stops and tells the engine when the
+vehicle arrives and departs: at the departure time plus the arrival offset, but not before the earliest arrival the
+engine allows, and at the departure time plus the departure offset, but not before the arrival. At the last stop, the
+driver leaves the vehicle and ends its leg; drivers that are still in a vehicle when the mobsim ends are dropped, as in
+SBB's engine.
 
 Passengers are agents with the role `PassengerLogic`. The engine asks a riding passenger at each stop whether it
 alights, and a waiting passenger about each vehicle at its stop whether it boards. Plan-based agents follow MATSim's
 `checkLineAndStop`: they board any vehicle of the planned line that still serves their egress stop and alight there. The
-engine only works when something is due; starts, arrivals and departures come from queues. Within a tick, it starts
-departures, lets the passengers wait who started their leg in this tick, and then handles arrivals and departures. A
-vehicle that departs in a tick thus takes passengers who start to wait in this tick. Their walk to the stop ended in an
-earlier tick, so QSim would have them at the stop as well (see [agent-contract.md](agent-contract.md)). At a stop,
-passengers alight before others board. A vehicle asks the waiting passengers when it arrives and, like SBB's engine,
-those who came while it halted when it departs. Simultaneous vehicles are handled in the order of their drivers' ids, and
-waiting passengers board in the order of their arrival tick and id.
+engine only works when something is due; arrivals and departures come from queues. Within a tick, it lets the passengers
+wait who started their leg in this tick, and then handles arrivals and departures. A vehicle that departs in a tick thus
+takes passengers who start to wait in this tick. Their walk to the stop ended in an earlier tick, so QSim would have
+them at the stop as well (see [agent-contract.md](agent-contract.md)). At a stop, passengers alight before others board.
+A vehicle asks the waiting passengers when it arrives and, like SBB's engine, those who came while it halted when it
+departs. Simultaneous vehicles are handled in the order of their drivers' ids, and waiting passengers board in the order
+of their arrival tick and id.
 
 If the next stop is on another partition, the vehicle, its driver, its passengers and their attachments are sent there.
 That partition may not be a neighbor, because links allowing no main mode, such as most transit links, do not make

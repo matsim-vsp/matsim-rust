@@ -167,4 +167,10 @@ impl TransitVehicle {
     pub fn take_passengers(&mut self) -> Vec<PassengerAgent> {
         std::mem::take(&mut self.passengers)
     }
+
+    /// Drops the vehicle and returns its driver, e.g. after the last stop. Passengers still in the
+    /// vehicle are dropped as well.
+    pub fn into_driver(self) -> TransitDriverAgent {
+        self.driver
+    }
 }
