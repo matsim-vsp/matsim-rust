@@ -7,9 +7,6 @@
 use super::SimulationAgentLogic;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
-use crate::simulation::pt::schedule::{
-    DepartureIndex, SimDeparture, SimRouteStop, SimTransitRoute,
-};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
@@ -156,13 +153,15 @@ pub trait StuckLogic: SimulationAgentLogic {
 /// driver knows where its vehicle is and decides when it arrives and departs; the engine moves the
 /// vehicle and lets passengers board and alight.
 pub trait TransitDriverLogic: SimulationAgentLogic {
-    fn departure_index(&self) -> DepartureIndex;
-    fn departure(&self) -> &SimDeparture;
-    fn route(&self) -> &SimTransitRoute;
+    /// The mode of the driver's leg, for its arrival at the end of the departure.
+    fn mode(&self) -> &Id<String>;
+    /// The link where the driver's leg ends, for its arrival at the end of the departure.
+    fn destination_link(&self) -> &Id<Link>;
+    fn line(&self) -> &Id<TransitLine>;
     /// The stop at which the vehicle halts or which it approaches.
-    fn current_stop(&self) -> &SimRouteStop;
+    fn stop(&self) -> &Id<TransitStopFacility>;
     /// The stops after the current stop. Empty at the last stop.
-    fn upcoming_stops(&self) -> &[SimRouteStop];
+    fn upcoming_stops(&self) -> &[Id<TransitStopFacility>];
     /// The arrival at the current stop while the vehicle approaches it, the departure while it
     /// halts there.
     fn next_time(&self) -> SimTime;

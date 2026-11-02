@@ -1,10 +1,13 @@
-use crate::simulation::agents::{LegAgent, LegLogic, NetworkDriverAgent, TeleportationAgent};
-use crate::simulation::config::QSim;
+use crate::simulation::agents::{
+    LegAgent, LegLogic, NetworkDriverAgent, PassengerAgent, TeleportationAgent,
+};
+use crate::simulation::config::{self, QSim, TransitSimulation};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_enter_events_for_vehicle;
-use crate::simulation::engines::leg_engine::ResponsibleEngine::{Network, Teleportation};
+use crate::simulation::engines::leg_engine::ResponsibleEngine::{Network, Teleportation, Transit};
 use crate::simulation::engines::network_engine::NetworkEngine;
 use crate::simulation::engines::teleportation_engine::TeleportationEngine;
+use crate::simulation::engines::transit_engine::TransitEngine;
 use crate::simulation::events::{
     PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
     PersonLeavesVehicleEventBuilder,
@@ -17,6 +20,7 @@ use crate::simulation::messaging::partition_change::{
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
 use crate::simulation::network::sim_network::SimNetworkPartition;
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::time::{SimClock, SimTime, Tick};
@@ -28,19 +32,31 @@ use tracing::instrument;
 enum ResponsibleEngine {
     Network(NetworkDriverAgent),
     Teleportation(TeleportationAgent),
+    Transit(PassengerAgent),
+}
+
+/// The engine that the leg engine prefers for the mode of a leg.
+#[derive(Clone, Copy)]
+enum PreferredEngine {
+    Network,
+    Transit,
+    Teleportation,
 }
 
 /// Policy belongs to the engine; capability conversion belongs to the current agent.
-fn select_execution(agent: LegAgent, main_mode: bool) -> ResponsibleEngine {
-    // If the leg mode is not a main mode, use teleportation in every case.
-    // Otherwise only an available network-driver capability permits network execution.
-    let agent = if main_mode {
-        match agent.try_into_network() {
+fn select_execution(agent: LegAgent, preferred: PreferredEngine) -> ResponsibleEngine {
+    // A main mode prefers the network, a transit passenger mode the transit engine. Only an
+    // available role permits that. Otherwise, and for all other modes, the leg is teleported.
+    let agent = match preferred {
+        PreferredEngine::Network => match agent.try_into_network() {
             Ok(driver) => return Network(driver),
             Err(agent) => agent,
-        }
-    } else {
-        agent
+        },
+        PreferredEngine::Transit => match agent.try_into_passenger() {
+            Ok(passenger) => return Transit(passenger),
+            Err(agent) => agent,
+        },
+        PreferredEngine::Teleportation => agent,
     };
     match agent.try_into_teleportation() {
         Ok(agent) => Teleportation(agent),
@@ -54,10 +70,13 @@ fn select_execution(agent: LegAgent, main_mode: bool) -> ResponsibleEngine {
 pub struct LegEngine<C: SimCommunicator> {
     teleportation_engine: TeleportationEngine,
     network_engine: NetworkEngine,
+    transit_engine: TransitEngine,
     garage: Arc<Garage>,
     net_message_broker: NetMessageBroker<C>,
     departure_handler: VehicularDepartureHandler,
     main_modes: IntSet<Id<String>>,
+    /// Leg modes that ride transit vehicles. Empty unless transit is simulated schedule based.
+    passenger_modes: IntSet<Id<String>>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
 }
@@ -66,8 +85,10 @@ impl<C: SimCommunicator> LegEngine<C> {
     pub fn new(
         network: SimNetworkPartition,
         garage: Arc<Garage>,
+        transit_schedule: Arc<TransitSimSchedule>,
         net_message_broker: NetMessageBroker<C>,
         config: &QSim,
+        transit: &config::Transit,
         comp_env: ThreadLocalComputationalEnvironment,
     ) -> Self {
         let clock = SimClock::new(config.ticks_per_second);
@@ -76,6 +97,19 @@ impl<C: SimCommunicator> LegEngine<C> {
             .iter()
             .map(|m| Id::<String>::get_from_ext(m))
             .collect();
+        // A mode without an id has no legs.
+        let passenger_modes: IntSet<Id<String>> = match transit.simulation {
+            TransitSimulation::Teleported => IntSet::default(),
+            TransitSimulation::ScheduleBased => transit
+                .passenger_modes
+                .iter()
+                .filter_map(|mode| Id::try_get_from_ext(mode))
+                .collect(),
+        };
+        assert!(
+            passenger_modes.is_disjoint(&main_modes),
+            "A mode cannot be both a main mode and a transit passenger mode."
+        );
 
         let departure_handler = VehicularDepartureHandler {
             comp_env: comp_env.clone(),
@@ -84,10 +118,17 @@ impl<C: SimCommunicator> LegEngine<C> {
         LegEngine {
             teleportation_engine: TeleportationEngine::new(comp_env.clone(), clock),
             network_engine: NetworkEngine::new(network, comp_env.clone(), clock),
+            transit_engine: TransitEngine::new(
+                transit_schedule,
+                net_message_broker.rank(),
+                comp_env.clone(),
+                clock,
+            ),
             garage,
             net_message_broker,
             departure_handler,
             main_modes,
+            passenger_modes,
             comp_env,
             clock,
         }
@@ -98,6 +139,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             .drain()
             .into_iter()
             .chain(self.teleportation_engine.drain())
+            .chain(self.transit_engine.drain())
             .collect()
     }
 
@@ -129,6 +171,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         let network_vehicles = self
             .network_engine
             .move_links(now, &mut self.net_message_broker);
+        let alighted_passengers = self.transit_engine.do_step(now);
 
         let sync_messages = self.send_recv(now);
 
@@ -179,6 +222,16 @@ impl<C: SimCommunicator> LegEngine<C> {
         let mut agents = vec![];
         agents.extend(self.publish_vehicular_end_events(now, network_vehicles));
         agents.extend(self.publish_teleported_end_events(now, teleported_vehicles));
+        // Passengers have left their vehicle already, so they only arrive, like teleported agents.
+        agents.extend(
+            self.publish_teleported_end_events(
+                now,
+                alighted_passengers
+                    .into_iter()
+                    .map(|agent| agent as LegAgent)
+                    .collect(),
+            ),
+        );
         agents
     }
 
@@ -281,10 +334,17 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .unwrap(),
         );
 
-        let main_mode = self.main_modes.contains(agent.mode());
-        match select_execution(agent, main_mode) {
+        let preferred = if self.passenger_modes.contains(agent.mode()) {
+            PreferredEngine::Transit
+        } else if self.main_modes.contains(agent.mode()) {
+            PreferredEngine::Network
+        } else {
+            PreferredEngine::Teleportation
+        };
+        match select_execution(agent, preferred) {
             Network(agent) => self.pass_to_leg(now, agent, true),
             Teleportation(agent) => self.pass_to_teleportation(now, agent),
+            Transit(agent) => self.transit_engine.receive_agent(agent),
         }
     }
 
@@ -376,7 +436,7 @@ mod tests {
     fn main_mode_uses_network_when_available() {
         let agent: LegAgent = create_agent(1, vec!["a", "b"]);
         let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
-        let Network(driver) = select_execution(agent, true) else {
+        let Network(driver) = select_execution(agent, PreferredEngine::Network) else {
             panic!("Expected network")
         };
         assert_eq!(address, std::ptr::from_ref(driver.as_ref()).cast::<()>());
@@ -386,7 +446,7 @@ mod tests {
     fn non_main_mode_teleports_even_a_network_route() {
         let agent: LegAgent = create_agent(1, vec!["a", "b"]);
         let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
-        let Teleportation(agent) = select_execution(agent, false) else {
+        let Teleportation(agent) = select_execution(agent, PreferredEngine::Teleportation) else {
             panic!("Expected teleportation")
         };
         assert_eq!(agent.destination_link().external(), "b");
@@ -410,7 +470,7 @@ mod tests {
             .finish_activity(SimTime::default())
             .expect_leg();
         let address = std::ptr::from_ref(agent.as_ref()).cast::<()>();
-        let Teleportation(agent) = select_execution(agent, true) else {
+        let Teleportation(agent) = select_execution(agent, PreferredEngine::Network) else {
             panic!("Expected teleportation")
         };
         assert_eq!(address, std::ptr::from_ref(agent.as_ref()).cast::<()>());
@@ -457,6 +517,9 @@ mod tests {
     #[deterministic_id_test]
     #[should_panic(expected = "Agent 1: no permitted leg execution capability")]
     fn missing_execution_capabilities_report_the_agent_id() {
-        select_execution(Box::new(Unsupported(create_agent(1, vec!["a"]))), true);
+        select_execution(
+            Box::new(Unsupported(create_agent(1, vec!["a"]))),
+            PreferredEngine::Network,
+        );
     }
 }

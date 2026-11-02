@@ -11,6 +11,7 @@ pub mod activity_engine;
 pub mod leg_engine;
 pub mod network_engine;
 pub mod teleportation_engine;
+pub mod transit_engine;
 
 fn emit_partition_leave_events_for_vehicle(
     comp_env: &mut ThreadLocalComputationalEnvironment,

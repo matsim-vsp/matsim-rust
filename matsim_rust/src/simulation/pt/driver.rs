@@ -4,7 +4,9 @@ use crate::simulation::id::Id;
 use crate::simulation::pt::schedule::{
     DepartureIndex, SimDeparture, SimRouteStop, SimTransitRoute, TransitSimSchedule,
 };
+use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
 use crate::simulation::time::SimTime;
 use std::sync::Arc;
 
@@ -53,6 +55,18 @@ impl ScheduledDriver {
         driver.next_time = stop_times(driver.departure(), driver.current_stop(), now).arrival;
         driver
     }
+
+    fn departure(&self) -> &SimDeparture {
+        self.schedule.departure(self.departure)
+    }
+
+    fn route(&self) -> &SimTransitRoute {
+        self.schedule.route(self.departure().route)
+    }
+
+    fn current_stop(&self) -> &SimRouteStop {
+        &self.route().stops[self.stop]
+    }
 }
 
 impl Identifiable<InternalPerson> for ScheduledDriver {
@@ -68,24 +82,24 @@ impl SimulationAgentLogic for ScheduledDriver {
 }
 
 impl TransitDriverLogic for ScheduledDriver {
-    fn departure_index(&self) -> DepartureIndex {
-        self.departure
+    fn mode(&self) -> &Id<String> {
+        &self.route().mode
     }
 
-    fn departure(&self) -> &SimDeparture {
-        self.schedule.departure(self.departure)
+    fn destination_link(&self) -> &Id<Link> {
+        &self.route().end_link
     }
 
-    fn route(&self) -> &SimTransitRoute {
-        self.schedule.route(self.departure().route)
+    fn line(&self) -> &Id<TransitLine> {
+        &self.route().line
     }
 
-    fn current_stop(&self) -> &SimRouteStop {
-        &self.route().stops[self.stop]
+    fn stop(&self) -> &Id<TransitStopFacility> {
+        &self.route().stop_facilities[self.stop]
     }
 
-    fn upcoming_stops(&self) -> &[SimRouteStop] {
-        &self.route().stops[self.stop + 1..]
+    fn upcoming_stops(&self) -> &[Id<TransitStopFacility>] {
+        &self.route().stop_facilities[self.stop + 1..]
     }
 
     fn next_time(&self) -> SimTime {
@@ -158,10 +172,7 @@ mod tests {
 
     /// The current stop and the next time.
     fn state(driver: &TransitDriverAgent) -> (&str, u64) {
-        (
-            driver.current_stop().facility.external(),
-            driver.next_time().as_secs(),
-        )
+        (driver.stop().external(), driver.next_time().as_secs())
     }
 
     #[deterministic_id_test]
@@ -169,7 +180,7 @@ mod tests {
         let mut driver = driver(SIX);
 
         assert_eq!("pt_Blue Line_1to3_01", driver.id().external());
-        assert_eq!("train", driver.route().mode.external());
+        assert_eq!("train", driver.mode().external());
         assert_eq!(("1", SIX), state(&driver));
 
         arrived(&mut driver, SIX);

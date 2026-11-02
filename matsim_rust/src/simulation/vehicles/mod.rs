@@ -1,5 +1,8 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{LegAgent, NetworkDriverAgent, NetworkDriverLogic};
+use crate::simulation::agents::{
+    LegAgent, NetworkDriverAgent, NetworkDriverLogic, PassengerAgent, TransitDriverAgent,
+    TransitDriverLogic,
+};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Link;
@@ -119,5 +122,48 @@ impl SimulationVehicle {
 impl Identifiable<InternalVehicle> for SimulationVehicle {
     fn id(&self) -> &Id<InternalVehicle> {
         self.id()
+    }
+}
+
+/// A vehicle of schedule-based transit. Unlike [`SimulationVehicle`], it keeps the roles of its
+/// driver and its passengers, because the transit engine asks them at every stop.
+pub struct TransitVehicle {
+    id: Id<InternalVehicle>,
+    driver: TransitDriverAgent,
+    passengers: Vec<PassengerAgent>,
+}
+
+impl TransitVehicle {
+    pub fn new(id: Id<InternalVehicle>, driver: TransitDriverAgent) -> Self {
+        Self {
+            id,
+            driver,
+            passengers: Vec::new(),
+        }
+    }
+
+    pub fn id(&self) -> &Id<InternalVehicle> {
+        &self.id
+    }
+
+    pub fn driver(&self) -> &dyn TransitDriverLogic {
+        self.driver.as_ref()
+    }
+
+    pub fn driver_mut(&mut self) -> &mut dyn TransitDriverLogic {
+        self.driver.as_mut()
+    }
+
+    pub fn passengers(&self) -> &[PassengerAgent] {
+        &self.passengers
+    }
+
+    pub fn add_passenger(&mut self, passenger: PassengerAgent) {
+        self.passengers.push(passenger);
+    }
+
+    /// Removes all passengers, e.g. to ask each of them whether it alights.
+    pub fn take_passengers(&mut self) -> Vec<PassengerAgent> {
+        std::mem::take(&mut self.passengers)
     }
 }

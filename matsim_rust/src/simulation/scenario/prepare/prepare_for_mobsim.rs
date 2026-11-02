@@ -394,20 +394,21 @@ fn pt_route_is_valid(schedule: &TransitSimSchedule, route: &InternalPtRoute) -> 
     else {
         return false;
     };
-    let stops = &transit_route.stops;
-    let Some(access) = stops
+    let facilities = &transit_route.stop_facilities;
+    let Some(access) = facilities
         .iter()
-        .position(|stop| stop.facility.external() == description.access_facility_id)
+        .position(|facility| facility.external() == description.access_facility_id)
     else {
         return false;
     };
-    let Some(egress) = stops[access + 1..]
+    let Some(egress) = facilities[access + 1..]
         .iter()
-        .position(|stop| stop.facility.external() == description.egress_facility_id)
+        .position(|facility| facility.external() == description.egress_facility_id)
         .map(|offset| access + 1 + offset)
     else {
         return false;
     };
+    let stops = &transit_route.stops;
     stops[access].link == *route.start_link() && stops[egress].link == *route.end_link()
 }
 

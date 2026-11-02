@@ -25,6 +25,9 @@ use tracing::info;
 pub struct TransitSimSchedule {
     routes: Vec<SimTransitRoute>,
     departures: Vec<SimDeparture>,
+    /// The partition of each stop facility, indexed by its internal id. `None` for facilities that
+    /// no route serves.
+    stop_partitions: Vec<Option<u32>>,
 }
 
 /// Index of a route in [`TransitSimSchedule::routes`]. Only the schedule creates such indices, so
@@ -63,12 +66,14 @@ pub struct SimTransitRoute {
     pub start_link: Id<Link>,
     /// Last link of the network route, or the link of the last stop if the route has no links.
     pub end_link: Id<Link>,
+    /// The facilities of the stops, in the order of `stops`. They are kept apart, so that a driver
+    /// can hand out the stops to come as a slice of ids.
+    pub stop_facilities: Vec<Id<TransitStopFacility>>,
     pub stops: Vec<SimRouteStop>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimRouteStop {
-    pub facility: Id<TransitStopFacility>,
     pub link: Id<Link>,
     /// Partition of `link`, i.e. the partition which handles the vehicle at this stop.
     pub partition: u32,
@@ -169,9 +174,11 @@ impl TransitSimSchedule {
             })
             .collect();
 
+        let stop_partitions = stop_partitions(&sim_routes);
         let result = Self {
             routes: sim_routes,
             departures,
+            stop_partitions,
         };
         result.assert_vehicles_are_not_shared_at_the_same_time();
         info!(
@@ -208,6 +215,20 @@ impl TransitSimSchedule {
 
     pub fn is_empty(&self) -> bool {
         self.routes.is_empty()
+    }
+
+    /// One more than the largest internal id of a stop facility that a route serves.
+    pub fn num_stops(&self) -> usize {
+        self.stop_partitions.len()
+    }
+
+    /// The partition that handles vehicles at `stop`.
+    pub fn stop_partition(&self, stop: &Id<TransitStopFacility>) -> u32 {
+        self.stop_partitions
+            .get(stop.internal() as usize)
+            .copied()
+            .flatten()
+            .unwrap_or_else(|| panic!("No transit route serves stop {stop}."))
     }
 
     /// Finds a route by the external ids of its line and route. The routes are sorted by these
@@ -302,7 +323,6 @@ impl SimTransitRoute {
                     };
                 let link = stop_link(&stop.facility_id, schedule, network);
                 SimRouteStop {
-                    facility: stop.facility_id.clone(),
                     partition: network.get_link(&link).partition,
                     link,
                     arrival_offset,
@@ -328,9 +348,30 @@ impl SimTransitRoute {
             mode: route.transport_mode.clone(),
             start_link,
             end_link,
+            stop_facilities: route
+                .stops
+                .iter()
+                .map(|stop| stop.facility_id.clone())
+                .collect(),
             stops,
         }
     }
+}
+
+/// The partition of each stop facility that a route serves, see [`TransitSimSchedule::stop_partition`].
+/// A facility has one link, so all routes agree on its partition.
+fn stop_partitions(routes: &[SimTransitRoute]) -> Vec<Option<u32>> {
+    let mut partitions = Vec::new();
+    for route in routes {
+        for (facility, stop) in route.stop_facilities.iter().zip(&route.stops) {
+            let index = facility.internal() as usize;
+            if partitions.len() <= index {
+                partitions.resize(index + 1, None);
+            }
+            partitions[index] = Some(stop.partition);
+        }
+    }
+    partitions
 }
 
 fn stop_link(
@@ -430,7 +471,7 @@ mod tests {
         assert_eq!(3, stops.len());
         assert_eq!(
             Id::<TransitStopFacility>::get_from_ext("2a"),
-            stops[1].facility
+            routes[0].stop_facilities[1]
         );
         assert_eq!(Id::<Link>::get_from_ext("12"), stops[1].link);
         assert_eq!(0, stops[1].partition);

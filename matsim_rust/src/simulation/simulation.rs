@@ -261,8 +261,10 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         let leg_engine = LegEngine::new(
             network_partition,
             scenario.garage.clone(),
+            scenario.transit_sim_schedule.clone(),
             self.net_message_broker,
             scenario.config.qsim(),
+            scenario.config.transit(),
             self.comp_env.clone(),
         );
 
