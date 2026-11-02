@@ -27,8 +27,10 @@ Read these files before making broad changes:
 - `matsim_rust/src/simulation/`: core simulation code.
 - `matsim_rust/src/simulation/controller/`: iteration orchestration and scenario
   transitions.
-- `matsim_rust/src/simulation/engines/`: activity, leg, network, and teleportation
-  engines.
+- `matsim_rust/src/simulation/engines/`: activity, leg, network, teleportation, and
+  transit engines.
+- `matsim_rust/src/simulation/pt/`: the dense transit schedule and the transit
+  drivers of schedule-based transit.
 - `matsim_rust/src/simulation/network/`: the runtime network, capacities,
   partitioning, and link dynamics.
 - `matsim_rust/src/simulation/replanning/`: selectors, strategies, routing, and

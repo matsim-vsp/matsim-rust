@@ -52,8 +52,8 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
   1. `Simulation` asks the agents that ended a leg in the previous tick for their next phase. The `ActivityEngine` starts
      the chosen activities, delivers wake-ups and ends the activities that are due.
   2. `Simulation` asks the agents that ended an activity in step 1 for their next phase. The `LegEngine` starts the chosen
-     legs, moves nodes and links, exchanges messages with other partitions and ends the legs that are due. An activity
-     chosen in this step starts in the next tick.
+     legs, moves nodes, links and transit vehicles, exchanges messages with other partitions and ends the legs that are
+     due. An activity chosen in this step starts in the next tick.
 - **T2** In one tick, an agent passes step 1 and step 2 of `T1` at most once. A chain of elements without duration
   therefore advances by one activity and one leg per tick. It cannot loop within a tick, and no call recurses.
 
@@ -122,6 +122,10 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
   time by no more than these ticks.
 - **Replanning is not possible from outside (`D1`).** In MATSim, within-day replanning can edit a plan from outside the
   agent between two engine steps. Here, only the agent changes its plan, at a decision point.
+- **Transit vehicles need at least one tick from one stop to the next.** SBB's deterministic transit engine allows zero
+  seconds. One tick makes the result independent of whether the next stop is on another partition, like the minimum tick
+  on a link. [architecture.md](architecture.md#schedule-based-transit) lists the other deviations of schedule-based
+  transit from that engine, e.g. that boarding and alighting take no time.
 
 ## Implementation status
 
@@ -129,4 +133,4 @@ The following rules are not implemented yet:
 
 | Rule         | Current state                                                                                                         |
 |--------------|-----------------------------------------------------------------------------------------------------------------------|
-| `D2`         | The rows for waiting and riding have no implementation, because schedule-based transit does not exist yet.            |
+| `D2`, `D4`   | Waiting transit passengers have no decision point on reaching their stop, and the transit engine has no wake-ups.     |
