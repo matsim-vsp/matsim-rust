@@ -169,8 +169,8 @@ impl<C: SimCommunicator> LegEngine<C> {
             .move_links(now, &mut self.net_message_broker);
 
         // 3: transit
-        let alighted_passengers = self.transit_engine.do_step(now);
-        for (to, message) in self.transit_engine.take_outgoing() {
+        let transit = self.transit_engine.do_step(now);
+        for (to, message) in transit.leaving {
             self.net_message_broker
                 .add_transit_vehicle(message, to, now);
         }
@@ -243,7 +243,8 @@ impl<C: SimCommunicator> LegEngine<C> {
         agents.extend(
             self.publish_teleported_end_events(
                 now,
-                alighted_passengers
+                transit
+                    .alighted
                     .into_iter()
                     .map(|agent| agent as LegAgent)
                     .collect(),

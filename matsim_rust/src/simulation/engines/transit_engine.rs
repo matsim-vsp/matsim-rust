@@ -41,9 +41,15 @@ pub(crate) struct TransitEngine {
     stops: Vec<StopState>,
     /// Passengers who started their leg in this tick.
     new_passengers: Vec<PassengerAgent>,
-    /// Vehicles that left in this tick for a stop on another partition, with that partition.
-    /// TODO is this really necessary?
-    outgoing: Vec<(u32, TransitVehicleMessage)>,
+}
+
+/// What leaves the transit engine in a step.
+#[derive(Default)]
+pub(crate) struct TransitStepResult {
+    /// Passengers who alighted. They end their leg.
+    pub(crate) alighted: Vec<PassengerAgent>,
+    /// Vehicles that left for a stop on another partition, with that partition.
+    pub(crate) leaving: Vec<(u32, TransitVehicleMessage)>,
 }
 
 /// A vehicle that halts at a stop is due to depart. The vehicle itself is in [`StopState::halting`].
@@ -107,7 +113,6 @@ impl TransitEngine {
             departing: TimeQueue::new(),
             stops,
             new_passengers: Vec::new(),
-            outgoing: Vec::new(),
         }
     }
 
@@ -145,27 +150,23 @@ impl TransitEngine {
         self.approaching.add_with_order(vehicle, now, order);
     }
 
-    /// The vehicles that left for another partition in the last step, with that partition.
-    pub(crate) fn take_outgoing(&mut self) -> Vec<(u32, TransitVehicleMessage)> {
-        std::mem::take(&mut self.outgoing)
-    }
-
-    /// Performs one step and returns the passengers who alighted.
+    /// Performs one step and returns the passengers who alighted and the vehicles that left for
+    /// another partition.
     #[hotpath::measure]
-    pub(crate) fn do_step(&mut self, now: Tick) -> Vec<PassengerAgent> {
+    pub(crate) fn do_step(&mut self, now: Tick) -> TransitStepResult {
         let now = self.clock.tick_to_time(now);
-        let mut alighted = Vec::new();
+        let mut result = TransitStepResult::default();
 
         self.start_departures(now);
         for vehicle in self.approaching.pop(now) {
-            self.arrive(vehicle, now, &mut alighted);
+            self.arrive(vehicle, now, &mut result.alighted);
         }
         for due in self.departing.pop(now) {
-            self.depart(due, now);
+            self.depart(due, now, &mut result.leaving);
         }
         // TODO couldn't we start waiting before the arrivals and departures? Then, passengers who start waiting in this tick could board vehicles that arrive in this tick and we don't need boarding logic here.
         self.start_waiting(now);
-        alighted
+        result
     }
 
     /// Returns all agents that still wait or ride, e.g. at the end of the mobsim. Drivers are
@@ -311,7 +312,12 @@ impl TransitEngine {
         self.departing.add_with_order(due, now, due_order);
     }
 
-    fn depart(&mut self, due: DueDeparture, now: SimTime) {
+    fn depart(
+        &mut self,
+        due: DueDeparture,
+        now: SimTime,
+        leaving: &mut Vec<(u32, TransitVehicleMessage)>,
+    ) {
         let halting = &mut self.stops[due.stop].halting;
         let position = halting
             .iter()
@@ -345,12 +351,12 @@ impl TransitEngine {
             let order = order(&vehicle);
             self.approaching.add_with_order(vehicle, now, order);
         } else {
-            self.send(vehicle, to, now);
+            leaving.push((to, self.send(vehicle, to, now)));
         }
     }
 
-    /// Passes the vehicle and the attachments of its passengers, e.g. backpacks, to partition `to`.
-    fn send(&mut self, vehicle: TransitVehicle, to: u32, now: SimTime) {
+    /// Packs the vehicle and the attachments of its passengers, e.g. backpacks, for partition `to`.
+    fn send(&mut self, vehicle: TransitVehicle, to: u32, now: SimTime) -> TransitVehicleMessage {
         // emit partition leave events for passengers before sending the vehicle to another partition
         for passenger in vehicle.passengers() {
             emit_partition_leave_events_for_agent(&mut self.comp_env, passenger.as_ref(), to, now);
@@ -364,8 +370,7 @@ impl TransitEngine {
             .comp_env
             .partition_migration_extensions_manager_borrow_mut()
             .send(PartitionChangeEntity::TransitVehicle(&vehicle), &context);
-        self.outgoing
-            .push((to, TransitVehicleMessage::new(vehicle, attachments)));
+        TransitVehicleMessage::new(vehicle, attachments)
     }
 
     /// The vehicle left its last stop: the driver leaves the vehicle and ends its leg.
@@ -557,15 +562,15 @@ mod tests {
                     .unwrap();
                 engine.receive_agent(passenger);
             }
-            for engine in engines.iter_mut() {
+            let mut leaving = Vec::new();
+            for (from, engine) in engines.iter_mut().enumerate() {
                 let step = engine.do_step(now);
-                alighted.extend(step.into_iter().map(|passenger| (tick, passenger)));
+                alighted.extend(step.alighted.into_iter().map(|passenger| (tick, passenger)));
+                leaving.extend(step.leaving.into_iter().map(|left| (from, left)));
             }
-            for from in 0..engines.len() {
-                for (to, message) in engines[from].take_outgoing() {
-                    let (vehicle, _) = message.into_parts();
-                    engines[to as usize].receive_remote_vehicle(now, vehicle, from as u32);
-                }
+            for (from, (to, message)) in leaving {
+                let (vehicle, _) = message.into_parts();
+                engines[to as usize].receive_remote_vehicle(now, vehicle, from as u32);
             }
         }
         alighted
@@ -661,12 +666,12 @@ mod tests {
     fn a_vehicle_received_in_the_tick_of_its_arrival_panics() {
         let mut engines = tutorial_engines(2, &Exchanges::default());
         // The 06:00 departure leaves stop 2a at 06:04 for stop 3 on partition 1.
+        let mut leaving = Vec::new();
         for tick in SIX..=SIX + 240 {
-            engines[0].do_step(Tick::new(tick));
+            leaving.extend(engines[0].do_step(Tick::new(tick)).leaving);
         }
-        let mut outgoing = engines[0].take_outgoing();
-        assert_eq!(outgoing.len(), 1);
-        let (to, message) = outgoing.pop().unwrap();
+        assert_eq!(leaving.len(), 1);
+        let (to, message) = leaving.pop().unwrap();
         assert_eq!(to, 1);
         let (vehicle, _) = message.into_parts();
 
