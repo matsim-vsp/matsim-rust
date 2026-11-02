@@ -562,6 +562,10 @@ pub struct Transit {
     /// [`TransitSimulation::ScheduleBased`], like MATSim's `transit.transitModes`.
     #[serde(default = "default_transit_passenger_modes")]
     pub passenger_modes: Vec<String>,
+    /// The logic of the drivers of transit vehicles if `simulation` is
+    /// [`TransitSimulation::ScheduleBased`].
+    #[serde(default)]
+    pub driver: TransitDriver,
 }
 
 impl Default for Transit {
@@ -571,6 +575,7 @@ impl Default for Transit {
             vehicles_path: None,
             simulation: TransitSimulation::default(),
             passenger_modes: default_transit_passenger_modes(),
+            driver: TransitDriver::default(),
         }
     }
 }
@@ -596,6 +601,25 @@ fn parse_transit_simulation(value: &str) -> TransitSimulation {
         "teleported" => TransitSimulation::Teleported,
         "schedulebased" => TransitSimulation::ScheduleBased,
         _ => panic!("Invalid transit simulation: {}", value),
+    }
+}
+
+/// The logic of the drivers of schedule-based transit. Both follow the schedule. They exist side by
+/// side to compare their performance, and one of them will be removed.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum TransitDriver {
+    /// Reads its departure from the shared schedule at every stop.
+    #[default]
+    Scheduled,
+    /// Copies its departure from the schedule into a plan of its own when the departure starts.
+    Planned,
+}
+
+fn parse_transit_driver(value: &str) -> TransitDriver {
+    match value.to_lowercase().as_str() {
+        "scheduled" => TransitDriver::Scheduled,
+        "planned" => TransitDriver::Planned,
+        _ => panic!("Invalid transit driver: {}", value),
     }
 }
 
@@ -650,6 +674,10 @@ register_override!("transit.vehicles_path", |config, value| {
 
 register_override!("transit.simulation", |config, value| {
     config.transit_mut().simulation = parse_transit_simulation(value);
+});
+
+register_override!("transit.driver", |config, value| {
+    config.transit_mut().driver = parse_transit_driver(value);
 });
 
 register_override!("facilities.path", |config, value| {
@@ -1803,7 +1831,7 @@ mod tests {
         parse_key_val,
     };
     use crate::simulation::config::{
-        Ids, Network, Population, Transit, TransitSimulation, Vehicles,
+        Ids, Network, Population, Transit, TransitDriver, TransitSimulation, Vehicles,
     };
     use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
     use crate::simulation::replanning::{
@@ -2437,6 +2465,7 @@ modules:
         assert_eq!(None, config.transit().vehicles_path);
         assert_eq!(TransitSimulation::Teleported, config.transit().simulation);
         assert_eq!(vec!["pt".to_string()], config.transit().passenger_modes);
+        assert_eq!(TransitDriver::Scheduled, config.transit().driver);
     }
 
     #[test]
@@ -2473,6 +2502,7 @@ modules:
                 "transit.vehicles_path".to_string(),
                 "transitVehicles.xml".to_string(),
             ),
+            ("transit.driver".to_string(), "Planned".to_string()),
         ]);
 
         assert_eq!(
@@ -2483,6 +2513,7 @@ modules:
             Some(PathBuf::from("transitVehicles.xml")),
             config.transit().vehicles_path
         );
+        assert_eq!(TransitDriver::Planned, config.transit().driver);
     }
 
     #[test]
