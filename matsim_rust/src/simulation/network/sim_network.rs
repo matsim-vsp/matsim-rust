@@ -835,7 +835,7 @@ mod tests {
     use super::{Candidate, SimNetworkPartition};
     use crate::simulation::Identifiable;
     use crate::simulation::agents::{
-        LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic, NextPhase,
+        LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic, NextPhase, PassengerAgent,
         SimulationAgentLogic, TeleportationAgent,
     };
     use crate::simulation::config::{MetisOptions, PartitionMethod};
@@ -989,6 +989,9 @@ mod tests {
             Ok(self)
         }
         fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
             Err(self)
         }
         fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {

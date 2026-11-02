@@ -221,7 +221,7 @@ mod tests {
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
-        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, SimulationAgentLogic,
+        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, PassengerAgent, SimulationAgentLogic,
         TeleportationAgent, TeleportationLogic, TransitTeleportation,
     };
     use crate::simulation::id::Id;
@@ -400,6 +400,9 @@ mod tests {
         }
         fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
             Ok(self)
+        }
+        fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+            Err(self)
         }
         fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {
             self.delegate.finish_leg(now)

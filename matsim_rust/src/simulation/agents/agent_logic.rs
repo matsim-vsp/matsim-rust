@@ -6,16 +6,18 @@ use crate::simulation::Identifiable;
 use crate::simulation::agents::agent::ReadOnlyPerson;
 use crate::simulation::agents::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
-    NextPhase, SimulationAgentLogic, StuckLogic, TeleportationAgent, TeleportationLogic,
-    TransitTeleportation,
+    NextPhase, PassengerAgent, PassengerLogic, SimulationAgentLogic, StuckLogic,
+    TeleportationAgent, TeleportationLogic, TransitTeleportation,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalRoute,
+    InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalPtRouteDescription,
+    InternalRoute,
 };
+use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
 use crate::simulation::scenario::trip_structure_utils::{
     find_trip_span_starting_at_activity_default, identify_main_mode,
 };
@@ -211,6 +213,21 @@ impl PlanBasedSimulationLogic {
             _ => 1,
         };
     }
+
+    fn has_pt_route(&self) -> bool {
+        self.curr_leg()
+            .route
+            .as_ref()
+            .is_some_and(|route| matches!(route, InternalRoute::Pt(_)))
+    }
+
+    fn pt_description(&self) -> &InternalPtRouteDescription {
+        &self
+            .route()
+            .as_pt()
+            .expect("Passenger role must have a transit route")
+            .description
+    }
 }
 
 impl ActivityLogic for PlanBasedSimulationLogic {
@@ -278,6 +295,13 @@ impl LegLogic for PlanBasedSimulationLogic {
     }
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
         Ok(self)
+    }
+    fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+        if self.has_pt_route() {
+            Ok(self)
+        } else {
+            Err(self)
+        }
     }
     fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
         if self.advance(now) {
@@ -348,6 +372,43 @@ impl TeleportationLogic for PlanBasedSimulationLogic {
         })
     }
     fn notify_begin_teleportation(&mut self, _now: SimTime) {
+        self.set_curr_route_element_to_last();
+    }
+}
+
+/// MATSim's rule for passengers (`TransitAgentImpl` with `checkLineAndStop`): board a vehicle of the
+/// planned line, whatever its route, if it still serves the planned egress stop, and alight there.
+/// Ids are compared by their external strings, so that no id needs to be resolved per vehicle.
+impl PassengerLogic for PlanBasedSimulationLogic {
+    fn access_stop(&self) -> Id<TransitStopFacility> {
+        Id::get_from_ext(&self.pt_description().access_facility_id)
+    }
+    fn egress_stop(&self) -> Id<TransitStopFacility> {
+        Id::get_from_ext(&self.pt_description().egress_facility_id)
+    }
+    fn wants_to_board(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        line: &Id<TransitLine>,
+        stops_to_come: &[Id<TransitStopFacility>],
+        _now: SimTime,
+    ) -> bool {
+        let description = self.pt_description();
+        line.external() == description.transit_line_id
+            && stops_to_come
+                .iter()
+                .any(|stop| stop.external() == description.egress_facility_id)
+    }
+    fn wants_to_alight(
+        &mut self,
+        _comp_env: &mut ThreadLocalComputationalEnvironment,
+        stop: &Id<TransitStopFacility>,
+        _now: SimTime,
+    ) -> bool {
+        stop.external() == self.pt_description().egress_facility_id
+    }
+    fn notify_left_vehicle(&mut self, _now: SimTime) {
+        // As for teleported legs, the agent is now at the end of its route.
         self.set_curr_route_element_to_last();
     }
 }
@@ -613,6 +674,13 @@ impl LegLogic for AdaptivePlanBasedSimulationLogic {
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
         Ok(self)
     }
+    fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+        if self.delegate.has_pt_route() {
+            Ok(self)
+        } else {
+            Err(self)
+        }
+    }
     fn finish_leg(mut self: Box<Self>, now: SimTime) -> NextPhase {
         if self.delegate.advance(now) {
             NextPhase::Activity(self)
@@ -657,6 +725,36 @@ impl TeleportationLogic for AdaptivePlanBasedSimulationLogic {
     }
     fn notify_begin_teleportation(&mut self, now: SimTime) {
         self.delegate.notify_begin_teleportation(now);
+    }
+}
+
+impl PassengerLogic for AdaptivePlanBasedSimulationLogic {
+    fn access_stop(&self) -> Id<TransitStopFacility> {
+        self.delegate.access_stop()
+    }
+    fn egress_stop(&self) -> Id<TransitStopFacility> {
+        self.delegate.egress_stop()
+    }
+    fn wants_to_board(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        line: &Id<TransitLine>,
+        stops_to_come: &[Id<TransitStopFacility>],
+        now: SimTime,
+    ) -> bool {
+        self.delegate
+            .wants_to_board(comp_env, line, stops_to_come, now)
+    }
+    fn wants_to_alight(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        stop: &Id<TransitStopFacility>,
+        now: SimTime,
+    ) -> bool {
+        self.delegate.wants_to_alight(comp_env, stop, now)
+    }
+    fn notify_left_vehicle(&mut self, now: SimTime) {
+        self.delegate.notify_left_vehicle(now);
     }
 }
 
@@ -1282,10 +1380,60 @@ mod tests {
             let original = std::ptr::from_ref(activity.as_ref()).cast::<()>();
             let agent = activity.finish_activity(SimTime::default()).expect_leg();
             let agent = agent.try_into_network().unwrap_err();
+            let agent = agent.try_into_passenger().unwrap_err();
             assert_eq!(original, std::ptr::from_ref(agent.as_ref()).cast::<()>());
             assert_eq!(agent.mode().external(), "car");
             assert_eq!(agent.curr_link_id().unwrap().external(), "l1");
             assert_eq!(agent.into_person(), Some(expected));
+        }
+    }
+
+    #[deterministic_id_test]
+    fn passengers_board_the_planned_line_while_it_serves_their_egress_stop() {
+        use crate::simulation::scenario::population::{
+            InternalPtRoute, InternalPtRouteDescription,
+        };
+        let stops = |ids: &[&str]| ids.iter().map(|id| Id::create(id)).collect::<Vec<_>>();
+        // The schedule creates the ids of the stops.
+        stops(&["1", "2a", "2b", "3"]);
+        for adaptive in [false, true] {
+            let person = person_with_leg(InternalRoute::Pt(InternalPtRoute {
+                generic_delegate: generic_route(),
+                description: InternalPtRouteDescription {
+                    transit_route_id: "1to3".to_string(),
+                    boarding_time: None,
+                    transit_line_id: "Blue Line".to_string(),
+                    access_facility_id: "1".to_string(),
+                    egress_facility_id: "3".to_string(),
+                },
+            }));
+            let activity = if adaptive {
+                AdaptivePlanBasedSimulationLogic::new_agent(person)
+            } else {
+                PlanBasedSimulationLogic::new_agent(person)
+            };
+            let original = std::ptr::from_ref(activity.as_ref()).cast::<()>();
+            let leg = activity.finish_activity(SimTime::default()).expect_leg();
+            let mut passenger = leg.try_into_passenger().unwrap();
+            assert_eq!(
+                original,
+                std::ptr::from_ref(passenger.as_ref()).cast::<()>()
+            );
+            assert_eq!(passenger.access_stop().external(), "1");
+            assert_eq!(passenger.egress_stop().external(), "3");
+
+            let env = &mut Default::default();
+            let now = SimTime::default();
+            let blue = Id::create("Blue Line");
+            assert!(passenger.wants_to_board(env, &blue, &stops(&["2a", "3"]), now));
+            // Another line, or a vehicle that no longer serves the egress stop.
+            assert!(!passenger.wants_to_board(env, &Id::create("Red Line"), &stops(&["3"]), now));
+            assert!(!passenger.wants_to_board(env, &blue, &stops(&["2b", "1"]), now));
+
+            assert!(!passenger.wants_to_alight(env, &Id::create("2a"), now));
+            assert!(passenger.wants_to_alight(env, &Id::create("3"), now));
+            passenger.notify_left_vehicle(now);
+            assert_eq!(passenger.curr_link_id().unwrap().external(), "l2");
         }
     }
 

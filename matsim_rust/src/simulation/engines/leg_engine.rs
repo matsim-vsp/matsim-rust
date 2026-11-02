@@ -365,7 +365,7 @@ mod tests {
     use super::*;
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
-    use crate::simulation::agents::{NextPhase, SimulationAgentLogic};
+    use crate::simulation::agents::{NextPhase, PassengerAgent, SimulationAgentLogic};
     use crate::simulation::scenario::population::{
         InternalGenericRoute, InternalPerson, InternalRoute,
     };
@@ -444,6 +444,9 @@ mod tests {
             Err(self)
         }
         fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
             Err(self)
         }
         fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {

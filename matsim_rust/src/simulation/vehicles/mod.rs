@@ -98,11 +98,13 @@ impl SimulationVehicle {
 impl SimulationVehicle {
     /// Moves the driver over the node onto `next_link`. As in MATSim, passengers keep their own
     /// position until they leave the vehicle; their arrival link is the vehicle's link.
-    // TODO(pt): A passenger's `curr_link_id()` still returns its departure link after arrival,
+    // TODO: A passenger's `curr_link_id()` still returns its departure link after arrival,
     // because nothing moves its route cursor. Arrival events use the vehicle's link, but a Stuck
     // event for a passenger who arrives in the last tick would report the departure link. MATSim
-    // sets the position on arrival (`notifyArrivalOnLinkByNonNetworkMode`). Do the same when PT
-    // passengers are introduced; today `unpark_veh` creates vehicles without passengers.
+    // sets the position on arrival (`notifyArrivalOnLinkByNonNetworkMode`). Do the same when
+    // network vehicles take passengers; today `unpark_veh` creates vehicles without passengers.
+    // Transit passengers do not ride these vehicles; `PassengerLogic::notify_left_vehicle` moves
+    // their cursor.
     pub fn move_over_node(
         &mut self,
         comp_env: &mut ThreadLocalComputationalEnvironment,

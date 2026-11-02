@@ -12,6 +12,7 @@ use crate::simulation::pt::schedule::{
 };
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
+use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 
@@ -19,6 +20,7 @@ pub type ActivityAgent = Box<dyn ActivityLogic>;
 pub type LegAgent = Box<dyn LegLogic>;
 pub type NetworkDriverAgent = Box<dyn NetworkDriverLogic>;
 pub type TeleportationAgent = Box<dyn TeleportationLogic>;
+pub type PassengerAgent = Box<dyn PassengerLogic>;
 pub type StuckAgent = Box<dyn StuckLogic>;
 pub type TransitDriverAgent = Box<dyn TransitDriverLogic>;
 
@@ -87,6 +89,7 @@ pub trait LegLogic: SimulationAgentLogic {
 
     fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent>;
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent>;
+    fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent>;
 
     fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase;
 }
@@ -112,6 +115,32 @@ pub trait TeleportationLogic: LegLogic {
     /// `Some` for a PT route, whose arrival event carries the transit data.
     fn transit(&self) -> Option<TransitTeleportation<'_>>;
     fn notify_begin_teleportation(&mut self, now: SimTime);
+}
+
+/// The passenger part of MATSim's `PTPassengerAgent`. While the agent waits, the transit engine
+/// asks it about each vehicle that halts at its stop; while it rides, about each stop (`D2`).
+pub trait PassengerLogic: LegLogic {
+    /// The stop where the agent waits. Asked once, when the leg starts.
+    fn access_stop(&self) -> Id<TransitStopFacility>;
+    /// The stop where the agent plans to alight. Asked once, when the leg starts.
+    fn egress_stop(&self) -> Id<TransitStopFacility>;
+    /// Whether the agent boards a vehicle of `line` that serves `stops_to_come` after this stop.
+    fn wants_to_board(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        line: &Id<TransitLine>,
+        stops_to_come: &[Id<TransitStopFacility>],
+        now: SimTime,
+    ) -> bool;
+    /// Whether the agent alights at `stop`. Before its planned stop, this ends the leg early (`D5`).
+    fn wants_to_alight(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        stop: &Id<TransitStopFacility>,
+        now: SimTime,
+    ) -> bool;
+    /// The agent has left the vehicle at the stop where it alighted.
+    fn notify_left_vehicle(&mut self, now: SimTime);
 }
 
 /// The final phase. A stuck agent receives no further calls and is materialized after mobsim.
