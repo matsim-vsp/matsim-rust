@@ -119,7 +119,6 @@ impl<C: SimCommunicator> LegEngine<C> {
             network_engine: NetworkEngine::new(network, comp_env.clone(), clock),
             transit_engine: TransitEngine::new(
                 transit_schedule,
-                transit.driver,
                 net_message_broker.rank(),
                 comp_env.clone(),
                 clock,

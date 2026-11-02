@@ -1,5 +1,4 @@
-use crate::simulation::agents::{EndTime, LegAgent, PassengerAgent, TransitDriverAgent};
-use crate::simulation::config::TransitDriver;
+use crate::simulation::agents::{EndTime, LegAgent, PassengerAgent};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::{
     emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
@@ -14,7 +13,7 @@ use crate::simulation::messaging::messages::TransitVehicleMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
-use crate::simulation::pt::driver::{PlannedDriver, ScheduledDriver};
+use crate::simulation::pt::driver::PlannedDriver;
 use crate::simulation::pt::schedule::{DepartureIndex, TransitSimSchedule};
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
@@ -27,7 +26,6 @@ use std::sync::Arc;
 /// events.
 pub(crate) struct TransitEngine {
     schedule: Arc<TransitSimSchedule>,
-    driver: TransitDriver,
     rank: u32,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
@@ -82,7 +80,6 @@ fn order(vehicle: &TransitVehicle) -> u64 {
 impl TransitEngine {
     pub(crate) fn new(
         schedule: Arc<TransitSimSchedule>,
-        driver: TransitDriver,
         rank: u32,
         comp_env: ThreadLocalComputationalEnvironment,
         clock: SimClock,
@@ -101,7 +98,6 @@ impl TransitEngine {
 
         Self {
             schedule,
-            driver,
             rank,
             comp_env,
             clock,
@@ -232,12 +228,7 @@ impl TransitEngine {
             );
             drop(events);
 
-            let driver: TransitDriverAgent = match self.driver {
-                TransitDriver::Scheduled => {
-                    Box::new(ScheduledDriver::new(schedule.clone(), index, now))
-                }
-                TransitDriver::Planned => Box::new(PlannedDriver::new(&schedule, index, now)),
-            };
+            let driver = Box::new(PlannedDriver::new(&schedule, index, now));
             let vehicle = TransitVehicle::new(departure.vehicle.clone(), driver);
             let order = order(&vehicle);
             self.approaching.add_with_order(vehicle, now, order);
@@ -470,7 +461,6 @@ impl TransitEngine {
 mod tests {
     use super::TransitEngine;
     use crate::simulation::agents::PassengerAgent;
-    use crate::simulation::config::TransitDriver;
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{PersonEntersVehicleEvent, PersonLeavesVehicleEvent};
     use crate::simulation::id::Id;
@@ -541,13 +531,7 @@ mod tests {
                     }
                 }
                 drop(events);
-                TransitEngine::new(
-                    schedule.clone(),
-                    TransitDriver::Scheduled,
-                    rank,
-                    comp_env,
-                    SimClock::new(1),
-                )
+                TransitEngine::new(schedule.clone(), rank, comp_env, SimClock::new(1))
             })
             .collect()
     }

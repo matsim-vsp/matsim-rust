@@ -198,11 +198,10 @@ that the schedule serves.
 The `TransitEngine` is part of the `LegEngine` and runs after the network moves and before the messages are exchanged.
 At each departure, it creates a driver and a `TransitVehicle`. There are no vehicle blocks (`Umlauf` in MATSim): a
 vehicle that serves several departures is created anew for each of them. The driver is an agent without a person
-(`TransitDriverLogic`). It knows its stops and tells the engine when the vehicle arrives and departs: at the departure
-time plus the arrival offset, but not before the earliest arrival the engine allows, and at the departure time plus the
-departure offset, but not before the arrival. At the last stop, the driver leaves the vehicle and is dropped.
-`transit.driver` selects one of two drivers with the same behavior: `Scheduled` reads the shared schedule at every stop,
-`Planned` copies its departure into a plan of its own when it starts. Both exist to compare their performance.
+(`TransitDriverLogic`). When its departure starts, it copies the departure from the schedule into a plan of its own and
+no longer depends on the schedule. It knows its stops and tells the engine when the vehicle arrives and departs: at the
+departure time plus the arrival offset, but not before the earliest arrival the engine allows, and at the departure time
+plus the departure offset, but not before the arrival. At the last stop, the driver leaves the vehicle and is dropped.
 
 Passengers are agents with the role `PassengerLogic`. The engine asks a riding passenger at each stop whether it
 alights, and a waiting passenger about each vehicle at its stop whether it boards. Plan-based agents follow MATSim's
