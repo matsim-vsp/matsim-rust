@@ -232,18 +232,27 @@ impl TransitSimSchedule {
             .unwrap_or_else(|| panic!("No transit route serves stop {stop}."))
     }
 
-    /// Finds a route by the external ids of its line and route. The routes are sorted by these
-    /// ids, so this is a binary search without hashing.
-    pub fn find_route(&self, line: &str, route: &str) -> Option<&SimTransitRoute> {
+    /// Finds a route by the ids of its line and route. The routes are sorted by the external ids,
+    /// so this is a binary search without hashing.
+    pub fn find_route(
+        &self,
+        line: &Id<TransitLine>,
+        route: &Id<TransitRoute>,
+    ) -> Option<&SimTransitRoute> {
         self.find_route_index(line, route)
             .map(|index| self.route(index))
     }
 
     /// Like [`Self::find_route`], but returns the index of the route.
-    pub fn find_route_index(&self, line: &str, route: &str) -> Option<RouteIndex> {
+    pub fn find_route_index(
+        &self,
+        line: &Id<TransitLine>,
+        route: &Id<TransitRoute>,
+    ) -> Option<RouteIndex> {
         self.routes
             .binary_search_by(|candidate| {
-                (candidate.line.external(), candidate.route.external()).cmp(&(line, route))
+                (candidate.line.external(), candidate.route.external())
+                    .cmp(&(line.external(), route.external()))
             })
             .ok()
             .map(RouteIndex::new)

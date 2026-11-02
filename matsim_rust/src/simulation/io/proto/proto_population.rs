@@ -229,11 +229,11 @@ impl PtRoute {
 impl PtRouteDescription {
     fn from(value: &InternalPtRouteDescription) -> Self {
         Self {
-            transit_route_id: value.transit_route_id.clone(),
+            transit_route_id: value.transit_route_id.external().to_string(),
             boarding_time_ns: value.boarding_time.map(SimTime::as_nanos),
-            transit_line_id: value.transit_line_id.clone(),
-            access_facility_id: value.access_facility_id.clone(),
-            egress_facility_id: value.egress_facility_id.clone(),
+            transit_line_id: value.transit_line_id.external().to_string(),
+            access_facility_id: value.access_facility_id.external().to_string(),
+            egress_facility_id: value.egress_facility_id.external().to_string(),
         }
     }
 }
@@ -466,14 +466,15 @@ mod tests {
         );
     }
 
-    #[test]
+    #[deterministic_id_test]
     fn pt_route_description_round_trip_preserves_sub_millisecond_boarding_time() {
+        use crate::simulation::id::Id;
         let description = InternalPtRouteDescription {
-            transit_route_id: "route-1".to_string(),
+            transit_route_id: Id::create("route-1"),
             boarding_time: Some(SimTime::from_nanos(750_000)),
-            transit_line_id: "line-1".to_string(),
-            access_facility_id: "access-1".to_string(),
-            egress_facility_id: "egress-1".to_string(),
+            transit_line_id: Id::create("line-1"),
+            access_facility_id: Id::create("access-1"),
+            egress_facility_id: Id::create("egress-1"),
         };
 
         let wire = PtRouteDescription::from(&description);

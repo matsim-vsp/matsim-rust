@@ -397,13 +397,13 @@ fn pt_route_is_valid(schedule: &TransitSimSchedule, route: &InternalPtRoute) -> 
     let facilities = &transit_route.stop_facilities;
     let Some(access) = facilities
         .iter()
-        .position(|facility| facility.external() == description.access_facility_id)
+        .position(|facility| *facility == description.access_facility_id)
     else {
         return false;
     };
     let Some(egress) = facilities[access + 1..]
         .iter()
-        .position(|facility| facility.external() == description.egress_facility_id)
+        .position(|facility| *facility == description.egress_facility_id)
         .map(|offset| access + 1 + offset)
     else {
         return false;
@@ -1584,11 +1584,11 @@ mod tests {
                     None,
                 ),
                 description: InternalPtRouteDescription {
-                    transit_route_id: route.to_string(),
+                    transit_route_id: Id::create(route),
                     boarding_time: None,
-                    transit_line_id: line.to_string(),
-                    access_facility_id: access.to_string(),
-                    egress_facility_id: egress.to_string(),
+                    transit_line_id: Id::create(line),
+                    access_facility_id: Id::create(access),
+                    egress_facility_id: Id::create(egress),
                 },
             }
         }

@@ -79,11 +79,11 @@ pub fn create_pt_agent(
         ),
         description: InternalPtRouteDescription {
             // Passengers board any route of their line.
-            transit_route_id: String::new(),
+            transit_route_id: Id::create(""),
             boarding_time: None,
-            transit_line_id: line.to_string(),
-            access_facility_id: access.to_string(),
-            egress_facility_id: egress.to_string(),
+            transit_line_id: Id::create(line),
+            access_facility_id: Id::create(access),
+            egress_facility_id: Id::create(egress),
         },
     };
     let activity = |link: &str| {

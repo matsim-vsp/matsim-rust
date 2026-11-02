@@ -9,7 +9,7 @@ use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
-use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
+use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitStopFacility};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 
@@ -167,9 +167,9 @@ pub trait TransitDriverLogic: SimulationAgentLogic {
 /// The data of a PT teleportation arrival event, without exposing the route type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransitTeleportation<'a> {
-    pub line: &'a str,
-    pub route: &'a str,
+    pub line: &'a Id<TransitLine>,
+    pub route: &'a Id<TransitRoute>,
     pub boarding_time: Option<SimTime>,
-    pub access_facility: &'a str,
-    pub egress_facility: &'a str,
+    pub access_facility: &'a Id<TransitStopFacility>,
+    pub egress_facility: &'a Id<TransitStopFacility>,
 }

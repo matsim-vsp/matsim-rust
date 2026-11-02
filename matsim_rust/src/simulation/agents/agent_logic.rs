@@ -378,13 +378,13 @@ impl TeleportationLogic for PlanBasedSimulationLogic {
 
 /// MATSim's rule for passengers (`TransitAgentImpl` with `checkLineAndStop`): board a vehicle of the
 /// planned line, whatever its route, if it still serves the planned egress stop, and alight there.
-/// Ids are compared by their external strings, so that no id needs to be resolved per vehicle.
+/// The route holds the ids of its line and stops, so the comparisons need no lookup.
 impl PassengerLogic for PlanBasedSimulationLogic {
     fn access_stop(&self) -> Id<TransitStopFacility> {
-        Id::get_from_ext(&self.pt_description().access_facility_id)
+        self.pt_description().access_facility_id.clone()
     }
     fn egress_stop(&self) -> Id<TransitStopFacility> {
-        Id::get_from_ext(&self.pt_description().egress_facility_id)
+        self.pt_description().egress_facility_id.clone()
     }
     fn wants_to_board(
         &mut self,
@@ -394,10 +394,8 @@ impl PassengerLogic for PlanBasedSimulationLogic {
         _now: SimTime,
     ) -> bool {
         let description = self.pt_description();
-        line.external() == description.transit_line_id
-            && stops_to_come
-                .iter()
-                .any(|stop| stop.external() == description.egress_facility_id)
+        *line == description.transit_line_id
+            && stops_to_come.contains(&description.egress_facility_id)
     }
     fn wants_to_alight(
         &mut self,
@@ -405,8 +403,7 @@ impl PassengerLogic for PlanBasedSimulationLogic {
         stop: &Id<TransitStopFacility>,
         _now: SimTime,
     ) -> bool {
-        // TODO this is string comparison. couldn't this be id comparison?
-        stop.external() == self.pt_description().egress_facility_id
+        *stop == self.pt_description().egress_facility_id
     }
     fn notify_left_vehicle(&mut self, _now: SimTime) {
         // As for teleported legs, the agent is now at the end of its route.
@@ -1075,11 +1072,11 @@ mod tests {
         let pt = InternalRoute::Pt(InternalPtRoute {
             generic_delegate: generic_route(),
             description: InternalPtRouteDescription {
-                transit_route_id: "route".into(),
+                transit_route_id: Id::create("route"),
                 boarding_time: None,
-                transit_line_id: "line".into(),
-                access_facility_id: "from".into(),
-                egress_facility_id: "to".into(),
+                transit_line_id: Id::create("line"),
+                access_facility_id: Id::create("from"),
+                egress_facility_id: Id::create("to"),
             },
         });
         let network = InternalRoute::Network(InternalNetworkRoute::new(
@@ -1127,11 +1124,11 @@ mod tests {
         let route = InternalRoute::Pt(InternalPtRoute {
             generic_delegate: generic_route(),
             description: InternalPtRouteDescription {
-                transit_route_id: "route".into(),
+                transit_route_id: Id::create("route"),
                 boarding_time: Some(SimTime::from_secs(12)),
-                transit_line_id: "line".into(),
-                access_facility_id: "from".into(),
-                egress_facility_id: "to".into(),
+                transit_line_id: Id::create("line"),
+                access_facility_id: Id::create("from"),
+                egress_facility_id: Id::create("to"),
             },
         });
         let agent = PlanBasedSimulationLogic::new_agent(person_with_leg(route.clone()));
@@ -1144,11 +1141,11 @@ mod tests {
         assert_eq!(
             agent.transit(),
             Some(TransitTeleportation {
-                line: "line",
-                route: "route",
+                line: &Id::get_from_ext("line"),
+                route: &Id::get_from_ext("route"),
                 boarding_time: Some(SimTime::from_secs(12)),
-                access_facility: "from",
-                egress_facility: "to",
+                access_facility: &Id::get_from_ext("from"),
+                egress_facility: &Id::get_from_ext("to"),
             })
         );
         assert_eq!(agent.distance(), Some(100.0));
@@ -1401,11 +1398,11 @@ mod tests {
             let person = person_with_leg(InternalRoute::Pt(InternalPtRoute {
                 generic_delegate: generic_route(),
                 description: InternalPtRouteDescription {
-                    transit_route_id: "1to3".to_string(),
+                    transit_route_id: Id::create("1to3"),
                     boarding_time: None,
-                    transit_line_id: "Blue Line".to_string(),
-                    access_facility_id: "1".to_string(),
-                    egress_facility_id: "3".to_string(),
+                    transit_line_id: Id::create("Blue Line"),
+                    access_facility_id: Id::get_from_ext("1"),
+                    egress_facility_id: Id::get_from_ext("3"),
                 },
             }));
             let activity = if adaptive {
