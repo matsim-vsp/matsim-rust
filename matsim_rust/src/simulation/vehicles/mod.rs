@@ -127,6 +127,7 @@ impl Identifiable<InternalVehicle> for SimulationVehicle {
 
 /// A vehicle of schedule-based transit. Unlike [`SimulationVehicle`], it keeps the roles of its
 /// driver and its passengers, because the transit engine asks them at every stop.
+#[derive(Debug)]
 pub struct TransitVehicle {
     id: Id<InternalVehicle>,
     driver: TransitDriverAgent,

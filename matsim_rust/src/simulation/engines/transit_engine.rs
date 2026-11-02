@@ -1,10 +1,17 @@
 use crate::simulation::agents::{EndTime, LegAgent, PassengerAgent};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
+use crate::simulation::engines::{
+    emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
+};
 use crate::simulation::events::{
     AgentWaitingForPtEventBuilder, PersonArrivalEventBuilder, PersonDepartureEventBuilder,
     PersonEntersVehicleEventBuilder, PersonLeavesVehicleEventBuilder,
     TransitDriverStartsEventBuilder, VehicleArrivesAtFacilityEventBuilder,
     VehicleDepartsAtFacilityEventBuilder,
+};
+use crate::simulation::messaging::messages::TransitVehicleMessage;
+use crate::simulation::messaging::partition_change::{
+    PartitionChangeContext, PartitionChangeEntity,
 };
 use crate::simulation::pt::driver::ScheduledDriver;
 use crate::simulation::pt::schedule::{DepartureIndex, TransitSimSchedule};
@@ -43,6 +50,8 @@ pub(crate) struct TransitEngine {
     stops: Vec<StopState>,
     /// Passengers who started their leg in this tick.
     new_passengers: Vec<PassengerAgent>,
+    /// Vehicles that left in this tick for a stop on another partition, with that partition.
+    outgoing: Vec<(u32, TransitVehicleMessage)>,
 }
 
 /// A vehicle that halts at a stop is due to depart. The vehicle itself is in [`StopState::halting`].
@@ -104,12 +113,47 @@ impl TransitEngine {
             departing: TimeQueue::new(),
             stops,
             new_passengers: Vec::new(),
+            outgoing: Vec::new(),
         }
     }
 
     /// An agent starts a transit leg. It waits at its stop from the end of this tick's step on.
     pub(crate) fn receive_agent(&mut self, agent: PassengerAgent) {
         self.new_passengers.push(agent);
+    }
+
+    /// A vehicle arrives from partition `from`. It is received after this tick's step, so its
+    /// arrival at the next stop must be due in a later tick (`R3`).
+    pub(crate) fn receive_remote_vehicle(&mut self, now: Tick, vehicle: TransitVehicle, from: u32) {
+        let due_tick = self.clock.time_to_tick(vehicle.driver().next_time());
+        assert!(
+            now < due_tick,
+            "Transit vehicle {} from partition {from} to partition {} was received in tick {}, but it \
+             is due at stop {} in tick {}. This might happen if the partitions share no link. To \
+             mitigate this problem, you might enable the global sync.",
+            vehicle.id(),
+            self.rank,
+            now.value(),
+            vehicle.driver().stop(),
+            due_tick.value(),
+        );
+
+        let now = self.clock.tick_to_time(now);
+        for passenger in vehicle.passengers() {
+            emit_partition_enter_events_for_agent(
+                &mut self.comp_env,
+                passenger.as_ref(),
+                from,
+                now,
+            );
+        }
+        let order = order(&vehicle);
+        self.approaching.add_with_order(vehicle, now, order);
+    }
+
+    /// The vehicles that left for another partition in the last step, with that partition.
+    pub(crate) fn take_outgoing(&mut self) -> Vec<(u32, TransitVehicleMessage)> {
+        std::mem::take(&mut self.outgoing)
     }
 
     /// Performs one step and returns the passengers who alighted.
@@ -302,16 +346,32 @@ impl TransitEngine {
             .driver_mut()
             .notify_stop_departed(earliest_arrival, now);
         let to = self.schedule.stop_partition(vehicle.driver().stop());
-        assert_eq!(
+        if to == self.rank {
+            let order = order(&vehicle);
+            self.approaching.add_with_order(vehicle, now, order);
+        } else {
+            self.send(vehicle, to, now);
+        }
+    }
+
+    /// Passes the vehicle and the attachments of its passengers, e.g. backpacks, to partition `to`
+    /// (`O5`). Only the passengers leave the partition: the driver has no person, and the travel
+    /// time calculator must not see transit vehicles.
+    fn send(&mut self, vehicle: TransitVehicle, to: u32, now: SimTime) {
+        for passenger in vehicle.passengers() {
+            emit_partition_leave_events_for_agent(&mut self.comp_env, passenger.as_ref(), to, now);
+        }
+        let context = PartitionChangeContext {
+            time: now,
+            from: self.rank,
             to,
-            self.rank,
-            "Transit vehicle {} would go to stop {} on partition {to}. Transit vehicles cannot \
-             change partitions yet.",
-            vehicle.id(),
-            vehicle.driver().stop()
-        );
-        let order = order(&vehicle);
-        self.approaching.add_with_order(vehicle, now, order);
+        };
+        let attachments = self
+            .comp_env
+            .partition_migration_extensions_manager_borrow_mut()
+            .send(PartitionChangeEntity::TransitVehicle(&vehicle), &context);
+        self.outgoing
+            .push((to, TransitVehicleMessage::new(vehicle, attachments)));
     }
 
     /// The vehicle left its last stop: the driver leaves the vehicle and ends its leg.
@@ -410,6 +470,7 @@ mod tests {
     use crate::simulation::agents::PassengerAgent;
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{PersonEntersVehicleEvent, PersonLeavesVehicleEvent};
+    use crate::simulation::id::Id;
     use crate::simulation::pt::schedule::TransitSimSchedule;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
@@ -428,15 +489,21 @@ mod tests {
     const SIX: u64 = 6 * 3600;
 
     type Exchange = (u64, &'static str, String, String);
+    type Exchanges = Rc<RefCell<Vec<Exchange>>>;
 
     fn exchange(time: u64, kind: &'static str, person: &str, vehicle: &str) -> Exchange {
         (time, kind, person.to_owned(), vehicle.to_owned())
     }
 
-    /// An engine for the tutorial schedule on one partition, which records when passengers enter
-    /// and leave vehicles.
-    fn tutorial_engine() -> (TransitEngine, Rc<RefCell<Vec<Exchange>>>) {
-        let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
+    /// One engine per partition for the tutorial schedule. With two partitions, stops 2b and 3 are
+    /// on partition 1. The engines record when passengers enter and leave vehicles.
+    fn tutorial_engines(parts: u32, exchanges: &Exchanges) -> Vec<TransitEngine> {
+        let mut network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
+        if parts == 2 {
+            for link in ["32", "33"] {
+                network.get_link_mut(&Id::get_from_ext(link)).partition = 1;
+            }
+        }
         let schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
         let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
@@ -447,79 +514,99 @@ mod tests {
             &Population::default(),
         ));
 
-        let exchanges = Rc::new(RefCell::new(Vec::new()));
-        let mut comp_env = ThreadLocalComputationalEnvironment::default();
-        let mut events = comp_env.events_manager_borrow_mut();
-        let enters = exchanges.clone();
-        events.on::<PersonEntersVehicleEvent, _>(move |e| {
-            if !e.person.external().starts_with("pt_") {
-                enters.borrow_mut().push(exchange(
-                    e.time.as_secs(),
-                    "enters",
-                    e.person.external(),
-                    e.vehicle.external(),
-                ));
-            }
-        });
-        let leaves = exchanges.clone();
-        events.on::<PersonLeavesVehicleEvent, _>(move |e| {
-            if !e.person.external().starts_with("pt_") {
-                leaves.borrow_mut().push(exchange(
-                    e.time.as_secs(),
-                    "leaves",
-                    e.person.external(),
-                    e.vehicle.external(),
-                ));
-            }
-        });
-        drop(events);
-
-        let engine = TransitEngine::new(schedule, 0, comp_env, SimClock::new(1));
-        (engine, exchanges)
+        (0..parts)
+            .map(|rank| {
+                let mut comp_env = ThreadLocalComputationalEnvironment::default();
+                let mut events = comp_env.events_manager_borrow_mut();
+                for kind in ["enters", "leaves"] {
+                    let exchanges = exchanges.clone();
+                    let record = move |time: u64, person: &str, vehicle: &str| {
+                        if !person.starts_with("pt_") {
+                            exchanges
+                                .borrow_mut()
+                                .push(exchange(time, kind, person, vehicle));
+                        }
+                    };
+                    if kind == "enters" {
+                        events.on::<PersonEntersVehicleEvent, _>(move |e| {
+                            record(e.time.as_secs(), e.person.external(), e.vehicle.external())
+                        });
+                    } else {
+                        events.on::<PersonLeavesVehicleEvent, _>(move |e| {
+                            record(e.time.as_secs(), e.person.external(), e.vehicle.external())
+                        });
+                    }
+                }
+                drop(events);
+                TransitEngine::new(schedule.clone(), rank, comp_env, SimClock::new(1))
+            })
+            .collect()
     }
 
-    /// Runs the engine from 06:00 up to and including `until`. Each passenger starts its leg in
-    /// its tick. Returns the passengers who alighted, with their tick.
+    /// Runs the engines, one per partition, from 06:00 up to and including `until`. Each
+    /// passenger starts its leg in its tick on the partition of its stop. Vehicles that leave for
+    /// another partition arrive there after the step of the same tick, as with `send_recv`.
+    /// Returns the passengers who alighted, with their tick.
     fn run(
-        engine: &mut TransitEngine,
+        engines: &mut [TransitEngine],
         mut passengers: Vec<(u64, PassengerAgent)>,
         until: u64,
     ) -> Vec<(u64, PassengerAgent)> {
         let mut alighted = Vec::new();
         for tick in SIX..=until {
+            let now = Tick::new(tick);
             for (_, passenger) in passengers.extract_if(.., |(start, _)| *start == tick) {
+                let engine = engines
+                    .iter_mut()
+                    .find(|engine| {
+                        engine.schedule.stop_partition(&passenger.access_stop()) == engine.rank
+                    })
+                    .unwrap();
                 engine.receive_agent(passenger);
             }
-            let step = engine.do_step(Tick::new(tick));
-            alighted.extend(step.into_iter().map(|passenger| (tick, passenger)));
+            for engine in engines.iter_mut() {
+                let step = engine.do_step(now);
+                alighted.extend(step.into_iter().map(|passenger| (tick, passenger)));
+            }
+            for from in 0..engines.len() {
+                for (to, message) in engines[from].take_outgoing() {
+                    let (vehicle, _) = message.into_parts();
+                    engines[to as usize].receive_remote_vehicle(now, vehicle, from as u32);
+                }
+            }
         }
         alighted
     }
 
     #[deterministic_id_test]
     fn a_passenger_rides_the_next_vehicle_of_its_line_to_its_egress_stop() {
-        let (mut engine, exchanges) = tutorial_engine();
-        let passenger = create_pt_agent(1, "Blue Line", "1", "3", "11", "33");
+        // With two partitions, the vehicle changes partitions on the way to stop 3.
+        for parts in [1, 2] {
+            let exchanges = Exchanges::default();
+            let mut engines = tutorial_engines(parts, &exchanges);
+            let passenger = create_pt_agent(1, "Blue Line", "1", "3", "11", "33");
 
-        let alighted = run(&mut engine, vec![(SIX + 300, passenger)], SIX + 1800);
+            let alighted = run(&mut engines, vec![(SIX + 300, passenger)], SIX + 1800);
 
-        assert_eq!(
-            *exchanges.borrow(),
-            [
-                exchange(SIX + 900, "enters", "1", "tr_2"),
-                exchange(SIX + 1440, "leaves", "1", "tr_2"),
-            ]
-        );
-        let [(tick, passenger)] = alighted.as_slice() else {
-            panic!("Expected one alighted passenger");
-        };
-        assert_eq!(*tick, SIX + 1440);
-        assert_eq!(passenger.curr_link_id().unwrap().external(), "33");
+            assert_eq!(
+                *exchanges.borrow(),
+                [
+                    exchange(SIX + 900, "enters", "1", "tr_2"),
+                    exchange(SIX + 1440, "leaves", "1", "tr_2"),
+                ]
+            );
+            let [(tick, passenger)] = alighted.as_slice() else {
+                panic!("Expected one alighted passenger");
+            };
+            assert_eq!(*tick, SIX + 1440);
+            assert_eq!(passenger.curr_link_id().unwrap().external(), "33");
+        }
     }
 
     #[deterministic_id_test]
     fn a_vehicle_takes_the_passengers_who_wait_before_its_departure_tick() {
-        let (mut engine, exchanges) = tutorial_engine();
+        let exchanges = Exchanges::default();
+        let mut engines = tutorial_engines(1, &exchanges);
         let passengers = vec![
             (
                 SIX + 899,
@@ -537,7 +624,7 @@ mod tests {
             ),
         ];
 
-        run(&mut engine, passengers, SIX + 1800);
+        run(&mut engines, passengers, SIX + 1800);
 
         let boardings: Vec<_> = exchanges
             .borrow()
@@ -557,7 +644,7 @@ mod tests {
 
     #[deterministic_id_test]
     fn drain_returns_waiting_and_riding_passengers_but_no_drivers() {
-        let (mut engine, _) = tutorial_engine();
+        let mut engines = tutorial_engines(1, &Exchanges::default());
         let passengers = vec![
             (SIX, create_pt_agent(1, "Red Line", "1", "3", "11", "33")),
             (
@@ -565,14 +652,31 @@ mod tests {
                 create_pt_agent(2, "Blue Line", "1", "3", "11", "33"),
             ),
         ];
-        run(&mut engine, passengers, SIX + 1000);
+        run(&mut engines, passengers, SIX + 1000);
 
-        let mut ids: Vec<_> = engine
+        let mut ids: Vec<_> = engines[0]
             .drain()
             .iter()
             .map(|agent| agent.id().external().to_owned())
             .collect();
         ids.sort();
         assert_eq!(ids, ["1", "2"]);
+    }
+
+    #[deterministic_id_test]
+    #[should_panic(expected = "was received in tick 22140, but it is due at stop 3 in tick 22140")]
+    fn a_vehicle_received_in_the_tick_of_its_arrival_panics() {
+        let mut engines = tutorial_engines(2, &Exchanges::default());
+        // The 06:00 departure leaves stop 2a at 06:04 for stop 3 on partition 1.
+        for tick in SIX..=SIX + 240 {
+            engines[0].do_step(Tick::new(tick));
+        }
+        let mut outgoing = engines[0].take_outgoing();
+        assert_eq!(outgoing.len(), 1);
+        let (to, message) = outgoing.pop().unwrap();
+        assert_eq!(to, 1);
+        let (vehicle, _) = message.into_parts();
+
+        engines[1].receive_remote_vehicle(Tick::new(SIX + 540), vehicle, 0);
     }
 }

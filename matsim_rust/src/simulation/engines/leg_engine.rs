@@ -172,6 +172,10 @@ impl<C: SimCommunicator> LegEngine<C> {
             .network_engine
             .move_links(now, &mut self.net_message_broker);
         let alighted_passengers = self.transit_engine.do_step(now);
+        for (to, message) in self.transit_engine.take_outgoing() {
+            self.net_message_broker
+                .add_transit_vehicle(message, to, now);
+        }
 
         let sync_messages = self.send_recv(now);
 
@@ -214,6 +218,19 @@ impl<C: SimCommunicator> LegEngine<C> {
                     );
                 self.teleportation_engine
                     .receive_remote_agent(now, teleportation.into(), from, to);
+            }
+
+            for message in msg.take_transit_vehicles() {
+                let (vehicle, attachments) = message.into_parts();
+                self.comp_env
+                    .partition_migration_extensions_manager_borrow_mut()
+                    .receive(
+                        PartitionChangeEntity::TransitVehicle(&vehicle),
+                        attachments,
+                        &context,
+                    );
+                self.transit_engine
+                    .receive_remote_vehicle(now, vehicle, from);
             }
         }
 

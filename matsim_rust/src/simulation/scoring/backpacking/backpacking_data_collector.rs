@@ -215,6 +215,12 @@ impl BackpackingDataCollector {
                 .cloned()
                 .collect(),
             PartitionChangeEntity::TeleportationAgent(agent) => vec![agent.id().clone()],
+            // Transit drivers have no person and thus no backpack.
+            PartitionChangeEntity::TransitVehicle(vehicle) => vehicle
+                .passengers()
+                .iter()
+                .map(|agent| agent.id().clone())
+                .collect(),
         }
     }
 

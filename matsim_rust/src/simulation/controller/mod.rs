@@ -393,16 +393,22 @@ fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage
         .map(|msg| (msg.from_process(), msg.to_process()))
         .collect();
     // Messages arrive in no particular order, so sort the agents for a reproducible message.
-    let mut agents: Vec<_> = messages
+    let teleported = messages
         .iter()
         .flat_map(|msg| msg.teleportations())
-        .map(|teleportation| teleportation.id().external())
-        .collect();
+        .map(|teleportation| teleportation.id().external());
+    let in_transit_vehicles = messages
+        .iter()
+        .flat_map(|msg| msg.transit_vehicles())
+        .flat_map(|message| message.vehicle().passengers())
+        .map(|passenger| passenger.id().external());
+    let mut agents: Vec<_> = teleported.chain(in_transit_vehicles).collect();
     agents.sort_unstable();
     format!(
         "Mobsim iteration {iteration} ended with {} unprocessed messages between partitions (from, to) {pairs:?}. \
-        {} teleported agents are lost, e.g. {:?}. A partition only reads messages from partitions it shares a link \
-        with. Check whether the network consists of components that are not connected by links.",
+        {} teleported agents or transit passengers are lost, e.g. {:?}. A partition only reads messages from \
+        partitions it shares a link with. Check whether the network consists of components that are not connected \
+        by links.",
         messages.len(),
         agents.len(),
         &agents[..agents.len().min(3)],
