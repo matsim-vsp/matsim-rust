@@ -177,7 +177,7 @@ mod tests {
                     .person(person.clone())
                     .link(link("start"))
                     .leg_mode(car.clone())
-                    .routing_mode(car.clone())
+                    .routing_mode(Some(car.clone()))
                     .build()
                     .unwrap(),
             );

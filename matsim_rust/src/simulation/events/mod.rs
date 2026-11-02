@@ -6,6 +6,9 @@ use crate::simulation::id::{CreateMissingIds, Id, IdResolver};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::transit::{
+    TransitDeparture, TransitLine, TransitRoute, TransitStopFacility,
+};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use macros::event_struct;
@@ -558,7 +561,9 @@ pub struct PersonDepartureEvent {
     pub person: Id<InternalPerson>,
     pub link: Id<Link>,
     pub leg_mode: Id<String>,
-    pub routing_mode: Id<String>,
+    /// MATSim writes no routing mode for transit drivers.
+    #[builder(default)]
+    pub routing_mode: Option<Id<String>>,
     #[builder(default)]
     pub attributes: InternalAttributes,
 }
@@ -584,7 +589,10 @@ impl PersonDepartureEvent {
                 .person(ids.resolve(&event.attributes["person"].as_string())?)
                 .link(ids.resolve(&event.attributes["link"].as_string())?)
                 .leg_mode(ids.resolve(&event.attributes["mode"].as_string())?)
-                .routing_mode(ids.resolve(&event.attributes["routing_mode"].as_string())?)
+                .routing_mode(match event.attributes.get("routing_mode") {
+                    Some(value) => Some(ids.resolve(&value.as_string())?),
+                    None => None,
+                })
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -714,6 +722,170 @@ impl PtTeleportationArrivalEvent {
                 ))
                 .access_facility(ids.resolve(&event.attributes["accessFacility"].as_string())?)
                 .egress_facility(ids.resolve(&event.attributes["egressFacility"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
+    }
+}
+
+/// A transit driver starts a departure, like MATSim's `TransitDriverStartsEvent`.
+#[event_struct]
+pub struct TransitDriverStartsEvent {
+    pub time: SimTime,
+    pub driver: Id<InternalPerson>,
+    pub vehicle: Id<InternalVehicle>,
+    pub transit_line: Id<TransitLine>,
+    pub transit_route: Id<TransitRoute>,
+    pub departure: Id<TransitDeparture>,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl TransitDriverStartsEvent {
+    pub const TYPE: &'static str = "TransitDriverStarts";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        Some(
+            TransitDriverStartsEventBuilder::default()
+                .time(time)
+                .driver(ids.resolve(&event.attributes["driverId"].as_string())?)
+                .vehicle(ids.resolve(&event.attributes["vehicleId"].as_string())?)
+                .transit_line(ids.resolve(&event.attributes["transitLineId"].as_string())?)
+                .transit_route(ids.resolve(&event.attributes["transitRouteId"].as_string())?)
+                .departure(ids.resolve(&event.attributes["departureId"].as_string())?)
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
+    }
+}
+
+/// A transit vehicle arrives at a stop, like MATSim's `VehicleArrivesAtFacilityEvent`.
+#[event_struct]
+pub struct VehicleArrivesAtFacilityEvent {
+    pub time: SimTime,
+    pub vehicle: Id<InternalVehicle>,
+    pub facility: Id<TransitStopFacility>,
+    /// Delay in seconds relative to the schedule.
+    #[builder(default)]
+    pub delay: f64,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl VehicleArrivesAtFacilityEvent {
+    pub const TYPE: &'static str = "VehicleArrivesAtFacility";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        Some(
+            VehicleArrivesAtFacilityEventBuilder::default()
+                .time(time)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .facility(ids.resolve(&event.attributes["facility"].as_string())?)
+                .delay(event.attributes["delay"].as_double())
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
+    }
+}
+
+/// A transit vehicle departs from a stop, like MATSim's `VehicleDepartsAtFacilityEvent`.
+#[event_struct]
+pub struct VehicleDepartsAtFacilityEvent {
+    pub time: SimTime,
+    pub vehicle: Id<InternalVehicle>,
+    pub facility: Id<TransitStopFacility>,
+    /// Delay in seconds relative to the schedule.
+    #[builder(default)]
+    pub delay: f64,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl VehicleDepartsAtFacilityEvent {
+    pub const TYPE: &'static str = "VehicleDepartsAtFacility";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        Some(
+            VehicleDepartsAtFacilityEventBuilder::default()
+                .time(time)
+                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .facility(ids.resolve(&event.attributes["facility"].as_string())?)
+                .delay(event.attributes["delay"].as_double())
+                .attributes(attrs)
+                .build()
+                .unwrap(),
+        )
+    }
+}
+
+/// A passenger starts waiting at a stop, like MATSim's `AgentWaitingForPtEvent`.
+#[event_struct]
+pub struct AgentWaitingForPtEvent {
+    pub time: SimTime,
+    pub agent: Id<InternalPerson>,
+    pub at_stop: Id<TransitStopFacility>,
+    pub destination_stop: Id<TransitStopFacility>,
+    #[builder(default)]
+    pub attributes: InternalAttributes,
+}
+
+impl AgentWaitingForPtEvent {
+    pub const TYPE: &'static str = "waitingForPt";
+    pub fn from_proto_event(event: &crate::generated::events::GenericEvent, time: SimTime) -> Self {
+        Self::try_from_proto_event(event, time, &CreateMissingIds)
+            .expect("Creating missing ids never fails.")
+    }
+
+    /// Like [`Self::from_proto_event`], but returns `None` if `ids` doesn't resolve an id.
+    pub(crate) fn try_from_proto_event(
+        event: &crate::generated::events::GenericEvent,
+        time: SimTime,
+        ids: &impl IdResolver,
+    ) -> Option<Self> {
+        let attrs = InternalAttributes::from(&event.attributes);
+        assert!(event.r#type.eq(Self::TYPE));
+        Some(
+            AgentWaitingForPtEventBuilder::default()
+                .time(time)
+                .agent(ids.resolve(&event.attributes["agent"].as_string())?)
+                .at_stop(ids.resolve(&event.attributes["atStop"].as_string())?)
+                .destination_stop(ids.resolve(&event.attributes["destinationStop"].as_string())?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -882,7 +1054,7 @@ mod tests {
             person: Id::create("person1"),
             link: Id::create("link1"),
             leg_mode: Id::create("car"),
-            routing_mode: Id::create("fastest"),
+            routing_mode: Some(Id::create("fastest")),
             attributes: InternalAttributes::default(),
         };
         let event4 = NewSimpleEvent {

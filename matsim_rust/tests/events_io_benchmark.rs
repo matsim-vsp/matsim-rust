@@ -261,7 +261,7 @@ fn synthetic_events() -> Vec<Box<dyn EventTrait>> {
                 .person(Id::create(&person))
                 .link(Id::create(&link(0)))
                 .leg_mode(Id::create(leg_mode))
-                .routing_mode(Id::create(leg_mode))
+                .routing_mode(Some(Id::create(leg_mode)))
                 .build()
                 .unwrap(),
         ));

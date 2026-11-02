@@ -266,7 +266,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .person(agent.id().clone())
                 .link(leg.departure_link().clone())
                 .leg_mode(leg.mode().clone())
-                .routing_mode(
+                .routing_mode(Some(
                     leg.routing_mode()
                         .unwrap_or_else(|| {
                             panic!(
@@ -276,7 +276,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                             )
                         })
                         .clone(),
-                )
+                ))
                 .build()
                 .unwrap(),
         );
