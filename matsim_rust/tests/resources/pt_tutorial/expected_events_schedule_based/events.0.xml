@@ -1,0 +1,1142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<events version="1.0">
+<event time="21600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_01" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="01"/>
+<event time="21600" type="departure" person="pt_Blue Line_1to3_01" link="11" legMode="train"/>
+<event time="21600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_01" vehicle="tr_1"/>
+<event time="21600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_01" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="01"/>
+<event time="21600" type="departure" person="pt_Blue Line_3to1_01" link="33" legMode="pt"/>
+<event time="21600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_01" vehicle="tr_2"/>
+<event time="21600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="21600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="21600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="21600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="21800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="21840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="21900" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="21940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="22140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="22140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="22140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="22140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_01" vehicle="tr_1"/>
+<event time="22140" type="arrival" person="pt_Blue Line_1to3_01" link="33" legMode="train"/>
+<event time="22140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="22140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_01" vehicle="tr_2"/>
+<event time="22140" type="arrival" person="pt_Blue Line_3to1_01" link="11" legMode="pt"/>
+<event time="22500" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_02" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="02"/>
+<event time="22500" type="departure" person="pt_Blue Line_1to3_02" link="11" legMode="train"/>
+<event time="22500" type="PersonEntersVehicle" person="pt_Blue Line_1to3_02" vehicle="tr_2"/>
+<event time="22500" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_02" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="02"/>
+<event time="22500" type="departure" person="pt_Blue Line_3to1_02" link="33" legMode="pt"/>
+<event time="22500" type="PersonEntersVehicle" person="pt_Blue Line_3to1_02" vehicle="tr_1"/>
+<event time="22500" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="22500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="22500" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="22500" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="22700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="22740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="22800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="22840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="23040" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="23040" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="23040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="23040" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_02" vehicle="tr_2"/>
+<event time="23040" type="arrival" person="pt_Blue Line_1to3_02" link="33" legMode="train"/>
+<event time="23040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="23040" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_02" vehicle="tr_1"/>
+<event time="23040" type="arrival" person="pt_Blue Line_3to1_02" link="11" legMode="pt"/>
+<event time="23400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_03" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="03"/>
+<event time="23400" type="departure" person="pt_Blue Line_1to3_03" link="11" legMode="train"/>
+<event time="23400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_03" vehicle="tr_1"/>
+<event time="23400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_03" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="03"/>
+<event time="23400" type="departure" person="pt_Blue Line_3to1_03" link="33" legMode="pt"/>
+<event time="23400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_03" vehicle="tr_2"/>
+<event time="23400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="23400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="23400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="23400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="23600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="23640" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="23700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="23740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="23940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="23940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="23940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="23940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_03" vehicle="tr_1"/>
+<event time="23940" type="arrival" person="pt_Blue Line_1to3_03" link="33" legMode="train"/>
+<event time="23940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="23940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_03" vehicle="tr_2"/>
+<event time="23940" type="arrival" person="pt_Blue Line_3to1_03" link="11" legMode="pt"/>
+<event time="24000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_04" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="04"/>
+<event time="24000" type="departure" person="pt_Blue Line_1to3_04" link="11" legMode="train"/>
+<event time="24000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_04" vehicle="tr_2"/>
+<event time="24000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_04" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="04"/>
+<event time="24000" type="departure" person="pt_Blue Line_3to1_04" link="33" legMode="pt"/>
+<event time="24000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_04" vehicle="tr_1"/>
+<event time="24000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="24000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="24000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="24000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="24200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="24240" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="24300" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="24340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="24540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="24540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="24540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="24540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_04" vehicle="tr_2"/>
+<event time="24540" type="arrival" person="pt_Blue Line_1to3_04" link="33" legMode="train"/>
+<event time="24540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="24540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_04" vehicle="tr_1"/>
+<event time="24540" type="arrival" person="pt_Blue Line_3to1_04" link="11" legMode="pt"/>
+<event time="24600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_05" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="05"/>
+<event time="24600" type="departure" person="pt_Blue Line_1to3_05" link="11" legMode="train"/>
+<event time="24600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_05" vehicle="tr_1"/>
+<event time="24600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_05" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="05"/>
+<event time="24600" type="departure" person="pt_Blue Line_3to1_05" link="33" legMode="pt"/>
+<event time="24600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_05" vehicle="tr_2"/>
+<event time="24600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="24600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="24600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="24600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="24800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="24840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="24900" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="24940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="25140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="25140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="25140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="25140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_05" vehicle="tr_1"/>
+<event time="25140" type="arrival" person="pt_Blue Line_1to3_05" link="33" legMode="train"/>
+<event time="25140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="25140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_05" vehicle="tr_2"/>
+<event time="25140" type="arrival" person="pt_Blue Line_3to1_05" link="11" legMode="pt"/>
+<event time="25200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_06" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="06"/>
+<event time="25200" type="departure" person="pt_Blue Line_1to3_06" link="11" legMode="train"/>
+<event time="25200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_06" vehicle="tr_2"/>
+<event time="25200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_06" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="06"/>
+<event time="25200" type="departure" person="pt_Blue Line_3to1_06" link="33" legMode="pt"/>
+<event time="25200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_06" vehicle="tr_1"/>
+<event time="25200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="25200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="25200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="25200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="25400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="25440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="25500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="25540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="25740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="25740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="25740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="25740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_06" vehicle="tr_2"/>
+<event time="25740" type="arrival" person="pt_Blue Line_1to3_06" link="33" legMode="train"/>
+<event time="25740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="25740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_06" vehicle="tr_1"/>
+<event time="25740" type="arrival" person="pt_Blue Line_3to1_06" link="11" legMode="pt"/>
+<event time="25800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_07" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="07"/>
+<event time="25800" type="departure" person="pt_Blue Line_1to3_07" link="11" legMode="train"/>
+<event time="25800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_07" vehicle="tr_1"/>
+<event time="25800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_07" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="07"/>
+<event time="25800" type="departure" person="pt_Blue Line_3to1_07" link="33" legMode="pt"/>
+<event time="25800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_07" vehicle="tr_2"/>
+<event time="25800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="25800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="25800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="25800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="26000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="26040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="26100" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="26140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="26340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="26340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="26340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="26340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_07" vehicle="tr_1"/>
+<event time="26340" type="arrival" person="pt_Blue Line_1to3_07" link="33" legMode="train"/>
+<event time="26340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="26340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_07" vehicle="tr_2"/>
+<event time="26340" type="arrival" person="pt_Blue Line_3to1_07" link="11" legMode="pt"/>
+<event time="26400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_08" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="08"/>
+<event time="26400" type="departure" person="pt_Blue Line_1to3_08" link="11" legMode="train"/>
+<event time="26400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_08" vehicle="tr_2"/>
+<event time="26400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_08" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="08"/>
+<event time="26400" type="departure" person="pt_Blue Line_3to1_08" link="33" legMode="pt"/>
+<event time="26400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_08" vehicle="tr_1"/>
+<event time="26400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="26400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="26400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="26400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="26600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="26640" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="26700" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="26740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="26940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="26940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="26940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="26940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_08" vehicle="tr_2"/>
+<event time="26940" type="arrival" person="pt_Blue Line_1to3_08" link="33" legMode="train"/>
+<event time="26940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="26940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_08" vehicle="tr_1"/>
+<event time="26940" type="arrival" person="pt_Blue Line_3to1_08" link="11" legMode="pt"/>
+<event time="27000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_09" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="09"/>
+<event time="27000" type="departure" person="pt_Blue Line_1to3_09" link="11" legMode="train"/>
+<event time="27000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_09" vehicle="tr_1"/>
+<event time="27000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_09" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="09"/>
+<event time="27000" type="departure" person="pt_Blue Line_3to1_09" link="33" legMode="pt"/>
+<event time="27000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_09" vehicle="tr_2"/>
+<event time="27000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="27000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="27000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="27000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="27126" type="actend" person="102" link="1112" x="938" y="642" actType="h"/>
+<event time="27126" type="departure" person="102" link="1112" legMode="walk" computationalRoutingMode="pt"/>
+<event time="27200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="27240" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="27300" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="27340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="27540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="27540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="27540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="27540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_09" vehicle="tr_1"/>
+<event time="27540" type="arrival" person="pt_Blue Line_1to3_09" link="33" legMode="train"/>
+<event time="27540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="27540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_09" vehicle="tr_2"/>
+<event time="27540" type="arrival" person="pt_Blue Line_3to1_09" link="11" legMode="pt"/>
+<event time="27600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_10" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="10"/>
+<event time="27600" type="departure" person="pt_Blue Line_1to3_10" link="11" legMode="train"/>
+<event time="27600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_10" vehicle="tr_2"/>
+<event time="27600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_10" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="10"/>
+<event time="27600" type="departure" person="pt_Blue Line_3to1_10" link="33" legMode="pt"/>
+<event time="27600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_10" vehicle="tr_1"/>
+<event time="27600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="27600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="27600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="27600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="27787" type="travelled" person="102" distance="550.0213814025778" mode="walk"/>
+<event time="27787" type="arrival" person="102" link="11" legMode="walk"/>
+<event time="27788" type="actstart" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="27788" type="actend" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="27788" type="departure" person="102" link="11" legMode="pt" computationalRoutingMode="pt"/>
+<event time="27788" type="waitingForPt" person="102" agent="102" atStop="1" destinationStop="3"/>
+<event time="27800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="27840" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="27900" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="27940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="28140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="28140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="28140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="28140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_10" vehicle="tr_2"/>
+<event time="28140" type="arrival" person="pt_Blue Line_1to3_10" link="33" legMode="train"/>
+<event time="28140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="28140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_10" vehicle="tr_1"/>
+<event time="28140" type="arrival" person="pt_Blue Line_3to1_10" link="11" legMode="pt"/>
+<event time="28200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_11" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="11"/>
+<event time="28200" type="departure" person="pt_Blue Line_1to3_11" link="11" legMode="train"/>
+<event time="28200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_11" vehicle="tr_1"/>
+<event time="28200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_11" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="11"/>
+<event time="28200" type="departure" person="pt_Blue Line_3to1_11" link="33" legMode="pt"/>
+<event time="28200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_11" vehicle="tr_2"/>
+<event time="28200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="28200" type="PersonEntersVehicle" person="102" vehicle="tr_1"/>
+<event time="28200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="28200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="28200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="28400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="28440" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="28500" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="28540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="28740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="28740" type="PersonLeavesVehicle" person="102" vehicle="tr_1"/>
+<event time="28740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="28740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="28740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_11" vehicle="tr_1"/>
+<event time="28740" type="arrival" person="pt_Blue Line_1to3_11" link="33" legMode="train"/>
+<event time="28740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="28740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_11" vehicle="tr_2"/>
+<event time="28740" type="arrival" person="pt_Blue Line_3to1_11" link="11" legMode="pt"/>
+<event time="28740" type="arrival" person="102" link="33" legMode="pt"/>
+<event time="28741" type="actstart" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="28741" type="actend" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="28741" type="departure" person="102" link="33" legMode="walk" computationalRoutingMode="pt"/>
+<event time="28800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_12" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="12"/>
+<event time="28800" type="departure" person="pt_Blue Line_1to3_12" link="11" legMode="train"/>
+<event time="28800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_12" vehicle="tr_2"/>
+<event time="28800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_12" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="12"/>
+<event time="28800" type="departure" person="pt_Blue Line_3to1_12" link="33" legMode="pt"/>
+<event time="28800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_12" vehicle="tr_1"/>
+<event time="28800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="28800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="28800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="28800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="29000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="29040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="29100" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="29140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="29320" type="travelled" person="102" distance="481.9652477098323" mode="walk"/>
+<event time="29320" type="arrival" person="102" link="3141" legMode="walk"/>
+<event time="29321" type="actstart" person="102" link="3141" x="3619" y="1217" actType="w"/>
+<event time="29340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="29340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="29340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="29340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_12" vehicle="tr_2"/>
+<event time="29340" type="arrival" person="pt_Blue Line_1to3_12" link="33" legMode="train"/>
+<event time="29340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="29340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_12" vehicle="tr_1"/>
+<event time="29340" type="arrival" person="pt_Blue Line_3to1_12" link="11" legMode="pt"/>
+<event time="29700" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_13" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="13"/>
+<event time="29700" type="departure" person="pt_Blue Line_1to3_13" link="11" legMode="train"/>
+<event time="29700" type="PersonEntersVehicle" person="pt_Blue Line_1to3_13" vehicle="tr_1"/>
+<event time="29700" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_13" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="13"/>
+<event time="29700" type="departure" person="pt_Blue Line_3to1_13" link="33" legMode="pt"/>
+<event time="29700" type="PersonEntersVehicle" person="pt_Blue Line_3to1_13" vehicle="tr_2"/>
+<event time="29700" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="29700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="29700" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="29700" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="29900" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="29940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="30000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="30040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="30240" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="30240" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="30240" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="30240" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_13" vehicle="tr_1"/>
+<event time="30240" type="arrival" person="pt_Blue Line_1to3_13" link="33" legMode="train"/>
+<event time="30240" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="30240" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_13" vehicle="tr_2"/>
+<event time="30240" type="arrival" person="pt_Blue Line_3to1_13" link="11" legMode="pt"/>
+<event time="30600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_14" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="14"/>
+<event time="30600" type="departure" person="pt_Blue Line_1to3_14" link="11" legMode="train"/>
+<event time="30600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_14" vehicle="tr_2"/>
+<event time="30600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_14" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="14"/>
+<event time="30600" type="departure" person="pt_Blue Line_3to1_14" link="33" legMode="pt"/>
+<event time="30600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_14" vehicle="tr_1"/>
+<event time="30600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="30600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="30600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="30600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="30800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="30840" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="30900" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="30940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="31140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="31140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="31140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="31140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_14" vehicle="tr_2"/>
+<event time="31140" type="arrival" person="pt_Blue Line_1to3_14" link="33" legMode="train"/>
+<event time="31140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="31140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_14" vehicle="tr_1"/>
+<event time="31140" type="arrival" person="pt_Blue Line_3to1_14" link="11" legMode="pt"/>
+<event time="32400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_15" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="15"/>
+<event time="32400" type="departure" person="pt_Blue Line_1to3_15" link="11" legMode="train"/>
+<event time="32400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_15" vehicle="tr_1"/>
+<event time="32400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_15" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="15"/>
+<event time="32400" type="departure" person="pt_Blue Line_3to1_15" link="33" legMode="pt"/>
+<event time="32400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_15" vehicle="tr_2"/>
+<event time="32400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="32400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="32400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="32400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="32600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="32640" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="32700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="32740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="32940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="32940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="32940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="32940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_15" vehicle="tr_1"/>
+<event time="32940" type="arrival" person="pt_Blue Line_1to3_15" link="33" legMode="train"/>
+<event time="32940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="32940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_15" vehicle="tr_2"/>
+<event time="32940" type="arrival" person="pt_Blue Line_3to1_15" link="11" legMode="pt"/>
+<event time="34200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_16" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="16"/>
+<event time="34200" type="departure" person="pt_Blue Line_1to3_16" link="11" legMode="train"/>
+<event time="34200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_16" vehicle="tr_2"/>
+<event time="34200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_16" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="16"/>
+<event time="34200" type="departure" person="pt_Blue Line_3to1_16" link="33" legMode="pt"/>
+<event time="34200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_16" vehicle="tr_1"/>
+<event time="34200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="34200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="34200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="34200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="34400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="34440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="34500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="34540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="34740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="34740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="34740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="34740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_16" vehicle="tr_2"/>
+<event time="34740" type="arrival" person="pt_Blue Line_1to3_16" link="33" legMode="train"/>
+<event time="34740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="34740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_16" vehicle="tr_1"/>
+<event time="34740" type="arrival" person="pt_Blue Line_3to1_16" link="11" legMode="pt"/>
+<event time="36000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_17" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="17"/>
+<event time="36000" type="departure" person="pt_Blue Line_1to3_17" link="11" legMode="train"/>
+<event time="36000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_17" vehicle="tr_1"/>
+<event time="36000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_17" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="17"/>
+<event time="36000" type="departure" person="pt_Blue Line_3to1_17" link="33" legMode="pt"/>
+<event time="36000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_17" vehicle="tr_2"/>
+<event time="36000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="36000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="36000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="36000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="36200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="36240" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="36300" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="36340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="36540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="36540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="36540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="36540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_17" vehicle="tr_1"/>
+<event time="36540" type="arrival" person="pt_Blue Line_1to3_17" link="33" legMode="train"/>
+<event time="36540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="36540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_17" vehicle="tr_2"/>
+<event time="36540" type="arrival" person="pt_Blue Line_3to1_17" link="11" legMode="pt"/>
+<event time="37800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_18" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="18"/>
+<event time="37800" type="departure" person="pt_Blue Line_1to3_18" link="11" legMode="train"/>
+<event time="37800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_18" vehicle="tr_2"/>
+<event time="37800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_18" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="18"/>
+<event time="37800" type="departure" person="pt_Blue Line_3to1_18" link="33" legMode="pt"/>
+<event time="37800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_18" vehicle="tr_1"/>
+<event time="37800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="37800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="37800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="37800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="38000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="38040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="38100" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="38140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="38340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="38340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="38340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="38340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_18" vehicle="tr_2"/>
+<event time="38340" type="arrival" person="pt_Blue Line_1to3_18" link="33" legMode="train"/>
+<event time="38340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="38340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_18" vehicle="tr_1"/>
+<event time="38340" type="arrival" person="pt_Blue Line_3to1_18" link="11" legMode="pt"/>
+<event time="39600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_19" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="19"/>
+<event time="39600" type="departure" person="pt_Blue Line_1to3_19" link="11" legMode="train"/>
+<event time="39600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_19" vehicle="tr_1"/>
+<event time="39600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_19" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="19"/>
+<event time="39600" type="departure" person="pt_Blue Line_3to1_19" link="33" legMode="pt"/>
+<event time="39600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_19" vehicle="tr_2"/>
+<event time="39600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="39600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="39600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="39600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="39800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="39840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="39900" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="39940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="40140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="40140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="40140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="40140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_19" vehicle="tr_1"/>
+<event time="40140" type="arrival" person="pt_Blue Line_1to3_19" link="33" legMode="train"/>
+<event time="40140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="40140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_19" vehicle="tr_2"/>
+<event time="40140" type="arrival" person="pt_Blue Line_3to1_19" link="11" legMode="pt"/>
+<event time="43200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_20" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="20"/>
+<event time="43200" type="departure" person="pt_Blue Line_1to3_20" link="11" legMode="train"/>
+<event time="43200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_20" vehicle="tr_2"/>
+<event time="43200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_20" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="20"/>
+<event time="43200" type="departure" person="pt_Blue Line_3to1_20" link="33" legMode="pt"/>
+<event time="43200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_20" vehicle="tr_1"/>
+<event time="43200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="43200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="43200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="43200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="43400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="43440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="43500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="43540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="43740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="43740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="43740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="43740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_20" vehicle="tr_2"/>
+<event time="43740" type="arrival" person="pt_Blue Line_1to3_20" link="33" legMode="train"/>
+<event time="43740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="43740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_20" vehicle="tr_1"/>
+<event time="43740" type="arrival" person="pt_Blue Line_3to1_20" link="11" legMode="pt"/>
+<event time="46800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_21" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="21"/>
+<event time="46800" type="departure" person="pt_Blue Line_1to3_21" link="11" legMode="train"/>
+<event time="46800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_21" vehicle="tr_1"/>
+<event time="46800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_21" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="21"/>
+<event time="46800" type="departure" person="pt_Blue Line_3to1_21" link="33" legMode="pt"/>
+<event time="46800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_21" vehicle="tr_2"/>
+<event time="46800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="46800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="46800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="46800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="47000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="47040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="47100" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="47140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="47340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="47340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="47340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="47340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_21" vehicle="tr_1"/>
+<event time="47340" type="arrival" person="pt_Blue Line_1to3_21" link="33" legMode="train"/>
+<event time="47340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="47340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_21" vehicle="tr_2"/>
+<event time="47340" type="arrival" person="pt_Blue Line_3to1_21" link="11" legMode="pt"/>
+<event time="50400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_22" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="22"/>
+<event time="50400" type="departure" person="pt_Blue Line_1to3_22" link="11" legMode="train"/>
+<event time="50400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_22" vehicle="tr_2"/>
+<event time="50400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_22" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="22"/>
+<event time="50400" type="departure" person="pt_Blue Line_3to1_22" link="33" legMode="pt"/>
+<event time="50400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_22" vehicle="tr_1"/>
+<event time="50400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="50400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="50400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="50400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="50600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="50640" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="50700" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="50740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="50940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="50940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="50940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="50940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_22" vehicle="tr_2"/>
+<event time="50940" type="arrival" person="pt_Blue Line_1to3_22" link="33" legMode="train"/>
+<event time="50940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="50940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_22" vehicle="tr_1"/>
+<event time="50940" type="arrival" person="pt_Blue Line_3to1_22" link="11" legMode="pt"/>
+<event time="54000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_23" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="23"/>
+<event time="54000" type="departure" person="pt_Blue Line_1to3_23" link="11" legMode="train"/>
+<event time="54000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_23" vehicle="tr_1"/>
+<event time="54000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_23" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="23"/>
+<event time="54000" type="departure" person="pt_Blue Line_3to1_23" link="33" legMode="pt"/>
+<event time="54000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_23" vehicle="tr_2"/>
+<event time="54000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="54000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="54000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="54000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="54200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="54240" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="54300" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="54340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="54540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="54540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="54540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="54540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_23" vehicle="tr_1"/>
+<event time="54540" type="arrival" person="pt_Blue Line_1to3_23" link="33" legMode="train"/>
+<event time="54540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="54540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_23" vehicle="tr_2"/>
+<event time="54540" type="arrival" person="pt_Blue Line_3to1_23" link="11" legMode="pt"/>
+<event time="55800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_24" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="24"/>
+<event time="55800" type="departure" person="pt_Blue Line_1to3_24" link="11" legMode="train"/>
+<event time="55800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_24" vehicle="tr_2"/>
+<event time="55800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_24" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="24"/>
+<event time="55800" type="departure" person="pt_Blue Line_3to1_24" link="33" legMode="pt"/>
+<event time="55800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_24" vehicle="tr_1"/>
+<event time="55800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="55800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="55800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="55800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="56000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="56040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="56100" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="56140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="56340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="56340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="56340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="56340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_24" vehicle="tr_2"/>
+<event time="56340" type="arrival" person="pt_Blue Line_1to3_24" link="33" legMode="train"/>
+<event time="56340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="56340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_24" vehicle="tr_1"/>
+<event time="56340" type="arrival" person="pt_Blue Line_3to1_24" link="11" legMode="pt"/>
+<event time="57600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_25" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="25"/>
+<event time="57600" type="departure" person="pt_Blue Line_1to3_25" link="11" legMode="train"/>
+<event time="57600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_25" vehicle="tr_1"/>
+<event time="57600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_25" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="25"/>
+<event time="57600" type="departure" person="pt_Blue Line_3to1_25" link="33" legMode="pt"/>
+<event time="57600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_25" vehicle="tr_2"/>
+<event time="57600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="57600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="57600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="57600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="57800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="57840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="57900" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="57940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="58140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="58140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="58140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="58140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_25" vehicle="tr_1"/>
+<event time="58140" type="arrival" person="pt_Blue Line_1to3_25" link="33" legMode="train"/>
+<event time="58140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="58140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_25" vehicle="tr_2"/>
+<event time="58140" type="arrival" person="pt_Blue Line_3to1_25" link="11" legMode="pt"/>
+<event time="58500" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_26" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="26"/>
+<event time="58500" type="departure" person="pt_Blue Line_1to3_26" link="11" legMode="train"/>
+<event time="58500" type="PersonEntersVehicle" person="pt_Blue Line_1to3_26" vehicle="tr_2"/>
+<event time="58500" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_26" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="26"/>
+<event time="58500" type="departure" person="pt_Blue Line_3to1_26" link="33" legMode="pt"/>
+<event time="58500" type="PersonEntersVehicle" person="pt_Blue Line_3to1_26" vehicle="tr_1"/>
+<event time="58500" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="58500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="58500" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="58500" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="58700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="58740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="58800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="58840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="59040" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="59040" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="59040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="59040" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_26" vehicle="tr_2"/>
+<event time="59040" type="arrival" person="pt_Blue Line_1to3_26" link="33" legMode="train"/>
+<event time="59040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="59040" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_26" vehicle="tr_1"/>
+<event time="59040" type="arrival" person="pt_Blue Line_3to1_26" link="11" legMode="pt"/>
+<event time="59400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_27" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="27"/>
+<event time="59400" type="departure" person="pt_Blue Line_1to3_27" link="11" legMode="train"/>
+<event time="59400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_27" vehicle="tr_1"/>
+<event time="59400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_27" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="27"/>
+<event time="59400" type="departure" person="pt_Blue Line_3to1_27" link="33" legMode="pt"/>
+<event time="59400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_27" vehicle="tr_2"/>
+<event time="59400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="59400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="59400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="59400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="59600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="59640" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="59700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="59740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="59940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="59940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="59940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="59940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_27" vehicle="tr_1"/>
+<event time="59940" type="arrival" person="pt_Blue Line_1to3_27" link="33" legMode="train"/>
+<event time="59940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="59940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_27" vehicle="tr_2"/>
+<event time="59940" type="arrival" person="pt_Blue Line_3to1_27" link="11" legMode="pt"/>
+<event time="60000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_28" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="28"/>
+<event time="60000" type="departure" person="pt_Blue Line_1to3_28" link="11" legMode="train"/>
+<event time="60000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_28" vehicle="tr_2"/>
+<event time="60000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_28" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="28"/>
+<event time="60000" type="departure" person="pt_Blue Line_3to1_28" link="33" legMode="pt"/>
+<event time="60000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_28" vehicle="tr_1"/>
+<event time="60000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="60000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="60000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="60000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="60200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="60240" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="60300" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="60340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="60540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="60540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="60540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="60540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_28" vehicle="tr_2"/>
+<event time="60540" type="arrival" person="pt_Blue Line_1to3_28" link="33" legMode="train"/>
+<event time="60540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="60540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_28" vehicle="tr_1"/>
+<event time="60540" type="arrival" person="pt_Blue Line_3to1_28" link="11" legMode="pt"/>
+<event time="60600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_29" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="29"/>
+<event time="60600" type="departure" person="pt_Blue Line_1to3_29" link="11" legMode="train"/>
+<event time="60600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_29" vehicle="tr_1"/>
+<event time="60600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_29" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="29"/>
+<event time="60600" type="departure" person="pt_Blue Line_3to1_29" link="33" legMode="pt"/>
+<event time="60600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_29" vehicle="tr_2"/>
+<event time="60600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="60600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="60600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="60600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="60800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="60840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="60900" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="60940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="61140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="61140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="61140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="61140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_29" vehicle="tr_1"/>
+<event time="61140" type="arrival" person="pt_Blue Line_1to3_29" link="33" legMode="train"/>
+<event time="61140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="61140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_29" vehicle="tr_2"/>
+<event time="61140" type="arrival" person="pt_Blue Line_3to1_29" link="11" legMode="pt"/>
+<event time="61200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_30" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="30"/>
+<event time="61200" type="departure" person="pt_Blue Line_1to3_30" link="11" legMode="train"/>
+<event time="61200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_30" vehicle="tr_2"/>
+<event time="61200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_30" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="30"/>
+<event time="61200" type="departure" person="pt_Blue Line_3to1_30" link="33" legMode="pt"/>
+<event time="61200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_30" vehicle="tr_1"/>
+<event time="61200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="61200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="61200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="61200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="61400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="61440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="61500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="61540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="61740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="61740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="61740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="61740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_30" vehicle="tr_2"/>
+<event time="61740" type="arrival" person="pt_Blue Line_1to3_30" link="33" legMode="train"/>
+<event time="61740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="61740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_30" vehicle="tr_1"/>
+<event time="61740" type="arrival" person="pt_Blue Line_3to1_30" link="11" legMode="pt"/>
+<event time="61800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_31" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="31"/>
+<event time="61800" type="departure" person="pt_Blue Line_1to3_31" link="11" legMode="train"/>
+<event time="61800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_31" vehicle="tr_1"/>
+<event time="61800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_31" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="31"/>
+<event time="61800" type="departure" person="pt_Blue Line_3to1_31" link="33" legMode="pt"/>
+<event time="61800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_31" vehicle="tr_2"/>
+<event time="61800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="61800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="61800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="61800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="62000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="62040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="62100" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="62140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="62340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="62340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="62340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="62340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_31" vehicle="tr_1"/>
+<event time="62340" type="arrival" person="pt_Blue Line_1to3_31" link="33" legMode="train"/>
+<event time="62340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="62340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_31" vehicle="tr_2"/>
+<event time="62340" type="arrival" person="pt_Blue Line_3to1_31" link="11" legMode="pt"/>
+<event time="62400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_32" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="32"/>
+<event time="62400" type="departure" person="pt_Blue Line_1to3_32" link="11" legMode="train"/>
+<event time="62400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_32" vehicle="tr_2"/>
+<event time="62400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_32" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="32"/>
+<event time="62400" type="departure" person="pt_Blue Line_3to1_32" link="33" legMode="pt"/>
+<event time="62400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_32" vehicle="tr_1"/>
+<event time="62400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="62400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="62400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="62400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="62600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="62640" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="62700" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="62740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="62844" type="actend" person="102" link="3141" x="3619" y="1217" actType="w"/>
+<event time="62844" type="departure" person="102" link="3141" legMode="walk" computationalRoutingMode="pt"/>
+<event time="62940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="62940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="62940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="62940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_32" vehicle="tr_2"/>
+<event time="62940" type="arrival" person="pt_Blue Line_1to3_32" link="33" legMode="train"/>
+<event time="62940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="62940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_32" vehicle="tr_1"/>
+<event time="62940" type="arrival" person="pt_Blue Line_3to1_32" link="11" legMode="pt"/>
+<event time="63000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_33" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="33"/>
+<event time="63000" type="departure" person="pt_Blue Line_1to3_33" link="11" legMode="train"/>
+<event time="63000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_33" vehicle="tr_1"/>
+<event time="63000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_33" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="33"/>
+<event time="63000" type="departure" person="pt_Blue Line_3to1_33" link="33" legMode="pt"/>
+<event time="63000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_33" vehicle="tr_2"/>
+<event time="63000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="63000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="63000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="63000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="63189" type="travelled" person="102" distance="287.7232176936717" mode="walk"/>
+<event time="63189" type="arrival" person="102" link="4142" legMode="walk"/>
+<event time="63190" type="actstart" person="102" link="4142" x="3840" y="1205" actType="s"/>
+<event time="63200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="63240" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="63300" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="63340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="63540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="63540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="63540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="63540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_33" vehicle="tr_1"/>
+<event time="63540" type="arrival" person="pt_Blue Line_1to3_33" link="33" legMode="train"/>
+<event time="63540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="63540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_33" vehicle="tr_2"/>
+<event time="63540" type="arrival" person="pt_Blue Line_3to1_33" link="11" legMode="pt"/>
+<event time="63600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_34" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="34"/>
+<event time="63600" type="departure" person="pt_Blue Line_1to3_34" link="11" legMode="train"/>
+<event time="63600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_34" vehicle="tr_2"/>
+<event time="63600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_34" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="34"/>
+<event time="63600" type="departure" person="pt_Blue Line_3to1_34" link="33" legMode="pt"/>
+<event time="63600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_34" vehicle="tr_1"/>
+<event time="63600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="63600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="63600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="63600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="63800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="63840" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="63900" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="63940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="64140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="64140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="64140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="64140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_34" vehicle="tr_2"/>
+<event time="64140" type="arrival" person="pt_Blue Line_1to3_34" link="33" legMode="train"/>
+<event time="64140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="64140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_34" vehicle="tr_1"/>
+<event time="64140" type="arrival" person="pt_Blue Line_3to1_34" link="11" legMode="pt"/>
+<event time="64200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_35" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="35"/>
+<event time="64200" type="departure" person="pt_Blue Line_1to3_35" link="11" legMode="train"/>
+<event time="64200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_35" vehicle="tr_1"/>
+<event time="64200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_35" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="35"/>
+<event time="64200" type="departure" person="pt_Blue Line_3to1_35" link="33" legMode="pt"/>
+<event time="64200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_35" vehicle="tr_2"/>
+<event time="64200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="64200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="64200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="64200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="64400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="64440" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="64500" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="64540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="64740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="64740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="64740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="64740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_35" vehicle="tr_1"/>
+<event time="64740" type="arrival" person="pt_Blue Line_1to3_35" link="33" legMode="train"/>
+<event time="64740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="64740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_35" vehicle="tr_2"/>
+<event time="64740" type="arrival" person="pt_Blue Line_3to1_35" link="11" legMode="pt"/>
+<event time="64800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_36" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="36"/>
+<event time="64800" type="departure" person="pt_Blue Line_1to3_36" link="11" legMode="train"/>
+<event time="64800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_36" vehicle="tr_2"/>
+<event time="64800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_36" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="36"/>
+<event time="64800" type="departure" person="pt_Blue Line_3to1_36" link="33" legMode="pt"/>
+<event time="64800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_36" vehicle="tr_1"/>
+<event time="64800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="64800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="64800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="64800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="65000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="65040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="65100" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="65140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="65340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="65340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="65340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="65340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_36" vehicle="tr_2"/>
+<event time="65340" type="arrival" person="pt_Blue Line_1to3_36" link="33" legMode="train"/>
+<event time="65340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="65340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_36" vehicle="tr_1"/>
+<event time="65340" type="arrival" person="pt_Blue Line_3to1_36" link="11" legMode="pt"/>
+<event time="65400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_37" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="37"/>
+<event time="65400" type="departure" person="pt_Blue Line_1to3_37" link="11" legMode="train"/>
+<event time="65400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_37" vehicle="tr_1"/>
+<event time="65400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_37" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="37"/>
+<event time="65400" type="departure" person="pt_Blue Line_3to1_37" link="33" legMode="pt"/>
+<event time="65400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_37" vehicle="tr_2"/>
+<event time="65400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="65400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="65400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="65400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="65600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="65640" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="65700" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="65740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="65940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="65940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="65940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="65940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_37" vehicle="tr_1"/>
+<event time="65940" type="arrival" person="pt_Blue Line_1to3_37" link="33" legMode="train"/>
+<event time="65940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="65940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_37" vehicle="tr_2"/>
+<event time="65940" type="arrival" person="pt_Blue Line_3to1_37" link="11" legMode="pt"/>
+<event time="66000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_38" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="38"/>
+<event time="66000" type="departure" person="pt_Blue Line_1to3_38" link="11" legMode="train"/>
+<event time="66000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_38" vehicle="tr_2"/>
+<event time="66000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_38" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="38"/>
+<event time="66000" type="departure" person="pt_Blue Line_3to1_38" link="33" legMode="pt"/>
+<event time="66000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_38" vehicle="tr_1"/>
+<event time="66000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="66000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="66000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="66000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="66200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="66240" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="66300" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="66310" type="actend" person="102" link="4142" x="3840" y="1205" actType="s"/>
+<event time="66310" type="departure" person="102" link="4142" legMode="walk" computationalRoutingMode="pt"/>
+<event time="66340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="66540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="66540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="66540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="66540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_38" vehicle="tr_2"/>
+<event time="66540" type="arrival" person="pt_Blue Line_1to3_38" link="33" legMode="train"/>
+<event time="66540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="66540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_38" vehicle="tr_1"/>
+<event time="66540" type="arrival" person="pt_Blue Line_3to1_38" link="11" legMode="pt"/>
+<event time="66600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_39" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="39"/>
+<event time="66600" type="departure" person="pt_Blue Line_1to3_39" link="11" legMode="train"/>
+<event time="66600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_39" vehicle="tr_1"/>
+<event time="66600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_39" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="39"/>
+<event time="66600" type="departure" person="pt_Blue Line_3to1_39" link="33" legMode="pt"/>
+<event time="66600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_39" vehicle="tr_2"/>
+<event time="66600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="66600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="66600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="66600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="66607" type="travelled" person="102" distance="247.08551151372677" mode="walk"/>
+<event time="66607" type="arrival" person="102" link="33" legMode="walk"/>
+<event time="66608" type="actstart" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="66608" type="actend" person="102" link="33" x="3950" y="1050" actType="pt interaction"/>
+<event time="66608" type="departure" person="102" link="33" legMode="pt" computationalRoutingMode="pt"/>
+<event time="66608" type="waitingForPt" person="102" agent="102" atStop="3" destinationStop="1"/>
+<event time="66800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="66840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="66900" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="66940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="67140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="67140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="67140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="67140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_39" vehicle="tr_1"/>
+<event time="67140" type="arrival" person="pt_Blue Line_1to3_39" link="33" legMode="train"/>
+<event time="67140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="67140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_39" vehicle="tr_2"/>
+<event time="67140" type="arrival" person="pt_Blue Line_3to1_39" link="11" legMode="pt"/>
+<event time="67200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_40" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="40"/>
+<event time="67200" type="departure" person="pt_Blue Line_1to3_40" link="11" legMode="train"/>
+<event time="67200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_40" vehicle="tr_2"/>
+<event time="67200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_40" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="40"/>
+<event time="67200" type="departure" person="pt_Blue Line_3to1_40" link="33" legMode="pt"/>
+<event time="67200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_40" vehicle="tr_1"/>
+<event time="67200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="67200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="67200" type="PersonEntersVehicle" person="102" vehicle="tr_1"/>
+<event time="67200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="67200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="67400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="67440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="67500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="67540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="67740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="67740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="67740" type="PersonLeavesVehicle" person="102" vehicle="tr_1"/>
+<event time="67740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="67740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_40" vehicle="tr_2"/>
+<event time="67740" type="arrival" person="pt_Blue Line_1to3_40" link="33" legMode="train"/>
+<event time="67740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="67740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_40" vehicle="tr_1"/>
+<event time="67740" type="arrival" person="pt_Blue Line_3to1_40" link="11" legMode="pt"/>
+<event time="67740" type="arrival" person="102" link="11" legMode="pt"/>
+<event time="67741" type="actstart" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="67741" type="actend" person="102" link="11" x="1050" y="1050" actType="pt interaction"/>
+<event time="67741" type="departure" person="102" link="11" legMode="walk" computationalRoutingMode="pt"/>
+<event time="67800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_41" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="41"/>
+<event time="67800" type="departure" person="pt_Blue Line_1to3_41" link="11" legMode="train"/>
+<event time="67800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_41" vehicle="tr_1"/>
+<event time="67800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_41" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="41"/>
+<event time="67800" type="departure" person="pt_Blue Line_3to1_41" link="33" legMode="pt"/>
+<event time="67800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_41" vehicle="tr_2"/>
+<event time="67800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="67800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="67800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="67800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="68000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="68040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="68100" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="68140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="68340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="68340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="68340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="68340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_41" vehicle="tr_1"/>
+<event time="68340" type="arrival" person="pt_Blue Line_1to3_41" link="33" legMode="train"/>
+<event time="68340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="68340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_41" vehicle="tr_2"/>
+<event time="68340" type="arrival" person="pt_Blue Line_3to1_41" link="11" legMode="pt"/>
+<event time="68400" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_42" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="42"/>
+<event time="68400" type="departure" person="pt_Blue Line_1to3_42" link="11" legMode="train"/>
+<event time="68400" type="PersonEntersVehicle" person="pt_Blue Line_1to3_42" vehicle="tr_2"/>
+<event time="68400" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_42" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="42"/>
+<event time="68400" type="departure" person="pt_Blue Line_3to1_42" link="33" legMode="pt"/>
+<event time="68400" type="PersonEntersVehicle" person="pt_Blue Line_3to1_42" vehicle="tr_1"/>
+<event time="68400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="68400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="68400" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="68400" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="68402" type="travelled" person="102" distance="550.0213814025778" mode="walk"/>
+<event time="68402" type="arrival" person="102" link="1112" legMode="walk"/>
+<event time="68403" type="actstart" person="102" link="1112" x="938" y="642" actType="h"/>
+<event time="68600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="68640" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="68700" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="68740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="68940" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="68940" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="68940" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="68940" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_42" vehicle="tr_2"/>
+<event time="68940" type="arrival" person="pt_Blue Line_1to3_42" link="33" legMode="train"/>
+<event time="68940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="68940" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_42" vehicle="tr_1"/>
+<event time="68940" type="arrival" person="pt_Blue Line_3to1_42" link="11" legMode="pt"/>
+<event time="69300" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_43" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="43"/>
+<event time="69300" type="departure" person="pt_Blue Line_1to3_43" link="11" legMode="train"/>
+<event time="69300" type="PersonEntersVehicle" person="pt_Blue Line_1to3_43" vehicle="tr_1"/>
+<event time="69300" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_43" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="43"/>
+<event time="69300" type="departure" person="pt_Blue Line_3to1_43" link="33" legMode="pt"/>
+<event time="69300" type="PersonEntersVehicle" person="pt_Blue Line_3to1_43" vehicle="tr_2"/>
+<event time="69300" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="69300" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="69300" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="69300" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="69500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="69540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="69600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="69640" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="69840" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="69840" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="69840" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="69840" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_43" vehicle="tr_1"/>
+<event time="69840" type="arrival" person="pt_Blue Line_1to3_43" link="33" legMode="train"/>
+<event time="69840" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="69840" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_43" vehicle="tr_2"/>
+<event time="69840" type="arrival" person="pt_Blue Line_3to1_43" link="11" legMode="pt"/>
+<event time="70200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_44" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="44"/>
+<event time="70200" type="departure" person="pt_Blue Line_1to3_44" link="11" legMode="train"/>
+<event time="70200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_44" vehicle="tr_2"/>
+<event time="70200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_44" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="44"/>
+<event time="70200" type="departure" person="pt_Blue Line_3to1_44" link="33" legMode="pt"/>
+<event time="70200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_44" vehicle="tr_1"/>
+<event time="70200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="70200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="70200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="70200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="70400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="70440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="70500" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="70540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="70740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="70740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="70740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="70740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_44" vehicle="tr_2"/>
+<event time="70740" type="arrival" person="pt_Blue Line_1to3_44" link="33" legMode="train"/>
+<event time="70740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="70740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_44" vehicle="tr_1"/>
+<event time="70740" type="arrival" person="pt_Blue Line_3to1_44" link="11" legMode="pt"/>
+<event time="71100" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_45" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="45"/>
+<event time="71100" type="departure" person="pt_Blue Line_1to3_45" link="11" legMode="train"/>
+<event time="71100" type="PersonEntersVehicle" person="pt_Blue Line_1to3_45" vehicle="tr_1"/>
+<event time="71100" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_45" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="45"/>
+<event time="71100" type="departure" person="pt_Blue Line_3to1_45" link="33" legMode="pt"/>
+<event time="71100" type="PersonEntersVehicle" person="pt_Blue Line_3to1_45" vehicle="tr_2"/>
+<event time="71100" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="71100" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="71100" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="71100" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="71300" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="71340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="71400" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="71440" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="71640" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="71640" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="71640" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="71640" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_45" vehicle="tr_1"/>
+<event time="71640" type="arrival" person="pt_Blue Line_1to3_45" link="33" legMode="train"/>
+<event time="71640" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="71640" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_45" vehicle="tr_2"/>
+<event time="71640" type="arrival" person="pt_Blue Line_3to1_45" link="11" legMode="pt"/>
+<event time="72000" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_46" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="46"/>
+<event time="72000" type="departure" person="pt_Blue Line_1to3_46" link="11" legMode="train"/>
+<event time="72000" type="PersonEntersVehicle" person="pt_Blue Line_1to3_46" vehicle="tr_2"/>
+<event time="72000" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_46" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="46"/>
+<event time="72000" type="departure" person="pt_Blue Line_3to1_46" link="33" legMode="pt"/>
+<event time="72000" type="PersonEntersVehicle" person="pt_Blue Line_3to1_46" vehicle="tr_1"/>
+<event time="72000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="72000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="72000" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="72000" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="72200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="72240" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="72300" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="72340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="72540" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="72540" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="72540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="72540" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_46" vehicle="tr_2"/>
+<event time="72540" type="arrival" person="pt_Blue Line_1to3_46" link="33" legMode="train"/>
+<event time="72540" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="72540" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_46" vehicle="tr_1"/>
+<event time="72540" type="arrival" person="pt_Blue Line_3to1_46" link="11" legMode="pt"/>
+<event time="73800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_47" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="47"/>
+<event time="73800" type="departure" person="pt_Blue Line_1to3_47" link="11" legMode="train"/>
+<event time="73800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_47" vehicle="tr_1"/>
+<event time="73800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_47" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="47"/>
+<event time="73800" type="departure" person="pt_Blue Line_3to1_47" link="33" legMode="pt"/>
+<event time="73800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_47" vehicle="tr_2"/>
+<event time="73800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="73800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="73800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="73800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="74000" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="74040" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="74100" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="74140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="74340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="74340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="74340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="74340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_47" vehicle="tr_1"/>
+<event time="74340" type="arrival" person="pt_Blue Line_1to3_47" link="33" legMode="train"/>
+<event time="74340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="74340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_47" vehicle="tr_2"/>
+<event time="74340" type="arrival" person="pt_Blue Line_3to1_47" link="11" legMode="pt"/>
+<event time="75600" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_48" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="48"/>
+<event time="75600" type="departure" person="pt_Blue Line_1to3_48" link="11" legMode="train"/>
+<event time="75600" type="PersonEntersVehicle" person="pt_Blue Line_1to3_48" vehicle="tr_2"/>
+<event time="75600" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_48" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="48"/>
+<event time="75600" type="departure" person="pt_Blue Line_3to1_48" link="33" legMode="pt"/>
+<event time="75600" type="PersonEntersVehicle" person="pt_Blue Line_3to1_48" vehicle="tr_1"/>
+<event time="75600" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="75600" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="75600" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="75600" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="75800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="75840" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="75900" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="75940" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="76140" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="76140" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="76140" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="76140" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_48" vehicle="tr_2"/>
+<event time="76140" type="arrival" person="pt_Blue Line_1to3_48" link="33" legMode="train"/>
+<event time="76140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="76140" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_48" vehicle="tr_1"/>
+<event time="76140" type="arrival" person="pt_Blue Line_3to1_48" link="11" legMode="pt"/>
+<event time="79200" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_49" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="1to3" departureId="49"/>
+<event time="79200" type="departure" person="pt_Blue Line_1to3_49" link="11" legMode="train"/>
+<event time="79200" type="PersonEntersVehicle" person="pt_Blue Line_1to3_49" vehicle="tr_1"/>
+<event time="79200" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_49" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="3to1" departureId="49"/>
+<event time="79200" type="departure" person="pt_Blue Line_3to1_49" link="33" legMode="pt"/>
+<event time="79200" type="PersonEntersVehicle" person="pt_Blue Line_3to1_49" vehicle="tr_2"/>
+<event time="79200" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="79200" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="79200" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="79200" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="79400" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="79440" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2a" delay="0"/>
+<event time="79500" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="79540" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2b" delay="0"/>
+<event time="79740" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="79740" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="79740" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="79740" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_49" vehicle="tr_1"/>
+<event time="79740" type="arrival" person="pt_Blue Line_1to3_49" link="33" legMode="train"/>
+<event time="79740" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="79740" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_49" vehicle="tr_2"/>
+<event time="79740" type="arrival" person="pt_Blue Line_3to1_49" link="11" legMode="pt"/>
+<event time="82800" type="TransitDriverStarts" driverId="pt_Blue Line_1to3_50" vehicleId="tr_2" transitLineId="Blue Line" transitRouteId="1to3" departureId="50"/>
+<event time="82800" type="departure" person="pt_Blue Line_1to3_50" link="11" legMode="train"/>
+<event time="82800" type="PersonEntersVehicle" person="pt_Blue Line_1to3_50" vehicle="tr_2"/>
+<event time="82800" type="TransitDriverStarts" driverId="pt_Blue Line_3to1_50" vehicleId="tr_1" transitLineId="Blue Line" transitRouteId="3to1" departureId="50"/>
+<event time="82800" type="departure" person="pt_Blue Line_3to1_50" link="33" legMode="pt"/>
+<event time="82800" type="PersonEntersVehicle" person="pt_Blue Line_3to1_50" vehicle="tr_1"/>
+<event time="82800" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="82800" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="82800" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="1" delay="0"/>
+<event time="82800" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="3" delay="0"/>
+<event time="83000" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="83040" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="2a" delay="0"/>
+<event time="83100" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="83140" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="2b" delay="0"/>
+<event time="83340" type="VehicleArrivesAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="83340" type="VehicleArrivesAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="83340" type="VehicleDepartsAtFacility" vehicle="tr_2" facility="3" delay="0"/>
+<event time="83340" type="PersonLeavesVehicle" person="pt_Blue Line_1to3_50" vehicle="tr_2"/>
+<event time="83340" type="arrival" person="pt_Blue Line_1to3_50" link="33" legMode="train"/>
+<event time="83340" type="VehicleDepartsAtFacility" vehicle="tr_1" facility="1" delay="0"/>
+<event time="83340" type="PersonLeavesVehicle" person="pt_Blue Line_3to1_50" vehicle="tr_1"/>
+<event time="83340" type="arrival" person="pt_Blue Line_3to1_50" link="11" legMode="pt"/>
+</events>
