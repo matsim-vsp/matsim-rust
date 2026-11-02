@@ -388,6 +388,7 @@ impl PlanStrategyModule for ReRouteModule {
             network: &self.scenario_core.network,
             garage: &self.scenario_core.garage,
             facilities: &self.scenario_core.facilities,
+            transit_sim_schedule: &self.scenario_core.transit_sim_schedule,
             config: &self.scenario_core.config,
         };
         let trip_count = get_trip_spans_default(&person.plans()[plan_index].elements).len();
