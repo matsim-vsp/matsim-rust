@@ -50,18 +50,20 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
 ## Time
 
 - **T1** A tick runs in a fixed order:
-  1. The `ActivityEngine` starts the activities chosen in step 3 of the previous tick, delivers wake-ups and ends the
-     activities that are due.
-  2. `Simulation` asks the agents that ended an activity in step 1 for their next phase. The `LegEngine` starts the chosen
-     legs, moves nodes and links, exchanges messages with other partitions and ends the legs that are due.
-  3. `Simulation` asks the agents that ended a leg in step 2 for their next phase. The `ActivityEngine` starts the chosen
-     activities and those chosen in step 1, delivers their wake-ups that are due and ends those of them that are due.
-     Agents already in the `ActivityEngine` are left alone. `Simulation` asks the agents whose activity ended for their
-     next phase. The `LegEngine` accepts the chosen legs: they depart in this tick, but are moved, exchanged with other
-     partitions and ended from the next tick on. An activity chosen in this step starts in the next tick.
-- **T2** In one tick, an agent passes each step of `T1` at most once. A chain of elements without duration therefore
-  advances by at most two activity ends and two leg departures per tick. It cannot loop within a tick, and no call
-  recurses.
+  1. The `ActivityEngine` delivers the wake-ups that are due and ends the activities that are due.
+  2. The `LegEngine` moves nodes and links, exchanges messages with other partitions and ends the legs that are due.
+
+  After each step, `Simulation` asks the agents whose phase ended for their next phase and passes them to the engines,
+  after step 1 together with the agents that chose an activity after an activity in the previous tick. The
+  `ActivityEngine` starts the chosen activities, delivers their wake-ups that are due and returns the agents whose
+  activity ends at once, e.g. an activity without duration. `Simulation` asks them for their next phase as well. Agents
+  already in the `ActivityEngine` are left alone. The `LegEngine` lets the chosen legs depart. An engine processes the
+  agents that it receives after its step from the next tick on: a leg that departs after step 2 is moved, exchanged
+  with other partitions and ended from the next tick on, and an activity chosen after an activity starts after step 1
+  of the next tick.
+- **T2** In one tick, an agent passes each step of `T1` and each handover after it at most once. A chain of elements
+  without duration therefore advances by at most two activity ends and two leg departures per tick. It cannot loop
+  within a tick, and no call recurses.
 
 ## Knowledge
 
@@ -120,12 +122,13 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
 ## Deviations from MATSim
 
 - **A leg that follows a leg end lasts at least one tick (`T1`).** In QSim, the leg end, the activity start, the end of
-  an activity without duration and the next departure all happen in one call, which is reentrant (`O2`). Here, step 3 of
-  `T1` does the same without recursion, but runs after the exchange of messages. A leg accepted there therefore ends in
-  the next tick at the earliest. Only legs that would end in the tick of their departure are affected: a teleported leg
-  of zero seconds, e.g. after a `pt interaction`, and a network leg whose route ends on its departure link. Such a leg
-  ends one tick after its departure. In QSim, a teleported leg of zero seconds ends at its departure.
-- **An activity that follows an activity in step 3 starts in the next tick (`T1`).** In QSim, it starts at once. Plan-based
+  an activity without duration and the next departure all happen in one call, which is reentrant (`O2`). Here,
+  `Simulation` does the same without recursion after step 2 of `T1`, i.e. after the exchange of messages. A leg that
+  departs there therefore ends in the next tick at the earliest. Only legs that would end in the tick of their
+  departure are affected: a teleported leg of zero seconds, e.g. after a `pt interaction`, and a network leg whose route
+  ends on its departure link. Such a leg ends one tick after its departure. In QSim, a teleported leg of zero seconds
+  ends at its departure.
+- **An activity that follows an activity starts in the next tick (`T1`).** In QSim, it starts at once. Plan-based
   agents always alternate activities and legs, so this only affects other agents.
 - **Replanning is not possible from outside (`D1`).** In MATSim, within-day replanning can edit a plan from outside the
   agent between two engine steps. Here, only the agent changes its plan, at a decision point.

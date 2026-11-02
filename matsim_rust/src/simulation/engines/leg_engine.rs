@@ -60,6 +60,8 @@ pub struct LegEngine<C: SimCommunicator> {
     main_modes: IntSet<Id<String>>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
+    // The tick of the last `do_step`. A leg that departs in this tick moves from the next one on.
+    last_step: Option<Tick>,
 }
 
 impl<C: SimCommunicator> LegEngine<C> {
@@ -90,6 +92,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             main_modes,
             comp_env,
             clock,
+            last_step: None,
         }
     }
 
@@ -121,11 +124,11 @@ impl<C: SimCommunicator> LegEngine<C> {
     /// So, minimal time on a link is `2` steps. Thus, in the upper case without partitions, the link travel time is 1 time step + 1 time step due to
     /// `move_nodes`. For all travel times greater than this, it is the same.
     ///
-    /// Legs that start after this step, i.e. after the end of a leg in this tick, go to [`LegEngine::accept_agents`].
+    /// Legs start in [`LegEngine::depart`]: before this step, or after it if they follow the end of a leg in this tick.
     #[hotpath::measure]
-    #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
-    pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
-        self.receive_agents(now, agents);
+    #[instrument(level = "trace", skip(self), fields(rank=self.net_message_broker.rank()))]
+    pub(crate) fn do_step(&mut self, now: Tick) -> Vec<LegAgent> {
+        self.last_step = Some(now);
 
         self.network_engine.move_nodes(now);
         let network_vehicles = self
@@ -189,21 +192,21 @@ impl<C: SimCommunicator> LegEngine<C> {
         self.net_message_broker.send_recv(now)
     }
 
-    fn receive_agents(&mut self, now: Tick, agents: Vec<LegAgent>) {
-        for agent in agents {
-            self.receive_agent(now, now, agent);
-        }
-    }
-
-    /// Accepts legs that start after [`LegEngine::do_step`] of this tick, i.e. step 3 of `T1`.
-    /// The agents depart now, but they are moved, exchanged with other partitions and end their
-    /// leg from the next tick on. A departing vehicle thus goes through the same steps as one that
-    /// departs before the move of the next tick.
+    /// Starts the legs of agents that depart now. A leg that departs before [`LegEngine::do_step`]
+    /// of this tick is moved in this tick. A leg that departs after it, i.e. after the end of a leg
+    /// in this tick, is moved, exchanged with other partitions and ended from the next tick on. A
+    /// departing vehicle thus goes through the same steps as one that departs before the move of
+    /// the next tick.
     #[hotpath::measure]
     #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
-    pub(crate) fn accept_agents(&mut self, now: Tick, agents: Vec<LegAgent>) {
+    pub(crate) fn depart(&mut self, now: Tick, agents: Vec<LegAgent>) {
+        let earliest_end = if self.last_step == Some(now) {
+            now.next()
+        } else {
+            now
+        };
         for agent in agents {
-            self.receive_agent(now, now.next(), agent);
+            self.receive_agent(now, earliest_end, agent);
         }
     }
 
@@ -271,7 +274,7 @@ impl<C: SimCommunicator> LegEngine<C> {
 
     /// `earliest_end` is the first tick in which the leg can end, see
     /// [`TeleportationEngine::receive_agent`].
-    pub(crate) fn receive_agent(&mut self, now: Tick, earliest_end: Tick, agent: LegAgent) {
+    fn receive_agent(&mut self, now: Tick, earliest_end: Tick, agent: LegAgent) {
         let now_time = self.clock.tick_to_time(now);
 
         let leg = agent.as_ref();

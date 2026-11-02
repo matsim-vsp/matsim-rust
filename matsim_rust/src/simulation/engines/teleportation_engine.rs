@@ -76,9 +76,10 @@ impl TeleportationEngine {
 
     /// Starts the teleportation of an agent at `now`. `earliest_end` is the first tick in which
     /// the leg engine moves the agent: `now` for a leg that starts before the move of this tick,
-    /// and the next tick for a leg that starts after it (step 3 of `T1`). The teleportation ends
-    /// no earlier than that. An agent for another partition is sent with the messages of
-    /// `earliest_end`, because the messages of an earlier tick may already have been exchanged.
+    /// and the next tick for a leg that starts after it (see `LegEngine::depart`). The
+    /// teleportation ends no earlier than that. An agent for another partition is sent with the
+    /// messages of `earliest_end`, because the messages of an earlier tick may already have been
+    /// exchanged.
     pub(crate) fn receive_agent<C: SimCommunicator>(
         &mut self,
         now: Tick,

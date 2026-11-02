@@ -31,28 +31,22 @@ impl ActivityEngine {
         self.asleep_q.drain().into_iter().map(|a| a.agent).collect()
     }
 
+    /// Delivers the wake-ups that are due and returns the agents whose activity ends, i.e. step 1
+    /// of `T1`. Agents enter the engine through [`ActivityEngine::start_activities`].
     #[hotpath::measure]
-    #[instrument(level = "trace", skip(self, now, agents))]
-    pub(crate) fn do_step(
-        &mut self,
-        now: impl Into<Tick>,
-        agents: Vec<ActivityAgent>,
-    ) -> Vec<ActivityAgent> {
-        let now = now.into();
-        let now_time = self.clock.tick_to_time(now);
-        for agent in agents {
-            self.receive_agent(now, agent);
-        }
-
+    #[instrument(level = "trace", skip(self, now))]
+    pub(crate) fn do_step(&mut self, now: impl Into<Tick>) -> Vec<ActivityAgent> {
+        let now_time = self.clock.tick_to_time(now.into());
         let end_agents = self.wake_up(now_time);
         self.notify_end_all(now_time, end_agents)
     }
 
-    /// Starts the activities of agents that chose an activity after the activity step of this
-    /// tick, i.e. step 3 of `T1`. Like `do_step`, it delivers the wake-ups that are due for these
-    /// agents and returns those whose activity ends right away. Unlike `do_step`, it leaves the
-    /// agents in the queue alone: their wake-ups and ends of this tick were handled in step 1, and
-    /// a second wake-up in the same tick would break the contract of `next_wakeup`.
+    /// Starts the activities of agents that chose an activity. Like `do_step`, it delivers the
+    /// wake-ups that are due for these agents and returns those whose activity ends right away;
+    /// all wake-ups come before the first end. Unlike `do_step`, it leaves the agents in the queue
+    /// alone. It must therefore run after `do_step` of the same tick: an agent that asks for a time
+    /// that has passed goes back into the queue as due, and `do_step` would wake it up a second
+    /// time in the same tick, which would break the contract of `next_wakeup`.
     #[hotpath::measure]
     #[instrument(level = "trace", skip(self, now, agents))]
     pub(crate) fn start_activities(
@@ -95,12 +89,6 @@ impl ActivityEngine {
             ActivityEngine::notify_act_end(agent, now);
         }
         end_agents
-    }
-
-    fn receive_agent(&mut self, now: Tick, agent: ActivityAgent) {
-        let now_time = self.clock.tick_to_time(now);
-        let agent = self.start(now, agent);
-        self.asleep_q.add(agent, now_time);
     }
 
     /// Starts the activity of an agent. The caller decides when the agent goes into the queue.
@@ -374,7 +362,7 @@ mod tests {
 
     fn step_without_end(engine: &mut ActivityEngine, ticks: std::ops::Range<u32>) {
         for tick in ticks {
-            assert!(engine.do_step(tick, vec![]).is_empty());
+            assert!(engine.do_step(tick).is_empty());
         }
     }
 
@@ -444,7 +432,7 @@ mod tests {
         step_without_end(&mut engine, 0..10);
         assert!(calls.lock().unwrap().is_empty());
 
-        assert_eq!(engine.do_step(10, vec![]).len(), 1);
+        assert_eq!(engine.do_step(10).len(), 1);
         assert_eq!(*calls.lock().unwrap(), [finished(10)]);
     }
 
@@ -457,7 +445,7 @@ mod tests {
         step_without_end(&mut engine, 0..10);
         assert_eq!(*calls.lock().unwrap(), [wakeup(10, 3), wakeup(10, 7)]);
 
-        assert_eq!(engine.do_step(10, vec![]).len(), 1);
+        assert_eq!(engine.do_step(10).len(), 1);
         assert_eq!(
             *calls.lock().unwrap(),
             [wakeup(10, 3), wakeup(10, 7), finished(10)]
@@ -471,7 +459,7 @@ mod tests {
         let mut engine = create_engine(vec![agent], Default::default());
 
         step_without_end(&mut engine, 0..10);
-        assert_eq!(engine.do_step(10, vec![]).len(), 1);
+        assert_eq!(engine.do_step(10).len(), 1);
         assert_eq!(*calls.lock().unwrap(), [wakeup(10, 10), finished(10)]);
     }
 
@@ -482,7 +470,7 @@ mod tests {
         let mut engine = create_engine(vec![agent], Default::default());
 
         step_without_end(&mut engine, 0..10);
-        assert_eq!(engine.do_step(10, vec![]).len(), 1);
+        assert_eq!(engine.do_step(10).len(), 1);
         assert_eq!(*calls.lock().unwrap(), [finished(10)]);
     }
 
@@ -492,7 +480,7 @@ mod tests {
         let agent = scripted_agent("1", &[5], 30, &calls);
         let mut engine = create_engine(vec![], Default::default());
 
-        assert!(engine.do_step(20, vec![agent]).is_empty());
+        assert!(engine.start_activities(20, vec![agent]).is_empty());
         assert_eq!(*calls.lock().unwrap(), [wakeup(30, 20)]);
     }
 
@@ -502,7 +490,7 @@ mod tests {
         let agent = scripted_agent("1", &[5], 10, &calls);
         let mut engine = create_engine(vec![], Default::default());
 
-        assert_eq!(engine.do_step(20, vec![agent]).len(), 1);
+        assert_eq!(engine.start_activities(20, vec![agent]).len(), 1);
         // The agent leaves now, so it must not plan with the end time that has passed.
         assert_eq!(*calls.lock().unwrap(), [wakeup(20, 20), finished(20)]);
     }
@@ -513,20 +501,10 @@ mod tests {
         let agent = scripted_agent("1", &[], 20, &calls);
         let mut engine = create_engine(vec![], Default::default());
 
-        assert!(engine.do_step(20, vec![]).is_empty());
+        assert!(engine.do_step(20).is_empty());
         assert_eq!(engine.start_activities(20, vec![agent]).len(), 1);
         assert_eq!(*calls.lock().unwrap(), [finished(20)]);
         assert_eq!(engine.asleep_q.len(), 0);
-    }
-
-    #[deterministic_id_test]
-    fn an_overdue_wakeup_comes_before_the_end_when_started_after_the_step() {
-        let calls = Calls::default();
-        let agent = scripted_agent("1", &[5], 10, &calls);
-        let mut engine = create_engine(vec![], Default::default());
-
-        assert_eq!(engine.start_activities(20, vec![agent]).len(), 1);
-        assert_eq!(*calls.lock().unwrap(), [wakeup(20, 20), finished(20)]);
     }
 
     #[deterministic_id_test]
@@ -538,7 +516,7 @@ mod tests {
         assert!(engine.start_activities(20, vec![agent]).is_empty());
         assert_eq!(engine.asleep_q.len(), 1);
         step_without_end(&mut engine, 21..30);
-        assert_eq!(engine.do_step(30, vec![]).len(), 1);
+        assert_eq!(engine.do_step(30).len(), 1);
         assert_eq!(*calls.lock().unwrap(), [wakeup(30, 25), finished(30)]);
     }
 
@@ -550,7 +528,8 @@ mod tests {
         let started = scripted_agent("2", &[], 10, &started_calls);
         let mut engine = create_engine(vec![], Default::default());
 
-        assert!(engine.do_step(5, vec![queued]).is_empty());
+        assert!(engine.do_step(5).is_empty());
+        assert!(engine.start_activities(5, vec![queued]).is_empty());
         // The agent asked for a time that has passed, so it is due again in the queue.
         assert!(engine.start_activities(5, vec![started]).is_empty());
         assert_eq!(*queued_calls.lock().unwrap(), [wakeup(10, 5)]);
@@ -591,7 +570,7 @@ mod tests {
         let mut engine = create_engine(agents, Default::default());
 
         step_without_end(&mut engine, 0..5);
-        assert_eq!(engine.do_step(5, vec![]).len(), 1);
+        assert_eq!(engine.do_step(5).len(), 1);
         assert_eq!(*calls.lock().unwrap(), [wakeup(9, 5), finished(5)]);
     }
 
@@ -607,7 +586,7 @@ mod tests {
         let mut engine = create_engine(agents, Default::default());
 
         step_without_end(&mut engine, 0..5);
-        let ended = engine.do_step(5, vec![]);
+        let ended = engine.do_step(5);
         let ids: Vec<_> = ended.iter().map(|a| a.id().external()).collect();
         assert_eq!(ids, ["2", "4", "1", "3"]);
     }
@@ -639,12 +618,12 @@ mod tests {
         let mut engine = create_engine(agents, Default::default());
 
         {
-            let agents = engine.do_step(0, vec![]);
+            let agents = engine.do_step(0);
             assert!(agents.is_empty());
             assert_eq!(engine.asleep_q.len(), 1);
         }
         {
-            let agents = engine.do_step(10, vec![]);
+            let agents = engine.do_step(10);
             assert_eq!(agents.len(), 1);
             assert_eq!(engine.asleep_q.len(), 0);
         }
@@ -784,18 +763,18 @@ mod tests {
         let agents = vec![agent];
         let mut engine = create_engine(agents, comp_env);
         {
-            let agents = engine.do_step(0, vec![]);
+            let agents = engine.do_step(0);
             assert!(agents.is_empty());
             assert_eq!(engine.asleep_q.len(), 1);
         }
         {
             // agent is not released, but was woken up
-            let agents = engine.do_step(5, vec![]);
+            let agents = engine.do_step(5);
             assert!(agents.is_empty());
             assert_eq!(engine.asleep_q.len(), 1);
         }
         {
-            let agents = engine.do_step(10, vec![]);
+            let agents = engine.do_step(10);
             assert_eq!(agents.len(), 1);
             assert_eq!(engine.asleep_q.len(), 0);
             agents
