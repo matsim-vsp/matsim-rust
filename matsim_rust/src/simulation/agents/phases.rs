@@ -7,6 +7,9 @@
 use super::SimulationAgentLogic;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
+use crate::simulation::pt::schedule::{
+    DepartureIndex, SimDeparture, SimRouteStop, SimTransitRoute,
+};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::vehicles::InternalVehicle;
@@ -17,6 +20,7 @@ pub type LegAgent = Box<dyn LegLogic>;
 pub type NetworkDriverAgent = Box<dyn NetworkDriverLogic>;
 pub type TeleportationAgent = Box<dyn TeleportationLogic>;
 pub type StuckAgent = Box<dyn StuckLogic>;
+pub type TransitDriverAgent = Box<dyn TransitDriverLogic>;
 
 /// What an agent does after a phase. Only the agent decides this; the simulation carries it out.
 #[derive(Debug)]
@@ -116,6 +120,27 @@ pub trait StuckLogic: SimulationAgentLogic {
     fn stuck_link(&self) -> Option<&Id<Link>>;
     /// The mode of the leg on which the agent got stuck, if it was on a leg.
     fn stuck_mode(&self) -> Option<&Id<String>>;
+}
+
+/// The driver of one departure of schedule-based transit. It has no person and passes through no
+/// phase: the transit engine creates it at the departure time and drops it at the last stop. The
+/// driver knows where its vehicle is and decides when it arrives and departs; the engine moves the
+/// vehicle and lets passengers board and alight.
+pub trait TransitDriverLogic: SimulationAgentLogic {
+    fn departure_index(&self) -> DepartureIndex;
+    fn departure(&self) -> &SimDeparture;
+    fn route(&self) -> &SimTransitRoute;
+    /// The stop at which the vehicle halts or which it approaches.
+    fn current_stop(&self) -> &SimRouteStop;
+    /// The stops after the current stop. Empty at the last stop.
+    fn upcoming_stops(&self) -> &[SimRouteStop];
+    /// The arrival at the current stop while the vehicle approaches it, the departure while it
+    /// halts there.
+    fn next_time(&self) -> SimTime;
+    fn notify_stop_arrived(&mut self, now: SimTime);
+    /// The vehicle left the current stop for the next one, which it reaches at `earliest_arrival`
+    /// at the earliest. Never called at the last stop.
+    fn notify_stop_departed(&mut self, earliest_arrival: SimTime, now: SimTime);
 }
 
 /// The data of a PT teleportation arrival event, without exposing the route type.

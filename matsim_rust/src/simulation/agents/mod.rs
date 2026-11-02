@@ -34,5 +34,6 @@ debug_agent_logic!(
     LegLogic,
     NetworkDriverLogic,
     TeleportationLogic,
-    StuckLogic
+    StuckLogic,
+    TransitDriverLogic
 );

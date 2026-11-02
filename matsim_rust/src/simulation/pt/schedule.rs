@@ -18,8 +18,8 @@ use tracing::info;
 /// their driver. A departure's index is therefore a stable order for simultaneous events, which
 /// depends neither on map iteration nor on the input format.
 ///
-/// Offsets are stored as given in the schedule. Like SBB's transit engine, the transit engine
-/// clamps the resulting times: a vehicle never arrives before it left the previous stop and never
+/// Offsets are stored as given in the schedule. Like SBB's transit engine, transit drivers clamp
+/// the resulting times: a vehicle never arrives before it left the previous stop and never
 /// departs before its scheduled departure.
 #[derive(Debug, Default)]
 pub struct TransitSimSchedule {
@@ -84,7 +84,7 @@ pub struct SimDeparture {
     pub id: Id<TransitDeparture>,
     pub time: SimTime,
     pub vehicle: Id<InternalVehicle>,
-    /// The driver only exists as an id for the events. Its external id is
+    /// The id of the departure's driver, who has no person. Its external id is
     /// `pt_<line>_<route>_<departure>`, like the drivers of SBB's transit engine.
     pub driver: Id<InternalPerson>,
 }
