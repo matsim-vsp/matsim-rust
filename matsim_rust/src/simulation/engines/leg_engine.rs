@@ -73,7 +73,6 @@ pub struct LegEngine<C: SimCommunicator> {
     transit_engine: TransitEngine,
     garage: Arc<Garage>,
     net_message_broker: NetMessageBroker<C>,
-    departure_handler: VehicularDepartureHandler,
     main_modes: IntSet<Id<String>>,
     transit_modes: IntSet<Id<String>>,
     comp_env: ThreadLocalComputationalEnvironment,
@@ -110,10 +109,6 @@ impl<C: SimCommunicator> LegEngine<C> {
             "A mode cannot be both a main mode and a transit passenger mode."
         );
 
-        let departure_handler = VehicularDepartureHandler {
-            comp_env: comp_env.clone(),
-        };
-
         LegEngine {
             teleportation_engine: TeleportationEngine::new(comp_env.clone(), clock),
             network_engine: NetworkEngine::new(network, comp_env.clone(), clock),
@@ -125,7 +120,6 @@ impl<C: SimCommunicator> LegEngine<C> {
             ),
             garage,
             net_message_broker,
-            departure_handler,
             main_modes,
             transit_modes,
             comp_env,
@@ -376,16 +370,28 @@ impl<C: SimCommunicator> LegEngine<C> {
             .receive_agent(now, agent, &mut self.net_message_broker);
     }
 
+    /// The driver enters its planned vehicle, or the vehicle `<person>_<mode>` if it plans none,
+    /// which leaves the garage for the network.
     fn pass_to_network(&mut self, now: Tick, agent: NetworkDriverAgent, route_begin: bool) {
-        let now_time = self.clock.tick_to_time(now);
+        let veh_id = match agent.planned_vehicle_id() {
+            Some(vehicle) => vehicle.clone(),
+            None => Id::get_from_ext(&format!(
+                "{}_{}",
+                agent.id().external(),
+                agent.mode().external()
+            )),
+        };
 
-        let agent_id = agent.id().clone();
+        self.comp_env.events_manager_borrow_mut().process_event(
+            &PersonEntersVehicleEventBuilder::default()
+                .time(self.clock.tick_to_time(now))
+                .person(agent.id().clone())
+                .vehicle(veh_id.clone())
+                .build()
+                .unwrap(),
+        );
 
-        let vehicle = self
-            .departure_handler
-            .handle_departure(now_time, agent, &self.garage)
-            .unwrap_or_else(|| panic!("Failed to handle departure for agent {}", agent_id));
-
+        let vehicle = self.garage.unpark_veh(agent, veh_id);
         self.pass_to_network_vehicle(now, vehicle, route_begin);
     }
 
@@ -409,43 +415,6 @@ impl<C: SimCommunicator> LegEngine<C> {
 
     pub fn network(&self) -> &SimNetworkPartition {
         &self.network_engine.network
-    }
-}
-
-// TODO do we still need this handler?
-struct VehicularDepartureHandler {
-    comp_env: ThreadLocalComputationalEnvironment,
-}
-
-impl VehicularDepartureHandler {
-    fn handle_departure(
-        &mut self,
-        now: SimTime,
-        agent: NetworkDriverAgent,
-        garage: &Garage,
-    ) -> Option<SimulationVehicle> {
-        let leg = agent.as_ref();
-
-        let veh_id = if let Some(v) = leg.planned_vehicle_id() {
-            v.clone()
-        } else {
-            Id::get_from_ext(&format!(
-                "{}_{}",
-                agent.id().external(),
-                leg.mode().external()
-            ))
-        };
-
-        self.comp_env.events_manager_borrow_mut().process_event(
-            &PersonEntersVehicleEventBuilder::default()
-                .time(now)
-                .person(agent.id().clone())
-                .vehicle(veh_id.clone())
-                .build()
-                .unwrap(),
-        );
-
-        Some(garage.unpark_veh(agent, veh_id))
     }
 }
 
