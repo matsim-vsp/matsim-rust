@@ -591,8 +591,7 @@ pub enum TransitSimulation {
     #[default]
     Teleported,
     /// Transit vehicles move from stop to stop according to the schedule, without using the
-    /// network, and passengers board and alight them, like SBB's deterministic transit simulation
-    /// in MATSim.
+    /// network, and passengers board and alight them.
     ScheduleBased,
 }
 
@@ -606,6 +605,7 @@ fn parse_transit_simulation(value: &str) -> TransitSimulation {
 
 /// The logic of the drivers of schedule-based transit. Both follow the schedule. They exist side by
 /// side to compare their performance, and one of them will be removed.
+/// TODO: Get rid of this enum: this should be inserted in code via agent source.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum TransitDriver {
     /// Reads its departure from the shared schedule at every stop.

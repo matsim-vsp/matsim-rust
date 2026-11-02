@@ -25,16 +25,6 @@ use std::sync::Arc;
 /// deterministic transit engine in MATSim. Drivers decide when their vehicles arrive and depart,
 /// passengers decide whether they board and alight. The engine carries that out and emits the
 /// events.
-///
-/// The engine only works when something is due, never per tick and vehicle: starts, arrivals and
-/// departures come from queues, and boarding is checked when a vehicle arrives at a stop or a
-/// passenger starts to wait.
-///
-/// Within a tick, the engine starts departures, then handles arrivals and departures, and only then
-/// lets the passengers who started their leg in this tick wait. A vehicle that departs in a tick
-/// thus only takes passengers who were at the stop before, as in QSim (see the deviations in
-/// `docs/agent-contract.md`). Simultaneous vehicles are handled in the order of their drivers' ids,
-/// and waiting passengers board in the order of their arrival tick and id (`R1`, `R4`).
 pub(crate) struct TransitEngine {
     schedule: Arc<TransitSimSchedule>,
     driver: TransitDriver,
@@ -42,6 +32,7 @@ pub(crate) struct TransitEngine {
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
     /// Departures whose first stop is on this partition, sorted by time and departure index.
+    /// TODO: This should not be done by the transit engine. PT agents should start with an activity. They start their leg when their first leg is scheduled.
     starts: Vec<DepartureIndex>,
     next_start: usize,
     /// Vehicles on their way to a stop, due at their arrival.
@@ -53,6 +44,7 @@ pub(crate) struct TransitEngine {
     /// Passengers who started their leg in this tick.
     new_passengers: Vec<PassengerAgent>,
     /// Vehicles that left in this tick for a stop on another partition, with that partition.
+    /// TODO is this really necessary?
     outgoing: Vec<(u32, TransitVehicleMessage)>,
 }
 
@@ -101,6 +93,8 @@ impl TransitEngine {
             .map(|(index, _)| index)
             .collect();
         starts.sort_by_key(|&index| (schedule.departure(index).time, index));
+
+        // Create empty state for each stop.
         let stops = std::iter::repeat_with(StopState::default)
             .take(schedule.num_stops())
             .collect();
@@ -173,6 +167,7 @@ impl TransitEngine {
         for due in self.departing.pop(now) {
             self.depart(due, now);
         }
+        // TODO couldn't we start waiting before the arrivals and departures? Then, passengers who start waiting in this tick could board vehicles that arrive in this tick and we don't need boarding logic here.
         self.start_waiting(now);
         alighted
     }
@@ -363,10 +358,9 @@ impl TransitEngine {
         }
     }
 
-    /// Passes the vehicle and the attachments of its passengers, e.g. backpacks, to partition `to`
-    /// (`O5`). Only the passengers leave the partition: the driver has no person, and the travel
-    /// time calculator must not see transit vehicles.
+    /// Passes the vehicle and the attachments of its passengers, e.g. backpacks, to partition `to`.
     fn send(&mut self, vehicle: TransitVehicle, to: u32, now: SimTime) {
+        // emit partition leave events for passengers before sending the vehicle to another partition
         for passenger in vehicle.passengers() {
             emit_partition_leave_events_for_agent(&mut self.comp_env, passenger.as_ref(), to, now);
         }
@@ -418,7 +412,6 @@ impl TransitEngine {
 
     fn start_waiting(&mut self, now: SimTime) {
         let mut passengers = std::mem::take(&mut self.new_passengers);
-        // Waiting passengers stay ordered by their arrival tick and id (`R4`).
         passengers.sort_unstable_by_key(|passenger| passenger.id().internal());
 
         for mut passenger in passengers {

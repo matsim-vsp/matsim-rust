@@ -385,8 +385,6 @@ impl MobsimWorkerPool {
     }
 }
 
-/// Describes messages that were never processed, see
-/// [`NetMessageBroker::take_unprocessed_messages`].
 fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage]) -> String {
     let pairs: BTreeSet<_> = messages
         .iter()

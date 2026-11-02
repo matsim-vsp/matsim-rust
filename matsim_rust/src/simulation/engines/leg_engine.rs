@@ -75,8 +75,7 @@ pub struct LegEngine<C: SimCommunicator> {
     net_message_broker: NetMessageBroker<C>,
     departure_handler: VehicularDepartureHandler,
     main_modes: IntSet<Id<String>>,
-    /// Leg modes that ride transit vehicles. Empty unless transit is simulated schedule based.
-    passenger_modes: IntSet<Id<String>>,
+    transit_modes: IntSet<Id<String>>,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
 }
@@ -98,7 +97,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             .map(|m| Id::<String>::get_from_ext(m))
             .collect();
         // A mode without an id has no legs.
-        let passenger_modes: IntSet<Id<String>> = match transit.simulation {
+        let transit_modes: IntSet<Id<String>> = match transit.simulation {
             TransitSimulation::Teleported => IntSet::default(),
             TransitSimulation::ScheduleBased => transit
                 .passenger_modes
@@ -107,7 +106,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .collect(),
         };
         assert!(
-            passenger_modes.is_disjoint(&main_modes),
+            transit_modes.is_disjoint(&main_modes),
             "A mode cannot be both a main mode and a transit passenger mode."
         );
 
@@ -129,7 +128,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             net_message_broker,
             departure_handler,
             main_modes,
-            passenger_modes,
+            transit_modes,
             comp_env,
             clock,
         }
@@ -168,16 +167,22 @@ impl<C: SimCommunicator> LegEngine<C> {
     pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
         self.receive_agents(now, agents);
 
+        // 1: move nodes
         self.network_engine.move_nodes(now);
+
+        // 2: move links
         let network_vehicles = self
             .network_engine
             .move_links(now, &mut self.net_message_broker);
+
+        // 3: transit
         let alighted_passengers = self.transit_engine.do_step(now);
         for (to, message) in self.transit_engine.take_outgoing() {
             self.net_message_broker
                 .add_transit_vehicle(message, to, now);
         }
 
+        // 4: send/receive messages
         let sync_messages = self.send_recv(now);
 
         for mut msg in sync_messages {
@@ -205,7 +210,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                     from,
                     self.clock.tick_to_time(now),
                 );
-                self.pass_to_leg_vehicle(now, veh, false);
+                self.pass_to_network_vehicle(now, veh, false);
             }
 
             for mut teleportation in msg.take_teleportations() {
@@ -235,6 +240,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             }
         }
 
+        // 5: teleportation
         let teleported_vehicles = self.teleportation_engine.do_step(now);
 
         let mut agents = vec![];
@@ -352,7 +358,7 @@ impl<C: SimCommunicator> LegEngine<C> {
                 .unwrap(),
         );
 
-        let preferred = if self.passenger_modes.contains(agent.mode()) {
+        let preferred = if self.transit_modes.contains(agent.mode()) {
             PreferredEngine::Transit
         } else if self.main_modes.contains(agent.mode()) {
             PreferredEngine::Network
@@ -360,7 +366,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             PreferredEngine::Teleportation
         };
         match select_execution(agent, preferred) {
-            Network(agent) => self.pass_to_leg(now, agent, true),
+            Network(agent) => self.pass_to_network(now, agent, true),
             Teleportation(agent) => self.pass_to_teleportation(now, agent),
             Transit(agent) => self.transit_engine.receive_agent(agent),
         }
@@ -371,7 +377,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             .receive_agent(now, agent, &mut self.net_message_broker);
     }
 
-    fn pass_to_leg(&mut self, now: Tick, agent: NetworkDriverAgent, route_begin: bool) {
+    fn pass_to_network(&mut self, now: Tick, agent: NetworkDriverAgent, route_begin: bool) {
         let now_time = self.clock.tick_to_time(now);
 
         let agent_id = agent.id().clone();
@@ -381,10 +387,15 @@ impl<C: SimCommunicator> LegEngine<C> {
             .handle_departure(now_time, agent, &self.garage)
             .unwrap_or_else(|| panic!("Failed to handle departure for agent {}", agent_id));
 
-        self.pass_to_leg_vehicle(now, vehicle, route_begin);
+        self.pass_to_network_vehicle(now, vehicle, route_begin);
     }
 
-    fn pass_to_leg_vehicle(&mut self, now: Tick, vehicle: SimulationVehicle, route_begin: bool) {
+    fn pass_to_network_vehicle(
+        &mut self,
+        now: Tick,
+        vehicle: SimulationVehicle,
+        route_begin: bool,
+    ) {
         self.network_engine
             .receive_vehicle(now, vehicle, route_begin)
     }
@@ -402,6 +413,7 @@ impl<C: SimCommunicator> LegEngine<C> {
     }
 }
 
+// TODO do we still need this handler?
 struct VehicularDepartureHandler {
     comp_env: ThreadLocalComputationalEnvironment,
 }

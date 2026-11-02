@@ -11,6 +11,7 @@ use crate::simulation::time::SimTime;
 use std::sync::Arc;
 
 /// A driver who follows the schedule, like the drivers of SBB's deterministic transit engine.
+/// TODO delete, not needed any more.
 pub struct ScheduledDriver {
     schedule: Arc<TransitSimSchedule>,
     departure: DepartureIndex,

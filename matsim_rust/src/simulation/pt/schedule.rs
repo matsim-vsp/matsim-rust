@@ -21,6 +21,7 @@ use tracing::info;
 /// Offsets are stored as given in the schedule. Like SBB's transit engine, transit drivers clamp
 /// the resulting times: a vehicle never arrives before it left the previous stop and never
 /// departs before its scheduled departure.
+/// TODO: why do we need the TransitSchedule any more? couldn't we delete it and use just this one here? moreover, all functions should take ids instead of strings.
 #[derive(Debug, Default)]
 pub struct TransitSimSchedule {
     routes: Vec<SimTransitRoute>,

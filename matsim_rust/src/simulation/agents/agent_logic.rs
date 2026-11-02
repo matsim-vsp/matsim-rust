@@ -405,6 +405,7 @@ impl PassengerLogic for PlanBasedSimulationLogic {
         stop: &Id<TransitStopFacility>,
         _now: SimTime,
     ) -> bool {
+        // TODO this is string comparison. couldn't this be id comparison?
         stop.external() == self.pt_description().egress_facility_id
     }
     fn notify_left_vehicle(&mut self, _now: SimTime) {

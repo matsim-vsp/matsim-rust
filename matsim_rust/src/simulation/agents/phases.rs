@@ -114,8 +114,6 @@ pub trait TeleportationLogic: LegLogic {
     fn notify_begin_teleportation(&mut self, now: SimTime);
 }
 
-/// The passenger part of MATSim's `PTPassengerAgent`. While the agent waits, the transit engine
-/// asks it about each vehicle that halts at its stop; while it rides, about each stop (`D2`).
 pub trait PassengerLogic: LegLogic {
     /// The stop where the agent waits. Asked once, when the leg starts.
     fn access_stop(&self) -> Id<TransitStopFacility>;
@@ -148,10 +146,6 @@ pub trait StuckLogic: SimulationAgentLogic {
     fn stuck_mode(&self) -> Option<&Id<String>>;
 }
 
-/// The driver of one departure of schedule-based transit. It has no person and passes through no
-/// phase: the transit engine creates it at the departure time and drops it at the last stop. The
-/// driver knows where its vehicle is and decides when it arrives and departs; the engine moves the
-/// vehicle and lets passengers board and alight.
 pub trait TransitDriverLogic: SimulationAgentLogic {
     /// The mode of the driver's leg, for its arrival at the end of the departure.
     fn mode(&self) -> &Id<String>;
@@ -160,7 +154,6 @@ pub trait TransitDriverLogic: SimulationAgentLogic {
     fn line(&self) -> &Id<TransitLine>;
     /// The stop at which the vehicle halts or which it approaches.
     fn stop(&self) -> &Id<TransitStopFacility>;
-    /// The stops after the current stop. Empty at the last stop.
     fn upcoming_stops(&self) -> &[Id<TransitStopFacility>];
     /// The arrival at the current stop while the vehicle approaches it, the departure while it
     /// halts there.
