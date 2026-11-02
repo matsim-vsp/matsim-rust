@@ -208,10 +208,12 @@ Passengers are agents with the role `PassengerLogic`. The engine asks a riding p
 alights, and a waiting passenger about each vehicle at its stop whether it boards. Plan-based agents follow MATSim's
 `checkLineAndStop`: they board any vehicle of the planned line that still serves their egress stop and alight there. The
 engine only works when something is due; starts, arrivals and departures come from queues. Within a tick, it starts
-departures, handles arrivals and then departures, and only then lets those passengers wait who started their leg in this
-tick. A vehicle that departs in a tick thus only takes passengers who were at the stop before, as in QSim (see
-[agent-contract.md](agent-contract.md)). At a stop, passengers alight before others board. Simultaneous vehicles are
-handled in the order of their drivers' ids, and waiting passengers board in the order of their arrival tick and id.
+departures, lets the passengers wait who started their leg in this tick, and then handles arrivals and departures. A
+vehicle that departs in a tick thus takes passengers who start to wait in this tick. Their walk to the stop ended in an
+earlier tick, so QSim would have them at the stop as well (see [agent-contract.md](agent-contract.md)). At a stop,
+passengers alight before others board. A vehicle asks the waiting passengers when it arrives and, like SBB's engine,
+those who came while it halted when it departs. Simultaneous vehicles are handled in the order of their drivers' ids, and
+waiting passengers board in the order of their arrival tick and id.
 
 If the next stop is on another partition, the vehicle, its driver, its passengers and their attachments are sent there.
 That partition may not be a neighbor, because links allowing no main mode, such as most transit links, do not make

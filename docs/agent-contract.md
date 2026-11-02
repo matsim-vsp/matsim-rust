@@ -118,12 +118,13 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
   this needs no additional code in the top-down step of `T1`. This deviation is intended. As a consequence, activities
   start one tick later than in QSim, and activities with only a maximum duration also end one tick later. Agents reach a
   stop one tick later per leg since their last fixed time. This rarely changes which vehicle they catch, provided that a
-  vehicle that departs in a tick only takes the agents that were at the stop before the leg step of that tick. QSim
-  behaves like this: vehicles depart in the netsim engine, which runs before the teleportation engine, in which walks
-  arrive. An agent whose walk to the stop ends in the departure tick thus misses the vehicle in QSim as well. Only
-  a transfer with exactly one tick of slack is caught by QSim and missed here. SwissRailRaptor leaves either no slack or
-  at least 5 s (`transferWalkMargin`) at transfers. In the Berlin 0.1 % scenario, both therefore catch the same 6,169 of
-  6,591 planned connections; the other 422 have no or negative slack in the plan.
+  vehicle that departs in a tick also takes the agents who start to wait in that tick, because their walk to the stop
+  ended in an earlier tick. QSim behaves like this: vehicles depart in the netsim engine, which runs before the
+  teleportation engine, in which walks arrive. An agent whose walk to the stop ends in the departure tick thus misses the
+  vehicle in QSim as well. Only a transfer with exactly one tick of slack is caught by QSim and missed here.
+  SwissRailRaptor leaves either no slack or at least 5 s (`transferWalkMargin`) at transfers. In the Berlin 0.1 %
+  scenario, both therefore catch the same 6,169 of 6,591 planned connections; the other 422 have no or negative slack in
+  the plan.
 - **Replanning is not possible from outside (`D1`).** In MATSim, within-day replanning can edit a plan from outside the
   agent between two engine steps. Here, only the agent changes its plan, at a decision point.
 - **Transit vehicles need at least one tick from one stop to the next.** SBB's deterministic transit engine allows zero

@@ -36,7 +36,7 @@ pub(crate) struct TransitEngine {
     /// Vehicles on their way to a stop, due at their arrival.
     approaching: TimeQueue<TransitVehicle, ()>,
     /// Vehicles that halt at a stop, due at their departure.
-    departing: TimeQueue<DueDeparture, ()>,
+    departing: TimeQueue<HaltingVehicle, ()>,
     /// The state of each stop, indexed by the internal id of its facility.
     stops: Vec<StopState>,
     /// Passengers who started their leg in this tick.
@@ -52,17 +52,24 @@ pub(crate) struct TransitStepResult {
     pub(crate) leaving: Vec<(u32, TransitVehicleMessage)>,
 }
 
-/// A vehicle that halts at a stop is due to depart. The vehicle itself is in [`StopState::halting`].
-struct DueDeparture {
+/// A vehicle that halts at a stop, due at its departure.
+struct HaltingVehicle {
+    vehicle: TransitVehicle,
+    /// The stop, as an index into [`TransitEngine::stops`].
     stop: usize,
-    order: u64,
-    time: SimTime,
+    arrival: SimTime,
+}
+
+/// A passenger who waits at a stop since `since`.
+struct WaitingPassenger {
+    since: SimTime,
+    passenger: PassengerAgent,
 }
 
 #[derive(Default)]
 struct StopState {
-    waiting: Vec<PassengerAgent>,
-    halting: Vec<TransitVehicle>,
+    /// Ordered by the start of waiting and the id of the passenger (`R4`).
+    waiting: Vec<WaitingPassenger>,
 }
 
 impl EndTime for TransitVehicle {
@@ -71,9 +78,9 @@ impl EndTime for TransitVehicle {
     }
 }
 
-impl EndTime for DueDeparture {
+impl EndTime for HaltingVehicle {
     fn end_time(&self, _now: SimTime) -> SimTime {
-        self.time
+        self.vehicle.driver().next_time()
     }
 }
 
@@ -116,7 +123,8 @@ impl TransitEngine {
         }
     }
 
-    /// An agent starts a transit leg. It waits at its stop from the end of this tick's step on.
+    /// An agent starts a transit leg. It waits at its stop from the start of this tick's step on,
+    /// so a vehicle that arrives or departs in this tick can take it.
     pub(crate) fn receive_agent(&mut self, agent: PassengerAgent) {
         self.new_passengers.push(agent);
     }
@@ -158,14 +166,13 @@ impl TransitEngine {
         let mut result = TransitStepResult::default();
 
         self.start_departures(now);
+        self.start_waiting(now);
         for vehicle in self.approaching.pop(now) {
             self.arrive(vehicle, now, &mut result.alighted);
         }
-        for due in self.departing.pop(now) {
-            self.depart(due, now, &mut result.leaving);
+        for halting in self.departing.pop(now) {
+            self.depart(halting, now, &mut result.leaving);
         }
-        // TODO couldn't we start waiting before the arrivals and departures? Then, passengers who start waiting in this tick could board vehicles that arrive in this tick and we don't need boarding logic here.
-        self.start_waiting(now);
         result
     }
 
@@ -176,15 +183,14 @@ impl TransitEngine {
     pub(crate) fn drain(&mut self) -> Vec<LegAgent> {
         let mut agents = std::mem::take(&mut self.new_passengers);
         for state in &mut self.stops {
-            agents.append(&mut state.waiting);
-            for mut vehicle in state.halting.drain(..) {
-                agents.extend(vehicle.take_passengers());
-            }
+            agents.extend(state.waiting.drain(..).map(|waiting| waiting.passenger));
+        }
+        for mut halting in self.departing.drain() {
+            agents.extend(halting.vehicle.take_passengers());
         }
         for mut vehicle in self.approaching.drain() {
             agents.extend(vehicle.take_passengers());
         }
-        self.departing.drain();
         agents.into_iter().map(|agent| agent as LegAgent).collect()
     }
 
@@ -272,59 +278,30 @@ impl TransitEngine {
         }
 
         let index = stop.internal() as usize;
-        let state = &mut self.stops[index];
-        // At its last stop, a vehicle takes nobody.
-        if !vehicle.driver().upcoming_stops().is_empty() {
-            let driver = vehicle.driver();
-            let mut boarding = Vec::new();
-            for mut passenger in std::mem::take(&mut state.waiting) {
-                if passenger.wants_to_board(
-                    &mut self.comp_env,
-                    driver.line(),
-                    driver.upcoming_stops(),
-                    now,
-                ) {
-                    boarding.push(passenger);
-                } else {
-                    state.waiting.push(passenger);
-                }
-            }
-            for passenger in boarding {
-                self.comp_env.events_manager_borrow_mut().process_event(
-                    &PersonEntersVehicleEventBuilder::default()
-                        .time(now)
-                        .person(passenger.id().clone())
-                        .vehicle(vehicle.id().clone())
-                        .build()
-                        .unwrap(),
-                );
-                vehicle.add_passenger(passenger);
-            }
-        }
+        self.board(&mut vehicle, index, None, now);
 
-        let due = DueDeparture {
+        let order = order(&vehicle);
+        let halting = HaltingVehicle {
+            vehicle,
             stop: index,
-            order: order(&vehicle),
-            time: vehicle.driver().next_time(),
+            arrival: now,
         };
-        let due_order = due.order;
-        state.halting.push(vehicle);
-        self.departing.add_with_order(due, now, due_order);
+        self.departing.add_with_order(halting, now, order);
     }
 
     fn depart(
         &mut self,
-        due: DueDeparture,
+        halting: HaltingVehicle,
         now: SimTime,
         leaving: &mut Vec<(u32, TransitVehicleMessage)>,
     ) {
-        let halting = &mut self.stops[due.stop].halting;
-        let position = halting
-            .iter()
-            .position(|vehicle| order(vehicle) == due.order)
-            .expect("A departing vehicle halts at its stop.");
-        // `remove` keeps the order in which the other vehicles arrived.
-        let mut vehicle = halting.remove(position);
+        let HaltingVehicle {
+            mut vehicle,
+            stop,
+            arrival,
+        } = halting;
+        // The passengers who were at the stop when the vehicle arrived have been asked then.
+        self.board(&mut vehicle, stop, Some(arrival), now);
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &VehicleDepartsAtFacilityEventBuilder::default()
@@ -406,11 +383,61 @@ impl TransitEngine {
         );
     }
 
+    /// Lets the passengers at `stop` board who want to take `vehicle`, in the order in which they
+    /// wait. With `after`, only those are asked who started to wait after that time. At its last
+    /// stop, a vehicle takes nobody.
+    fn board(
+        &mut self,
+        vehicle: &mut TransitVehicle,
+        stop: usize,
+        after: Option<SimTime>,
+        now: SimTime,
+    ) {
+        let driver = vehicle.driver();
+        if driver.upcoming_stops().is_empty() {
+            return;
+        }
+        let waiting = &mut self.stops[stop].waiting;
+        // The list is ordered by the start of waiting, so the passengers to ask are at its end.
+        let first = after.map_or(0, |after| {
+            waiting.partition_point(|waiting| waiting.since <= after)
+        });
+        let mut boarding = Vec::new();
+        for candidate in waiting.split_off(first) {
+            let mut passenger = candidate.passenger;
+            if passenger.wants_to_board(
+                &mut self.comp_env,
+                driver.line(),
+                driver.upcoming_stops(),
+                now,
+            ) {
+                boarding.push(passenger);
+            } else {
+                waiting.push(WaitingPassenger {
+                    since: candidate.since,
+                    passenger,
+                });
+            }
+        }
+
+        for passenger in boarding {
+            self.comp_env.events_manager_borrow_mut().process_event(
+                &PersonEntersVehicleEventBuilder::default()
+                    .time(now)
+                    .person(passenger.id().clone())
+                    .vehicle(vehicle.id().clone())
+                    .build()
+                    .unwrap(),
+            );
+            vehicle.add_passenger(passenger);
+        }
+    }
+
     fn start_waiting(&mut self, now: SimTime) {
         let mut passengers = std::mem::take(&mut self.new_passengers);
         passengers.sort_unstable_by_key(|passenger| passenger.id().internal());
 
-        for mut passenger in passengers {
+        for passenger in passengers {
             let access = passenger.access_stop();
             self.comp_env.events_manager_borrow_mut().process_event(
                 &AgentWaitingForPtEventBuilder::default()
@@ -431,33 +458,10 @@ impl TransitEngine {
                         passenger.id()
                     )
                 });
-            // The vehicles that depart in this tick have left. The passenger boards the first
-            // of the others that it wants to take, in the order of their arrival.
-            let comp_env = &mut self.comp_env;
-            let vehicle = state.halting.iter_mut().find(|vehicle| {
-                let driver = vehicle.driver();
-                !driver.upcoming_stops().is_empty()
-                    && passenger.wants_to_board(
-                        comp_env,
-                        driver.line(),
-                        driver.upcoming_stops(),
-                        now,
-                    )
+            state.waiting.push(WaitingPassenger {
+                since: now,
+                passenger,
             });
-            match vehicle {
-                Some(vehicle) => {
-                    comp_env.events_manager_borrow_mut().process_event(
-                        &PersonEntersVehicleEventBuilder::default()
-                            .time(now)
-                            .person(passenger.id().clone())
-                            .vehicle(vehicle.id().clone())
-                            .build()
-                            .unwrap(),
-                    );
-                    vehicle.add_passenger(passenger);
-                }
-                None => state.waiting.push(passenger),
-            }
         }
     }
 }
@@ -602,7 +606,7 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn a_vehicle_takes_the_passengers_who_wait_before_its_departure_tick() {
+    fn a_vehicle_takes_the_passengers_who_wait_up_to_its_departure_tick() {
         let exchanges = Exchanges::default();
         let mut engines = tutorial_engines(1, &exchanges);
         let passengers = vec![
@@ -610,15 +614,20 @@ mod tests {
                 SIX + 899,
                 create_pt_agent(1, "Blue Line", "1", "3", "11", "33"),
             ),
-            // Starts to wait in the tick of the 06:15 departure, so it takes the next one.
+            // Starts to wait in the tick of the 06:15 departure and still takes it.
             (
                 SIX + 900,
                 create_pt_agent(2, "Blue Line", "1", "3", "11", "33"),
             ),
-            // Comes while the 06:15 departure halts at stop 2a.
+            // Comes one tick late, so it takes the 06:30 departure.
+            (
+                SIX + 901,
+                create_pt_agent(3, "Blue Line", "1", "3", "11", "33"),
+            ),
+            // Comes while the 06:15 departure halts at stop 2a and boards when it departs.
             (
                 SIX + 1110,
-                create_pt_agent(3, "Blue Line", "2a", "3", "12", "33"),
+                create_pt_agent(4, "Blue Line", "2a", "3", "12", "33"),
             ),
         ];
 
@@ -634,8 +643,9 @@ mod tests {
             boardings,
             [
                 exchange(SIX + 900, "enters", "1", "tr_2"),
-                exchange(SIX + 1110, "enters", "3", "tr_2"),
-                exchange(SIX + 1800, "enters", "2", "tr_1"),
+                exchange(SIX + 900, "enters", "2", "tr_2"),
+                exchange(SIX + 1140, "enters", "4", "tr_2"),
+                exchange(SIX + 1800, "enters", "3", "tr_1"),
             ]
         );
     }
