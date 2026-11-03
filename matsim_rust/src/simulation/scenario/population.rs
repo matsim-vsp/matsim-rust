@@ -11,6 +11,7 @@ use crate::simulation::io::xml::population::{
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::facilities::ActivityFacility;
 use crate::simulation::scenario::network::{Link, Network};
+use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitStopFacility};
 use crate::simulation::scenario::vehicles::Garage;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
@@ -254,11 +255,11 @@ pub struct InternalPtRoute {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalPtRouteDescription {
-    pub transit_route_id: String,
+    pub transit_route_id: Id<TransitRoute>,
     pub boarding_time: Option<SimTime>,
-    pub transit_line_id: String,
-    pub access_facility_id: String,
-    pub egress_facility_id: String,
+    pub transit_line_id: Id<TransitLine>,
+    pub access_facility_id: Id<TransitStopFacility>,
+    pub egress_facility_id: Id<TransitStopFacility>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -505,11 +506,11 @@ impl FromStr for InternalPtRouteDescription {
         let desc: Value = serde_json::from_str(s)?;
 
         Ok(InternalPtRouteDescription {
-            transit_route_id: trim_quotes(&desc["transitRouteId"]),
+            transit_route_id: Id::create(&trim_quotes(&desc["transitRouteId"])),
             boarding_time: desc["boardingTime"].as_str().and_then(parse_time),
-            transit_line_id: trim_quotes(&desc["transitLineId"]),
-            access_facility_id: trim_quotes(&desc["accessFacilityId"]),
-            egress_facility_id: trim_quotes(&desc["egressFacilityId"]),
+            transit_line_id: Id::create(&trim_quotes(&desc["transitLineId"])),
+            access_facility_id: Id::create(&trim_quotes(&desc["accessFacilityId"])),
+            egress_facility_id: Id::create(&trim_quotes(&desc["egressFacilityId"])),
         })
     }
 }
@@ -621,15 +622,15 @@ impl InternalRoute {
             }
             InternalRoute::Pt(ptr) => Some(
                 serde_json::to_string(&IOPTRouteDescription {
-                    transit_route_id: ptr.description.transit_route_id,
+                    transit_route_id: ptr.description.transit_route_id.external().to_string(),
                     boarding_time: ptr
                         .description
                         .boarding_time
                         .map(|t| t.format_hh_mm_ss_trimmed())
                         .unwrap_or_else(|| "undefined".to_string()),
-                    transit_line_id: ptr.description.transit_line_id,
-                    access_facility_id: ptr.description.access_facility_id,
-                    egress_facility_id: ptr.description.egress_facility_id,
+                    transit_line_id: ptr.description.transit_line_id.external().to_string(),
+                    access_facility_id: ptr.description.access_facility_id.external().to_string(),
+                    egress_facility_id: ptr.description.egress_facility_id.external().to_string(),
                 })
                 .unwrap(),
             ),
@@ -669,14 +670,17 @@ impl From<GenericRoute> for InternalGenericRoute {
     }
 }
 
+/// Like all ids of a protobuf person, these are only looked up, see [`ProtoPersonDraft`]. A
+/// population converted before transit routes held ids may lack them in its id store; it has to be
+/// converted again.
 impl From<PtRouteDescription> for InternalPtRouteDescription {
     fn from(value: PtRouteDescription) -> Self {
         InternalPtRouteDescription {
-            transit_route_id: value.transit_route_id,
+            transit_route_id: Id::get_from_ext(&value.transit_route_id),
             boarding_time: value.boarding_time_ns.map(SimTime::from_nanos),
-            transit_line_id: value.transit_line_id,
-            access_facility_id: value.access_facility_id,
-            egress_facility_id: value.egress_facility_id,
+            transit_line_id: Id::get_from_ext(&value.transit_line_id),
+            access_facility_id: Id::get_from_ext(&value.access_facility_id),
+            egress_facility_id: Id::get_from_ext(&value.egress_facility_id),
         }
     }
 }
@@ -962,6 +966,9 @@ pub(crate) enum IOPersonId<'a> {
     Link(&'a str),
     Facility(&'a str),
     Vehicle(Cow<'a, str>),
+    TransitRoute(String),
+    TransitLine(String),
+    TransitStop(String),
 }
 
 impl IOPersonId<'_> {
@@ -972,6 +979,11 @@ impl IOPersonId<'_> {
             IOPersonId::Link(id) => Id::<Link>::try_get_from_ext(id).is_some(),
             IOPersonId::Facility(id) => Id::<ActivityFacility>::try_get_from_ext(id).is_some(),
             IOPersonId::Vehicle(id) => Id::<InternalVehicle>::try_get_from_ext(id).is_some(),
+            IOPersonId::TransitRoute(id) => Id::<TransitRoute>::try_get_from_ext(id).is_some(),
+            IOPersonId::TransitLine(id) => Id::<TransitLine>::try_get_from_ext(id).is_some(),
+            IOPersonId::TransitStop(id) => {
+                Id::<TransitStopFacility>::try_get_from_ext(id).is_some()
+            }
         }
     }
 
@@ -991,6 +1003,15 @@ impl IOPersonId<'_> {
             }
             IOPersonId::Vehicle(id) => {
                 Id::<InternalVehicle>::create(id);
+            }
+            IOPersonId::TransitRoute(id) => {
+                Id::<TransitRoute>::create(id);
+            }
+            IOPersonId::TransitLine(id) => {
+                Id::<TransitLine>::create(id);
+            }
+            IOPersonId::TransitStop(id) => {
+                Id::<TransitStopFacility>::create(id);
             }
         }
     }
@@ -1043,6 +1064,25 @@ pub(crate) fn for_each_id_of_io_person<'a>(io: &'a IOPerson, mut f: impl FnMut(I
                         .split_whitespace()
                     {
                         f(IOPersonId::Link(link));
+                    }
+                }
+                // In the order in which `InternalPtRouteDescription::from_str` creates them.
+                if route.r#type.as_deref() == Some("default_pt") {
+                    let description = route
+                        .route
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str::<Value>(s).ok());
+                    if let Some(desc) = description {
+                        f(IOPersonId::TransitRoute(trim_quotes(
+                            &desc["transitRouteId"],
+                        )));
+                        f(IOPersonId::TransitLine(trim_quotes(&desc["transitLineId"])));
+                        f(IOPersonId::TransitStop(trim_quotes(
+                            &desc["accessFacilityId"],
+                        )));
+                        f(IOPersonId::TransitStop(trim_quotes(
+                            &desc["egressFacilityId"],
+                        )));
                     }
                 }
             }

@@ -211,7 +211,7 @@ pub(crate) struct MobsimWorkerRun {
 #[builder(pattern = "owned")]
 pub(crate) struct MobsimWorkerPoolArguments {
     scenario_core: ScenarioCore,
-    agent_source: DynAgentSource,
+    agent_sources: Vec<DynAgentSource>,
     #[builder(default)]
     external_services: ExternalServices,
     #[builder(default)]
@@ -225,7 +225,7 @@ struct MobsimWorkerArguments {
     rank: u32,
     communicator: ChannelSimCommunicator,
     scenario_core: ScenarioCore,
-    agent_source: DynAgentSource,
+    agent_sources: Vec<DynAgentSource>,
     #[builder(default)]
     external_services: ExternalServices,
     #[builder(default)]
@@ -238,7 +238,7 @@ struct MobsimWorker {
     // the current implementation requires a new worker every iteration. Thus, the worker holds a reference to the communicator, but does not own it.
     communicator: Rc<ChannelSimCommunicator>,
     scenario_core: ScenarioCore,
-    agent_source: DynAgentSource,
+    agent_sources: Vec<DynAgentSource>,
     comp_env: ThreadLocalComputationalEnvironment,
     global_barrier: Arc<Barrier>,
     reached_initial_barrier: bool,
@@ -268,7 +268,7 @@ impl MobsimWorkerPool {
                 .rank(rank)
                 .communicator(comm)
                 .scenario_core(args.scenario_core.clone())
-                .agent_source(args.agent_source.clone())
+                .agent_sources(args.agent_sources.clone())
                 .external_services(args.external_services.clone())
                 .worker_listener(args.worker_listener.remove(&rank).unwrap_or_default())
                 .global_barrier(args.global_barrier.clone())
@@ -385,24 +385,28 @@ impl MobsimWorkerPool {
     }
 }
 
-/// Describes messages that were never processed, see
-/// [`NetMessageBroker::take_unprocessed_messages`].
 fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage]) -> String {
     let pairs: BTreeSet<_> = messages
         .iter()
         .map(|msg| (msg.from_process(), msg.to_process()))
         .collect();
     // Messages arrive in no particular order, so sort the agents for a reproducible message.
-    let mut agents: Vec<_> = messages
+    let teleported = messages
         .iter()
         .flat_map(|msg| msg.teleportations())
-        .map(|teleportation| teleportation.id().external())
-        .collect();
+        .map(|teleportation| teleportation.id().external());
+    let in_transit_vehicles = messages
+        .iter()
+        .flat_map(|msg| msg.transit_vehicles())
+        .flat_map(|message| message.vehicle().passengers())
+        .map(|passenger| passenger.id().external());
+    let mut agents: Vec<_> = teleported.chain(in_transit_vehicles).collect();
     agents.sort_unstable();
     format!(
         "Mobsim iteration {iteration} ended with {} unprocessed messages between partitions (from, to) {pairs:?}. \
-        {} teleported agents are lost, e.g. {:?}. A partition only reads messages from partitions it shares a link \
-        with. Check whether the network consists of components that are not connected by links.",
+        {} teleported agents or transit passengers are lost, e.g. {:?}. A partition only reads messages from \
+        partitions it shares a link with. Check whether the network consists of components that are not connected \
+        by links.",
         messages.len(),
         agents.len(),
         &agents[..agents.len().min(3)],
@@ -428,7 +432,7 @@ impl MobsimWorker {
             rank,
             communicator,
             scenario_core,
-            agent_source,
+            agent_sources,
             external_services,
             mut worker_listener,
             global_barrier,
@@ -481,7 +485,7 @@ impl MobsimWorker {
             rank,
             communicator: Rc::new(communicator),
             scenario_core,
-            agent_source,
+            agent_sources,
             comp_env,
             global_barrier,
             reached_initial_barrier: false,
@@ -564,7 +568,7 @@ impl MobsimWorker {
             input,
             net_message_broker,
             self.comp_env.clone(),
-            self.agent_source.clone(),
+            self.agent_sources.clone(),
         )
         .build();
 
@@ -918,9 +922,7 @@ mod tests {
         let scenario_core = ScenarioCore {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
-            transit_schedule: Arc::new(
-                crate::simulation::scenario::transit::TransitSchedule::default(),
-            ),
+            transit_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
@@ -942,7 +944,7 @@ mod tests {
             });
         let args = MobsimWorkerPoolArgumentsBuilder::default()
             .scenario_core(scenario_core.clone())
-            .agent_source(Arc::new(PopulationAgentSource))
+            .agent_sources(vec![Arc::new(PopulationAgentSource)])
             .worker_listener(HashMap::from([(0, vec![completion_listener])]))
             .global_barrier(Arc::new(Barrier::new(1)))
             .build()
@@ -967,9 +969,7 @@ mod tests {
         let scenario_core = ScenarioCore {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
-            transit_schedule: Arc::new(
-                crate::simulation::scenario::transit::TransitSchedule::default(),
-            ),
+            transit_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
@@ -1006,6 +1006,7 @@ mod tests {
                 rank: 0,
                 scenario: scenario.clone(),
                 network_partition,
+                transit_sim_schedule: Arc::default(),
             },
             population: PopulationShard {
                 population: Population::new(),

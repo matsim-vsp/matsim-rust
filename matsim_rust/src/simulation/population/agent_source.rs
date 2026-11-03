@@ -4,6 +4,7 @@ use crate::simulation::agents::agent_logic::{
 };
 use crate::simulation::config::{Config, RoutingMode};
 use crate::simulation::id::Id;
+use crate::simulation::pt::driver::WaitingDriver;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::{MobsimScenarioPartition, PopulationShard};
 use ahash::HashMapExt;
@@ -14,12 +15,20 @@ use std::sync::Arc;
 pub type DynAgentSource = Arc<dyn AgentSource + Send + Sync>;
 pub type AgentSet = IntMap<Id<InternalPerson>, ActivityAgent>;
 
+/// Creates agents for a mobsim partition. A mobsim asks several sources one after the other. Each
+/// source takes the persons of `population` for which it creates agents, so that every person ends
+/// up with exactly one agent.
 pub trait AgentSource {
     fn create_agents(
         &self,
-        population: PopulationShard,
+        population: &mut PopulationShard,
         partition: &MobsimScenarioPartition,
     ) -> AgentSet;
+}
+
+/// The agent sources of a mobsim by default: the persons of the population.
+pub fn default_agent_sources() -> Vec<DynAgentSource> {
+    vec![Arc::new(PopulationAgentSource)]
 }
 
 pub trait IntoDynAgentSource {
@@ -55,10 +64,10 @@ pub struct PopulationAgentSource;
 impl AgentSource for PopulationAgentSource {
     fn create_agents(
         &self,
-        population: PopulationShard,
+        population: &mut PopulationShard,
         _partition: &MobsimScenarioPartition,
     ) -> AgentSet {
-        let persons = population.population.persons;
+        let persons = std::mem::take(&mut population.population.persons);
         let mut agents = IntMap::with_capacity(persons.len());
 
         for (id, person) in persons {
@@ -73,16 +82,40 @@ pub struct PreplanningHorizonAgentSource;
 impl AgentSource for PreplanningHorizonAgentSource {
     fn create_agents(
         &self,
-        population: PopulationShard,
+        population: &mut PopulationShard,
         partition: &MobsimScenarioPartition,
     ) -> AgentSet {
-        let persons = population.population.persons;
+        let persons = std::mem::take(&mut population.population.persons);
         let mut agents = IntMap::with_capacity(persons.len());
 
         for (id, person) in persons {
             identify_logic_and_insert(&mut agents, id, person, &partition.scenario.config);
         }
         agents
+    }
+}
+
+/// Creates the drivers of the transit departures whose first stop is on the partition. Each waits
+/// in an activity until its departure, like the drivers that MATSim's transit engines insert. With
+/// teleported transit, the schedule is empty and there are no drivers.
+pub struct TransitDriverAgentSource;
+
+impl AgentSource for TransitDriverAgentSource {
+    fn create_agents(
+        &self,
+        _population: &mut PopulationShard,
+        partition: &MobsimScenarioPartition,
+    ) -> AgentSet {
+        let schedule = &partition.transit_sim_schedule;
+        schedule
+            .departures_starting_on(partition.rank)
+            .map(|index| {
+                (
+                    schedule.driver(index).clone(),
+                    WaitingDriver::new_agent(schedule.clone(), index),
+                )
+            })
+            .collect()
     }
 }
 
@@ -142,7 +175,7 @@ mod tests {
     impl AgentSource for TestAgentSource {
         fn create_agents(
             &self,
-            _population: PopulationShard,
+            _population: &mut PopulationShard,
             _partition: &MobsimScenarioPartition,
         ) -> AgentSet {
             IntMap::default()
@@ -178,11 +211,12 @@ mod tests {
     fn population_agent_source_consumes_owned_population_shard() {
         let core = empty_partition_core();
         let population = Population::from_persons(vec![person("person-1")]);
-        let shard = PopulationShard { population };
+        let mut shard = PopulationShard { population };
 
-        let agents = PopulationAgentSource.create_agents(shard, &core);
+        let agents = PopulationAgentSource.create_agents(&mut shard, &core);
 
         assert_eq!(1, agents.len());
+        assert!(shard.population.persons.is_empty());
         assert!(agents.contains_key(&Id::get_from_ext("person-1")));
     }
 
@@ -195,15 +229,14 @@ mod tests {
             scenario: ScenarioCore {
                 network,
                 garage: Arc::new(Garage::default()),
-                transit_schedule: Arc::new(
-                    crate::simulation::scenario::transit::TransitSchedule::default(),
-                ),
+                transit_schedule: Arc::default(),
                 facilities: Arc::new(
                     crate::simulation::scenario::facilities::ActivityFacilities::default(),
                 ),
                 config,
             },
             network_partition,
+            transit_sim_schedule: Arc::default(),
         }
     }
 

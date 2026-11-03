@@ -7,7 +7,6 @@ use crate::simulation::engines::{
 use crate::simulation::events::{
     PtTeleportationArrivalEventBuilder, TeleportationArrivalEventBuilder,
 };
-use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::TeleportationMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
@@ -190,13 +189,9 @@ impl TeleportationEngine {
         transit: TransitTeleportation<'_>,
     ) {
         let now_time = self.clock.tick_to_time(now);
-        let transit_line_id = Id::<String>::get_from_ext(transit.line);
-        let transit_route_id = Id::<String>::get_from_ext(transit.route);
         let boarding_time = transit
             .boarding_time
             .expect("Boarding time needs to be set.");
-        let access_facility = Id::<String>::get_from_ext(transit.access_facility);
-        let egress_facility = Id::<String>::get_from_ext(transit.egress_facility);
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PtTeleportationArrivalEventBuilder::default()
@@ -204,11 +199,11 @@ impl TeleportationEngine {
                 .person(agent.id().clone())
                 .mode(agent.mode().clone())
                 .distance(agent.distance().expect("Route distance needs to be set."))
-                .line(transit_line_id)
-                .route(transit_route_id)
+                .line(transit.line.clone())
+                .route(transit.route.clone())
                 .boarding_time(boarding_time)
-                .access_facility(access_facility)
-                .egress_facility(egress_facility)
+                .access_facility(transit.access_facility.clone())
+                .egress_facility(transit.egress_facility.clone())
                 .build()
                 .unwrap(),
         );
@@ -221,8 +216,8 @@ mod tests {
     use crate::simulation::Identifiable;
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::agents::{
-        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, SimulationAgentLogic,
-        TeleportationAgent, TeleportationLogic, TransitTeleportation,
+        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, PassengerAgent, SimulationAgentLogic,
+        TeleportationAgent, TeleportationLogic, TransitDriverAgent, TransitTeleportation,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
@@ -400,6 +395,12 @@ mod tests {
         }
         fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent> {
             Ok(self)
+        }
+        fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent> {
+            Err(self)
+        }
+        fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent> {
+            Err(self)
         }
         fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase {
             self.delegate.finish_leg(now)

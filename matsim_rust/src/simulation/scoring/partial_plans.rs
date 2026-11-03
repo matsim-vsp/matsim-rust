@@ -296,7 +296,7 @@ impl Default for PartialLeg {
 impl PartialLeg {
     fn handle_person_departure(&mut self, event: &PersonDepartureEvent) {
         self.mode = Some(event.leg_mode.clone());
-        self.routing_mode = Some(event.routing_mode.clone());
+        self.routing_mode = event.routing_mode.clone();
         self.dep_time = Some(event.time);
     }
 
@@ -435,11 +435,11 @@ impl PartialRoute {
         self.route_type = Some(PartialRouteTypes::Pt);
         self.distance = Some(event.distance);
         self.pt_description = Some(InternalPtRouteDescription {
-            transit_route_id: event.route.external().to_string(),
+            transit_route_id: event.route.clone(),
             boarding_time: Some(event.boarding_time),
-            transit_line_id: event.line.external().to_string(),
-            access_facility_id: event.access_facility.external().to_string(),
-            egress_facility_id: event.egress_facility.external().to_string(),
+            transit_line_id: event.line.clone(),
+            access_facility_id: event.access_facility.clone(),
+            egress_facility_id: event.egress_facility.clone(),
         });
     }
 
@@ -557,7 +557,7 @@ mod tests {
                 .person(Id::create("person"))
                 .link(Id::create("start"))
                 .leg_mode(Id::create(mode))
-                .routing_mode(Id::create(mode))
+                .routing_mode(Some(Id::create(mode)))
                 .build()
                 .unwrap(),
         );
@@ -764,14 +764,14 @@ mod tests {
         assert_eq!(route.start_link().external(), "start");
         assert_eq!(route.end_link().external(), "end");
         assert_eq!(route.generic_delegate().distance(), Some(1_234.0));
-        assert_eq!(route.description.transit_route_id, "route");
-        assert_eq!(route.description.transit_line_id, "line");
+        assert_eq!(route.description.transit_route_id.external(), "route");
+        assert_eq!(route.description.transit_line_id.external(), "line");
         assert_eq!(
             route.description.boarding_time,
             Some(SimTime::from_secs(12))
         );
-        assert_eq!(route.description.access_facility_id, "access");
-        assert_eq!(route.description.egress_facility_id, "egress");
+        assert_eq!(route.description.access_facility_id.external(), "access");
+        assert_eq!(route.description.egress_facility_id.external(), "egress");
     }
 
     #[deterministic_id_test]

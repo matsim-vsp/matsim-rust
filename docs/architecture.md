@@ -66,12 +66,14 @@ which are parsed and converted by the rayon thread pool. The id store must stay 
 for protobuf, all ids except missing subpopulations are only looked up, and these are created in file order afterwards.
 For XML, all ids are created sequentially before the persons are converted, in the order in which converting the
 persons sorted by id one after another would create them (see `for_each_id_of_io_person`). Internal ids are the
-creation index of an id and never depend on hashing.
+creation index of an id and never depend on hashing. Data is not laid out in vectors whose positions are internal ids,
+since their length and gaps would depend on the id store instead of on the data. It is kept by id in an `IntMap`, or a
+container hands out typed indices of its own, like the routes and departures of the transit schedule.
 
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
-(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
-mutable `Population`.
+(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the mutable
+`Population`. Next to the core, it keeps the `Arc<TransitSimSchedule>`, which only the mobsim partitions receive.
 
 Input data is converted into internal types without deriving missing values. Fields that can be derived stay `Option`
 after the conversion and are resolved during preparation; code running afterward uses accessors such as
@@ -177,6 +179,80 @@ The Queue link dynamics deviate from QSim in the following points:
 - There is no `pcuThresholdForFlowCapacityEasing` and no flow efficiency. A vehicle consumes exactly its PCE.
 - A vehicle stays in the queue for at least one tick, so that a link behaves the same whether or not it is split
   between partitions (see `LegEngine::do_step`).
+
+### Schedule-Based Transit
+
+By default, transit legs are teleported with the travel time of their route. With `transit.simulation: ScheduleBased`,
+transit vehicles move from stop to stop according to the schedule instead, and passengers wait at stops, board and
+alight, as in SBB's deterministic transit engine for MATSim (`SBBTransitQSimEngine`). The transit vehicles are read from
+`transit.vehicles_path`. The legs of `transit.passenger_modes` (default `pt`) ride them; these modes must not be main
+modes. Backpacking cannot build experienced plans of transit legs yet, so this setting requires `scoring.mode:
+Disabled`.
+
+`TransitSchedule` holds all data of the schedule files, independent of the simulation: routes and departures in dense
+vectors, routes sorted by the external ids of line and route, the routes of a line and the departures of a route
+contiguous, and lines and stop facilities by their ids in maps without a particular order. XML and protobuf are read
+element by element in the order of the file, so the ids are created as before, and only then laid out. The schedule is
+loaded before the population, and `ScenarioCore` keeps it also with teleported transit.
+
+`TransitSimSchedule` is what the mobsim adds to it, like `SimNetworkPartition` to `Network`: the driver and the vehicle
+of each departure and the partition of each stop. `From<Scenario> for ControllerScenario` builds it once, after the
+population is loaded, so that the ids of persons do not depend on transit. `ControllerScenario` keeps it next to the core
+and hands it to each `MobsimScenarioPartition`, so replanning and plan preparation only see the `TransitSchedule`. The
+transit engine processes stops in the order of their ids. Drivers have the external ids
+`pt_<line>_<route>_<departure>` as in SBB's engine, and their ids are created in the order of these external ids.
+Building it panics if the schedule cannot be simulated, e.g. if a stop has no link or a vehicle serves two departures at
+the same time. Plan preparation requires no travel times for transit legs, but a transit route that the schedule serves.
+
+Each departure has a driver, an agent without a person. Like the drivers of MATSim's transit engines, it passes through
+three phases: it waits in a `pt interaction` activity at the start link of its route until the departure time, drives
+the departure as its leg and then stays in an activity without end until the mobsim drops it. Its activities emit no
+events. `TransitDriverAgentSource` creates the drivers of the departures whose first stop is on a partition. A mobsim
+asks a list of agent sources one after the other, by default `PopulationAgentSource`; each source takes the persons of
+the population for which it creates agents. With schedule-based transit, the controller adds `TransitDriverAgentSource`.
+A driver that is still waiting when the mobsim ends becomes stuck, as in MATSim's activity engine.
+
+The `TransitEngine` is part of the `LegEngine` and runs after the network moves and before the messages are exchanged.
+The `LegEngine` passes it every agent that offers the role of a driver (`TransitDriverLogic`), whatever its mode, and
+the legs of passenger modes that offer the role of a passenger (`PassengerLogic`). When a driver's leg starts, the
+engine creates a `TransitVehicle` for it. There are no vehicle blocks (`Umlauf` in MATSim): a vehicle that serves
+several departures is created anew for each of them. When its activity ends, the driver copies its departure from the
+schedule into a plan of its own and no longer depends on the schedule. It knows its stops and tells the engine when the
+vehicle arrives and departs: at the departure time plus the arrival offset, but not before the earliest arrival the
+engine allows, and at the departure time plus the departure offset, but not before the arrival. At the last stop, the
+driver leaves the vehicle and ends its leg; drivers that are still in a vehicle when the mobsim ends are dropped, as in
+SBB's engine.
+
+Passengers are agents with the role `PassengerLogic`. The engine asks a riding passenger at each stop whether it
+alights, and a waiting passenger about each vehicle at its stop whether it boards. Plan-based agents follow MATSim's
+`checkLineAndStop`: they board any vehicle of the planned line that still serves their egress stop and alight there. The
+engine only works when something is due; arrivals and departures come from queues. A passenger waits at its stop as soon
+as its leg starts. A step has three parts: vehicles arrive and passengers alight; at each stop where a vehicle arrived
+or passengers started to wait, the waiting passengers board the halting vehicles; vehicles whose departure time has come
+leave. A vehicle that departs in a tick thus takes passengers who start to wait in this tick. Their walk to the stop
+ended in an earlier tick, so QSim would have them at the stop as well (see [agent-contract.md](agent-contract.md)). A
+passenger who comes while a vehicle halts boards right away. Alighting and boarding take no time yet; once they do, a
+vehicle leaves when nobody wants to alight or board anymore and its departure time has come. Simultaneous vehicles are
+handled in the order of their drivers' ids, and waiting passengers board in the order of their arrival tick and id.
+
+If the next stop is on another partition, the vehicle, its driver, its passengers and their attachments are sent there.
+That partition may not be a neighbor, because links allowing no main mode, such as most transit links, do not make
+partitions neighbors. Like teleported agents, such vehicles are only received while the partition waits for its
+neighbors, and the engine panics if one arrives after it was due. Enable `computational_setup.global_sync` if this
+happens.
+
+Deviations from SBB's engine:
+
+- A vehicle needs at least one tick from one stop to the next, so that the result does not depend on whether the next
+  stop is on another partition. SBB allows zero seconds.
+- Boarding and alighting take no time. With MATSim's default `ComplexTransitStopHandler`, SBB boards and alights one
+  second after the arrival and departs up to three seconds later, even with zero access and egress times.
+- Vehicles have no capacity, `delay` is always 0, and there are no chained departures and no link events.
+- Passengers who are still in a vehicle at the end of the mobsim report the link of their access stop in the stuck
+  event, SBB the link of the next stop.
+
+Apart from these deviations and the tick per leg, the events of `pt_tutorial` match those of SBB's engine
+(`tests/simulation/pt.rs`).
 
 ### External Services
 

@@ -9,6 +9,9 @@ use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
+use crate::simulation::scenario::transit::{
+    TransitDeparture, TransitLine, TransitRoute, TransitStopFacility,
+};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 
@@ -16,7 +19,9 @@ pub type ActivityAgent = Box<dyn ActivityLogic>;
 pub type LegAgent = Box<dyn LegLogic>;
 pub type NetworkDriverAgent = Box<dyn NetworkDriverLogic>;
 pub type TeleportationAgent = Box<dyn TeleportationLogic>;
+pub type PassengerAgent = Box<dyn PassengerLogic>;
 pub type StuckAgent = Box<dyn StuckLogic>;
+pub type TransitDriverAgent = Box<dyn TransitDriverLogic>;
 
 /// What an agent does after a phase. Only the agent decides this; the simulation carries it out.
 #[derive(Debug)]
@@ -50,6 +55,8 @@ pub trait ActivityLogic: SimulationAgentLogic {
     fn link_id(&self) -> &Id<Link>;
     fn coord(&self) -> &Coordinate;
     fn has_next_leg(&self) -> bool;
+    /// Whether the activity engine emits the start and the end of this activity.
+    fn has_activity_events(&self) -> bool;
     /// `activity_start` is the time when the activity engine received the agent. An activity with
     /// only a maximum duration may derive its end from it.
     fn end_time(&self, activity_start: SimTime) -> SimTime;
@@ -83,6 +90,8 @@ pub trait LegLogic: SimulationAgentLogic {
 
     fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent>;
     fn try_into_teleportation(self: Box<Self>) -> Result<TeleportationAgent, LegAgent>;
+    fn try_into_passenger(self: Box<Self>) -> Result<PassengerAgent, LegAgent>;
+    fn try_into_transit_driver(self: Box<Self>) -> Result<TransitDriverAgent, LegAgent>;
 
     fn finish_leg(self: Box<Self>, now: SimTime) -> NextPhase;
 }
@@ -110,6 +119,30 @@ pub trait TeleportationLogic: LegLogic {
     fn notify_begin_teleportation(&mut self, now: SimTime);
 }
 
+pub trait PassengerLogic: LegLogic {
+    /// The stop where the agent waits. Asked once, when the leg starts.
+    fn access_stop(&self) -> Id<TransitStopFacility>;
+    /// The stop where the agent plans to alight. Asked once, when the leg starts.
+    fn egress_stop(&self) -> Id<TransitStopFacility>;
+    /// Whether the agent boards a vehicle of `line` that serves `stops_to_come` after this stop.
+    fn wants_to_board(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        line: &Id<TransitLine>,
+        stops_to_come: &[Id<TransitStopFacility>],
+        now: SimTime,
+    ) -> bool;
+    /// Whether the agent alights at `stop`. Before its planned stop, this ends the leg early.
+    fn wants_to_alight(
+        &mut self,
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        stop: &Id<TransitStopFacility>,
+        now: SimTime,
+    ) -> bool;
+    /// The agent has left the vehicle at the stop where it alighted.
+    fn notify_left_vehicle(&mut self, now: SimTime);
+}
+
 /// The final phase. A stuck agent receives no further calls and is materialized after mobsim.
 pub trait StuckLogic: SimulationAgentLogic {
     /// The link where the agent got stuck, if it was on a leg.
@@ -118,12 +151,32 @@ pub trait StuckLogic: SimulationAgentLogic {
     fn stuck_mode(&self) -> Option<&Id<String>>;
 }
 
+/// The leg of a transit driver is one departure. The mode and the links of the leg come from
+/// [`LegLogic`]; at the last stop, the current link is the link where the leg ends.
+pub trait TransitDriverLogic: LegLogic {
+    fn vehicle(&self) -> &Id<InternalVehicle>;
+    fn line(&self) -> &Id<TransitLine>;
+    /// The route and the departure, for the event of the start of the departure.
+    fn route(&self) -> &Id<TransitRoute>;
+    fn departure(&self) -> &Id<TransitDeparture>;
+    /// The stop at which the vehicle halts or which it approaches.
+    fn stop(&self) -> &Id<TransitStopFacility>;
+    fn upcoming_stops(&self) -> &[Id<TransitStopFacility>];
+    /// The arrival at the current stop while the vehicle approaches it, the departure while it
+    /// halts there.
+    fn next_time(&self) -> SimTime;
+    fn notify_stop_arrived(&mut self, now: SimTime);
+    /// The vehicle left the current stop for the next one, which it reaches at `earliest_arrival`
+    /// at the earliest. Never called at the last stop.
+    fn notify_stop_departed(&mut self, earliest_arrival: SimTime, now: SimTime);
+}
+
 /// The data of a PT teleportation arrival event, without exposing the route type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransitTeleportation<'a> {
-    pub line: &'a str,
-    pub route: &'a str,
+    pub line: &'a Id<TransitLine>,
+    pub route: &'a Id<TransitRoute>,
     pub boarding_time: Option<SimTime>,
-    pub access_facility: &'a str,
-    pub egress_facility: &'a str,
+    pub access_facility: &'a Id<TransitStopFacility>,
+    pub egress_facility: &'a Id<TransitStopFacility>,
 }

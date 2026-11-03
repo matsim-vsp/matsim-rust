@@ -1,7 +1,7 @@
 use crate::simulation::agents::SimulationAgentLogic;
 use crate::simulation::framework_events::QSimId;
 use crate::simulation::time::SimTime;
-use crate::simulation::vehicles::SimulationVehicle;
+use crate::simulation::vehicles::{SimulationVehicle, TransitVehicle};
 use std::any::{Any, type_name};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,6 +15,7 @@ pub struct PartitionChangeContext {
 pub enum PartitionChangeEntity<'a> {
     Vehicle(&'a SimulationVehicle),
     TeleportationAgent(&'a dyn SimulationAgentLogic),
+    TransitVehicle(&'a TransitVehicle),
 }
 
 impl std::fmt::Debug for PartitionChangeEntity<'_> {
@@ -22,6 +23,7 @@ impl std::fmt::Debug for PartitionChangeEntity<'_> {
         match self {
             Self::Vehicle(_) => f.write_str("Vehicle"),
             Self::TeleportationAgent(_) => f.write_str("TeleportationAgent"),
+            Self::TransitVehicle(_) => f.write_str("TransitVehicle"),
         }
     }
 }

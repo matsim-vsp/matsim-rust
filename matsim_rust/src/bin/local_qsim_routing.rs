@@ -71,7 +71,7 @@ fn main() {
     // Create controller
     let controller = ControllerBuilder::default_with_scenario(scenario)
         .external_services(services)
-        .agent_source(PreplanningHorizonAgentSource)
+        .agent_sources(vec![Arc::new(PreplanningHorizonAgentSource)])
         .global_barrier(barrier)
         .adapter_handles(adapters)
         .build()

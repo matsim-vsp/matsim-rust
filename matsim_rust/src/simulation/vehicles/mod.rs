@@ -1,5 +1,8 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{LegAgent, NetworkDriverAgent, NetworkDriverLogic};
+use crate::simulation::agents::{
+    LegAgent, NetworkDriverAgent, NetworkDriverLogic, PassengerAgent, TransitDriverAgent,
+    TransitDriverLogic,
+};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Link;
@@ -98,11 +101,13 @@ impl SimulationVehicle {
 impl SimulationVehicle {
     /// Moves the driver over the node onto `next_link`. As in MATSim, passengers keep their own
     /// position until they leave the vehicle; their arrival link is the vehicle's link.
-    // TODO(pt): A passenger's `curr_link_id()` still returns its departure link after arrival,
+    // TODO: A passenger's `curr_link_id()` still returns its departure link after arrival,
     // because nothing moves its route cursor. Arrival events use the vehicle's link, but a Stuck
     // event for a passenger who arrives in the last tick would report the departure link. MATSim
-    // sets the position on arrival (`notifyArrivalOnLinkByNonNetworkMode`). Do the same when PT
-    // passengers are introduced; today `unpark_veh` creates vehicles without passengers.
+    // sets the position on arrival (`notifyArrivalOnLinkByNonNetworkMode`). Do the same when
+    // network vehicles take passengers; today `unpark_veh` creates vehicles without passengers.
+    // Transit passengers do not ride these vehicles; `PassengerLogic::notify_left_vehicle` moves
+    // their cursor.
     pub fn move_over_node(
         &mut self,
         comp_env: &mut ThreadLocalComputationalEnvironment,
@@ -117,5 +122,66 @@ impl SimulationVehicle {
 impl Identifiable<InternalVehicle> for SimulationVehicle {
     fn id(&self) -> &Id<InternalVehicle> {
         self.id()
+    }
+}
+
+/// A vehicle of schedule-based transit. Unlike [`SimulationVehicle`], it keeps the roles of its
+/// driver and its passengers, because the transit engine asks them at every stop.
+#[derive(Debug)]
+pub struct TransitVehicle {
+    id: Id<InternalVehicle>,
+    driver: TransitDriverAgent,
+    passengers: Vec<PassengerAgent>,
+}
+
+impl TransitVehicle {
+    pub fn new(id: Id<InternalVehicle>, driver: TransitDriverAgent) -> Self {
+        Self {
+            id,
+            driver,
+            passengers: Vec::new(),
+        }
+    }
+
+    pub fn id(&self) -> &Id<InternalVehicle> {
+        &self.id
+    }
+
+    pub fn driver(&self) -> &dyn TransitDriverLogic {
+        self.driver.as_ref()
+    }
+
+    pub fn driver_mut(&mut self) -> &mut dyn TransitDriverLogic {
+        self.driver.as_mut()
+    }
+
+    pub fn passengers(&self) -> &[PassengerAgent] {
+        &self.passengers
+    }
+
+    pub fn add_passenger(&mut self, passenger: PassengerAgent) {
+        self.passengers.push(passenger);
+    }
+
+    /// Removes all passengers, e.g. at the end of the mobsim.
+    pub fn take_passengers(&mut self) -> Vec<PassengerAgent> {
+        std::mem::take(&mut self.passengers)
+    }
+
+    /// Removes the passengers for which `filter` is true, e.g. those who alight, and keeps the
+    /// order of the others.
+    pub fn extract_passengers(
+        &mut self,
+        mut filter: impl FnMut(&mut PassengerAgent) -> bool,
+    ) -> Vec<PassengerAgent> {
+        self.passengers
+            .extract_if(.., |passenger| filter(passenger))
+            .collect()
+    }
+
+    /// Drops the vehicle and returns its driver, e.g. after the last stop. Passengers still in the
+    /// vehicle are dropped as well.
+    pub fn into_driver(self) -> TransitDriverAgent {
+        self.driver
     }
 }

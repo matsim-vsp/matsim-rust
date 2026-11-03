@@ -27,8 +27,10 @@ Read these files before making broad changes:
 - `matsim_rust/src/simulation/`: core simulation code.
 - `matsim_rust/src/simulation/controller/`: iteration orchestration and scenario
   transitions.
-- `matsim_rust/src/simulation/engines/`: activity, leg, network, and teleportation
-  engines.
+- `matsim_rust/src/simulation/engines/`: activity, leg, network, teleportation, and
+  transit engines.
+- `matsim_rust/src/simulation/pt/`: what schedule-based transit adds to the transit
+  schedule (drivers, vehicles, stop partitions) and the transit drivers.
 - `matsim_rust/src/simulation/network/`: the runtime network, capacities,
   partitioning, and link dynamics.
 - `matsim_rust/src/simulation/replanning/`: selectors, strategies, routing, and
@@ -95,11 +97,19 @@ Reproducibility is part of the simulation contract, not just a testing aid.
   same behavior across runs.
 - Never let `IntMap`, `IntSet`, `HashMap`, or `HashSet` iteration order decide a
   simulation outcome. When processing order is observable, establish a stable
-  order explicitly or use dense data indexed by internal ID.
+  order explicitly: sort by external keys once when the data is laid out (as
+  the transit schedule does for routes and driver IDs), or sort by internal ID,
+  which is stable because IDs are created in a deterministic order.
 - Internal IDs are dense and assigned through the global ID store. XML loading
   canonicalizes person IDs before assigning them; protobuf loading restores the
   stored mapping. Preserve the association between protobuf data and its ID
   store.
+- Do not lay out data in vectors whose positions are internal IDs. Their length
+  and gaps depend on the global ID store instead of on the data, e.g. on IDs
+  that plans create for unknown elements, which makes adding or removing
+  elements clumsy. Key such data by `Id` in an `IntMap`, or give a container
+  typed indices of its own (like `RouteIndex`) when other data refers to its
+  elements by position.
 - XML and protobuf are different serializations of the same scenario model.
   Avoid introducing new format-dependent behavior. If a change targets
   cross-format equivalence, compare final simulation state separately from

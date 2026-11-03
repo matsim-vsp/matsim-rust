@@ -52,8 +52,8 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
   1. `Simulation` asks the agents that ended a leg in the previous tick for their next phase. The `ActivityEngine` starts
      the chosen activities, delivers wake-ups and ends the activities that are due.
   2. `Simulation` asks the agents that ended an activity in step 1 for their next phase. The `LegEngine` starts the chosen
-     legs, moves nodes and links, exchanges messages with other partitions and ends the legs that are due. An activity
-     chosen in this step starts in the next tick.
+     legs, moves nodes, links and transit vehicles, exchanges messages with other partitions and ends the legs that are
+     due. An activity chosen in this step starts in the next tick.
 - **T2** In one tick, an agent passes step 1 and step 2 of `T1` at most once. A chain of elements without duration
   therefore advances by one activity and one leg per tick. It cannot loop within a tick, and no call recurses.
 
@@ -117,11 +117,20 @@ cited by their number, e.g. `K2`. Rules that the code does not follow yet are li
   without duration all happen in one call, which is reentrant (`O2`). Here, a leg end is handled in the next tick, because
   this needs no additional code in the top-down step of `T1`. This deviation is intended. As a consequence, activities
   start one tick later than in QSim, and activities with only a maximum duration also end one tick later. Agents reach a
-  stop one tick later per leg since their last fixed time. A plan with little slack can thus miss its planned vehicle: in
-  the Berlin 0.1 % reference events, 284 of 6,590 teleported transit legs reach their stop after the planned boarding
-  time by no more than these ticks.
+  stop one tick later per leg since their last fixed time. This rarely changes which vehicle they catch, provided that a
+  vehicle that departs in a tick also takes the agents who start to wait in that tick, because their walk to the stop
+  ended in an earlier tick. QSim behaves like this: vehicles depart in the netsim engine, which runs before the
+  teleportation engine, in which walks arrive. An agent whose walk to the stop ends in the departure tick thus misses the
+  vehicle in QSim as well. Only a transfer with exactly one tick of slack is caught by QSim and missed here.
+  SwissRailRaptor leaves either no slack or at least 5 s (`transferWalkMargin`) at transfers. In the Berlin 0.1 %
+  scenario, both therefore catch the same 6,169 of 6,591 planned connections; the other 422 have no or negative slack in
+  the plan.
 - **Replanning is not possible from outside (`D1`).** In MATSim, within-day replanning can edit a plan from outside the
   agent between two engine steps. Here, only the agent changes its plan, at a decision point.
+- **Transit vehicles need at least one tick from one stop to the next.** SBB's deterministic transit engine allows zero
+  seconds. One tick makes the result independent of whether the next stop is on another partition, like the minimum tick
+  on a link. [architecture.md](architecture.md#schedule-based-transit) lists the other deviations of schedule-based
+  transit from that engine, e.g. that boarding and alighting take no time.
 
 ## Implementation status
 
@@ -129,4 +138,4 @@ The following rules are not implemented yet:
 
 | Rule         | Current state                                                                                                         |
 |--------------|-----------------------------------------------------------------------------------------------------------------------|
-| `D2`         | The rows for waiting and riding have no implementation, because schedule-based transit does not exist yet.            |
+| `D2`, `D4`   | Waiting transit passengers have no decision point on reaching their stop, and the transit engine has no wake-ups.     |

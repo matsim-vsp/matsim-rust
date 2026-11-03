@@ -346,7 +346,7 @@ fn execute_adaptive(
     let output_dir = config.output().output_dir.clone();
     let scenario = Scenario::load(config);
     let controller = ControllerBuilder::default_with_scenario(scenario)
-        .agent_source(PreplanningHorizonAgentSource)
+        .agent_sources(vec![Arc::new(PreplanningHorizonAgentSource)])
         .external_services(map)
         .adapter_handles(adapter_handles)
         .global_barrier(global_barrier)
