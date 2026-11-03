@@ -435,11 +435,11 @@ impl PartialRoute {
         self.route_type = Some(PartialRouteTypes::Pt);
         self.distance = Some(event.distance);
         self.pt_description = Some(InternalPtRouteDescription {
-            transit_route_id: Id::create(event.route.external()),
+            transit_route_id: event.route.clone(),
             boarding_time: Some(event.boarding_time),
-            transit_line_id: Id::create(event.line.external()),
-            access_facility_id: Id::create(event.access_facility.external()),
-            egress_facility_id: Id::create(event.egress_facility.external()),
+            transit_line_id: event.line.clone(),
+            access_facility_id: event.access_facility.clone(),
+            egress_facility_id: event.egress_facility.clone(),
         });
     }
 

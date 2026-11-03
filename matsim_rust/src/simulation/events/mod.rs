@@ -682,11 +682,11 @@ pub struct PtTeleportationArrivalEvent {
     pub person: Id<InternalPerson>,
     pub distance: f64,
     pub mode: Id<String>,
-    pub route: Id<String>,
-    pub line: Id<String>,
+    pub route: Id<TransitRoute>,
+    pub line: Id<TransitLine>,
     pub boarding_time: SimTime,
-    pub access_facility: Id<String>,
-    pub egress_facility: Id<String>,
+    pub access_facility: Id<TransitStopFacility>,
+    pub egress_facility: Id<TransitStopFacility>,
     #[builder(default)]
     pub attributes: InternalAttributes,
 }

@@ -189,13 +189,9 @@ impl TeleportationEngine {
         transit: TransitTeleportation<'_>,
     ) {
         let now_time = self.clock.tick_to_time(now);
-        let transit_line_id = transit.line.clone();
-        let transit_route_id = transit.route.clone();
         let boarding_time = transit
             .boarding_time
             .expect("Boarding time needs to be set.");
-        let access_facility = transit.access_facility.clone();
-        let egress_facility = transit.egress_facility.clone();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PtTeleportationArrivalEventBuilder::default()
@@ -203,11 +199,11 @@ impl TeleportationEngine {
                 .person(agent.id().clone())
                 .mode(agent.mode().clone())
                 .distance(agent.distance().expect("Route distance needs to be set."))
-                .line(transit_line_id)
-                .route(transit_route_id)
+                .line(transit.line.clone())
+                .route(transit.route.clone())
                 .boarding_time(boarding_time)
-                .access_facility(access_facility)
-                .egress_facility(egress_facility)
+                .access_facility(transit.access_facility.clone())
+                .egress_facility(transit.egress_facility.clone())
                 .build()
                 .unwrap(),
         );

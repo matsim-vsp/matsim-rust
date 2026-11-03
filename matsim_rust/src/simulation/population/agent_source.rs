@@ -26,13 +26,9 @@ pub trait AgentSource {
     ) -> AgentSet;
 }
 
-/// The agent sources of a mobsim by default: the persons of the population and the drivers of
-/// schedule-based transit.
+/// The agent sources of a mobsim by default: the persons of the population.
 pub fn default_agent_sources() -> Vec<DynAgentSource> {
-    vec![
-        Arc::new(PopulationAgentSource),
-        Arc::new(TransitDriverAgentSource),
-    ]
+    vec![Arc::new(PopulationAgentSource)]
 }
 
 pub trait IntoDynAgentSource {

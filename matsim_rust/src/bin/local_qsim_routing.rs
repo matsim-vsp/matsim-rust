@@ -6,9 +6,7 @@ use matsim_rust::simulation::config::Config;
 use matsim_rust::simulation::controller::ExternalServices;
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::logging::init_std_out_logging_thread_local;
-use matsim_rust::simulation::population::agent_source::{
-    PreplanningHorizonAgentSource, TransitDriverAgentSource,
-};
+use matsim_rust::simulation::population::agent_source::PreplanningHorizonAgentSource;
 use matsim_rust::simulation::scenario::Scenario;
 use std::sync::{Arc, Barrier};
 use tracing::info;

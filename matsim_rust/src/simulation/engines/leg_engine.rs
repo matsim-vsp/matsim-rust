@@ -347,7 +347,7 @@ impl<C: SimCommunicator> LegEngine<C> {
             }
             Transit(agent) => {
                 self.publish_departure(now, agent.as_ref());
-                self.transit_engine.receive_agent(agent);
+                self.transit_engine.receive_agent(now, agent);
             }
             TransitDriver(driver) => self.transit_engine.receive_driver(now, driver),
         }

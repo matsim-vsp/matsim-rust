@@ -32,6 +32,7 @@ use crate::simulation::io::xml::element_splitter::ElementSplitter;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
+use crate::simulation::scenario::transit::{TransitLine, TransitRoute, TransitStopFacility};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 
@@ -592,12 +593,14 @@ fn handle_pt_travelled(
     let person: Id<InternalPerson> = ids.resolve(value_from_name(attr, "person").unwrap())?;
     let distance: f64 = value_from_name(attr, "distance").unwrap().parse().unwrap();
     let mode: Id<String> = ids.resolve(value_from_name(attr, "mode").unwrap())?;
-    let line: Id<String> = ids.resolve(value_from_name(attr, "line").unwrap())?;
-    let route: Id<String> = ids.resolve(value_from_name(attr, "route").unwrap())?;
+    let line: Id<TransitLine> = ids.resolve(value_from_name(attr, "line").unwrap())?;
+    let route: Id<TransitRoute> = ids.resolve(value_from_name(attr, "route").unwrap())?;
     let boarding_time =
         SimTime::parse_decimal_seconds(value_from_name(attr, "boardingTime").unwrap()).unwrap();
-    let access_fac: Id<String> = ids.resolve(value_from_name(attr, "accessFacility").unwrap())?;
-    let egress_fac: Id<String> = ids.resolve(value_from_name(attr, "egressFacility").unwrap())?;
+    let access_fac: Id<TransitStopFacility> =
+        ids.resolve(value_from_name(attr, "accessFacility").unwrap())?;
+    let egress_fac: Id<TransitStopFacility> =
+        ids.resolve(value_from_name(attr, "egressFacility").unwrap())?;
     Some(Box::new(
         PtTeleportationArrivalEventBuilder::default()
             .time(time)

@@ -1079,7 +1079,6 @@ mod tests {
     #[deterministic_id_test]
     fn owned_roles_follow_route_capabilities_and_preserve_allocation() {
         use crate::simulation::scenario::population::{
-
             InternalNetworkRoute, InternalPtRoute, InternalPtRouteDescription,
         };
         let pt = InternalRoute::Pt(InternalPtRoute {
@@ -1132,7 +1131,6 @@ mod tests {
     #[deterministic_id_test]
     fn pt_routes_only_offer_teleportation_and_keep_their_metadata() {
         use crate::simulation::scenario::population::{
-
             InternalPtRoute, InternalPtRouteDescription,
         };
         let route = InternalRoute::Pt(InternalPtRoute {
@@ -1403,7 +1401,6 @@ mod tests {
     #[deterministic_id_test]
     fn passengers_board_the_planned_line_while_it_serves_their_egress_stop() {
         use crate::simulation::scenario::population::{
-
             InternalPtRoute, InternalPtRouteDescription,
         };
         let stops = |ids: &[&str]| ids.iter().map(|id| Id::create(id)).collect::<Vec<_>>();

@@ -132,7 +132,7 @@ pub trait PassengerLogic: LegLogic {
         stops_to_come: &[Id<TransitStopFacility>],
         now: SimTime,
     ) -> bool;
-    /// Whether the agent alights at `stop`. Before its planned stop, this ends the leg early (`D5`).
+    /// Whether the agent alights at `stop`. Before its planned stop, this ends the leg early.
     fn wants_to_alight(
         &mut self,
         comp_env: &mut ThreadLocalComputationalEnvironment,

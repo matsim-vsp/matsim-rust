@@ -163,9 +163,20 @@ impl TransitVehicle {
         self.passengers.push(passenger);
     }
 
-    /// Removes all passengers, e.g. to ask each of them whether it alights.
+    /// Removes all passengers, e.g. at the end of the mobsim.
     pub fn take_passengers(&mut self) -> Vec<PassengerAgent> {
         std::mem::take(&mut self.passengers)
+    }
+
+    /// Removes the passengers for which `filter` is true, e.g. those who alight, and keeps the
+    /// order of the others.
+    pub fn extract_passengers(
+        &mut self,
+        mut filter: impl FnMut(&mut PassengerAgent) -> bool,
+    ) -> Vec<PassengerAgent> {
+        self.passengers
+            .extract_if(.., |passenger| filter(passenger))
+            .collect()
     }
 
     /// Drops the vehicle and returns its driver, e.g. after the last stop. Passengers still in the

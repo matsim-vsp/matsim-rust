@@ -49,7 +49,7 @@ modules:
     type: Output
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/pt_tutorial_schedule_based
-    write_events: XmlZst
+    write_events: File
   routing:
     type: Routing
     mode: UsePlans
