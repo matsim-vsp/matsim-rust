@@ -276,6 +276,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         let MobsimScenarioPartition {
             scenario,
             network_partition,
+            transit_sim_schedule,
             ..
         } = partition;
 
@@ -289,7 +290,7 @@ impl<C: SimCommunicator> SimulationBuilder<C> {
         let leg_engine = LegEngine::new(
             network_partition,
             scenario.garage.clone(),
-            scenario.transit_sim_schedule.clone(),
+            transit_sim_schedule,
             self.net_message_broker,
             scenario.config.qsim(),
             scenario.config.transit(),

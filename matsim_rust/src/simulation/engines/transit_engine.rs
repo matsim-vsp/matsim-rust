@@ -8,14 +8,18 @@ use crate::simulation::events::{
     PersonLeavesVehicleEventBuilder, TransitDriverStartsEventBuilder,
     VehicleArrivesAtFacilityEventBuilder, VehicleDepartsAtFacilityEventBuilder,
 };
+use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::TransitVehicleMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
 use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::scenario::transit::TransitStopFacility;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::TransitVehicle;
+use itertools::Itertools;
+use nohash_hasher::IntMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,12 +39,10 @@ pub(crate) struct TransitEngine {
     clock: SimClock,
     approaching: TimeQueue<TransitVehicle, ()>,
     departing: TimeQueue<DepartureTracker, ()>,
-    /// Passengers who started their leg in this tick.
     new_passengers: Vec<PassengerAgent>,
-    /// The state of each stop, indexed by the internal id of its facility.
-    stops: Vec<StopState>,
+    stops: IntMap<Id<TransitStopFacility>, StopState>,
     /// The stops to process in this tick: alighting and boarding ongoing.
-    stops_to_be_processed: Vec<usize>,
+    stops_to_be_processed: Vec<Id<TransitStopFacility>>,
 }
 
 /// What leaves the transit engine in a step.
@@ -64,10 +66,10 @@ enum Doors {
     Boarding { complete: bool },
 }
 
-/// The departure of the vehicle with the given `vehicle_driver_reference`, which halts at stop with index `stop_index`.
+/// The departure of the vehicle with the given `vehicle_driver_reference`, which halts at `stop`.
 /// Each departure has its own driver, so the order identifies the vehicle even if two copies of the same vehicle halt at the stop.
 struct DepartureTracker {
-    stop_index: usize,
+    stop: Id<TransitStopFacility>,
     vehicle_driver_reference: u64,
     time: SimTime,
 }
@@ -106,8 +108,9 @@ impl TransitEngine {
         clock: SimClock,
     ) -> Self {
         // Create empty state for each stop.
-        let stops = std::iter::repeat_with(StopState::default)
-            .take(schedule.num_stops())
+        let stops = schedule
+            .served_stops()
+            .map(|stop| (stop.clone(), StopState::default()))
             .collect();
 
         Self {
@@ -175,7 +178,12 @@ impl TransitEngine {
     /// Returns all agents that still wait or ride, e.g. at the end of the mobsim.
     pub(crate) fn drain(&mut self) -> Vec<LegAgent> {
         let mut agents = std::mem::take(&mut self.new_passengers);
-        for state in &mut self.stops {
+        // Sorted, so that the order of the agents does not depend on the map.
+        for (_, state) in self
+            .stops
+            .iter_mut()
+            .sorted_unstable_by_key(|(stop, _)| *stop)
+        {
             agents.append(&mut state.waiting_passengers);
             for mut halting in state.halting_vehicles.drain(..) {
                 agents.extend(halting.vehicle.take_passengers());
@@ -243,20 +251,23 @@ impl TransitEngine {
             );
             vehicle.driver_mut().notify_stop_arrived(now);
 
-            let index = stop.internal() as usize;
             let due = DepartureTracker {
-                stop_index: index,
+                stop: stop.clone(),
                 vehicle_driver_reference: order(&vehicle),
                 time: vehicle.driver().next_time(),
             };
             let due_order = due.vehicle_driver_reference;
             self.departing.add_with_order(due, now, due_order);
-            self.stops[index].halting_vehicles.push(HaltingVehicle {
-                vehicle,
-                doors: Doors::Alighting,
-                doors_used_until: now,
-            });
-            self.stops_to_be_processed.push(index);
+            self.stops
+                .get_mut(&stop)
+                .expect("Vehicles only halt at stops that a route serves.")
+                .halting_vehicles
+                .push(HaltingVehicle {
+                    vehicle,
+                    doors: Doors::Alighting,
+                    doors_used_until: now,
+                });
+            self.stops_to_be_processed.push(stop);
         }
     }
 
@@ -273,8 +284,11 @@ impl TransitEngine {
         let mut stops_to_be_processed = std::mem::take(&mut self.stops_to_be_processed);
         stops_to_be_processed.sort_unstable();
         stops_to_be_processed.dedup();
-        stops_to_be_processed.retain(|&stop| {
-            let state = &mut self.stops[stop];
+        stops_to_be_processed.retain(|stop| {
+            let state = self
+                .stops
+                .get_mut(stop)
+                .expect("Only stops that a route serves are processed.");
             let mut stop_to_be_processed = false;
             for halting_vehicle in &mut state.halting_vehicles {
                 halting_vehicle.doors_used_until = halting_vehicle.doors_used_until.max(now);
@@ -322,14 +336,14 @@ impl TransitEngine {
                     .unwrap(),
             );
 
-            let stop = access.internal() as usize;
-            assert!(
-                stop < self.stops.len(),
-                "Agent {} waits at stop {access}, which no transit route serves.",
-                passenger.id()
-            );
-            self.stops[stop].waiting_passengers.push(passenger);
-            self.stops_to_be_processed.push(stop);
+            let state = self.stops.get_mut(&access).unwrap_or_else(|| {
+                panic!(
+                    "Agent {} waits at stop {access}, which no transit route serves.",
+                    passenger.id()
+                )
+            });
+            state.waiting_passengers.push(passenger);
+            self.stops_to_be_processed.push(access);
         }
     }
 
@@ -337,7 +351,11 @@ impl TransitEngine {
     /// time has come. Otherwise, it tries again in the next tick, or once its doors are free.
     fn depart(&mut self, now: SimTime, next: SimTime, result: &mut TransitStepResult) {
         for due in self.departing.pop(now) {
-            let halting_vehicle = &mut self.stops[due.stop_index].halting_vehicles;
+            let halting_vehicle = &mut self
+                .stops
+                .get_mut(&due.stop)
+                .expect("A vehicle that is due to depart halts at its stop.")
+                .halting_vehicles;
             let position = halting_vehicle
                 .iter()
                 .position(|halting_vehicle| {
@@ -613,8 +631,8 @@ mod tests {
     fn start_drivers(engine: &mut TransitEngine, tick: u64) {
         let now = SimTime::from_secs(tick);
         let schedule = engine.schedule.clone();
-        for (index, departure) in schedule.departures_starting_on(engine.rank) {
-            if departure.time == now {
+        for index in schedule.departures_starting_on(engine.rank) {
+            if schedule.schedule().departure(index).departure_time == now {
                 let driver = Box::new(PlannedDriver::new(&schedule, index, now));
                 engine.receive_driver(Tick::new(tick), driver);
             }
@@ -633,7 +651,7 @@ mod tests {
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
         let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
         Arc::new(TransitSimSchedule::build(
-            &schedule,
+            Arc::new(schedule),
             &network,
             &garage,
             &Population::default(),
@@ -813,8 +831,9 @@ mod tests {
         // The 06:00 departure starts at 06:10 instead. It leaves stop 1 right away, so its
         // scheduled arrival at stop 2a at 06:03:20 has passed.
         let (index, _) = schedule
+            .schedule()
             .indexed_departures()
-            .find(|(_, departure)| departure.driver.external() == "pt_Blue Line_1to3_01")
+            .find(|(index, _)| schedule.driver(*index).external() == "pt_Blue Line_1to3_01")
             .unwrap();
         let start = clock.secs_to_tick(SIX + 600);
         let driver = PlannedDriver::new(&schedule, index, clock.tick_to_time(start));

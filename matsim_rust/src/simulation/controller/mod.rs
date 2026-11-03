@@ -922,7 +922,7 @@ mod tests {
         let scenario_core = ScenarioCore {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
-            transit_sim_schedule: Arc::default(),
+            transit_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
@@ -969,7 +969,7 @@ mod tests {
         let scenario_core = ScenarioCore {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
-            transit_sim_schedule: Arc::default(),
+            transit_schedule: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
@@ -1006,6 +1006,7 @@ mod tests {
                 rank: 0,
                 scenario: scenario.clone(),
                 network_partition,
+                transit_sim_schedule: Arc::default(),
             },
             population: PopulationShard {
                 population: Population::new(),

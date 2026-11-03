@@ -12,38 +12,82 @@ use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::time::SimTime;
 use nohash_hasher::IntMap;
+use std::ops::Range;
 use std::path::Path;
 use std::time::Duration;
 use tracing::info;
+
+/// Index of a route in [`TransitSchedule::routes`]. Only the schedule creates such indices, so
+/// that they cannot be confused with other indices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RouteIndex(u32);
+
+/// Index of a departure in [`TransitSchedule::departures`]. Only the schedule creates such
+/// indices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DepartureIndex(u32);
+
+impl RouteIndex {
+    fn new(index: usize) -> Self {
+        Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX routes."))
+    }
+}
+
+impl DepartureIndex {
+    fn new(index: usize) -> Self {
+        Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX departures."))
+    }
+
+    /// The position in [`TransitSchedule::departures`], e.g. to index data of the departures.
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TransitLine {
     pub id: Id<TransitLine>,
     pub name: String,
-    pub routes: IntMap<Id<TransitRoute>, TransitRoute>,
     pub attributes: InternalAttributes,
+    /// The line's routes, which are contiguous in [`TransitSchedule::routes`].
+    routes: Range<usize>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TransitRoute {
     pub id: Id<TransitRoute>,
+    pub line: Id<TransitLine>,
     pub description: Option<String>,
     pub transport_mode: Id<String>,
+    /// The facilities of the stops, in the order of `stops`.
+    pub stop_facilities: Vec<Id<TransitStopFacility>>,
     pub stops: Vec<TransitRouteStop>,
     pub network_route: Vec<Id<Link>>,
-    pub departures: Vec<TransitDeparture>,
     pub attributes: InternalAttributes,
+    /// The route's departures, which are contiguous in [`TransitSchedule::departures`].
+    departures: Range<usize>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TransitRouteStop {
-    pub facility_id: Id<TransitStopFacility>,
     pub arrival_offset: Option<Duration>,
     pub departure_offset: Option<Duration>,
     pub await_departure: Option<bool>,
     pub allow_boarding: bool,
     pub allow_alighting: bool,
     pub minimum_stop_duration: Duration,
+}
+
+impl TransitRouteStop {
+    /// The arrival offset. Falls back to the departure offset.
+    pub fn arrival(&self) -> Option<Duration> {
+        self.arrival_offset.or(self.departure_offset)
+    }
+
+    /// The departure offset. Falls back to the arrival offset.
+    pub fn departure(&self) -> Option<Duration> {
+        self.departure_offset.or(self.arrival_offset)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -73,15 +117,114 @@ pub struct TransitStopFacility {
     pub attributes: InternalAttributes,
 }
 
+/// The transit schedule with all data of its files.
+///
+/// Routes and departures are kept in dense vectors. Routes are sorted by the external ids of line
+/// and route, so that the layout depends neither on the input format nor on hashing. The routes of
+/// a line and the departures of a route are contiguous. Facilities and lines are kept by their
+/// ids, in no particular order.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct TransitSchedule {
-    lines: IntMap<Id<TransitLine>, TransitLine>,
     facilities: IntMap<Id<TransitStopFacility>, TransitStopFacility>,
+    lines: IntMap<Id<TransitLine>, TransitLine>,
+    routes: Vec<TransitRoute>,
+    departures: Vec<TransitDeparture>,
+    /// The route of each departure.
+    departure_routes: Vec<RouteIndex>,
     minimal_transfer_times: Vec<MinimalTransferTime>,
     attributes: InternalAttributes,
 }
 
+/// A line as it is read from a file. [`TransitSchedule::new`] lays the lines out densely.
+pub(crate) struct LoadedLine {
+    pub(crate) id: Id<TransitLine>,
+    pub(crate) name: String,
+    pub(crate) attributes: InternalAttributes,
+    pub(crate) routes: Vec<LoadedRoute>,
+}
+
+/// A route as it is read from a file, see [`LoadedLine`].
+pub(crate) struct LoadedRoute {
+    pub(crate) id: Id<TransitRoute>,
+    pub(crate) description: Option<String>,
+    pub(crate) transport_mode: Id<String>,
+    pub(crate) stop_facilities: Vec<Id<TransitStopFacility>>,
+    pub(crate) stops: Vec<TransitRouteStop>,
+    pub(crate) network_route: Vec<Id<Link>>,
+    pub(crate) departures: Vec<TransitDeparture>,
+    pub(crate) attributes: InternalAttributes,
+}
+
+/// Sorts `items` by `key`. Of items with the same key, the last one is kept, as if they were
+/// inserted into a map one after the other.
+fn sorted_keeping_last<T>(mut items: Vec<T>, key: impl Fn(&T) -> &str) -> Vec<T> {
+    // The sort is stable, so items with the same key stay in the order of the input.
+    items.sort_by(|a, b| key(a).cmp(key(b)));
+    let mut result: Vec<T> = Vec::with_capacity(items.len());
+    for item in items {
+        match result.last_mut() {
+            Some(last) if key(last) == key(&item) => *last = item,
+            _ => result.push(item),
+        }
+    }
+    result
+}
+
 impl TransitSchedule {
+    /// Lays out the facilities and lines as they were read from a file. A facility, line or route
+    /// with the same id as an earlier one replaces it.
+    pub(crate) fn new(
+        facilities: Vec<TransitStopFacility>,
+        lines: Vec<LoadedLine>,
+        minimal_transfer_times: Vec<MinimalTransferTime>,
+        attributes: InternalAttributes,
+    ) -> Self {
+        let mut schedule = TransitSchedule {
+            // Inserted in the order of the file, so that a later facility replaces an earlier one.
+            facilities: facilities
+                .into_iter()
+                .map(|facility| (facility.id.clone(), facility))
+                .collect(),
+            minimal_transfer_times,
+            attributes,
+            ..Default::default()
+        };
+        // Sorted, so that the routes are laid out in the order of the external ids of their lines.
+        for line in sorted_keeping_last(lines, |line| line.id.external()) {
+            let first_route = schedule.routes.len();
+            for route in sorted_keeping_last(line.routes, |route| route.id.external()) {
+                let route_index = RouteIndex::new(schedule.routes.len());
+                let first_departure = schedule.departures.len();
+                schedule
+                    .departure_routes
+                    .extend(std::iter::repeat_n(route_index, route.departures.len()));
+                schedule.departures.extend(route.departures);
+                schedule.routes.push(TransitRoute {
+                    id: route.id,
+                    line: line.id.clone(),
+                    description: route.description,
+                    transport_mode: route.transport_mode,
+                    stop_facilities: route.stop_facilities,
+                    stops: route.stops,
+                    network_route: route.network_route,
+                    attributes: route.attributes,
+                    departures: first_departure..schedule.departures.len(),
+                });
+            }
+
+            schedule.lines.insert(
+                line.id.clone(),
+                TransitLine {
+                    id: line.id,
+                    name: line.name,
+                    attributes: line.attributes,
+                    routes: first_route..schedule.routes.len(),
+                },
+            );
+        }
+        schedule
+    }
+
     pub fn from_file(file_path: &Path) -> Self {
         info!("Reading transit schedule from {file_path:?}");
         let schedule = if file_path.extension().unwrap().eq("binpb") {
@@ -98,7 +241,7 @@ impl TransitSchedule {
         };
         info!(
             "Finished reading transit schedule. Found {} lines, {} routes and {} facilities.",
-            schedule.lines.len(),
+            schedule.num_lines(),
             schedule.num_routes(),
             schedule.facilities.len()
         );
@@ -120,12 +263,99 @@ impl TransitSchedule {
         }
     }
 
-    pub fn lines(&self) -> &IntMap<Id<TransitLine>, TransitLine> {
-        &self.lines
+    /// The facilities, in no particular order.
+    pub fn facilities(&self) -> impl Iterator<Item = &TransitStopFacility> {
+        self.facilities.values()
     }
 
-    pub fn facilities(&self) -> &IntMap<Id<TransitStopFacility>, TransitStopFacility> {
-        &self.facilities
+    pub fn facility(&self, id: &Id<TransitStopFacility>) -> Option<&TransitStopFacility> {
+        self.facilities.get(id)
+    }
+
+    /// The link of a stop facility.
+    pub fn stop_link(&self, facility: &Id<TransitStopFacility>) -> Option<&Id<Link>> {
+        self.facility(facility)?.link_ref_id.as_ref()
+    }
+
+    /// The lines, in no particular order.
+    pub fn lines(&self) -> impl Iterator<Item = &TransitLine> {
+        self.lines.values()
+    }
+
+    pub fn line(&self, id: &Id<TransitLine>) -> Option<&TransitLine> {
+        self.lines.get(id)
+    }
+
+    pub fn num_lines(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub fn routes(&self) -> &[TransitRoute] {
+        &self.routes
+    }
+
+    pub fn routes_of(&self, line: &TransitLine) -> &[TransitRoute] {
+        &self.routes[line.routes.clone()]
+    }
+
+    pub fn route(&self, index: RouteIndex) -> &TransitRoute {
+        &self.routes[index.0 as usize]
+    }
+
+    /// Finds a route by the ids of its line and route.
+    pub fn find_route(
+        &self,
+        line: &Id<TransitLine>,
+        route: &Id<TransitRoute>,
+    ) -> Option<RouteIndex> {
+        let line = self.line(line)?;
+        line.routes
+            .clone()
+            .find(|&index| self.routes[index].id == *route)
+            .map(RouteIndex::new)
+    }
+
+    /// The first link of the route's network route, or the link of its first stop if it has no
+    /// network route.
+    pub fn start_link<'a>(&'a self, route: &'a TransitRoute) -> Option<&'a Id<Link>> {
+        route
+            .network_route
+            .first()
+            .or_else(|| self.stop_link(route.stop_facilities.first()?))
+    }
+
+    /// The last link of the route's network route, or the link of its last stop if it has no
+    /// network route.
+    pub fn end_link<'a>(&'a self, route: &'a TransitRoute) -> Option<&'a Id<Link>> {
+        route
+            .network_route
+            .last()
+            .or_else(|| self.stop_link(route.stop_facilities.last()?))
+    }
+
+    pub fn departures(&self) -> &[TransitDeparture] {
+        &self.departures
+    }
+
+    pub fn departures_of(&self, route: &TransitRoute) -> &[TransitDeparture] {
+        &self.departures[route.departures.clone()]
+    }
+
+    pub fn departure(&self, index: DepartureIndex) -> &TransitDeparture {
+        &self.departures[index.0 as usize]
+    }
+
+    /// The route which the departure serves.
+    pub fn departure_route(&self, index: DepartureIndex) -> RouteIndex {
+        self.departure_routes[index.0 as usize]
+    }
+
+    /// All departures with their indices, in the order of the indices.
+    pub fn indexed_departures(&self) -> impl Iterator<Item = (DepartureIndex, &TransitDeparture)> {
+        self.departures
+            .iter()
+            .enumerate()
+            .map(|(index, departure)| (DepartureIndex::new(index), departure))
     }
 
     pub fn minimal_transfer_times(&self) -> &Vec<MinimalTransferTime> {
@@ -136,16 +366,12 @@ impl TransitSchedule {
         &self.attributes
     }
 
-    pub fn get_line(&self, id: &Id<TransitLine>) -> &TransitLine {
-        self.lines.get(id).unwrap()
-    }
-
-    pub fn get_facility(&self, id: &Id<TransitStopFacility>) -> &TransitStopFacility {
-        self.facilities.get(id).unwrap()
-    }
-
     pub fn num_routes(&self) -> usize {
-        self.lines.values().map(|line| line.routes.len()).sum()
+        self.routes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
     }
 }
 
@@ -156,15 +382,9 @@ impl From<IOTransitSchedule> for TransitSchedule {
             .stop_facilities
             .into_iter()
             .map(TransitStopFacility::from)
-            .map(|facility| (facility.id.clone(), facility))
             .collect();
 
-        let lines = io
-            .transit_lines
-            .into_iter()
-            .map(TransitLine::from)
-            .map(|line| (line.id.clone(), line))
-            .collect();
+        let lines = io.transit_lines.into_iter().map(LoadedLine::from).collect();
 
         let minimal_transfer_times = io
             .minimal_transfer_times
@@ -177,12 +397,12 @@ impl From<IOTransitSchedule> for TransitSchedule {
             })
             .unwrap_or_default();
 
-        TransitSchedule {
-            lines,
+        TransitSchedule::new(
             facilities,
+            lines,
             minimal_transfer_times,
-            attributes: io.attributes.map(Into::into).unwrap_or_default(),
-        }
+            io.attributes.map(Into::into).unwrap_or_default(),
+        )
     }
 }
 
@@ -191,11 +411,7 @@ impl From<&TransitSchedule> for IOTransitSchedule {
         Self {
             attributes: IOAttributes::from_internal_none_if_empty(schedule.attributes()),
             transit_stops: IOTransitStops {
-                stop_facilities: schedule
-                    .facilities()
-                    .values()
-                    .map(IOStopFacility::from)
-                    .collect(),
+                stop_facilities: schedule.facilities().map(IOStopFacility::from).collect(),
             },
             minimal_transfer_times: (!schedule.minimal_transfer_times().is_empty()).then(|| {
                 IOMinimalTransferTimes {
@@ -206,45 +422,53 @@ impl From<&TransitSchedule> for IOTransitSchedule {
                         .collect(),
                 }
             }),
-            transit_lines: schedule.lines().values().map(IOTransitLine::from).collect(),
+            transit_lines: schedule
+                .lines()
+                .map(|line| IOTransitLine {
+                    id: line.id.external().to_string(),
+                    name: (!line.name.is_empty()).then(|| line.name.clone()),
+                    attributes: IOAttributes::from_internal_none_if_empty(&line.attributes),
+                    transit_routes: schedule
+                        .routes_of(line)
+                        .iter()
+                        .map(|route| io_route(schedule, route))
+                        .collect(),
+                })
+                .collect(),
         }
     }
 }
 
-impl From<&TransitLine> for IOTransitLine {
-    fn from(line: &TransitLine) -> Self {
-        Self {
-            id: line.id.external().to_string(),
-            name: (!line.name.is_empty()).then(|| line.name.clone()),
-            attributes: IOAttributes::from_internal_none_if_empty(&line.attributes),
-            transit_routes: line.routes.values().map(IOTransitRoute::from).collect(),
-        }
-    }
-}
-
-impl From<&TransitRoute> for IOTransitRoute {
-    fn from(route: &TransitRoute) -> Self {
-        Self {
-            id: route.id.external().to_string(),
-            description: route.description.clone(),
-            transport_mode: route.transport_mode.external().to_string(),
-            route_profile: IORouteProfile {
-                stops: route.stops.iter().map(IORouteStop::from).collect(),
-            },
-            route: IONetworkRoute {
-                links: route
-                    .network_route
-                    .iter()
-                    .map(|id| IORouteLink {
-                        ref_id: id.external().to_string(),
-                    })
-                    .collect(),
-            },
-            departures: IODepartures {
-                departures: route.departures.iter().map(IODeparture::from).collect(),
-            },
-            attributes: IOAttributes::from_internal_none_if_empty(&route.attributes),
-        }
+fn io_route(schedule: &TransitSchedule, route: &TransitRoute) -> IOTransitRoute {
+    IOTransitRoute {
+        id: route.id.external().to_string(),
+        description: route.description.clone(),
+        transport_mode: route.transport_mode.external().to_string(),
+        route_profile: IORouteProfile {
+            stops: route
+                .stop_facilities
+                .iter()
+                .zip(&route.stops)
+                .map(|(facility, stop)| io_route_stop(facility, stop))
+                .collect(),
+        },
+        route: IONetworkRoute {
+            links: route
+                .network_route
+                .iter()
+                .map(|id| IORouteLink {
+                    ref_id: id.external().to_string(),
+                })
+                .collect(),
+        },
+        departures: IODepartures {
+            departures: schedule
+                .departures_of(route)
+                .iter()
+                .map(IODeparture::from)
+                .collect(),
+        },
+        attributes: IOAttributes::from_internal_none_if_empty(&route.attributes),
     }
 }
 
@@ -293,40 +517,28 @@ impl From<&TransitStopFacility> for IOStopFacility {
 
 impl From<crate::generated::transit::TransitSchedule> for TransitSchedule {
     fn from(wire: crate::generated::transit::TransitSchedule) -> Self {
-        let lines = wire
-            .lines
-            .into_iter()
-            .map(TransitLine::from)
-            .map(|line| (line.id.clone(), line))
-            .collect();
+        let lines = wire.lines.into_iter().map(LoadedLine::from).collect();
         let facilities = wire
             .facilities
             .into_iter()
             .map(TransitStopFacility::from)
-            .map(|facility| (facility.id.clone(), facility))
             .collect();
 
-        Self {
-            lines,
+        TransitSchedule::new(
             facilities,
-            minimal_transfer_times: wire
-                .minimal_transfer_times
+            lines,
+            wire.minimal_transfer_times
                 .into_iter()
                 .map(MinimalTransferTime::from)
                 .collect(),
-            attributes: InternalAttributes::from(&wire.attributes),
-        }
+            InternalAttributes::from(&wire.attributes),
+        )
     }
 }
 
-impl From<crate::generated::transit::TransitLine> for TransitLine {
+impl From<crate::generated::transit::TransitLine> for LoadedLine {
     fn from(wire: crate::generated::transit::TransitLine) -> Self {
-        let routes = wire
-            .routes
-            .into_iter()
-            .map(TransitRoute::from)
-            .map(|route| (route.id.clone(), route))
-            .collect();
+        let routes = wire.routes.into_iter().map(LoadedRoute::from).collect();
 
         Self {
             id: Id::get(wire.id),
@@ -337,13 +549,19 @@ impl From<crate::generated::transit::TransitLine> for TransitLine {
     }
 }
 
-impl From<crate::generated::transit::TransitRoute> for TransitRoute {
+impl From<crate::generated::transit::TransitRoute> for LoadedRoute {
     fn from(wire: crate::generated::transit::TransitRoute) -> Self {
+        let (stop_facilities, stops) = wire
+            .stops
+            .into_iter()
+            .map(|stop| (Id::get(stop.facility_id), TransitRouteStop::from(stop)))
+            .unzip();
         Self {
             id: Id::get(wire.id),
             description: wire.description,
             transport_mode: Id::get(wire.transport_mode),
-            stops: wire.stops.into_iter().map(TransitRouteStop::from).collect(),
+            stop_facilities,
+            stops,
             network_route: wire.network_route.into_iter().map(Id::get).collect(),
             departures: wire
                 .departures
@@ -358,7 +576,6 @@ impl From<crate::generated::transit::TransitRoute> for TransitRoute {
 impl From<crate::generated::transit::TransitRouteStop> for TransitRouteStop {
     fn from(wire: crate::generated::transit::TransitRouteStop) -> Self {
         Self {
-            facility_id: Id::get(wire.facility_id),
             arrival_offset: wire.arrival_offset_ns.map(Duration::from_nanos),
             departure_offset: wire.departure_offset_ns.map(Duration::from_nanos),
             await_departure: wire.await_departure,
@@ -405,17 +622,16 @@ impl From<crate::generated::transit::MinimalTransferTime> for MinimalTransferTim
     }
 }
 
-impl From<IOTransitLine> for TransitLine {
+impl From<IOTransitLine> for LoadedLine {
     fn from(io: IOTransitLine) -> Self {
         Id::<String>::create(&io.id);
         let routes = io
             .transit_routes
             .into_iter()
-            .map(TransitRoute::from)
-            .map(|route| (route.id.clone(), route))
+            .map(LoadedRoute::from)
             .collect();
 
-        TransitLine {
+        LoadedLine {
             id: Id::create(&io.id),
             name: io.name.unwrap_or_default(),
             routes,
@@ -424,19 +640,23 @@ impl From<IOTransitLine> for TransitLine {
     }
 }
 
-impl From<IOTransitRoute> for TransitRoute {
+impl From<IOTransitRoute> for LoadedRoute {
     fn from(io: IOTransitRoute) -> Self {
         Id::<String>::create(&io.id);
-        TransitRoute {
-            id: Id::create(&io.id),
+        let id = Id::create(&io.id);
+        let transport_mode = Id::create(&io.transport_mode);
+        let (stop_facilities, stops) = io
+            .route_profile
+            .stops
+            .into_iter()
+            .map(route_stop_from_io)
+            .unzip();
+        LoadedRoute {
+            id,
             description: io.description,
-            transport_mode: Id::create(&io.transport_mode),
-            stops: io
-                .route_profile
-                .stops
-                .into_iter()
-                .map(TransitRouteStop::from)
-                .collect(),
+            transport_mode,
+            stop_facilities,
+            stops,
             network_route: io
                 .route
                 .links
@@ -454,58 +674,54 @@ impl From<IOTransitRoute> for TransitRoute {
     }
 }
 
-impl From<IORouteStop> for TransitRouteStop {
-    fn from(io: IORouteStop) -> Self {
-        let await_departure = io
-            .await_departure
-            .or_else(|| find_bool_attr(&io.attributes, "awaitDeparture"));
+fn route_stop_from_io(io: IORouteStop) -> (Id<TransitStopFacility>, TransitRouteStop) {
+    let await_departure = io
+        .await_departure
+        .or_else(|| find_bool_attr(&io.attributes, "awaitDeparture"));
 
-        TransitRouteStop {
-            facility_id: Id::create(&io.ref_id),
-            arrival_offset: parse_duration_opt(&io.arrival_offset),
-            departure_offset: parse_duration_opt(&io.departure_offset),
-            await_departure,
-            allow_boarding: find_bool_attr(&io.attributes, "allowBoarding").unwrap_or(true),
-            allow_alighting: find_bool_attr(&io.attributes, "allowAlighting").unwrap_or(true),
-            minimum_stop_duration: find_duration_attr(&io.attributes, "minimumStopDuration")
-                .unwrap_or_default(),
-        }
-    }
+    let stop = TransitRouteStop {
+        arrival_offset: parse_duration_opt(&io.arrival_offset),
+        departure_offset: parse_duration_opt(&io.departure_offset),
+        await_departure,
+        allow_boarding: find_bool_attr(&io.attributes, "allowBoarding").unwrap_or(true),
+        allow_alighting: find_bool_attr(&io.attributes, "allowAlighting").unwrap_or(true),
+        minimum_stop_duration: find_duration_attr(&io.attributes, "minimumStopDuration")
+            .unwrap_or_default(),
+    };
+    (Id::create(&io.ref_id), stop)
 }
 
-impl From<&TransitRouteStop> for IORouteStop {
-    fn from(stop: &TransitRouteStop) -> Self {
-        let mut attributes = Vec::new();
+fn io_route_stop(facility: &Id<TransitStopFacility>, stop: &TransitRouteStop) -> IORouteStop {
+    let mut attributes = Vec::new();
+    attributes.push(IOAttribute::new_with_class(
+        "allowBoarding".to_string(),
+        "java.lang.Boolean".to_string(),
+        stop.allow_boarding.to_string(),
+    ));
+    attributes.push(IOAttribute::new_with_class(
+        "allowAlighting".to_string(),
+        "java.lang.Boolean".to_string(),
+        stop.allow_alighting.to_string(),
+    ));
+    if let Some(await_departure) = stop.await_departure {
         attributes.push(IOAttribute::new_with_class(
-            "allowBoarding".to_string(),
+            "awaitDeparture".to_string(),
             "java.lang.Boolean".to_string(),
-            stop.allow_boarding.to_string(),
+            await_departure.to_string(),
         ));
-        attributes.push(IOAttribute::new_with_class(
-            "allowAlighting".to_string(),
-            "java.lang.Boolean".to_string(),
-            stop.allow_alighting.to_string(),
-        ));
-        if let Some(await_departure) = stop.await_departure {
-            attributes.push(IOAttribute::new_with_class(
-                "awaitDeparture".to_string(),
-                "java.lang.Boolean".to_string(),
-                await_departure.to_string(),
-            ));
-        }
-        attributes.push(IOAttribute::new_with_class(
-            "minimumStopDuration".to_string(),
-            "java.lang.Integer".to_string(),
-            stop.minimum_stop_duration.as_secs().to_string(),
-        ));
+    }
+    attributes.push(IOAttribute::new_with_class(
+        "minimumStopDuration".to_string(),
+        "java.lang.Integer".to_string(),
+        stop.minimum_stop_duration.as_secs().to_string(),
+    ));
 
-        IORouteStop {
-            ref_id: stop.facility_id.external().to_string(),
-            arrival_offset: format_duration_opt(stop.arrival_offset),
-            departure_offset: format_duration_opt(stop.departure_offset),
-            await_departure: stop.await_departure,
-            attributes: Some(IOAttributes { attributes }),
-        }
+    IORouteStop {
+        ref_id: facility.external().to_string(),
+        arrival_offset: format_duration_opt(stop.arrival_offset),
+        departure_offset: format_duration_opt(stop.departure_offset),
+        await_departure: stop.await_departure,
+        attributes: Some(IOAttributes { attributes }),
     }
 }
 
@@ -615,24 +831,24 @@ mod tests {
         let schedule =
             TransitSchedule::from_file("./assets/pt_tutorial/transitschedule.xml".as_ref());
 
-        assert_eq!(1, schedule.lines().len());
-        assert_eq!(4, schedule.facilities().len());
+        assert_eq!(1, schedule.num_lines());
+        assert_eq!(4, schedule.facilities().count());
         assert_eq!(2, schedule.num_routes());
 
         let line_id: Id<TransitLine> = Id::get_from_ext("Blue Line");
-        let line = schedule.get_line(&line_id);
+        let line = schedule.line(&line_id).unwrap();
         assert_eq!("", line.name);
-        assert_eq!(2, line.routes.len());
+        assert_eq!(2, schedule.routes_of(line).len());
 
         let route_1to3_id: Id<TransitRoute> = Id::get_from_ext("1to3");
-        let route_1to3 = line.routes.get(&route_1to3_id).unwrap();
+        let route_1to3 = schedule.route(schedule.find_route(&line_id, &route_1to3_id).unwrap());
         assert_eq!(
             Id::<String>::get_from_ext("train"),
             route_1to3.transport_mode
         );
         assert_eq!(3, route_1to3.stops.len());
         assert_eq!(4, route_1to3.network_route.len());
-        assert_eq!(50, route_1to3.departures.len());
+        assert_eq!(50, schedule.departures_of(route_1to3).len());
     }
 
     #[deterministic_id_test]
@@ -654,12 +870,12 @@ mod tests {
             "./assets/dresden/dresden-v1.0-transitSchedule.xml.gz".as_ref(),
         );
 
-        assert_eq!(376, schedule.lines().len());
-        assert_eq!(9150, schedule.facilities().len());
+        assert_eq!(376, schedule.num_lines());
+        assert_eq!(9150, schedule.facilities().count());
         assert_eq!(4037, schedule.num_routes());
 
         let facility_id: Id<TransitStopFacility> = Id::get_from_ext("long_1");
-        let facility = schedule.get_facility(&facility_id);
+        let facility = schedule.facility(&facility_id).unwrap();
         assert_eq!(733340.71, facility.coord.x);
         assert_eq!(5304341.79, facility.coord.y);
         assert_eq!(0., facility.coord.z);
@@ -676,7 +892,7 @@ mod tests {
         );
 
         let line_id: Id<TransitLine> = Id::get_from_ext("long_EC 12---27");
-        let line = schedule.get_line(&line_id);
+        let line = schedule.line(&line_id).unwrap();
         assert_eq!("EC 12", line.name);
         assert_eq!(
             Some(String::from("10")),
@@ -692,7 +908,8 @@ mod tests {
         );
 
         let route_id: Id<TransitRoute> = Id::get_from_ext("long_EC 12---27_0");
-        let route = line.routes.get(&route_id).unwrap();
+        let route = schedule.route(schedule.find_route(&line_id, &route_id).unwrap());
+        let departures = schedule.departures_of(route);
         assert_eq!(Id::<String>::get_from_ext("rail"), route.transport_mode);
         assert_eq!(
             Some(String::from("rail")),
@@ -700,10 +917,10 @@ mod tests {
         );
         assert_eq!(15, route.stops.len());
         assert_eq!(15, route.network_route.len());
-        assert_eq!(1, route.departures.len());
+        assert_eq!(1, departures.len());
         assert_eq!(
             Id::<TransitStopFacility>::get_from_ext("long_630"),
-            route.stops[0].facility_id
+            route.stop_facilities[0]
         );
         assert_eq!(Some(Duration::from_secs(0)), route.stops[0].arrival_offset);
         assert_eq!(
@@ -715,15 +932,15 @@ mod tests {
         assert_eq!(Id::<Link>::get_from_ext("pt_0"), route.network_route[0]);
         assert_eq!(
             Id::<TransitDeparture>::get_from_ext("long_1882_0"),
-            route.departures[0].id
+            departures[0].id
         );
         assert_eq!(
             SimTime::from_secs(20 * 3600 + 10 * 60),
-            route.departures[0].departure_time
+            departures[0].departure_time
         );
         assert_eq!(
             Some(Id::<String>::get_from_ext("pt_long_EC 12---27_0_0")),
-            route.departures[0].vehicle_ref_id.clone()
+            departures[0].vehicle_ref_id.clone()
         );
     }
 

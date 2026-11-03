@@ -1,7 +1,6 @@
 use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
 use crate::simulation::config::{Config, TransitSimulation};
 use crate::simulation::id::Id;
-use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::replanning::routing::utils::calc_distance;
 use crate::simulation::replanning::routing::{
     Facility, RoutingError, RoutingRequestBuilder, TripRouter,
@@ -13,6 +12,7 @@ use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalPerson, InternalPlan,
     InternalPlanElement, InternalPtRoute, InternalRoute,
 };
+use crate::simulation::scenario::transit::TransitSchedule;
 use crate::simulation::scenario::trip_structure_utils::{
     TripSpan, get_trip_spans_default, identify_main_mode,
 };
@@ -34,7 +34,7 @@ pub(crate) fn prepare_for_mobsim(
         network: &scenario.core.network,
         garage: &scenario.core.garage,
         facilities: &scenario.core.facilities,
-        transit_sim_schedule: &scenario.core.transit_sim_schedule,
+        transit_schedule: &scenario.core.transit_schedule,
         config: scenario.core.config.as_ref(),
     };
 
@@ -56,8 +56,9 @@ pub struct PrepareForMobsimContext<'a> {
     pub network: &'a Network,
     pub garage: &'a Garage,
     pub facilities: &'a ActivityFacilities,
-    /// Empty unless transit is simulated schedule based.
-    pub transit_sim_schedule: &'a TransitSimSchedule,
+    /// Loaded also with teleported transit. Only legs of transit passenger modes, which exist only
+    /// with schedule-based transit, are checked against it.
+    pub transit_schedule: &'a TransitSchedule,
     pub config: &'a Config,
 }
 
@@ -305,7 +306,7 @@ fn trip_is_valid(
         if is_transit_passenger_mode(context, &leg.mode) {
             match route {
                 InternalRoute::Pt(pt_route)
-                    if pt_route_is_valid(context.transit_sim_schedule, pt_route) =>
+                    if pt_route_is_valid(context.transit_schedule, pt_route) =>
                 {
                     continue;
                 }
@@ -387,13 +388,14 @@ fn network_route_is_valid(
 
 /// Checks a transit route against the schedule: its line and route exist, the access stop and a
 /// later egress stop are on the route, and the route starts and ends at the links of these stops.
-fn pt_route_is_valid(schedule: &TransitSimSchedule, route: &InternalPtRoute) -> bool {
+fn pt_route_is_valid(schedule: &TransitSchedule, route: &InternalPtRoute) -> bool {
     let description = &route.description;
-    let Some(transit_route) =
+    let Some(index) =
         schedule.find_route(&description.transit_line_id, &description.transit_route_id)
     else {
         return false;
     };
+    let transit_route = schedule.route(index);
     let facilities = &transit_route.stop_facilities;
     let Some(access) = facilities
         .iter()
@@ -408,8 +410,8 @@ fn pt_route_is_valid(schedule: &TransitSimSchedule, route: &InternalPtRoute) -> 
     else {
         return false;
     };
-    let stops = &transit_route.stops;
-    stops[access].link == *route.start_link() && stops[egress].link == *route.end_link()
+    schedule.stop_link(&facilities[access]) == Some(route.start_link())
+        && schedule.stop_link(&facilities[egress]) == Some(route.end_link())
 }
 
 /// Whether legs of `mode` ride transit vehicles of the schedule-based transit simulation.
@@ -1469,19 +1471,16 @@ mod tests {
         use super::super::{prepare_for_mobsim, pt_route_is_valid};
         use crate::simulation::config::{Config, ScoringMode, Transit, TransitSimulation};
         use crate::simulation::id::Id;
-        use crate::simulation::pt::schedule::TransitSimSchedule;
         use crate::simulation::replanning::routing::TripRouter;
-        use crate::simulation::scenario::network::Network;
         use crate::simulation::scenario::population::{
             InternalGenericRoute, InternalLeg, InternalPtRoute, InternalPtRouteDescription,
-            InternalRoute, Population,
+            InternalRoute,
         };
         use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
         use crate::simulation::scenario::transit::TransitSchedule;
-        use crate::simulation::scenario::vehicles::Garage;
         use crate::simulation::scenario::{ControllerScenario, Scenario};
         use macros::deterministic_id_test;
-        use std::path::{Path, PathBuf};
+        use std::path::Path;
 
         fn tutorial_config(simulation: TransitSimulation) -> Config {
             let mut config = Config::default();
@@ -1558,13 +1557,8 @@ mod tests {
             assert!(prepare_for_mobsim(&mut scenario, &TripRouter::default()).is_err());
         }
 
-        fn tutorial_schedule() -> TransitSimSchedule {
-            let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
-            let schedule =
-                TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
-            let garage =
-                Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
-            TransitSimSchedule::build(&schedule, &network, &garage, &Population::default())
+        fn tutorial_schedule() -> TransitSchedule {
+            TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"))
         }
 
         fn pt_route(

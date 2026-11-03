@@ -6,9 +6,10 @@ use crate::generated::transit::{
     TransitRouteStop as WireTransitRouteStop, TransitSchedule as WireTransitSchedule,
     TransitStopFacility as WireTransitStopFacility,
 };
+use crate::simulation::id::Id;
 use crate::simulation::scenario::transit::{
-    MinimalTransferTime, TransitDeparture, TransitLine, TransitRoute, TransitRouteStop,
-    TransitSchedule, TransitStopFacility,
+    MinimalTransferTime, TransitDeparture, TransitRoute, TransitRouteStop, TransitSchedule,
+    TransitStopFacility,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -40,12 +41,19 @@ impl From<&TransitSchedule> for WireTransitSchedule {
         Self {
             lines: schedule
                 .lines()
-                .values()
-                .map(WireTransitLine::from)
+                .map(|line| WireTransitLine {
+                    id: line.id.internal(),
+                    name: line.name.clone(),
+                    routes: schedule
+                        .routes_of(line)
+                        .iter()
+                        .map(|route| wire_route(schedule, route))
+                        .collect(),
+                    attributes: line.attributes.as_cloned_map(),
+                })
                 .collect(),
             facilities: schedule
                 .facilities()
-                .values()
                 .map(WireTransitStopFacility::from)
                 .collect(),
             minimal_transfer_times: schedule
@@ -58,46 +66,39 @@ impl From<&TransitSchedule> for WireTransitSchedule {
     }
 }
 
-impl From<&TransitLine> for WireTransitLine {
-    fn from(line: &TransitLine) -> Self {
-        Self {
-            id: line.id.internal(),
-            name: line.name.clone(),
-            routes: line.routes.values().map(WireTransitRoute::from).collect(),
-            attributes: line.attributes.as_cloned_map(),
-        }
+fn wire_route(schedule: &TransitSchedule, route: &TransitRoute) -> WireTransitRoute {
+    WireTransitRoute {
+        id: route.id.internal(),
+        description: route.description.clone(),
+        transport_mode: route.transport_mode.internal(),
+        stops: route
+            .stop_facilities
+            .iter()
+            .zip(&route.stops)
+            .map(|(facility, stop)| wire_route_stop(facility, stop))
+            .collect(),
+        network_route: route.network_route.iter().map(|id| id.internal()).collect(),
+        departures: schedule
+            .departures_of(route)
+            .iter()
+            .map(WireTransitDeparture::from)
+            .collect(),
+        attributes: route.attributes.as_cloned_map(),
     }
 }
 
-impl From<&TransitRoute> for WireTransitRoute {
-    fn from(route: &TransitRoute) -> Self {
-        Self {
-            id: route.id.internal(),
-            description: route.description.clone(),
-            transport_mode: route.transport_mode.internal(),
-            stops: route.stops.iter().map(WireTransitRouteStop::from).collect(),
-            network_route: route.network_route.iter().map(|id| id.internal()).collect(),
-            departures: route
-                .departures
-                .iter()
-                .map(WireTransitDeparture::from)
-                .collect(),
-            attributes: route.attributes.as_cloned_map(),
-        }
-    }
-}
-
-impl From<&TransitRouteStop> for WireTransitRouteStop {
-    fn from(stop: &TransitRouteStop) -> Self {
-        Self {
-            facility_id: stop.facility_id.internal(),
-            arrival_offset_ns: stop.arrival_offset.map(duration_to_nanos),
-            departure_offset_ns: stop.departure_offset.map(duration_to_nanos),
-            await_departure: stop.await_departure,
-            allow_boarding: stop.allow_boarding,
-            allow_alighting: stop.allow_alighting,
-            minimum_stop_duration_ns: duration_to_nanos(stop.minimum_stop_duration),
-        }
+fn wire_route_stop(
+    facility: &Id<TransitStopFacility>,
+    stop: &TransitRouteStop,
+) -> WireTransitRouteStop {
+    WireTransitRouteStop {
+        facility_id: facility.internal(),
+        arrival_offset_ns: stop.arrival_offset.map(duration_to_nanos),
+        departure_offset_ns: stop.departure_offset.map(duration_to_nanos),
+        await_departure: stop.await_departure,
+        allow_boarding: stop.allow_boarding,
+        allow_alighting: stop.allow_alighting,
+        minimum_stop_duration_ns: duration_to_nanos(stop.minimum_stop_duration),
     }
 }
 

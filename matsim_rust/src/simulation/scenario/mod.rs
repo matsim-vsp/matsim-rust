@@ -268,10 +268,8 @@ impl Scenario {
 pub struct ScenarioCore {
     pub network: Arc<Network>,
     pub garage: Arc<Garage>,
-    /// Dense schedule for the transit engine. Empty unless transit is simulated
-    /// [schedule based](TransitSimulation::ScheduleBased). The schedule as read from the input
-    /// files is only needed to build it and stays with [`Scenario`].
-    pub transit_sim_schedule: Arc<TransitSimSchedule>,
+    /// The transit schedule with all data of its files, also with teleported transit.
+    pub transit_schedule: Arc<TransitSchedule>,
     /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
     pub facilities: Arc<ActivityFacilities>,
     pub config: Arc<Config>,
@@ -281,6 +279,10 @@ pub struct ScenarioCore {
 #[derive(Debug)]
 pub struct ControllerScenario {
     pub core: ScenarioCore,
+    /// What the mobsim adds to `core.transit_schedule`: drivers, vehicles and the partitions of the
+    /// stops. Empty unless transit is simulated [schedule based](TransitSimulation::ScheduleBased).
+    /// Like the network partitions, it is only handed to the mobsim partitions.
+    pub transit_sim_schedule: Arc<TransitSimSchedule>,
     pub population: Population,
 }
 
@@ -296,6 +298,8 @@ pub struct MobsimScenarioPartition {
     pub rank: u32,
     pub scenario: ScenarioCore,
     pub network_partition: SimNetworkPartition,
+    /// Shared by all partitions, see [`ControllerScenario::transit_sim_schedule`].
+    pub transit_sim_schedule: Arc<TransitSimSchedule>,
 }
 
 /// Input for one mobsim partition run.
@@ -307,6 +311,7 @@ pub struct MobsimInput {
 
 impl From<Scenario> for ControllerScenario {
     fn from(scenario: Scenario) -> Self {
+        let transit_schedule = Arc::new(scenario.transit_schedule);
         // Built here, after the population exists, so that the driver ids come after all person
         // ids. With teleported transit, no driver ids are created.
         let transit_sim_schedule = match scenario.config.transit().simulation {
@@ -321,7 +326,7 @@ impl From<Scenario> for ControllerScenario {
                      Disabled."
                 );
                 TransitSimSchedule::build(
-                    &scenario.transit_schedule,
+                    transit_schedule.clone(),
                     &scenario.network,
                     &scenario.transit_garage,
                     &scenario.population,
@@ -332,10 +337,11 @@ impl From<Scenario> for ControllerScenario {
             core: ScenarioCore {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
-                transit_sim_schedule: Arc::new(transit_sim_schedule),
+                transit_schedule,
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
             },
+            transit_sim_schedule: Arc::new(transit_sim_schedule),
             population: scenario.population,
         }
     }
@@ -402,6 +408,7 @@ impl ControllerScenario {
                 // Since core holds Arcs, this clone is cheap.
                 scenario: self.core.clone(),
                 network_partition,
+                transit_sim_schedule: self.transit_sim_schedule.clone(),
             },
             population: PopulationShard { population },
         }
@@ -438,11 +445,11 @@ mod tests {
     fn scenario_without_transit_config_uses_shared_empty_schedule() {
         let scenario = Scenario::load(Config::default());
 
-        assert!(scenario.transit_schedule.lines().is_empty());
-        assert!(scenario.transit_schedule.facilities().is_empty());
+        assert!(scenario.transit_schedule.is_empty());
+        assert_eq!(0, scenario.transit_schedule.facilities().count());
 
         let controller_scenario: ControllerScenario = scenario.into();
-        assert!(controller_scenario.core.transit_sim_schedule.is_empty());
+        assert!(controller_scenario.transit_sim_schedule.is_empty());
     }
 
     #[deterministic_id_test]
@@ -455,8 +462,8 @@ mod tests {
 
         let scenario = Scenario::load(config);
 
-        assert_eq!(1, scenario.transit_schedule.lines().len());
-        assert_eq!(4, scenario.transit_schedule.facilities().len());
+        assert_eq!(1, scenario.transit_schedule.num_lines());
+        assert_eq!(4, scenario.transit_schedule.facilities().count());
         assert_eq!(2, scenario.transit_schedule.num_routes());
         assert_eq!(
             "Blue Line",

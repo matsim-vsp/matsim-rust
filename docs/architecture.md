@@ -66,13 +66,14 @@ which are parsed and converted by the rayon thread pool. The id store must stay 
 for protobuf, all ids except missing subpopulations are only looked up, and these are created in file order afterwards.
 For XML, all ids are created sequentially before the persons are converted, in the order in which converting the
 persons sorted by id one after another would create them (see `for_each_id_of_io_person`). Internal ids are the
-creation index of an id and never depend on hashing.
+creation index of an id and never depend on hashing. Data is not laid out in vectors whose positions are internal ids,
+since their length and gaps would depend on the id store instead of on the data. It is kept by id in an `IntMap`, or a
+container hands out typed indices of its own, like the routes and departures of the transit schedule.
 
 Scenario ownership is split into three lifecycles. `Scenario` owns the input data while files are read.
 The controller turns it into `ControllerScenario`, which keeps immutable data in a shared `ScenarioCore`
-(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSimSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the
-mutable `Population`. The transit schedule as read from the files stays with `Scenario`: it is only needed to build the
-dense `TransitSimSchedule`.
+(`Arc<Network>`, `Arc<Garage>`, `Arc<TransitSchedule>`, `Arc<ActivityFacilities>`, `Arc<Config>`) and owns the mutable
+`Population`. Next to the core, it keeps the `Arc<TransitSimSchedule>`, which only the mobsim partitions receive.
 
 Input data is converted into internal types without deriving missing values. Fields that can be derived stay `Option`
 after the conversion and are resolved during preparation; code running afterward uses accessors such as
@@ -188,13 +189,20 @@ alight, as in SBB's deterministic transit engine for MATSim (`SBBTransitQSimEngi
 modes. Backpacking cannot build experienced plans of transit legs yet, so this setting requires `scoring.mode:
 Disabled`.
 
-`From<Scenario> for ControllerScenario` builds a dense `TransitSimSchedule` once, after the population is loaded, so
-that the ids of persons do not depend on transit. Routes are sorted by the external ids of line and route, departures by
-the external id of their driver, `pt_<line>_<route>_<departure>` as in SBB's engine, which also fixes the order in which
-the driver ids are created. For each stop of a route, the schedule keeps its facility, its link, the partition of the
-link and its offsets. Building the schedule panics if it cannot be simulated, e.g. if a stop has no link or a vehicle
-serves two departures at the same time. Plan preparation requires no travel times for transit legs, but a transit route
-that the schedule serves.
+`TransitSchedule` holds all data of the schedule files, independent of the simulation: routes and departures in dense
+vectors, routes sorted by the external ids of line and route, the routes of a line and the departures of a route
+contiguous, and lines and stop facilities by their ids in maps without a particular order. XML and protobuf are read
+element by element in the order of the file, so the ids are created as before, and only then laid out. The schedule is
+loaded before the population, and `ScenarioCore` keeps it also with teleported transit.
+
+`TransitSimSchedule` is what the mobsim adds to it, like `SimNetworkPartition` to `Network`: the driver and the vehicle
+of each departure and the partition of each stop. `From<Scenario> for ControllerScenario` builds it once, after the
+population is loaded, so that the ids of persons do not depend on transit. `ControllerScenario` keeps it next to the core
+and hands it to each `MobsimScenarioPartition`, so replanning and plan preparation only see the `TransitSchedule`. The
+transit engine processes stops in the order of their ids. Drivers have the external ids
+`pt_<line>_<route>_<departure>` as in SBB's engine, and their ids are created in the order of these external ids.
+Building it panics if the schedule cannot be simulated, e.g. if a stop has no link or a vehicle serves two departures at
+the same time. Plan preparation requires no travel times for transit legs, but a transit route that the schedule serves.
 
 Each departure has a driver, an agent without a person. Like the drivers of MATSim's transit engines, it passes through
 three phases: it waits in a `pt interaction` activity at the start link of its route until the departure time, drives

@@ -6,14 +6,13 @@ use crate::simulation::agents::{
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
-use crate::simulation::pt::schedule::{
-    DepartureIndex, SimDeparture, SimRouteStop, TransitSimSchedule,
-};
+use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::transit::{
-    TransitDeparture, TransitLine, TransitRoute, TransitStopFacility,
+    DepartureIndex, TransitDeparture, TransitLine, TransitRoute, TransitRouteStop, TransitSchedule,
+    TransitStopFacility,
 };
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
@@ -34,11 +33,23 @@ struct StopTimes {
 }
 
 /// The scheduled times of `departure` at `stop`.
-fn scheduled_times(departure: &SimDeparture, stop: &SimRouteStop) -> StopTimes {
+fn scheduled_times(departure: &TransitDeparture, stop: &TransitRouteStop) -> StopTimes {
+    let offset = |offset: Option<std::time::Duration>| {
+        let offset =
+            offset.expect("TransitSimSchedule::build checks that every stop has an offset.");
+        departure.departure_time + SimTime::from_duration(offset)
+    };
     StopTimes {
-        arrival: departure.time + SimTime::from_duration(stop.arrival_offset),
-        departure: departure.time + SimTime::from_duration(stop.departure_offset),
+        arrival: offset(stop.arrival()),
+        departure: offset(stop.departure()),
     }
+}
+
+/// The link where a driver starts its departure.
+fn start_link<'a>(schedule: &'a TransitSchedule, route: &'a TransitRoute) -> &'a Id<Link> {
+    schedule
+        .start_link(route)
+        .expect("TransitSimSchedule::build checks that every stop has a link.")
 }
 
 /// The single place where the times of a vehicle at a stop are computed from the scheduled ones.
@@ -71,14 +82,14 @@ impl WaitingDriver {
         })
     }
 
-    fn departure(&self) -> &SimDeparture {
-        self.schedule.departure(self.departure)
+    fn departure(&self) -> &TransitDeparture {
+        self.schedule.schedule().departure(self.departure)
     }
 }
 
 impl Identifiable<InternalPerson> for WaitingDriver {
     fn id(&self) -> &Id<InternalPerson> {
-        &self.departure().driver
+        self.schedule.driver(self.departure)
     }
 }
 
@@ -93,7 +104,9 @@ impl ActivityLogic for WaitingDriver {
         self.schedule.driver_activity_type()
     }
     fn link_id(&self) -> &Id<Link> {
-        &self.schedule.route(self.departure().route).start_link
+        let schedule = self.schedule.schedule();
+        let route = schedule.route(schedule.departure_route(self.departure));
+        start_link(schedule, route)
     }
     fn coord(&self) -> &Coordinate {
         &NO_COORDINATE
@@ -105,7 +118,7 @@ impl ActivityLogic for WaitingDriver {
         false
     }
     fn end_time(&self, _activity_start: SimTime) -> SimTime {
-        self.departure().time
+        self.departure().departure_time
     }
     fn next_wakeup(&self, _now: SimTime) -> Option<SimTime> {
         None
@@ -164,21 +177,34 @@ struct DriverPlan {
 
 impl PlannedDriver {
     /// A driver who starts `departure` at `now` and approaches the first stop.
-    pub fn new(schedule: &TransitSimSchedule, departure: DepartureIndex, now: SimTime) -> Self {
-        let departure = schedule.departure(departure);
-        let route = schedule.route(departure.route);
+    pub fn new(schedule: &TransitSimSchedule, index: DepartureIndex, now: SimTime) -> Self {
+        let transit = schedule.schedule();
+        let departure = transit.departure(index);
+        let route = transit.route(transit.departure_route(index));
         let plan = DriverPlan {
-            id: departure.driver.clone(),
-            mode: route.mode.clone(),
-            vehicle: departure.vehicle.clone(),
+            id: schedule.driver(index).clone(),
+            mode: route.transport_mode.clone(),
+            vehicle: schedule.vehicle(index).clone(),
             line: route.line.clone(),
-            route: route.route.clone(),
+            route: route.id.clone(),
             departure: departure.id.clone(),
-            start_link: route.start_link.clone(),
-            destination_link: route.end_link.clone(),
+            start_link: start_link(transit, route).clone(),
+            destination_link: transit
+                .end_link(route)
+                .expect("TransitSimSchedule::build checks that every stop has a link.")
+                .clone(),
             activity_type: schedule.driver_activity_type().clone(),
             stops: route.stop_facilities.clone(),
-            stop_links: route.stops.iter().map(|stop| stop.link.clone()).collect(),
+            stop_links: route
+                .stop_facilities
+                .iter()
+                .map(|facility| {
+                    transit
+                        .stop_link(facility)
+                        .expect("TransitSimSchedule::build checks that every stop has a link.")
+                        .clone()
+                })
+                .collect(),
             scheduled: route
                 .stops
                 .iter()
@@ -355,10 +381,10 @@ impl ActivityLogic for FinishedDriver {
 mod tests {
     use super::{PlannedDriver, WaitingDriver};
     use crate::simulation::agents::TransitDriverAgent;
-    use crate::simulation::pt::schedule::{DepartureIndex, TransitSimSchedule};
+    use crate::simulation::pt::schedule::TransitSimSchedule;
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
-    use crate::simulation::scenario::transit::TransitSchedule;
+    use crate::simulation::scenario::transit::{DepartureIndex, TransitSchedule};
     use crate::simulation::scenario::vehicles::Garage;
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
@@ -374,11 +400,16 @@ mod tests {
         let schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
         let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
-        let schedule =
-            TransitSimSchedule::build(&schedule, &network, &garage, &Population::default());
+        let schedule = TransitSimSchedule::build(
+            Arc::new(schedule),
+            &network,
+            &garage,
+            &Population::default(),
+        );
         let (index, _) = schedule
+            .schedule()
             .indexed_departures()
-            .find(|(_, departure)| departure.driver.external() == "pt_Blue Line_1to3_01")
+            .find(|(index, _)| schedule.driver(*index).external() == "pt_Blue Line_1to3_01")
             .unwrap();
         (schedule, index)
     }

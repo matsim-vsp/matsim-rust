@@ -106,12 +106,12 @@ impl AgentSource for TransitDriverAgentSource {
         _population: &mut PopulationShard,
         partition: &MobsimScenarioPartition,
     ) -> AgentSet {
-        let schedule = &partition.scenario.transit_sim_schedule;
+        let schedule = &partition.transit_sim_schedule;
         schedule
             .departures_starting_on(partition.rank)
-            .map(|(index, departure)| {
+            .map(|index| {
                 (
-                    departure.driver.clone(),
+                    schedule.driver(index).clone(),
                     WaitingDriver::new_agent(schedule.clone(), index),
                 )
             })
@@ -229,13 +229,14 @@ mod tests {
             scenario: ScenarioCore {
                 network,
                 garage: Arc::new(Garage::default()),
-                transit_sim_schedule: Arc::default(),
+                transit_schedule: Arc::default(),
                 facilities: Arc::new(
                     crate::simulation::scenario::facilities::ActivityFacilities::default(),
                 ),
                 config,
             },
             network_partition,
+            transit_sim_schedule: Arc::default(),
         }
     }
 

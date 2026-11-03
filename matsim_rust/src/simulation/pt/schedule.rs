@@ -1,151 +1,79 @@
 use crate::simulation::id::Id;
-use crate::simulation::scenario::network::{Link, Network};
+use crate::simulation::scenario::network::Network;
 use crate::simulation::scenario::population::{InternalPerson, Population};
 use crate::simulation::scenario::transit::{
-    TransitDeparture, TransitLine, TransitRoute, TransitSchedule, TransitStopFacility,
+    DepartureIndex, TransitDeparture, TransitRoute, TransitSchedule, TransitStopFacility,
 };
 use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
 use itertools::Itertools;
-use std::time::Duration;
+use nohash_hasher::IntMap;
+use std::sync::Arc;
 use tracing::info;
 
 /// MATSim's `PtConstants.TRANSIT_ACTIVITY_TYPE`, which MATSim's transit drivers use as well.
 const DRIVER_ACTIVITY_TYPE: &str = "pt interaction";
 
-/// Dense, simulation-ready view of the transit schedule. It is built once, before the first
-/// iteration, and shared by all partitions. [`TransitSchedule`] stays the model of the input and
-/// output files, like [`Network`] beside the network partitions of the mobsim; its maps are only
-/// read while building this schedule.
+/// The [`TransitSchedule`] with what the mobsim adds to it: the driver and the vehicle of each
+/// departure and the partition of each stop. It is built once, before the first iteration, and
+/// shared by all partitions, like [`SimNetworkPartition`](crate::simulation::network::sim_network::SimNetworkPartition)
+/// extends [`Network`].
 ///
-/// Routes are sorted by the external ids of line and route, departures by the external id of
-/// their driver. A departure's index is therefore a stable order for simultaneous events, which
-/// depends neither on map iteration nor on the input format.
+/// The driver of a departure has the external id `pt_<line>_<route>_<departure>`, like the
+/// drivers of SBB's transit engine. Driver ids are created in the order of these external ids, so
+/// their internal ids are a stable order for simultaneous events, which depends neither on map
+/// iteration nor on the input format.
 ///
-/// Offsets are stored as given in the schedule. Like SBB's transit engine, transit drivers clamp
+/// Offsets are kept as given in the schedule. Like SBB's transit engine, transit drivers clamp
 /// the resulting times: a vehicle never arrives before it left the previous stop and never
 /// departs before its scheduled departure.
 #[derive(Debug, Default)]
 pub struct TransitSimSchedule {
-    routes: Vec<SimTransitRoute>,
-    departures: Vec<SimDeparture>,
-    /// The partition of each stop facility, indexed by its internal id. `None` for facilities that
-    /// no route serves.
-    stop_partitions: Vec<Option<u32>>,
+    schedule: Arc<TransitSchedule>,
+    /// The driver of each departure, by [`DepartureIndex`].
+    drivers: Vec<Id<InternalPerson>>,
+    /// The vehicle of each departure, by [`DepartureIndex`].
+    vehicles: Vec<Id<InternalVehicle>>,
+    /// The partition of each stop facility. Facilities that no route serves have no entry.
+    stop_partitions: IntMap<Id<TransitStopFacility>, u32>,
     /// See [`Self::driver_activity_type`]. `None` for the empty schedule.
     driver_activity_type: Option<Id<String>>,
 }
 
-/// Index of a route in [`TransitSimSchedule::routes`]. Only the schedule creates such indices, so
-/// that they cannot be confused with other indices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RouteIndex(u32);
-
-/// Index of a departure in [`TransitSimSchedule::departures`]. Departures are sorted by the
-/// external id of their driver, so the index orders simultaneous events, see [`Self::order`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DepartureIndex(u32);
-
-impl RouteIndex {
-    fn new(index: usize) -> Self {
-        Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX routes."))
-    }
-}
-
-impl DepartureIndex {
-    fn new(index: usize) -> Self {
-        Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX departures."))
-    }
-
-    /// Stable tie-break order of simultaneous events, e.g. for [`TimeQueue`](crate::simulation::time_queue::TimeQueue).
-    pub fn order(self) -> u64 {
-        u64::from(self.0)
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct SimTransitRoute {
-    pub line: Id<TransitLine>,
-    pub route: Id<TransitRoute>,
-    pub mode: Id<String>,
-    /// First link of the network route, or the link of the first stop if the route has no links.
-    pub start_link: Id<Link>,
-    /// Last link of the network route, or the link of the last stop if the route has no links.
-    pub end_link: Id<Link>,
-    /// The facilities of the stops, in the order of `stops`. They are kept apart, so that a driver
-    /// can hand out the stops to come as a slice of ids.
-    pub stop_facilities: Vec<Id<TransitStopFacility>>,
-    pub stops: Vec<SimRouteStop>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SimRouteStop {
-    pub link: Id<Link>,
-    /// Partition of `link`, i.e. the partition which handles the vehicle at this stop.
-    pub partition: u32,
-    /// Arrival offset relative to the departure time. Falls back to the departure offset.
-    pub arrival_offset: Duration,
-    /// Departure offset relative to the departure time. Falls back to the arrival offset.
-    pub departure_offset: Duration,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SimDeparture {
-    pub route: RouteIndex,
-    pub id: Id<TransitDeparture>,
-    pub time: SimTime,
-    pub vehicle: Id<InternalVehicle>,
-    /// The id of the departure's driver, who has no person. Its external id is
-    /// `pt_<line>_<route>_<departure>`, like the drivers of SBB's transit engine.
-    pub driver: Id<InternalPerson>,
-}
-
 impl TransitSimSchedule {
-    /// Builds the dense schedule and creates the driver ids.
+    /// Builds the mobsim's view of `schedule` and creates the driver ids.
     ///
     /// This must run after the population is loaded, so that the internal ids of persons do not
     /// depend on whether transit is simulated.
     ///
     /// # Panics
     ///
-    /// If the schedule cannot be simulated: a stop facility has no link or an unknown link, a
-    /// stop has no offset, a departure has no vehicle or a vehicle which is not in `garage`, a
-    /// vehicle serves departures whose time windows overlap, or a driver id clashes with another
-    /// driver or with a person.
+    /// If the schedule cannot be simulated: a route has no stops, a stop facility has no link or
+    /// an unknown link, a stop has no offset, a departure has no vehicle or a vehicle which is not
+    /// in `garage`, a vehicle serves departures whose time windows overlap, or a driver id clashes
+    /// with another driver or with a person.
     pub fn build(
-        schedule: &TransitSchedule,
+        schedule: Arc<TransitSchedule>,
         network: &Network,
         garage: &Garage,
         population: &Population,
     ) -> Self {
-        let routes: Vec<_> = schedule
-            .lines()
-            .values()
-            .flat_map(|line| line.routes.values().map(move |route| (line, route)))
-            .sorted_by(|(line_a, route_a), (line_b, route_b)| {
-                (line_a.id.external(), route_a.id.external())
-                    .cmp(&(line_b.id.external(), route_b.id.external()))
+        let mut pending_drivers: Vec<_> = schedule
+            .indexed_departures()
+            .map(|(index, departure)| {
+                let route = schedule.route(schedule.departure_route(index));
+                let driver = format!(
+                    "pt_{}_{}_{}",
+                    route.line.external(),
+                    route.id.external(),
+                    departure.id.external()
+                );
+                (driver, index)
             })
             .collect();
-
-        let mut pending_departures: Vec<_> = routes
-            .iter()
-            .enumerate()
-            .flat_map(|(route_index, (line, route))| {
-                route.departures.iter().map(move |departure| {
-                    let driver = format!(
-                        "pt_{}_{}_{}",
-                        line.id.external(),
-                        route.id.external(),
-                        departure.id.external()
-                    );
-                    (driver, RouteIndex::new(route_index), departure)
-                })
-            })
-            .collect();
-        pending_departures.sort_by(|(driver_a, ..), (driver_b, ..)| driver_a.cmp(driver_b));
+        pending_drivers.sort_by(|(driver_a, _), (driver_b, _)| driver_a.cmp(driver_b));
         // Ids like line "a_b" with route "c" and line "a" with route "b_c" give the same driver.
-        if let Some(pair) = pending_departures
+        if let Some(pair) = pending_drivers
             .windows(2)
             .find(|pair| pair[0].0 == pair[1].0)
         {
@@ -155,35 +83,29 @@ impl TransitSimSchedule {
             );
         }
 
-        let sim_routes: Vec<_> = routes
-            .iter()
-            .map(|(line, route)| SimTransitRoute::new(line, route, schedule, network))
-            .collect();
+        for route in schedule.routes() {
+            check_route(&schedule, route, network);
+        }
+        let stop_partitions = stop_partitions(&schedule, network);
 
-        let departures: Vec<_> = pending_departures
-            .into_iter()
-            .map(|(driver, route_index, departure)| {
-                let vehicle = resolve_vehicle(&driver, departure, garage);
-                // Created in sorted order, so that the internal ids of drivers are stable.
-                let driver_id = Id::<InternalPerson>::create(&driver);
-                assert!(
-                    !population.persons.contains_key(&driver_id),
-                    "The id {driver} of a transit driver is also the id of a person."
-                );
-                SimDeparture {
-                    route: route_index,
-                    id: departure.id.clone(),
-                    time: departure.departure_time,
-                    vehicle,
-                    driver: driver_id,
-                }
-            })
-            .collect();
+        let mut drivers = vec![None; schedule.departures().len()];
+        let mut vehicles = vec![None; schedule.departures().len()];
+        for (driver, index) in pending_drivers {
+            let vehicle = resolve_vehicle(&driver, schedule.departure(index), garage);
+            // Created in sorted order, so that the internal ids of drivers are stable.
+            let driver_id = Id::<InternalPerson>::create(&driver);
+            assert!(
+                !population.persons.contains_key(&driver_id),
+                "The id {driver} of a transit driver is also the id of a person."
+            );
+            drivers[index.index()] = Some(driver_id);
+            vehicles[index.index()] = Some(vehicle);
+        }
 
-        let stop_partitions = stop_partitions(&sim_routes);
         let result = Self {
-            routes: sim_routes,
-            departures,
+            schedule,
+            drivers: drivers.into_iter().map(Option::unwrap).collect(),
+            vehicles: vehicles.into_iter().map(Option::unwrap).collect(),
             stop_partitions,
             // Created here, so that the id does not depend on which partition creates its drivers
             // first.
@@ -192,37 +114,37 @@ impl TransitSimSchedule {
         result.assert_vehicles_are_not_shared_at_the_same_time();
         info!(
             "Built transit schedule for simulation with {} routes and {} departures.",
-            result.routes.len(),
-            result.departures.len()
+            result.schedule.routes().len(),
+            result.drivers.len()
         );
         result
     }
 
-    pub fn routes(&self) -> &[SimTransitRoute] {
-        &self.routes
+    pub fn schedule(&self) -> &TransitSchedule {
+        &self.schedule
     }
 
-    pub fn departures(&self) -> &[SimDeparture] {
-        &self.departures
+    /// The driver of the departure, who has no person.
+    pub fn driver(&self, departure: DepartureIndex) -> &Id<InternalPerson> {
+        &self.drivers[departure.index()]
     }
 
-    pub fn route(&self, index: RouteIndex) -> &SimTransitRoute {
-        &self.routes[index.0 as usize]
+    pub fn vehicle(&self, departure: DepartureIndex) -> &Id<InternalVehicle> {
+        &self.vehicles[departure.index()]
     }
 
-    pub fn departure(&self, index: DepartureIndex) -> &SimDeparture {
-        &self.departures[index.0 as usize]
-    }
-
-    /// The departures whose first stop is on `partition`, with their indices. Their drivers start
-    /// there.
+    /// The departures whose first stop is on `partition`. Their drivers start there.
     pub fn departures_starting_on(
         &self,
         partition: u32,
-    ) -> impl Iterator<Item = (DepartureIndex, &SimDeparture)> {
-        self.indexed_departures().filter(move |(_, departure)| {
-            self.route(departure.route).stops[0].partition == partition
-        })
+    ) -> impl Iterator<Item = DepartureIndex> + '_ {
+        self.schedule
+            .indexed_departures()
+            .map(|(index, _)| index)
+            .filter(move |&index| {
+                let route = self.schedule.route(self.schedule.departure_route(index));
+                self.stop_partition(&route.stop_facilities[0]) == partition
+            })
     }
 
     /// The type of the activities in which drivers wait for their departure and stay after it.
@@ -232,83 +154,54 @@ impl TransitSimSchedule {
             .expect("The empty transit schedule has no drivers.")
     }
 
-    /// All departures with their indices, in the order of the indices.
-    pub fn indexed_departures(&self) -> impl Iterator<Item = (DepartureIndex, &SimDeparture)> {
-        self.departures
-            .iter()
-            .enumerate()
-            .map(|(index, departure)| (DepartureIndex::new(index), departure))
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.routes.is_empty()
+        self.schedule.routes().is_empty()
     }
 
-    /// One more than the largest internal id of a stop facility that a route serves.
-    pub fn num_stops(&self) -> usize {
-        self.stop_partitions.len()
+    /// The stop facilities that a route serves, in no particular order.
+    pub fn served_stops(&self) -> impl Iterator<Item = &Id<TransitStopFacility>> {
+        self.stop_partitions.keys()
     }
 
     /// The partition that handles vehicles at `stop`.
     pub fn stop_partition(&self, stop: &Id<TransitStopFacility>) -> u32 {
         self.stop_partitions
-            .get(stop.internal() as usize)
+            .get(stop)
             .copied()
-            .flatten()
             .unwrap_or_else(|| panic!("No transit route serves stop {stop}."))
-    }
-
-    /// Finds a route by the ids of its line and route. The routes are sorted by the external ids,
-    /// so this is a binary search without hashing.
-    pub fn find_route(
-        &self,
-        line: &Id<TransitLine>,
-        route: &Id<TransitRoute>,
-    ) -> Option<&SimTransitRoute> {
-        self.find_route_index(line, route)
-            .map(|index| self.route(index))
-    }
-
-    /// Like [`Self::find_route`], but returns the index of the route.
-    pub fn find_route_index(
-        &self,
-        line: &Id<TransitLine>,
-        route: &Id<TransitRoute>,
-    ) -> Option<RouteIndex> {
-        self.routes
-            .binary_search_by(|candidate| {
-                (candidate.line.external(), candidate.route.external())
-                    .cmp(&(line.external(), route.external()))
-            })
-            .ok()
-            .map(RouteIndex::new)
     }
 
     /// Scheduled time at which the departure leaves its last stop and releases its vehicle. Like
     /// the drivers, a vehicle never departs before its arrival.
-    fn scheduled_release(&self, departure: &SimDeparture) -> SimTime {
-        let last_stop = self
-            .route(departure.route)
-            .stops
-            .last()
-            .expect("Routes have at least one stop.");
-        let offset = last_stop.arrival_offset.max(last_stop.departure_offset);
-        departure.time + SimTime::from_duration(offset)
+    fn scheduled_release(&self, index: DepartureIndex) -> SimTime {
+        let route = self.schedule.route(self.schedule.departure_route(index));
+        let last_stop = route.stops.last().expect("Routes have at least one stop.");
+        let offset = last_stop
+            .arrival()
+            .max(last_stop.departure())
+            .expect("Every stop has an offset.");
+        self.schedule.departure(index).departure_time + SimTime::from_duration(offset)
     }
 
     /// A vehicle can only serve one departure at a time. Departures may share a vehicle if one
     /// releases it at or before the start of the next one.
     fn assert_vehicles_are_not_shared_at_the_same_time(&self) {
         let windows: Vec<_> = self
-            .departures
-            .iter()
-            .map(|departure| (departure.time, self.scheduled_release(departure), departure))
-            .sorted_by_key(|(start, end, departure)| {
+            .schedule
+            .indexed_departures()
+            .map(|(index, departure)| {
                 (
-                    departure.vehicle.internal(),
+                    departure.departure_time,
+                    self.scheduled_release(index),
+                    index,
+                )
+            })
+            .sorted_by_key(|(start, end, index)| {
+                (
+                    self.vehicle(*index).internal(),
                     *start,
                     *end,
-                    departure.driver.internal(),
+                    self.driver(*index).internal(),
                 )
             })
             .collect();
@@ -317,120 +210,74 @@ impl TransitSimSchedule {
         // comparing neighbours is enough.
         for pair in windows.windows(2) {
             let (_, previous_end, previous) = pair[0];
-            let (start, _, departure) = pair[1];
+            let (start, _, index) = pair[1];
             assert!(
-                previous.vehicle != departure.vehicle || start >= previous_end,
+                self.vehicle(previous) != self.vehicle(index) || start >= previous_end,
                 "Transit vehicle {} serves the departures of drivers {} and {} at the same time.",
-                departure.vehicle,
-                previous.driver,
-                departure.driver
+                self.vehicle(index),
+                self.driver(previous),
+                self.driver(index)
             );
         }
     }
 }
 
-impl SimTransitRoute {
-    fn new(
-        line: &TransitLine,
-        route: &TransitRoute,
-        schedule: &TransitSchedule,
-        network: &Network,
-    ) -> Self {
+/// Checks that the route can be simulated: it has stops, each stop has an offset, and each stop
+/// facility has a link of the network.
+fn check_route(schedule: &TransitSchedule, route: &TransitRoute, network: &Network) {
+    assert!(
+        !route.stops.is_empty(),
+        "Transit route {} of line {} has no stops.",
+        route.id,
+        route.line
+    );
+    for (index, (facility, stop)) in route.stop_facilities.iter().zip(&route.stops).enumerate() {
         assert!(
-            !route.stops.is_empty(),
-            "Transit route {} of line {} has no stops.",
+            stop.arrival().is_some(),
+            "Stop {index} ({facility}) of transit route {} of line {} has neither an arrival nor a \
+             departure offset.",
             route.id,
-            line.id
+            route.line
         );
-
-        let stops: Vec<_> = route
-            .stops
-            .iter()
-            .enumerate()
-            .map(|(index, stop)| {
-                let (arrival_offset, departure_offset) =
-                    match (stop.arrival_offset, stop.departure_offset) {
-                        (Some(arrival), Some(departure)) => (arrival, departure),
-                        (Some(arrival), None) => (arrival, arrival),
-                        (None, Some(departure)) => (departure, departure),
-                        (None, None) => panic!(
-                            "Stop {index} ({}) of transit route {} of line {} has neither an \
-                             arrival nor a departure offset.",
-                            stop.facility_id, route.id, line.id
-                        ),
-                    };
-                let link = stop_link(&stop.facility_id, schedule, network);
-                SimRouteStop {
-                    partition: network.get_link(&link).partition,
-                    link,
-                    arrival_offset,
-                    departure_offset,
-                }
-            })
-            .collect();
-
-        let start_link = route
-            .network_route
-            .first()
-            .cloned()
-            .unwrap_or_else(|| stops.first().unwrap().link.clone());
-        let end_link = route
-            .network_route
-            .last()
-            .cloned()
-            .unwrap_or_else(|| stops.last().unwrap().link.clone());
-
-        Self {
-            line: line.id.clone(),
-            route: route.id.clone(),
-            mode: route.transport_mode.clone(),
-            start_link,
-            end_link,
-            stop_facilities: route
-                .stops
-                .iter()
-                .map(|stop| stop.facility_id.clone())
-                .collect(),
-            stops,
-        }
+        check_stop_link(schedule, facility, network);
     }
+}
+
+fn check_stop_link(
+    schedule: &TransitSchedule,
+    facility_id: &Id<TransitStopFacility>,
+    network: &Network,
+) {
+    let facility = schedule
+        .facility(facility_id)
+        .unwrap_or_else(|| panic!("Transit stop facility {facility_id} does not exist."));
+    let link = facility
+        .link_ref_id
+        .as_ref()
+        .unwrap_or_else(|| panic!("Transit stop facility {facility_id} has no link."));
+    assert!(
+        network.links_with_ids().contains_key(link),
+        "Transit stop facility {facility_id} references link {link}, which is not part of the \
+         network."
+    );
 }
 
 /// The partition of each stop facility that a route serves, see [`TransitSimSchedule::stop_partition`].
 /// A facility has one link, so all routes agree on its partition.
-fn stop_partitions(routes: &[SimTransitRoute]) -> Vec<Option<u32>> {
-    let mut partitions = Vec::new();
-    for route in routes {
-        for (facility, stop) in route.stop_facilities.iter().zip(&route.stops) {
-            let index = facility.internal() as usize;
-            if partitions.len() <= index {
-                partitions.resize(index + 1, None);
-            }
-            partitions[index] = Some(stop.partition);
+fn stop_partitions(
+    schedule: &TransitSchedule,
+    network: &Network,
+) -> IntMap<Id<TransitStopFacility>, u32> {
+    let mut partitions = IntMap::default();
+    for route in schedule.routes() {
+        for facility in &route.stop_facilities {
+            let link = schedule
+                .stop_link(facility)
+                .expect("Every stop facility has a link.");
+            partitions.insert(facility.clone(), network.get_link(link).partition);
         }
     }
     partitions
-}
-
-fn stop_link(
-    facility_id: &Id<TransitStopFacility>,
-    schedule: &TransitSchedule,
-    network: &Network,
-) -> Id<Link> {
-    let facility = schedule
-        .facilities()
-        .get(facility_id)
-        .unwrap_or_else(|| panic!("Transit stop facility {facility_id} does not exist."));
-    let link = facility
-        .link_ref_id
-        .clone()
-        .unwrap_or_else(|| panic!("Transit stop facility {facility_id} has no link."));
-    assert!(
-        network.links_with_ids().contains_key(&link),
-        "Transit stop facility {facility_id} references link {link}, which is not part of the \
-         network."
-    );
-    link
 }
 
 fn resolve_vehicle(
@@ -465,6 +312,7 @@ mod tests {
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::time::Duration;
 
     const NETWORK: &str = "./assets/pt_tutorial/multimodalnetwork.xml";
@@ -475,7 +323,12 @@ mod tests {
         let network = Network::from_file(NETWORK);
         let schedule = TransitSchedule::from_file(Path::new(SCHEDULE));
         let garage = Garage::from_file(&PathBuf::from(VEHICLES));
-        TransitSimSchedule::build(&schedule, &network, &garage, &Population::default())
+        TransitSimSchedule::build(
+            Arc::new(schedule),
+            &network,
+            &garage,
+            &Population::default(),
+        )
     }
 
     #[deterministic_id_test]
@@ -495,54 +348,72 @@ mod tests {
     fn tutorial_routes_are_sorted_and_offsets_fall_back() {
         let schedule = tutorial_schedule();
 
-        let routes = schedule.routes();
+        let transit = schedule.schedule();
+        let routes = transit.routes();
         assert_eq!(2, routes.len());
-        assert_eq!("1to3", routes[0].route.external());
-        assert_eq!("3to1", routes[1].route.external());
+        assert_eq!("1to3", routes[0].id.external());
+        assert_eq!("3to1", routes[1].id.external());
         assert_eq!("Blue Line", routes[0].line.external());
-        assert_eq!("train", routes[0].mode.external());
-        assert_eq!("pt", routes[1].mode.external());
-        assert_eq!(Id::<Link>::get_from_ext("11"), routes[0].start_link);
-        assert_eq!(Id::<Link>::get_from_ext("33"), routes[0].end_link);
+        assert_eq!("train", routes[0].transport_mode.external());
+        assert_eq!("pt", routes[1].transport_mode.external());
+        assert_eq!(
+            Some(&Id::<Link>::get_from_ext("11")),
+            transit.start_link(&routes[0])
+        );
+        assert_eq!(
+            Some(&Id::<Link>::get_from_ext("33")),
+            transit.end_link(&routes[0])
+        );
 
         let stops = &routes[0].stops;
         assert_eq!(3, stops.len());
+        let stop_2a = Id::<TransitStopFacility>::get_from_ext("2a");
+        assert_eq!(stop_2a, routes[0].stop_facilities[1]);
         assert_eq!(
-            Id::<TransitStopFacility>::get_from_ext("2a"),
-            routes[0].stop_facilities[1]
+            Some(&Id::<Link>::get_from_ext("12")),
+            transit.stop_link(&stop_2a)
         );
-        assert_eq!(Id::<Link>::get_from_ext("12"), stops[1].link);
-        assert_eq!(0, stops[1].partition);
+        assert_eq!(0, schedule.stop_partition(&stop_2a));
         // The first stop only has a departure offset, the last one only an arrival offset.
-        assert_eq!(Duration::ZERO, stops[0].arrival_offset);
-        assert_eq!(Duration::ZERO, stops[0].departure_offset);
-        assert_eq!(Duration::from_secs(200), stops[1].arrival_offset);
-        assert_eq!(Duration::from_secs(240), stops[1].departure_offset);
-        assert_eq!(Duration::from_secs(540), stops[2].arrival_offset);
-        assert_eq!(Duration::from_secs(540), stops[2].departure_offset);
+        assert_eq!(Some(Duration::ZERO), stops[0].arrival());
+        assert_eq!(Some(Duration::ZERO), stops[0].departure());
+        assert_eq!(Some(Duration::from_secs(200)), stops[1].arrival());
+        assert_eq!(Some(Duration::from_secs(240)), stops[1].departure());
+        assert_eq!(Some(Duration::from_secs(540)), stops[2].arrival());
+        assert_eq!(Some(Duration::from_secs(540)), stops[2].departure());
     }
 
     #[deterministic_id_test]
-    fn tutorial_departures_are_sorted_by_driver_and_get_ascending_driver_ids() {
+    fn tutorial_drivers_get_ascending_ids_in_the_order_of_their_names() {
         let schedule = tutorial_schedule();
+        let transit = schedule.schedule();
 
-        let departures = schedule.departures();
+        let mut departures: Vec<_> = transit
+            .indexed_departures()
+            .map(|(index, _)| index)
+            .collect();
         assert_eq!(100, departures.len());
-        let first = &departures[0];
-        assert_eq!("pt_Blue Line_1to3_01", first.driver.external());
-        assert_eq!("1to3", schedule.route(first.route).route.external());
-        assert_eq!("01", first.id.external());
-        assert_eq!(SimTime::from_secs(6 * 3600), first.time);
-        assert_eq!("tr_1", first.vehicle.external());
-        let last = departures.last().unwrap();
-        assert_eq!("pt_Blue Line_3to1_50", last.driver.external());
-        assert_eq!("3to1", schedule.route(last.route).route.external());
+        departures.sort_by_key(|&index| schedule.driver(index).external().to_owned());
+        let first = departures[0];
+        assert_eq!("pt_Blue Line_1to3_01", schedule.driver(first).external());
+        let route = transit.route(transit.departure_route(first));
+        assert_eq!("1to3", route.id.external());
+        assert_eq!("01", transit.departure(first).id.external());
+        assert_eq!(
+            SimTime::from_secs(6 * 3600),
+            transit.departure(first).departure_time
+        );
+        assert_eq!("tr_1", schedule.vehicle(first).external());
+        let last = *departures.last().unwrap();
+        assert_eq!("pt_Blue Line_3to1_50", schedule.driver(last).external());
+        let route = transit.route(transit.departure_route(last));
+        assert_eq!("3to1", route.id.external());
 
         assert!(
             departures
                 .windows(2)
-                .all(|pair| pair[0].driver.external() < pair[1].driver.external()
-                    && pair[0].driver.internal() < pair[1].driver.internal())
+                .all(|pair| schedule.driver(pair[0]).internal()
+                    < schedule.driver(pair[1]).internal())
         );
     }
 
@@ -560,7 +431,7 @@ mod tests {
         assert_eq!(2, scenario.transit_garage.vehicles.len());
         let scenario: ControllerScenario = scenario.into();
 
-        assert!(scenario.core.transit_sim_schedule.is_empty());
+        assert!(scenario.transit_sim_schedule.is_empty());
         assert!(Id::<InternalPerson>::try_get_from_ext("pt_Blue Line_1to3_01").is_none());
     }
 
@@ -583,8 +454,9 @@ mod tests {
 
         let scenario: ControllerScenario = Scenario::load(config).into();
 
-        assert_eq!(2, scenario.core.transit_sim_schedule.routes().len());
-        assert_eq!(100, scenario.core.transit_sim_schedule.departures().len());
+        let transit = scenario.transit_sim_schedule.schedule();
+        assert_eq!(2, transit.routes().len());
+        assert_eq!(100, transit.departures().len());
     }
 
     #[deterministic_id_test]
@@ -620,7 +492,7 @@ mod tests {
         let network = Network::from_file(NETWORK);
         let schedule = TransitSchedule::from_file(&path);
         let garage = Garage::from_file(&PathBuf::from(VEHICLES));
-        TransitSimSchedule::build(&schedule, &network, &garage, population);
+        TransitSimSchedule::build(Arc::new(schedule), &network, &garage, population);
     }
 
     const FACILITIES: &str = r#"
