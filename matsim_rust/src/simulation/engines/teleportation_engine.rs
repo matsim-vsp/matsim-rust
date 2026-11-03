@@ -7,7 +7,6 @@ use crate::simulation::engines::{
 use crate::simulation::events::{
     PtTeleportationArrivalEventBuilder, TeleportationArrivalEventBuilder,
 };
-use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::TeleportationMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
@@ -190,13 +189,13 @@ impl TeleportationEngine {
         transit: TransitTeleportation<'_>,
     ) {
         let now_time = self.clock.tick_to_time(now);
-        let transit_line_id = Id::<String>::get_from_ext(transit.line.external());
-        let transit_route_id = Id::<String>::get_from_ext(transit.route.external());
+        let transit_line_id = transit.line.clone();
+        let transit_route_id = transit.route.clone();
         let boarding_time = transit
             .boarding_time
             .expect("Boarding time needs to be set.");
-        let access_facility = Id::<String>::get_from_ext(transit.access_facility.external());
-        let egress_facility = Id::<String>::get_from_ext(transit.egress_facility.external());
+        let access_facility = transit.access_facility.clone();
+        let egress_facility = transit.egress_facility.clone();
 
         self.comp_env.events_manager_borrow_mut().process_event(
             &PtTeleportationArrivalEventBuilder::default()

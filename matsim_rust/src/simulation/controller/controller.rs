@@ -1,6 +1,6 @@
 use crate::external_services::AdapterHandle;
 use crate::simulation::config::{
-    Config, Logging, OverwriteFiles, ScoringMode, WriteEvents, write_config,
+    Config, Logging, OverwriteFiles, ScoringMode, TransitSimulation, WriteEvents, write_config,
 };
 use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
@@ -13,7 +13,7 @@ use crate::simulation::framework_events::{
 use crate::simulation::id::Id;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::population::agent_source::{
-    DynAgentSource, IntoDynAgentSource, default_agent_sources,
+    DynAgentSource, IntoDynAgentSource, TransitDriverAgentSource, default_agent_sources,
 };
 use crate::simulation::replanning::routing::a_star::{AStar, AltHeuristic};
 use crate::simulation::replanning::routing::cost::ScoringBasedTravelTimeAndDisutility;
@@ -166,11 +166,19 @@ impl ControllerBuilder {
                 }));
         }
 
+        let mut agent_sources = self.agent_sources;
+        if matches!(
+            config.transit().simulation,
+            TransitSimulation::ScheduleBased
+        ) {
+            agent_sources.push(Arc::new(TransitDriverAgentSource));
+        }
+
         Ok(Controller {
             scenario,
             link_storage_capacities,
             config,
-            agent_sources: self.agent_sources,
+            agent_sources,
             controller_events_manager: controller_event_manager,
             worker_listener: self.worker_listener_register_fn,
             external_services: self.external_services,

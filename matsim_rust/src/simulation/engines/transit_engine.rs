@@ -27,9 +27,7 @@ pub(crate) struct TransitEngine {
     rank: u32,
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
-    /// Vehicles on their way to a stop, due at their arrival.
     approaching: TimeQueue<TransitVehicle, ()>,
-    /// Vehicles that halt at a stop, due at their departure.
     departing: TimeQueue<HaltingVehicle, ()>,
     /// The state of each stop, indexed by the internal id of its facility.
     stops: Vec<StopState>,
@@ -54,7 +52,6 @@ struct HaltingVehicle {
     arrival: SimTime,
 }
 
-/// A passenger who waits at a stop since `since`.
 struct WaitingPassenger {
     since: SimTime,
     passenger: PassengerAgent,
@@ -62,7 +59,6 @@ struct WaitingPassenger {
 
 #[derive(Default)]
 struct StopState {
-    /// Ordered by the start of waiting and the id of the passenger (`R4`).
     waiting: Vec<WaitingPassenger>,
 }
 
@@ -160,10 +156,7 @@ impl TransitEngine {
         result
     }
 
-    /// Returns all agents that still wait or ride, e.g. at the end of the mobsim. Drivers are
-    /// dropped, because they have no person (`O4`).
-    // TODO: SBB reports passengers in a vehicle as stuck on the link of the next stop. Here, they
-    // report the link of their access stop, because they do not know where the vehicle is.
+    /// Returns all agents that still wait or ride, e.g. at the end of the mobsim.
     pub(crate) fn drain(&mut self) -> Vec<LegAgent> {
         let mut agents = std::mem::take(&mut self.new_passengers);
         for state in &mut self.stops {
@@ -280,12 +273,12 @@ impl TransitEngine {
         );
 
         if vehicle.driver().upcoming_stops().is_empty() {
-            result.arrived.push(self.finish(vehicle, now));
+            result.arrived.push(self.finish_vehicle(vehicle, now));
             return;
         }
 
-        // A vehicle needs at least one tick to the next stop, so that the result does not depend on
-        // whether that stop is on another partition.
+        // As for "normal teleportation: Min time for teleportation is one tick,
+        // so that the result does not depend on whether that stop is on another partition.
         let earliest_arrival = now + SimTime::from_duration(self.clock.tick_length());
         vehicle
             .driver_mut()
@@ -317,9 +310,8 @@ impl TransitEngine {
         TransitVehicleMessage::new(vehicle, attachments)
     }
 
-    /// The vehicle left its last stop: the driver leaves the vehicle and ends its leg. The vehicle
-    /// is dropped.
-    fn finish(&mut self, vehicle: TransitVehicle, now: SimTime) -> LegAgent {
+    /// The vehicle left its last stop: the driver leaves the vehicle and ends its leg. The vehicle is dropped.
+    fn finish_vehicle(&mut self, vehicle: TransitVehicle, now: SimTime) -> LegAgent {
         assert!(
             vehicle.passengers().is_empty(),
             "Passengers {:?} are still in transit vehicle {} after its last stop.",

@@ -229,18 +229,6 @@ fn create_agents(
         population.population.persons.len(),
         population.population.persons.keys().next().unwrap()
     );
-    for (_, departure) in partition
-        .scenario
-        .transit_sim_schedule
-        .departures_starting_on(partition.rank)
-    {
-        assert!(
-            agents.contains_key(&departure.driver),
-            "No agent source created transit driver {}. Add TransitDriverAgentSource to the agent \
-             sources.",
-            departure.driver
-        );
-    }
     agents
 }
 

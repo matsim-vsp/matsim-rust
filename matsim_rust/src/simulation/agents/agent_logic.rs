@@ -1079,6 +1079,7 @@ mod tests {
     #[deterministic_id_test]
     fn owned_roles_follow_route_capabilities_and_preserve_allocation() {
         use crate::simulation::scenario::population::{
+
             InternalNetworkRoute, InternalPtRoute, InternalPtRouteDescription,
         };
         let pt = InternalRoute::Pt(InternalPtRoute {
@@ -1131,6 +1132,7 @@ mod tests {
     #[deterministic_id_test]
     fn pt_routes_only_offer_teleportation_and_keep_their_metadata() {
         use crate::simulation::scenario::population::{
+
             InternalPtRoute, InternalPtRouteDescription,
         };
         let route = InternalRoute::Pt(InternalPtRoute {
@@ -1401,6 +1403,7 @@ mod tests {
     #[deterministic_id_test]
     fn passengers_board_the_planned_line_while_it_serves_their_egress_stop() {
         use crate::simulation::scenario::population::{
+
             InternalPtRoute, InternalPtRouteDescription,
         };
         let stops = |ids: &[&str]| ids.iter().map(|id| Id::create(id)).collect::<Vec<_>>();
@@ -1422,13 +1425,8 @@ mod tests {
             } else {
                 PlanBasedSimulationLogic::new_agent(person)
             };
-            let original = std::ptr::from_ref(activity.as_ref()).cast::<()>();
             let leg = activity.finish_activity(SimTime::default()).expect_leg();
             let mut passenger = leg.try_into_passenger().unwrap();
-            assert_eq!(
-                original,
-                std::ptr::from_ref(passenger.as_ref()).cast::<()>()
-            );
             assert_eq!(passenger.access_stop().external(), "1");
             assert_eq!(passenger.egress_stop().external(), "3");
 

@@ -55,8 +55,7 @@ pub trait ActivityLogic: SimulationAgentLogic {
     fn link_id(&self) -> &Id<Link>;
     fn coord(&self) -> &Coordinate;
     fn has_next_leg(&self) -> bool;
-    /// Whether the activity engine emits the start and the end of this activity. Transit drivers
-    /// wait in activities without events, as in MATSim.
+    /// Whether the activity engine emits the start and the end of this activity.
     fn has_activity_events(&self) -> bool;
     /// `activity_start` is the time when the activity engine received the agent. An activity with
     /// only a maximum duration may derive its end from it.
