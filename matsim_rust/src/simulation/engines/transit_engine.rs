@@ -8,15 +8,23 @@ use crate::simulation::events::{
     PersonLeavesVehicleEventBuilder, TransitDriverStartsEventBuilder,
     VehicleArrivesAtFacilityEventBuilder, VehicleDepartsAtFacilityEventBuilder,
 };
+use crate::simulation::id::Id;
 use crate::simulation::messaging::messages::TransitVehicleMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
 use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::TransitVehicle;
 use std::sync::Arc;
+use std::time::Duration;
+
+/// The time a passenger needs to alight. Alighting takes no time yet.
+const ALIGHTING_TIME: Duration = Duration::ZERO;
+/// The time a passenger needs to board. Boarding takes no time yet.
+const BOARDING_TIME: Duration = Duration::ZERO;
 
 /// Moves the vehicles of schedule-based transit from stop to stop without the network, like SBB's
 /// deterministic transit engine in MATSim. Drivers decide when their vehicles arrive and depart,
@@ -28,11 +36,13 @@ pub(crate) struct TransitEngine {
     comp_env: ThreadLocalComputationalEnvironment,
     clock: SimClock,
     approaching: TimeQueue<TransitVehicle, ()>,
-    departing: TimeQueue<HaltingVehicle, ()>,
-    /// The state of each stop, indexed by the internal id of its facility.
-    stops: Vec<StopState>,
+    departing: TimeQueue<DueDeparture, ()>,
     /// Passengers who started their leg in this tick.
     new_passengers: Vec<PassengerAgent>,
+    /// The state of each stop, indexed by the internal id of its facility.
+    stops: Vec<StopState>,
+    /// The stops to process in this tick: alighting and boarding ongoing.
+    stops_to_be_processed: Vec<usize>,
 }
 
 /// What leaves the transit engine in a step.
@@ -44,22 +54,32 @@ pub(crate) struct TransitStepResult {
     pub(crate) leaving: Vec<(u32, TransitVehicleMessage)>,
 }
 
-/// A vehicle that halts at a stop, due at its departure.
 struct HaltingVehicle {
     vehicle: TransitVehicle,
-    /// The stop, as an index into [`TransitEngine::stops`].
-    stop: usize,
-    arrival: SimTime,
+    doors: Doors,
+    doors_used_until: SimTime,
 }
 
-struct WaitingPassenger {
-    since: SimTime,
-    passenger: PassengerAgent,
+#[derive(PartialEq)]
+enum Doors {
+    Alighting,
+    Boarding { complete: bool },
+}
+
+/// The departure of `vehicle`, which halts at `stop`. A vehicle serves one departure at a time,
+/// so its id identifies it among the halting vehicles.
+struct DueDeparture {
+    stop: usize,
+    vehicle: Id<InternalVehicle>,
+    time: SimTime,
 }
 
 #[derive(Default)]
 struct StopState {
-    waiting: Vec<WaitingPassenger>,
+    /// In the order in which the passengers started to wait, within a tick by id.
+    waiting_passengers: Vec<PassengerAgent>,
+    /// In the order in which the vehicles arrived.
+    halting_vehicles: Vec<HaltingVehicle>,
 }
 
 impl EndTime for TransitVehicle {
@@ -68,9 +88,9 @@ impl EndTime for TransitVehicle {
     }
 }
 
-impl EndTime for HaltingVehicle {
+impl EndTime for DueDeparture {
     fn end_time(&self, _now: SimTime) -> SimTime {
-        self.vehicle.driver().next_time()
+        self.time
     }
 }
 
@@ -101,17 +121,18 @@ impl TransitEngine {
             departing: TimeQueue::new(),
             stops,
             new_passengers: Vec::new(),
+            stops_to_be_processed: Vec::new(),
         }
     }
 
-    /// An agent starts a transit leg. It waits at its stop from the start of this tick's step on,
-    /// so a vehicle that arrives or departs in this tick can take it.
-    pub(crate) fn receive_agent(&mut self, agent: PassengerAgent) {
-        self.new_passengers.push(agent);
+    /// An agent starts a transit leg. It waits at its stop from this tick on, so a vehicle that
+    /// arrives or departs in this tick can take it.
+    pub(crate) fn receive_agent(&mut self, passenger: PassengerAgent) {
+        self.new_passengers.push(passenger);
     }
 
     /// A vehicle arrives from partition `from`. It is received after this tick's step, so its
-    /// arrival at the next stop must be due in a later tick (`R3`).
+    /// arrival at the next stop must be due in a later tick.
     pub(crate) fn receive_remote_vehicle(&mut self, now: Tick, vehicle: TransitVehicle, from: u32) {
         let due_tick = self.clock.time_to_tick(vehicle.driver().next_time());
         assert!(
@@ -139,20 +160,15 @@ impl TransitEngine {
         self.approaching.add_with_order(vehicle, now, order);
     }
 
-    /// Performs one step and returns the agents who arrived and the vehicles that left for another
-    /// partition.
+    /// Performs one step and returns the agents who arrived and the vehicles that left for another partition.
     #[hotpath::measure]
     pub(crate) fn do_step(&mut self, now: Tick) -> TransitStepResult {
         let now = self.clock.tick_to_time(now);
         let mut result = TransitStepResult::default();
 
-        self.start_waiting(now);
-        for vehicle in self.approaching.pop(now) {
-            self.arrive(vehicle, now, &mut result.arrived);
-        }
-        for halting in self.departing.pop(now) {
-            self.depart(halting, now, &mut result);
-        }
+        self.arrive(now);
+        result.arrived = self.process_halting(now);
+        self.depart(now, &mut result);
         result
     }
 
@@ -160,14 +176,15 @@ impl TransitEngine {
     pub(crate) fn drain(&mut self) -> Vec<LegAgent> {
         let mut agents = std::mem::take(&mut self.new_passengers);
         for state in &mut self.stops {
-            agents.extend(state.waiting.drain(..).map(|waiting| waiting.passenger));
-        }
-        for mut halting in self.departing.drain() {
-            agents.extend(halting.vehicle.take_passengers());
+            agents.append(&mut state.waiting_passengers);
+            for mut halting in state.halting_vehicles.drain(..) {
+                agents.extend(halting.vehicle.take_passengers());
+            }
         }
         for mut vehicle in self.approaching.drain() {
             agents.extend(vehicle.take_passengers());
         }
+        self.departing.drain();
         agents.into_iter().map(|agent| agent as LegAgent).collect()
     }
 
@@ -212,57 +229,142 @@ impl TransitEngine {
         self.approaching.add_with_order(vehicle, now, order);
     }
 
-    fn arrive(&mut self, mut vehicle: TransitVehicle, now: SimTime, alighted: &mut Vec<LegAgent>) {
-        let stop = vehicle.driver().stop().clone();
-        self.comp_env.events_manager_borrow_mut().process_event(
-            &VehicleArrivesAtFacilityEventBuilder::default()
-                .time(now)
-                .vehicle(vehicle.id().clone())
-                .facility(stop.clone())
-                .build()
-                .unwrap(),
-        );
-        vehicle.driver_mut().notify_stop_arrived(now);
+    /// Vehicles reach their stops. Their passengers alight when the stop is processed.
+    fn arrive(&mut self, now: SimTime) {
+        for mut vehicle in self.approaching.pop(now) {
+            let stop = vehicle.driver().stop().clone();
+            self.comp_env.events_manager_borrow_mut().process_event(
+                &VehicleArrivesAtFacilityEventBuilder::default()
+                    .time(now)
+                    .vehicle(vehicle.id().clone())
+                    .facility(stop.clone())
+                    .build()
+                    .unwrap(),
+            );
+            vehicle.driver_mut().notify_stop_arrived(now);
 
-        // Passengers alight before others board.
-        for mut passenger in vehicle.take_passengers() {
-            if passenger.wants_to_alight(&mut self.comp_env, &stop, now) {
-                self.comp_env.events_manager_borrow_mut().process_event(
-                    &PersonLeavesVehicleEventBuilder::default()
-                        .time(now)
-                        .person(passenger.id().clone())
-                        .vehicle(vehicle.id().clone())
-                        .build()
-                        .unwrap(),
-                );
-                passenger.notify_left_vehicle(now);
-                alighted.push(passenger as LegAgent);
-            } else {
-                vehicle.add_passenger(passenger);
-            }
+            let index = stop.internal() as usize;
+            let due = DueDeparture {
+                stop: index,
+                vehicle: vehicle.id().clone(),
+                time: vehicle.driver().next_time(),
+            };
+            self.departing.add_with_order(due, now, order(&vehicle));
+            self.stops[index].halting_vehicles.push(HaltingVehicle {
+                vehicle,
+                doors: Doors::Alighting,
+                doors_used_until: now,
+            });
+            self.stops_to_be_processed.push(index);
         }
-
-        let index = stop.internal() as usize;
-        self.board(&mut vehicle, index, None, now);
-
-        let order = order(&vehicle);
-        let halting = HaltingVehicle {
-            vehicle,
-            stop: index,
-            arrival: now,
-        };
-        self.departing.add_with_order(halting, now, order);
     }
 
-    fn depart(&mut self, halting: HaltingVehicle, now: SimTime, result: &mut TransitStepResult) {
-        let HaltingVehicle {
-            mut vehicle,
-            stop,
-            arrival,
-        } = halting;
-        // The passengers who were at the stop when the vehicle arrived have been asked then.
-        self.board(&mut vehicle, stop, Some(arrival), now);
+    /// Processes the stops where a vehicle arrived or passengers started to wait, in the order of
+    /// the vehicles' arrival. Passengers alight and board sequentially:
+    fn process_halting(&mut self, now: SimTime) -> Vec<LegAgent> {
+        let mut result = Vec::new();
+        self.start_waiting(now);
 
+        let until = now + SimTime::from_duration(self.clock.tick_length());
+        // Taken and put back, so that the list keeps its capacity. Only the stops where a vehicle
+        // has not finished yet stay in it, for the next tick.
+        let mut stops_to_be_processed = std::mem::take(&mut self.stops_to_be_processed);
+        stops_to_be_processed.sort_unstable();
+        stops_to_be_processed.dedup();
+        stops_to_be_processed.retain(|&stop| {
+            let state = &mut self.stops[stop];
+            let mut stop_to_be_processed = false;
+            for halting_vehicle in &mut state.halting_vehicles {
+                halting_vehicle.doors_used_until = halting_vehicle.doors_used_until.max(now);
+
+                if halting_vehicle.doors == Doors::Alighting
+                    && Self::alight(&mut self.comp_env, halting_vehicle, until, &mut result)
+                {
+                    halting_vehicle.doors = Doors::Boarding { complete: false };
+                }
+                if let Doors::Boarding { .. } = halting_vehicle.doors {
+                    let complete = Self::board(
+                        &mut self.comp_env,
+                        halting_vehicle,
+                        &mut state.waiting_passengers,
+                        until,
+                    );
+                    halting_vehicle.doors = Doors::Boarding { complete };
+                }
+
+                // Stop still needs to be processed if the vehicle is still boarding or alighting passengers.
+                stop_to_be_processed |= halting_vehicle.doors != Doors::Boarding { complete: true };
+            }
+            stop_to_be_processed
+        });
+        self.stops_to_be_processed = stops_to_be_processed;
+        result
+    }
+
+    /// The passengers who started their leg in this tick join the waiting passengers at their
+    /// stops. They wait behind the others, in the order of their ids, whatever the order in which
+    /// they were received.
+    fn start_waiting(&mut self, now: SimTime) {
+        let mut passengers = std::mem::take(&mut self.new_passengers);
+        passengers.sort_unstable_by_key(|passenger| passenger.id().internal());
+
+        for passenger in passengers {
+            let access = passenger.access_stop();
+            self.comp_env.events_manager_borrow_mut().process_event(
+                &AgentWaitingForPtEventBuilder::default()
+                    .time(now)
+                    .agent(passenger.id().clone())
+                    .at_stop(access.clone())
+                    .destination_stop(passenger.egress_stop())
+                    .build()
+                    .unwrap(),
+            );
+
+            let stop = access.internal() as usize;
+            assert!(
+                stop < self.stops.len(),
+                "Agent {} waits at stop {access}, which no transit route serves.",
+                passenger.id()
+            );
+            self.stops[stop].waiting_passengers.push(passenger);
+            self.stops_to_be_processed.push(stop);
+        }
+    }
+
+    /// A vehicle leaves its stop when nobody wants to alight or board anymore and its departure
+    /// time has come. Otherwise, it tries again in the next tick, or once its doors are free.
+    fn depart(&mut self, now: SimTime, result: &mut TransitStepResult) {
+        for due in self.departing.pop(now) {
+            let halting = &mut self.stops[due.stop].halting_vehicles;
+            let position = halting
+                .iter()
+                .position(|halting| *halting.vehicle.id() == due.vehicle)
+                .expect("A vehicle that is due to depart halts at its stop.");
+            let candidate = &halting[position];
+            let ready = candidate.doors == Doors::Boarding { complete: true }
+                && candidate.doors_used_until <= now;
+            if !ready {
+                let next_tick = now + SimTime::from_duration(self.clock.tick_length());
+                let later = DueDeparture {
+                    time: candidate.doors_used_until.max(next_tick),
+                    ..due
+                };
+                let order = order(&candidate.vehicle);
+                self.departing.add_with_order(later, now, order);
+                continue;
+            }
+            // `remove` keeps the order in which the other vehicles arrived.
+            let vehicle = halting.remove(position).vehicle;
+            self.leave_stop(vehicle, now, result);
+        }
+    }
+
+    fn leave_stop(
+        &mut self,
+        mut vehicle: TransitVehicle,
+        now: SimTime,
+        result: &mut TransitStepResult,
+    ) {
         self.comp_env.events_manager_borrow_mut().process_event(
             &VehicleDepartsAtFacilityEventBuilder::default()
                 .time(now)
@@ -333,86 +435,97 @@ impl TransitEngine {
         vehicle.into_driver()
     }
 
-    /// Lets the passengers at `stop` board who want to take `vehicle`, in the order in which they
-    /// wait. With `after`, only those are asked who started to wait after that time. At its last
-    /// stop, a vehicle takes nobody.
-    fn board(
-        &mut self,
-        vehicle: &mut TransitVehicle,
-        stop: usize,
-        after: Option<SimTime>,
-        now: SimTime,
-    ) {
-        let driver = vehicle.driver();
-        if driver.upcoming_stops().is_empty() {
-            return;
-        }
-        let waiting = &mut self.stops[stop].waiting;
-        // The list is ordered by the start of waiting, so the passengers to ask are at its end.
-        let first = after.map_or(0, |after| {
-            waiting.partition_point(|waiting| waiting.since <= after)
-        });
-        let mut boarding = Vec::new();
-        for candidate in waiting.split_off(first) {
-            let mut passenger = candidate.passenger;
-            if passenger.wants_to_board(
-                &mut self.comp_env,
-                driver.line(),
-                driver.upcoming_stops(),
-                now,
-            ) {
-                boarding.push(passenger);
-            } else {
-                waiting.push(WaitingPassenger {
-                    since: candidate.since,
-                    passenger,
-                });
+    /// Lets the passengers of the halting vehicle alight who want to at its stop, one after the other in
+    /// the order in which they boarded, until the tick ends at `until`.
+    fn alight(
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        halting: &mut HaltingVehicle,
+        until: SimTime,
+        alighted: &mut Vec<LegAgent>,
+    ) -> bool {
+        let vehicle_id = halting.vehicle.id().clone();
+        let stop = halting.vehicle.driver().stop().clone();
+        let mut doors_used_until = halting.doors_used_until;
+        let mut complete = true;
+        let alighting = halting.vehicle.extract_passengers(|passenger| {
+            // Cannot alight if others use doors until time step is over.
+            if doors_used_until >= until {
+                // Set complete to false, since there are still passengers for possible alighting in the next tick
+                complete = false;
+                return false;
             }
-        }
-
-        for passenger in boarding {
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &PersonEntersVehicleEventBuilder::default()
-                    .time(now)
+            if !passenger.wants_to_alight(comp_env, &stop, doors_used_until) {
+                return false;
+            }
+            comp_env.events_manager_borrow_mut().process_event(
+                &PersonLeavesVehicleEventBuilder::default()
+                    .time(doors_used_until)
                     .person(passenger.id().clone())
-                    .vehicle(vehicle.id().clone())
+                    .vehicle(vehicle_id.clone())
                     .build()
                     .unwrap(),
             );
-            vehicle.add_passenger(passenger);
-        }
+            passenger.notify_left_vehicle(doors_used_until);
+            doors_used_until += SimTime::from_duration(ALIGHTING_TIME);
+            true
+        });
+        alighted.extend(alighting.into_iter().map(|passenger| passenger as LegAgent));
+        halting.doors_used_until = doors_used_until;
+        complete
     }
 
-    fn start_waiting(&mut self, now: SimTime) {
-        let mut passengers = std::mem::take(&mut self.new_passengers);
-        passengers.sort_unstable_by_key(|passenger| passenger.id().internal());
+    /// Lets the passengers in `waiting` board the halting vehicle who want to, one after the other in
+    /// the order in which they wait, until the tick ends at `until`.
+    fn board(
+        comp_env: &mut ThreadLocalComputationalEnvironment,
+        halting: &mut HaltingVehicle,
+        waiting: &mut Vec<PassengerAgent>,
+        until: SimTime,
+    ) -> bool {
+        let vehicle = &mut halting.vehicle;
+        let vehicle_id = vehicle.id().clone();
+        let driver = vehicle.driver();
 
-        for passenger in passengers {
-            let access = passenger.access_stop();
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &AgentWaitingForPtEventBuilder::default()
-                    .time(now)
-                    .agent(passenger.id().clone())
-                    .at_stop(access.clone())
-                    .destination_stop(passenger.egress_stop())
-                    .build()
-                    .unwrap(),
-            );
-
-            let state = self
-                .stops
-                .get_mut(access.internal() as usize)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Agent {} waits at stop {access}, which no transit route serves.",
-                        passenger.id()
-                    )
-                });
-            state.waiting.push(WaitingPassenger {
-                since: now,
-                passenger,
-            });
+        if driver.upcoming_stops().is_empty() {
+            // No one is allowed to board at last stop.
+            return true;
         }
+
+        let mut doors_used_until = halting.doors_used_until;
+        let mut complete = true;
+        let boarding: Vec<_> = waiting
+            .extract_if(.., |passenger| {
+                // Cannot board if others use doors until time step is over. (See alight)
+                if doors_used_until >= until {
+                    // Set complete to false, since there are still passengers for possible boarding in the next tick. (See alight)
+                    complete = false;
+                    return false;
+                }
+                if !passenger.wants_to_board(
+                    comp_env,
+                    driver.line(),
+                    driver.upcoming_stops(),
+                    doors_used_until,
+                ) {
+                    return false;
+                }
+                comp_env.events_manager_borrow_mut().process_event(
+                    &PersonEntersVehicleEventBuilder::default()
+                        .time(doors_used_until)
+                        .person(passenger.id().clone())
+                        .vehicle(vehicle_id.clone())
+                        .build()
+                        .unwrap(),
+                );
+                doors_used_until += SimTime::from_duration(BOARDING_TIME);
+                true
+            })
+            .collect();
+        for passenger in boarding {
+            vehicle.add_passenger(passenger);
+        }
+        halting.doors_used_until = doors_used_until;
+        complete
     }
 }
 
@@ -595,7 +708,7 @@ mod tests {
                 SIX + 901,
                 create_pt_agent(3, "Blue Line", "1", "3", "11", "33"),
             ),
-            // Comes while the 06:15 departure halts at stop 2a and boards when it departs.
+            // Comes while the 06:15 departure halts at stop 2a and boards right away.
             (
                 SIX + 1110,
                 create_pt_agent(4, "Blue Line", "2a", "3", "12", "33"),
@@ -615,7 +728,7 @@ mod tests {
             [
                 exchange(SIX + 900, "enters", "1", "tr_2"),
                 exchange(SIX + 900, "enters", "2", "tr_2"),
-                exchange(SIX + 1140, "enters", "4", "tr_2"),
+                exchange(SIX + 1110, "enters", "4", "tr_2"),
                 exchange(SIX + 1800, "enters", "3", "tr_1"),
             ]
         );
