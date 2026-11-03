@@ -284,23 +284,25 @@ impl TransitSimSchedule {
             .map(RouteIndex::new)
     }
 
-    /// Scheduled time at which the departure arrives at its last stop.
-    fn scheduled_end(&self, departure: &SimDeparture) -> SimTime {
+    /// Scheduled time at which the departure leaves its last stop and releases its vehicle. Like
+    /// the drivers, a vehicle never departs before its arrival.
+    fn scheduled_release(&self, departure: &SimDeparture) -> SimTime {
         let last_stop = self
             .route(departure.route)
             .stops
             .last()
             .expect("Routes have at least one stop.");
-        departure.time + SimTime::from_duration(last_stop.arrival_offset)
+        let offset = last_stop.arrival_offset.max(last_stop.departure_offset);
+        departure.time + SimTime::from_duration(offset)
     }
 
     /// A vehicle can only serve one departure at a time. Departures may share a vehicle if one
-    /// ends at or before the start of the next one.
+    /// releases it at or before the start of the next one.
     fn assert_vehicles_are_not_shared_at_the_same_time(&self) {
         let windows: Vec<_> = self
             .departures
             .iter()
-            .map(|departure| (departure.time, self.scheduled_end(departure), departure))
+            .map(|departure| (departure.time, self.scheduled_release(departure), departure))
             .sorted_by_key(|(start, end, departure)| {
                 (
                     departure.vehicle.internal(),
@@ -647,6 +649,21 @@ mod tests {
             STOPS,
             r#"<departure id="1" departureTime="06:00:00" vehicleRefId="tr_1"/>
                <departure id="2" departureTime="06:09:59" vehicleRefId="tr_1"/>"#,
+            &Population::default(),
+        );
+    }
+
+    /// The vehicle halts at the last stop of the first departure until 06:11, so it cannot start
+    /// the second one at 06:10:30.
+    #[deterministic_id_test]
+    #[should_panic(expected = "serves the departures of drivers pt_L_R_1 and pt_L_R_2")]
+    fn vehicle_halting_at_its_last_stop_cannot_start_another_departure() {
+        build_small(
+            FACILITIES,
+            r#"<stop refId="s1" departureOffset="00:00:00"/>
+               <stop refId="s2" arrivalOffset="00:10:00" departureOffset="00:11:00"/>"#,
+            r#"<departure id="1" departureTime="06:00:00" vehicleRefId="tr_1"/>
+               <departure id="2" departureTime="06:10:30" vehicleRefId="tr_1"/>"#,
             &Population::default(),
         );
     }
