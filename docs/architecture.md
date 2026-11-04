@@ -250,10 +250,11 @@ vehicle's stop as access stop and the time of the event as boarding time; when t
 stop is the egress stop. The distance is that of `RouteUtils.calcDistance`: the lengths of the links of the route's
 network route after the access link up to and including the egress link (`calc_transit_distance`). Since a vehicle
 that serves several departures is created anew for each of them, two of its departures can be active at the same time,
-e.g. if one starts where the other ends. Unlike `EventsToLegs`, backpacking therefore tracks each departure: an arrival
-belongs to the departure whose next stop it is, and a passenger leaves the departure it boarded. If two departures of a
-vehicle can take passengers at the same time, backpacking panics, because the events don't tell which one a passenger
-boards. A partition that receives a vehicle takes its departure from the driver.
+e.g. if one starts where the other ends. Unlike `EventsToLegs`, backpacking therefore tracks each active vehicle
+separately: an arrival belongs to the active vehicle whose next stop it is, and a passenger leaves the vehicle it boarded,
+recognized by its driver. If two active vehicles with the same id can take passengers at the same time, backpacking
+panics, because the events don't tell which one a passenger boards. A partition that receives a vehicle takes its
+departure from the driver.
 
 Deviations from SBB's engine:
 
