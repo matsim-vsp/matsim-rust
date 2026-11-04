@@ -15,6 +15,7 @@ use crate::simulation::messaging::partition_change::{
 };
 use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::transit::TransitStopFacility;
+use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::TransitVehicle;
@@ -66,11 +67,11 @@ enum Doors {
     Boarding { complete: bool },
 }
 
-/// The departure of the vehicle with the given `vehicle_driver_reference`, which halts at `stop`.
-/// Each departure has its own driver, so the order identifies the vehicle even if two copies of the same vehicle halt at the stop.
+/// The departure of `vehicle`, which halts at `stop`. Each departure has a vehicle of its own, see
+/// [`give_each_departure_its_own_vehicle`](crate::simulation::pt::schedule::give_each_departure_its_own_vehicle).
 struct DepartureTracker {
     stop: Id<TransitStopFacility>,
-    vehicle_driver_reference: u64,
+    vehicle: Id<InternalVehicle>,
     time: SimTime,
 }
 
@@ -253,11 +254,10 @@ impl TransitEngine {
 
             let due = DepartureTracker {
                 stop: stop.clone(),
-                vehicle_driver_reference: order(&vehicle),
+                vehicle: vehicle.id().clone(),
                 time: vehicle.driver().next_time(),
             };
-            let due_order = due.vehicle_driver_reference;
-            self.departing.add_with_order(due, now, due_order);
+            self.departing.add_with_order(due, now, order(&vehicle));
             self.stops
                 .get_mut(&stop)
                 .expect("Vehicles only halt at stops that a route serves.")
@@ -358,19 +358,17 @@ impl TransitEngine {
                 .halting_vehicles;
             let position = halting_vehicle
                 .iter()
-                .position(|halting_vehicle| {
-                    order(&halting_vehicle.vehicle) == due.vehicle_driver_reference
-                })
+                .position(|halting_vehicle| halting_vehicle.vehicle.id() == &due.vehicle)
                 .expect("A vehicle that is due to depart halts at its stop.");
             let candidate = &halting_vehicle[position];
             let ready = candidate.doors == Doors::Boarding { complete: true }
                 && candidate.doors_used_until <= now;
             if !ready {
+                let later_order = order(&candidate.vehicle);
                 let later_departure = DepartureTracker {
                     time: candidate.doors_used_until.max(next),
                     ..due
                 };
-                let later_order = later_departure.vehicle_driver_reference;
                 self.departing
                     .add_with_order(later_departure, now, later_order);
                 continue;
