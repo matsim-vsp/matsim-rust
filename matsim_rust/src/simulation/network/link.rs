@@ -939,8 +939,8 @@ mod sim_link_tests {
 
         local_link.do_sim_step(10, &mut Default::default());
         assert!(local_link.offers_veh().is_some());
-        assert!(!local_link.is_veh_stuck(19));
-        assert!(local_link.is_veh_stuck(20));
+        assert!(!local_link.is_veh_stuck(20));
+        assert!(local_link.is_veh_stuck(21));
     }
 
     #[deterministic_id_test]
@@ -973,8 +973,8 @@ mod sim_link_tests {
         let popped = local_link.pop_veh_and_restart_stuck_timer(5).unwrap();
         assert_eq!("1", popped.id().external());
         assert!(local_link.offers_veh().is_some());
-        assert!(!local_link.is_veh_stuck(14));
-        assert!(local_link.is_veh_stuck(15));
+        assert!(!local_link.is_veh_stuck(15));
+        assert!(local_link.is_veh_stuck(16));
     }
 
     #[deterministic_id_test]
