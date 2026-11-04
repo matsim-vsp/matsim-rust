@@ -9,8 +9,8 @@ use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPlanElement::{Activity, Leg};
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPerson,
-    InternalPlan, InternalPlanElement, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
+    InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPlan,
+    InternalPlanElement, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
 };
 use crate::simulation::scenario::transit::{
     RouteIndex, TransitLine, TransitRoute, TransitStopFacility,
@@ -19,10 +19,9 @@ use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use std::time::Duration;
 
-/// A passenger boards a transit vehicle at stop `access`, at `time`. The vehicle serves the
-/// departure of `driver` on `route` of `line`.
+/// A passenger boards a transit vehicle at stop `access`, at `time`. The vehicle serves a departure
+/// on `route` of `line`.
 pub(crate) struct TransitBoarding {
-    pub(crate) driver: Id<InternalPerson>,
     pub(crate) line: Id<TransitLine>,
     pub(crate) route: Id<TransitRoute>,
     pub(crate) route_index: RouteIndex,
@@ -179,14 +178,15 @@ impl PartialPlan {
         });
     }
 
-    /// The passenger leaves the transit vehicle it boarded. `alight` returns the egress stop and
-    /// the distance of the ride.
+    /// The passenger leaves the transit vehicle it boarded at stop `egress`. `distance` returns the
+    /// distance of the ride from its boarding.
     pub(crate) fn transit_alighting(
         &mut self,
-        alight: impl FnOnce(&TransitBoarding) -> (Id<TransitStopFacility>, f64),
+        egress: Id<TransitStopFacility>,
+        distance: impl FnOnce(&TransitBoarding) -> f64,
     ) {
         self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |leg| {
-            leg.partial_route.handle_transit_alighting(alight)
+            leg.partial_route.handle_transit_alighting(egress, distance)
         });
     }
 
@@ -454,14 +454,14 @@ impl PartialRoute {
 
     fn handle_transit_alighting(
         &mut self,
-        alight: impl FnOnce(&TransitBoarding) -> (Id<TransitStopFacility>, f64),
+        egress: Id<TransitStopFacility>,
+        distance: impl FnOnce(&TransitBoarding) -> f64,
     ) {
         let boarding = self
             .transit_boarding
             .take()
             .unwrap_or_else(|| panic!("Caught a transit alighting without a boarding!"));
-        let (egress, distance) = alight(&boarding);
-        self.distance = Some(distance);
+        self.distance = Some(distance(&boarding));
         self.pt_description = Some(InternalPtRouteDescription {
             transit_route_id: boarding.route,
             boarding_time: Some(boarding.time),

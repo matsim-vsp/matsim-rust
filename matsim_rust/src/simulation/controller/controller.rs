@@ -585,8 +585,6 @@ impl Controller {
             .to_file_with_link_attribute_overrides(&net_out_path, &attribute_overrides);
     }
 
-    /// Writes the transit schedule and vehicles, with the vehicle that `prepare_for_sim` gave each
-    /// departure, so that they match the events.
     fn write_output_transit(&self, output_path: impl AsRef<Path>) {
         let compression_type = self.config.controller().compression_type;
         let schedule_path = create_output_filename(

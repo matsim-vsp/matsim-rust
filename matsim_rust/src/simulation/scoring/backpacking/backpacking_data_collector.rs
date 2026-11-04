@@ -11,7 +11,7 @@ use crate::simulation::replanning::routing::utils::calc_transit_distance;
 use crate::simulation::scenario::network::Network;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::transit::{
-    RouteIndex, TransitLine, TransitRoute, TransitSchedule, TransitStopFacility,
+    RouteIndex, TransitLine, TransitRoute, TransitStopFacility,
 };
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::scoring::backpacking::backpack::{Backpack, PersonExperience};
@@ -35,25 +35,31 @@ pub struct BackpackingDataCollector {
     person_id2backpack: IntMap<Id<InternalPerson>, Backpack>,
     /// Keeps track of persons being in vehicles.
     vehicle_id2person_ids: IntMap<Id<InternalVehicle>, IntSet<Id<InternalPerson>>>,
-    /// The transit vehicles that are active on this partition. A vehicle that serves several
-    /// departures is created anew for each of them, so two active vehicles can have the same id,
-    /// e.g. if one departure starts where the other ends.
-    transit_vehicles: IntMap<Id<InternalVehicle>, Vec<ActiveVehicle>>,
+    transit_vehicles: IntMap<Id<InternalVehicle>, ActiveVehicle>,
+    /// The drivers of the active transit vehicles, until their legs end. Drivers have no person
+    /// and thus no backpack. This field is there to avoid expensive calls to the schedule.
+    known_transit_drivers: IntSet<Id<InternalPerson>>,
     transit_schedule: Arc<TransitSimSchedule>,
     network: Arc<Network>,
 }
 
-/// A transit vehicle that is active on this partition, serving the departure of its driver. The
-/// events only carry the id of the vehicle, so an arrival belongs to the active vehicle whose next
-/// stop it is.
+/// A transit vehicle that is active on this partition, with the line and route of its departure.
 struct ActiveVehicle {
-    driver: Id<InternalPerson>,
     line: Id<TransitLine>,
     route: Id<TransitRoute>,
     route_index: RouteIndex,
-    /// Index of the stop that the vehicle approaches next. It halts at or has left the stop
-    /// before.
-    next_stop: usize,
+    /// The stop at which the vehicle arrived last on this partition. `None` before its first
+    /// arrival here.
+    stop: Option<Id<TransitStopFacility>>,
+}
+
+impl ActiveVehicle {
+    /// The stop at which the vehicle halts. Passengers only board and alight at stops.
+    fn stop(&self, vehicle_id: &Id<InternalVehicle>) -> &Id<TransitStopFacility> {
+        self.stop.as_ref().unwrap_or_else(|| {
+            panic!("Transit vehicle {vehicle_id} has not arrived at a stop on this partition yet.")
+        })
+    }
 }
 
 impl BackpackingDataCollector {
@@ -67,6 +73,7 @@ impl BackpackingDataCollector {
             person_id2backpack: Default::default(),
             vehicle_id2person_ids: Default::default(),
             transit_vehicles: Default::default(),
+            known_transit_drivers: Default::default(),
             transit_schedule,
             network,
         }
@@ -81,6 +88,7 @@ impl BackpackingDataCollector {
         }
         self.vehicle_id2person_ids.clear();
         self.transit_vehicles.clear();
+        self.known_transit_drivers.clear();
     }
 
     /// Records the person as an occupant of the vehicle and forwards the event to its backpack.
@@ -89,20 +97,18 @@ impl BackpackingDataCollector {
     pub(crate) fn person_enters_vehicle(&mut self, event: &PersonEntersVehicleEvent) {
         let Some(plan) = Self::partial_plan_of(
             &mut self.person_id2backpack,
+            &self.known_transit_drivers,
             &self.transit_schedule,
             &event.person,
         ) else {
             return;
         };
-        if let Some(vehicles) = self.transit_vehicles.get(&event.vehicle) {
-            let schedule = self.transit_schedule.schedule();
-            let vehicle = Self::boarded_vehicle(vehicles, schedule, event);
+        if let Some(vehicle) = self.transit_vehicles.get(&event.vehicle) {
             plan.transit_boarding(TransitBoarding {
-                driver: vehicle.driver.clone(),
                 line: vehicle.line.clone(),
                 route: vehicle.route.clone(),
                 route_index: vehicle.route_index,
-                access: Self::current_stop(vehicle, schedule).clone(),
+                access: vehicle.stop(&event.vehicle).clone(),
                 time: event.time,
             });
             return;
@@ -121,39 +127,29 @@ impl BackpackingDataCollector {
     pub(crate) fn person_leaves_vehicle(&mut self, event: &PersonLeavesVehicleEvent) {
         let Some(plan) = Self::partial_plan_of(
             &mut self.person_id2backpack,
+            &self.known_transit_drivers,
             &self.transit_schedule,
             &event.person,
         ) else {
-            Self::remove_transit_vehicle(&mut self.transit_vehicles, &event.vehicle, &event.person);
+            // A driver leaves its vehicle at the last stop.
+            Self::remove_transit_vehicle(&mut self.transit_vehicles, &event.vehicle);
             return;
         };
-        if let Some(vehicles) = self.transit_vehicles.get(&event.vehicle) {
+        if let Some(vehicle) = self.transit_vehicles.get(&event.vehicle) {
+            let egress = vehicle.stop(&event.vehicle);
             let schedule = self.transit_schedule.schedule();
-            let network = &self.network;
-            plan.transit_alighting(|boarding| {
-                let vehicle = vehicles
-                    .iter()
-                    .find(|vehicle| vehicle.driver == boarding.driver)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "Passenger {} leaves transit vehicle {}, but the vehicle of driver {} \
-                             that it boarded is not active on this partition.",
-                            event.person, event.vehicle, boarding.driver
-                        )
-                    });
-                let egress = Self::current_stop(vehicle, schedule);
-                let stop_link = |stop: &Id<TransitStopFacility>| {
-                    schedule
-                        .stop_link(stop)
-                        .unwrap_or_else(|| panic!("Transit stop facility {stop} has no link."))
-                };
-                let distance = calc_transit_distance(
+            let stop_link = |stop: &Id<TransitStopFacility>| {
+                schedule
+                    .stop_link(stop)
+                    .unwrap_or_else(|| panic!("Transit stop facility {stop} has no link."))
+            };
+            plan.transit_alighting(egress.clone(), |boarding| {
+                calc_transit_distance(
                     &schedule.route(boarding.route_index).network_route,
                     stop_link(&boarding.access),
                     stop_link(egress),
-                    network,
-                );
-                (egress.clone(), distance)
+                    &self.network,
+                )
             });
             return;
         }
@@ -178,8 +174,12 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn person_arrival(&mut self, event: &PersonArrivalEvent) {
-        if let Some(plan) = self.partial_plan(&event.person) {
-            plan.person_arrival(event);
+        match self.partial_plan(&event.person) {
+            Some(plan) => plan.person_arrival(event),
+            // The leg of a driver ends after its departure.
+            None => {
+                self.known_transit_drivers.remove(&event.person);
+            }
         }
     }
 
@@ -226,132 +226,67 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn transit_driver_starts(&mut self, event: &TransitDriverStartsEvent) {
-        let route_index = self.route_index(&event.transit_line, &event.transit_route);
         self.add_transit_vehicle(
             &event.vehicle,
             &event.driver,
             &event.transit_line,
             &event.transit_route,
-            route_index,
-            0,
         );
     }
 
     pub(crate) fn vehicle_arrives_at_facility(&mut self, event: &VehicleArrivesAtFacilityEvent) {
-        let schedule = self.transit_schedule.schedule();
         let vehicle = self
             .transit_vehicles
             .get_mut(&event.vehicle)
-            .and_then(|vehicles| {
-                // In the order in which the vehicles became active on this partition.
-                vehicles.iter_mut().find(|vehicle| {
-                    schedule
-                        .route(vehicle.route_index)
-                        .stop_facilities
-                        .get(vehicle.next_stop)
-                        == Some(&event.facility)
-                })
-            })
             .unwrap_or_else(|| {
                 panic!(
-                    "Transit vehicle {} arrives at stop {}, which is not the next stop of any active \
-                     vehicle with this id on this partition.",
+                    "Transit vehicle {} arrives at stop {}, but it is not active on this partition.",
                     event.vehicle, event.facility
                 )
             });
-        vehicle.next_stop += 1;
-    }
-
-    fn route_index(&self, line: &Id<TransitLine>, route: &Id<TransitRoute>) -> RouteIndex {
-        self.transit_schedule
-            .schedule()
-            .find_route(line, route)
-            .unwrap_or_else(|| panic!("Transit route {route} of line {line} does not exist."))
+        vehicle.stop = Some(event.facility.clone());
     }
 
     /// A transit vehicle becomes active on this partition: its departure starts here, or it arrives
-    /// from another partition before its stop with index `next_stop`.
+    /// from another partition.
     fn add_transit_vehicle(
         &mut self,
         vehicle_id: &Id<InternalVehicle>,
         driver: &Id<InternalPerson>,
         line: &Id<TransitLine>,
         route: &Id<TransitRoute>,
-        route_index: RouteIndex,
-        next_stop: usize,
     ) {
-        self.transit_vehicles
-            .entry(vehicle_id.clone())
-            .or_default()
-            .push(ActiveVehicle {
-                driver: driver.clone(),
+        let route_index = self
+            .transit_schedule
+            .schedule()
+            .find_route(line, route)
+            .unwrap_or_else(|| panic!("Transit route {route} of line {line} does not exist."));
+        let previous = self.transit_vehicles.insert(
+            vehicle_id.clone(),
+            ActiveVehicle {
                 line: line.clone(),
                 route: route.clone(),
                 route_index,
-                next_stop,
-            });
+                stop: None,
+            },
+        );
+        assert!(
+            previous.is_none(),
+            "Transit vehicle {vehicle_id} is already active on this partition, but each departure \
+             has a vehicle of its own."
+        );
+        self.known_transit_drivers.insert(driver.clone());
     }
 
-    /// The transit vehicle of `driver` is no longer active on this partition: its departure ends,
-    /// or it leaves for another partition.
+    /// The transit vehicle is no longer active on this partition: its departure ends, or it leaves
+    /// for another partition.
     fn remove_transit_vehicle(
-        transit_vehicles: &mut IntMap<Id<InternalVehicle>, Vec<ActiveVehicle>>,
+        transit_vehicles: &mut IntMap<Id<InternalVehicle>, ActiveVehicle>,
         vehicle_id: &Id<InternalVehicle>,
-        driver: &Id<InternalPerson>,
     ) {
-        let vehicles = transit_vehicles.get_mut(vehicle_id).unwrap_or_else(|| {
+        transit_vehicles.remove(vehicle_id).unwrap_or_else(|| {
             panic!("Transit vehicle {vehicle_id} is not active on this partition.")
         });
-        let position = vehicles
-            .iter()
-            .position(|vehicle| vehicle.driver == *driver)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Transit vehicle {vehicle_id} of driver {driver} is not active on this partition."
-                )
-            });
-        vehicles.remove(position);
-        if vehicles.is_empty() {
-            transit_vehicles.remove(vehicle_id);
-        }
-    }
-
-    /// The active vehicle that a passenger boards: the one that halts at a stop other than its
-    /// last, where the transit engine lets passengers board. If two active vehicles with the same
-    /// id could take passengers, the events don't tell which one the passenger boards.
-    fn boarded_vehicle<'a>(
-        vehicles: &'a [ActiveVehicle],
-        schedule: &TransitSchedule,
-        event: &PersonEntersVehicleEvent,
-    ) -> &'a ActiveVehicle {
-        let mut boardable = vehicles.iter().filter(|vehicle| {
-            let stops = schedule.route(vehicle.route_index).stop_facilities.len();
-            vehicle.next_stop > 0 && vehicle.next_stop < stops
-        });
-        let vehicle = boardable.next().unwrap_or_else(|| {
-            panic!(
-                "Passenger {} boards transit vehicle {}, which does not halt at a stop where \
-                 passengers can board.",
-                event.person, event.vehicle
-            )
-        });
-        if let Some(other) = boardable.next() {
-            panic!(
-                "Passenger {} boards transit vehicle {}, but the active vehicles of drivers {} and {} \
-                 have this id and can both take passengers, so the boarded one is ambiguous. Give \
-                 these departures different vehicles.",
-                event.person, event.vehicle, vehicle.driver, other.driver
-            );
-        }
-        vehicle
-    }
-
-    /// The stop at which the vehicle halts or which it has left last.
-    fn current_stop<'a>(
-        vehicle: &ActiveVehicle,
-        schedule: &'a TransitSchedule,
-    ) -> &'a Id<TransitStopFacility> {
-        &schedule.route(vehicle.route_index).stop_facilities[vehicle.next_stop - 1]
     }
 
     /// Passes an event of a vehicle to the backpacks of all its occupants. Events of vehicles
@@ -370,20 +305,28 @@ impl BackpackingDataCollector {
     }
 
     fn partial_plan(&mut self, person: &Id<InternalPerson>) -> Option<&mut PartialPlan> {
-        Self::partial_plan_of(&mut self.person_id2backpack, &self.transit_schedule, person)
+        Self::partial_plan_of(
+            &mut self.person_id2backpack,
+            &self.known_transit_drivers,
+            &self.transit_schedule,
+            person,
+        )
     }
 
     /// The partial plan of the person, or `None` for a transit driver, who has no person and thus
     /// no backpack. Drivers are only looked up if the backpack is missing, so the events of persons
-    /// cost no extra lookup.
+    /// cost no extra lookup. The drivers of active vehicles are known; other drivers, e.g. those who
+    /// still wait for their departure when the mobsim ends and get stuck, are rare, so they are
+    /// searched in the schedule.
     fn partial_plan_of<'a>(
         backpacks: &'a mut IntMap<Id<InternalPerson>, Backpack>,
+        transit_drivers: &IntSet<Id<InternalPerson>>,
         transit_schedule: &TransitSimSchedule,
         person: &Id<InternalPerson>,
     ) -> Option<&'a mut PartialPlan> {
         match backpacks.get_mut(person) {
             Some(backpack) => Some(backpack.partial_plan_mut()),
-            None if transit_schedule.is_driver(person) => None,
+            None if transit_drivers.contains(person) || transit_schedule.is_driver(person) => None,
             None => panic!(
                 "No backpack is available for person {} while handling an event.",
                 person.external()
@@ -411,11 +354,8 @@ impl BackpackingDataCollector {
                 self.vehicle_id2person_ids.remove(vehicle.id());
             }
             PartitionChangeEntity::TransitVehicle(vehicle) => {
-                Self::remove_transit_vehicle(
-                    &mut self.transit_vehicles,
-                    vehicle.id(),
-                    vehicle.driver().id(),
-                );
+                Self::remove_transit_vehicle(&mut self.transit_vehicles, vehicle.id());
+                self.known_transit_drivers.remove(vehicle.driver().id());
             }
             PartitionChangeEntity::TeleportationAgent(_) => {}
         }
@@ -477,25 +417,10 @@ impl BackpackingDataCollector {
                     vehicle.id().external()
                 );
             }
-            // The vehicle approaches the driver's current stop, whose index follows from the stops
-            // still to come.
+            // The vehicle's stop is known once it arrives at its next stop on this partition.
             PartitionChangeEntity::TransitVehicle(vehicle) => {
                 let driver = vehicle.driver();
-                let route_index = self.route_index(driver.line(), driver.route());
-                let stops = self
-                    .transit_schedule
-                    .schedule()
-                    .route(route_index)
-                    .stop_facilities
-                    .len();
-                self.add_transit_vehicle(
-                    vehicle.id(),
-                    driver.id(),
-                    driver.line(),
-                    driver.route(),
-                    route_index,
-                    stops - 1 - driver.upcoming_stops().len(),
-                );
+                self.add_transit_vehicle(vehicle.id(), driver.id(), driver.line(), driver.route());
             }
             PartitionChangeEntity::TeleportationAgent(_) => {}
         }
@@ -540,7 +465,7 @@ mod tests {
     use crate::simulation::pt::schedule::give_each_departure_its_own_vehicle;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::population::{InternalPlanElement, InternalRoute, Population};
-    use crate::simulation::scenario::transit::DepartureIndex;
+    use crate::simulation::scenario::transit::{DepartureIndex, TransitSchedule};
     use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
     use crate::simulation::time::SimTime;
     use crate::simulation::vehicles::{SimulationVehicle, TransitVehicle};
@@ -786,6 +711,7 @@ mod tests {
         );
 
         assert!(collector.transit_vehicles.is_empty());
+        assert!(collector.known_transit_drivers.is_empty());
         assert_ride_from_1_to_3(&collector.finish());
     }
 
@@ -811,6 +737,7 @@ mod tests {
         vehicle.add_passenger(passenger_agent);
         let attachment = departing.send(PartitionChangeEntity::TransitVehicle(&vehicle));
         assert!(departing.transit_vehicles.is_empty());
+        assert!(departing.known_transit_drivers.is_empty());
         assert!(departing.person_id2backpack.is_empty());
 
         let mut arriving = BackpackingDataCollector::new(Vec::new(), transit.clone(), network);
@@ -819,6 +746,7 @@ mod tests {
         end_ride(&mut arriving, &transit, departure, &passenger);
 
         assert!(arriving.transit_vehicles.is_empty());
+        assert!(arriving.known_transit_drivers.is_empty());
         assert_ride_from_1_to_3(&arriving.finish());
     }
 }

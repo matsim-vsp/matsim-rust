@@ -249,18 +249,16 @@ partitions neighbors. Like teleported agents, such vehicles are only received wh
 neighbors, and the engine panics if one arrives after it was due. Enable `computational_setup.global_sync` if this
 happens.
 
-Backpacking builds the experienced plans of transit legs like MATSim's `EventsToLegs`. It ignores the events of drivers,
-which have no person, and keeps the departures of the transit vehicles on its partition: `TransitDriverStarts` gives the
-line and the route, and `VehicleArrivesAtFacility` the stop. A passenger who enters a vehicle gets a PT route with the
-vehicle's stop as access stop and the time of the event as boarding time; when the passenger leaves the vehicle, its
-stop is the egress stop. The distance is that of `RouteUtils.calcDistance`: the lengths of the links of the route's
-network route after the access link up to and including the egress link (`calc_transit_distance`). Since a vehicle
-that serves several departures is created anew for each of them, two of its departures can be active at the same time,
-e.g. if one starts where the other ends. Unlike `EventsToLegs`, backpacking therefore tracks each active vehicle
-separately: an arrival belongs to the active vehicle whose next stop it is, and a passenger leaves the vehicle it boarded,
-recognized by its driver. If two active vehicles with the same id can take passengers at the same time, backpacking
-panics, because the events don't tell which one a passenger boards. A partition that receives a vehicle takes its
-departure from the driver.
+Backpacking builds the experienced plans of transit legs like MATSim's `EventsToLegs`. It keeps the transit vehicles
+that are active on its partition: `TransitDriverStarts` gives the line and the route, and `VehicleArrivesAtFacility` the
+stop. Since each departure has a vehicle of its own, the id of the vehicle in an event identifies it. A passenger who
+enters a vehicle gets a PT route with the vehicle's stop as access stop and the time of the event as boarding time; when
+the passenger leaves the vehicle, its stop is the egress stop. The distance is that of `RouteUtils.calcDistance`: the
+lengths of the links of the route's network route after the access link up to and including the egress link
+(`calc_transit_distance`). A partition that receives a vehicle takes the line and the route from its driver. Drivers
+have no person and thus no backpack, so backpacking ignores their events. It knows the drivers of the active vehicles;
+other drivers, e.g. those who still wait for their departure when the mobsim ends and get stuck, are rare and searched
+in the schedule.
 
 Deviations from SBB's engine:
 

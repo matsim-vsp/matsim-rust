@@ -5,7 +5,7 @@ use crate::simulation::scenario::transit::{
     DepartureIndex, TransitDeparture, TransitRoute, TransitSchedule, TransitStopFacility,
 };
 use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
-use nohash_hasher::{IntMap, IntSet};
+use nohash_hasher::IntMap;
 use std::sync::Arc;
 use tracing::info;
 
@@ -30,8 +30,6 @@ pub struct TransitSimSchedule {
     schedule: Arc<TransitSchedule>,
     /// The driver of each departure, by [`DepartureIndex`].
     drivers: Vec<Id<InternalPerson>>,
-    /// The same drivers, to tell them from persons, see [`Self::is_driver`].
-    driver_set: IntSet<Id<InternalPerson>>,
     /// The vehicle of each departure, by [`DepartureIndex`].
     vehicles: Vec<Id<InternalVehicle>>,
     /// The partition of each stop facility. Facilities that no route serves have no entry.
@@ -102,11 +100,9 @@ impl TransitSimSchedule {
             vehicles[index.index()] = Some(vehicle);
         }
 
-        let drivers: Vec<_> = drivers.into_iter().map(Option::unwrap).collect();
         let result = Self {
             schedule,
-            driver_set: drivers.iter().cloned().collect(),
-            drivers,
+            drivers: drivers.into_iter().map(Option::unwrap).collect(),
             vehicles: vehicles.into_iter().map(Option::unwrap).collect(),
             stop_partitions,
             // Created here, so that the id does not depend on which partition creates its drivers
@@ -131,11 +127,11 @@ impl TransitSimSchedule {
         &self.drivers[departure.index()]
     }
 
-    /// Whether `person` is the driver of a departure rather than a person of the population. The ids
-    /// of drivers are not necessarily greater than those of all persons, e.g. if the id store was
-    /// loaded with them, so this checks the drivers themselves.
+    /// Whether `person` is the driver of a departure rather than a person of the population. This
+    /// searches all drivers, so it is meant for rare cases, e.g. drivers who still wait for their
+    /// departure when the mobsim ends and get stuck.
     pub fn is_driver(&self, person: &Id<InternalPerson>) -> bool {
-        self.driver_set.contains(person)
+        self.drivers.contains(person)
     }
 
     pub fn vehicle(&self, departure: DepartureIndex) -> &Id<InternalVehicle> {

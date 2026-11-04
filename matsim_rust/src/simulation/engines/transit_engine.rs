@@ -67,8 +67,7 @@ enum Doors {
     Boarding { complete: bool },
 }
 
-/// The departure of `vehicle`, which halts at `stop`. Each departure has a vehicle of its own, see
-/// [`give_each_departure_its_own_vehicle`](crate::simulation::pt::schedule::give_each_departure_its_own_vehicle).
+/// The departure of `vehicle`, which halts at `stop`. Each departure has a vehicle of its own.
 struct DepartureTracker {
     stop: Id<TransitStopFacility>,
     vehicle: Id<InternalVehicle>,
