@@ -7,7 +7,7 @@ use crate::simulation::scenario::transit::{
 use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
 use crate::simulation::time::SimTime;
 use itertools::Itertools;
-use nohash_hasher::IntMap;
+use nohash_hasher::{IntMap, IntSet};
 use std::sync::Arc;
 use tracing::info;
 
@@ -32,6 +32,8 @@ pub struct TransitSimSchedule {
     schedule: Arc<TransitSchedule>,
     /// The driver of each departure, by [`DepartureIndex`].
     drivers: Vec<Id<InternalPerson>>,
+    /// The same drivers, to tell them from persons, see [`Self::is_driver`].
+    driver_set: IntSet<Id<InternalPerson>>,
     /// The vehicle of each departure, by [`DepartureIndex`].
     vehicles: Vec<Id<InternalVehicle>>,
     /// The partition of each stop facility. Facilities that no route serves have no entry.
@@ -102,9 +104,11 @@ impl TransitSimSchedule {
             vehicles[index.index()] = Some(vehicle);
         }
 
+        let drivers: Vec<_> = drivers.into_iter().map(Option::unwrap).collect();
         let result = Self {
             schedule,
-            drivers: drivers.into_iter().map(Option::unwrap).collect(),
+            driver_set: drivers.iter().cloned().collect(),
+            drivers,
             vehicles: vehicles.into_iter().map(Option::unwrap).collect(),
             stop_partitions,
             // Created here, so that the id does not depend on which partition creates its drivers
@@ -127,6 +131,13 @@ impl TransitSimSchedule {
     /// The driver of the departure, who has no person.
     pub fn driver(&self, departure: DepartureIndex) -> &Id<InternalPerson> {
         &self.drivers[departure.index()]
+    }
+
+    /// Whether `person` is the driver of a departure rather than a person of the population. The ids
+    /// of drivers are not necessarily greater than those of all persons, e.g. if the id store was
+    /// loaded with them, so this checks the drivers themselves.
+    pub fn is_driver(&self, person: &Id<InternalPerson>) -> bool {
+        self.driver_set.contains(person)
     }
 
     pub fn vehicle(&self, departure: DepartureIndex) -> &Id<InternalVehicle> {
@@ -302,7 +313,7 @@ fn resolve_vehicle(
 #[cfg(test)]
 mod tests {
     use super::TransitSimSchedule;
-    use crate::simulation::config::{Config, ScoringMode, Transit, TransitSimulation};
+    use crate::simulation::config::{Config, Transit, TransitSimulation};
     use crate::simulation::id::Id;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{InternalPerson, InternalPlan, Population};
@@ -404,6 +415,7 @@ mod tests {
             transit.departure(first).departure_time
         );
         assert_eq!("tr_1", schedule.vehicle(first).external());
+        assert!(schedule.is_driver(schedule.driver(first)));
         let last = *departures.last().unwrap();
         assert_eq!("pt_Blue Line_3to1_50", schedule.driver(last).external());
         let route = transit.route(transit.departure_route(last));
@@ -435,7 +447,7 @@ mod tests {
         assert!(Id::<InternalPerson>::try_get_from_ext("pt_Blue Line_1to3_01").is_none());
     }
 
-    fn schedule_based_config(scoring: ScoringMode) -> Config {
+    fn schedule_based_config() -> Config {
         let mut config = Config::default();
         config.network_mut().path = Some(NETWORK.into());
         config.set_transit(Transit {
@@ -444,27 +456,18 @@ mod tests {
             simulation: TransitSimulation::ScheduleBased,
             ..Transit::default()
         });
-        config.scoring_mut().mode = scoring;
         config
     }
 
     #[deterministic_id_test]
     fn schedule_based_transit_builds_schedule_in_controller_scenario() {
-        let config = schedule_based_config(ScoringMode::Disabled);
+        let config = schedule_based_config();
 
         let scenario: ControllerScenario = Scenario::load(config).into();
 
         let transit = scenario.transit_sim_schedule.schedule();
         assert_eq!(2, transit.routes().len());
         assert_eq!(100, transit.departures().len());
-    }
-
-    #[deterministic_id_test]
-    #[should_panic(expected = "Schedule-based transit does not support scoring yet.")]
-    fn schedule_based_transit_with_scoring_panics() {
-        let config = schedule_based_config(ScoringMode::Enabled);
-
-        let _: ControllerScenario = Scenario::load(config).into();
     }
 
     /// Builds a schedule with one line `L` and one route `R` on the tutorial network. Stop `s1`

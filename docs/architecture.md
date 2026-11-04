@@ -128,7 +128,10 @@ only exception is `scoring.mode: Disabled`: the controller then registers no bac
 experienced plans, and sets the score of each selected plan to `None`. Backpacks do not return to an initial or "home"
 partition.
 Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
-`Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
+`Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. Like MATSim's `CharyparNagelLegScoring`,
+it scores the time until boarding of a leg with a transit route with `waiting_pt` instead of the marginal utility of
+traveling, by default with the one of traveling by `pt`, and adds `utility_of_line_switch` for each leg of a
+`transit.passenger_modes` mode after the first one in a trip. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
 
@@ -186,8 +189,7 @@ By default, transit legs are teleported with the travel time of their route. Wit
 transit vehicles move from stop to stop according to the schedule instead, and passengers wait at stops, board and
 alight, as in SBB's deterministic transit engine for MATSim (`SBBTransitQSimEngine`). The transit vehicles are read from
 `transit.vehicles_path`. The legs of `transit.passenger_modes` (default `pt`) ride them; these modes must not be main
-modes. Backpacking cannot build experienced plans of transit legs yet, so this setting requires `scoring.mode:
-Disabled`.
+modes.
 
 `TransitSchedule` holds all data of the schedule files, independent of the simulation: routes and departures in dense
 vectors, routes sorted by the external ids of line and route, the routes of a line and the departures of a route
@@ -241,6 +243,18 @@ partitions neighbors. Like teleported agents, such vehicles are only received wh
 neighbors, and the engine panics if one arrives after it was due. Enable `computational_setup.global_sync` if this
 happens.
 
+Backpacking builds the experienced plans of transit legs like MATSim's `EventsToLegs`. It ignores the events of drivers,
+which have no person, and keeps the departures of the transit vehicles on its partition: `TransitDriverStarts` gives the
+line and the route, and `VehicleArrivesAtFacility` the stop. A passenger who enters a vehicle gets a PT route with the
+vehicle's stop as access stop and the time of the event as boarding time; when the passenger leaves the vehicle, its
+stop is the egress stop. The distance is that of `RouteUtils.calcDistance`: the lengths of the links of the route's
+network route after the access link up to and including the egress link (`calc_transit_distance`). Since a vehicle
+that serves several departures is created anew for each of them, two of its departures can be active at the same time,
+e.g. if one starts where the other ends. Unlike `EventsToLegs`, backpacking therefore tracks each departure: an arrival
+belongs to the departure whose next stop it is, and a passenger leaves the departure it boarded. If two departures of a
+vehicle can take passengers at the same time, backpacking panics, because the events don't tell which one a passenger
+boards. A partition that receives a vehicle takes its departure from the driver.
+
 Deviations from SBB's engine:
 
 - A vehicle needs at least one tick from one stop to the next, so that the result does not depend on whether the next
@@ -248,11 +262,13 @@ Deviations from SBB's engine:
 - Boarding and alighting take no time. With MATSim's default `ComplexTransitStopHandler`, SBB boards and alights one
   second after the arrival and departs up to three seconds later, even with zero access and egress times.
 - Vehicles have no capacity, `delay` is always 0, and there are no chained departures and no link events.
+- Experienced transit legs have no attributes `enterVehicleTime` and `vehicleId`, like the other experienced legs of
+  matsim-rust.
 - Passengers who are still in a vehicle at the end of the mobsim report the link of their access stop in the stuck
   event, SBB the link of the next stop.
 
-Apart from these deviations and the tick per leg, the events of `pt_tutorial` match those of SBB's engine
-(`tests/simulation/pt.rs`).
+Apart from these deviations and the tick per leg, the events of `pt_tutorial` match those of SBB's engine, and so do
+the experienced plan and its score (`tests/simulation/pt.rs`).
 
 ### External Services
 

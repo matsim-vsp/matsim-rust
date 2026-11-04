@@ -1021,6 +1021,11 @@ pub struct AgentParameter {
     pub waiting: f64,                   // utils/hour
     pub marginal_utility_of_money: f64, // utils/money
     pub aborted_plan_score: f64,        // utils/hour
+    /// The marginal utility of waiting for a transit vehicle, in utils/hour. Without a value, it
+    /// is the marginal utility of traveling by `pt`, so that waiting costs as much as riding, like
+    /// MATSim's `waitingPt`.
+    pub waiting_pt: Option<f64>, // utils/hour
+    pub utility_of_line_switch: f64,    // utils
 }
 
 impl Default for AgentParameter {
@@ -1033,6 +1038,8 @@ impl Default for AgentParameter {
             waiting: -0.0,
             marginal_utility_of_money: 1.0,
             aborted_plan_score: -18.0,
+            waiting_pt: None,
+            utility_of_line_switch: -1.0,
         }
     }
 }
@@ -2203,6 +2210,8 @@ mod tests {
                 waiting: -3.0
                 marginal_utility_of_money: 2.0
                 aborted_plan_score: -24.0
+                waiting_pt: -9.0
+                utility_of_line_switch: -0.5
             fraction_of_iterations_to_start_score_msa: 0.75
         "#;
 
@@ -2232,6 +2241,8 @@ mod tests {
                 waiting: -3.0,
                 marginal_utility_of_money: 2.0,
                 aborted_plan_score: -24.0,
+                waiting_pt: Some(-9.0),
+                utility_of_line_switch: -0.5,
             }],
             fraction_of_iterations_to_start_score_msa: Some(0.75),
         };

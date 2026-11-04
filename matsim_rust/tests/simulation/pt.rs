@@ -1,12 +1,14 @@
 use macros::deterministic_id_test;
 use matsim_rust::external_services::routing::RoutingServiceAdapterFactory;
 use matsim_rust::external_services::{AdapterHandleBuilder, AsyncExecutor, ExternalServiceType};
-use matsim_rust::simulation::config::{CommandLineArgs, Config, PartitionMethod};
+use matsim_rust::simulation::config::{CommandLineArgs, CompressionType, Config, PartitionMethod};
 use matsim_rust::simulation::controller::ExternalServices;
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::events::utils::compare_event_folder;
 use matsim_rust::simulation::population::agent_source::PreplanningHorizonAgentSource;
 use matsim_rust::simulation::scenario::Scenario;
+use matsim_rust::simulation::scenario::population::Population;
+use matsim_rust::simulation::scenario::vehicles::Garage;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
@@ -34,8 +36,17 @@ fn pt_tutorial_matches_expected_events() {
 /// alighting one second after the arrival, the departure three seconds later) and the tick per leg.
 /// With two partitions, stop 3 is on its own partition, so that the vehicles change partitions. METIS
 /// would put the whole transit network of the tutorial on one partition.
+///
+/// The experienced plans are compared with a reference as well. It matches the experienced plan of
+/// MATSim's reference run with SBB's engine and the same typical durations: same elements, lines,
+/// routes, stops and distances (6100 m per ride). Without the door times, the person boards and
+/// alights one second earlier, and with the tick per leg, its activities start one second later.
+/// MATSim scores the plan with 75.6995, matsim-rust with 75.6986. After an intended change of the
+/// result, replace the reference with the decompressed
+/// `test_output/simulation/pt_tutorial_schedule_based_1/output_experienced_plans.xml.zst`.
 #[deterministic_id_test(matsim_rust)]
 fn pt_tutorial_schedule_based_matches_expected_events() {
+    let mut experienced = Vec::new();
     for parts in [1, 2] {
         let mut config = Config::from_args(CommandLineArgs::new_with_path(
             "./tests/resources/pt_tutorial/pt_tutorial_schedule_based_config.yml",
@@ -51,6 +62,7 @@ fn pt_tutorial_schedule_based_matches_expected_events() {
             "./test_output/simulation/pt_tutorial_schedule_based_{parts}"
         ));
         config.output_mut().output_dir = output_dir.clone();
+        config.controller_mut().compression_type = CompressionType::Zst;
 
         let scenario = Scenario::load(config);
         ControllerBuilder::default_with_scenario(scenario)
@@ -62,6 +74,20 @@ fn pt_tutorial_schedule_based_matches_expected_events() {
             output_dir.join("events"),
         )
         .unwrap();
+        experienced.push(Population::from_file(
+            &output_dir.join("output_experienced_plans.xml.zst"),
+            &mut Garage::new(),
+        ));
+    }
+    // Loaded after the runs, so that it doesn't change the order in which ids are created.
+    let expected = Population::from_file(
+        &PathBuf::from(
+            "./tests/resources/pt_tutorial/expected_experienced_plans_schedule_based.xml",
+        ),
+        &mut Garage::new(),
+    );
+    for population in experienced {
+        assert_eq!(population, expected);
     }
 }
 

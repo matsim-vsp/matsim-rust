@@ -6,7 +6,7 @@ pub mod transit;
 pub mod trip_structure_utils;
 pub mod vehicles;
 
-use crate::simulation::config::{Config, ScoringMode, TransitSimulation};
+use crate::simulation::config::{Config, TransitSimulation};
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::sim_network::SimNetworkPartition;
 use crate::simulation::pt::schedule::TransitSimSchedule;
@@ -316,22 +316,12 @@ impl From<Scenario> for ControllerScenario {
         // ids. With teleported transit, no driver ids are created.
         let transit_sim_schedule = match scenario.config.transit().simulation {
             TransitSimulation::Teleported => TransitSimSchedule::default(),
-            TransitSimulation::ScheduleBased => {
-                // Backpacking cannot build experienced plans of transit legs yet, and it panics
-                // for drivers, which have no backpack.
-                assert_eq!(
-                    scenario.config.scoring().mode,
-                    ScoringMode::Disabled,
-                    "Schedule-based transit does not support scoring yet. Set scoring.mode to \
-                     Disabled."
-                );
-                TransitSimSchedule::build(
-                    transit_schedule.clone(),
-                    &scenario.network,
-                    &scenario.transit_garage,
-                    &scenario.population,
-                )
-            }
+            TransitSimulation::ScheduleBased => TransitSimSchedule::build(
+                transit_schedule.clone(),
+                &scenario.network,
+                &scenario.transit_garage,
+                &scenario.population,
+            ),
         };
         Self {
             core: ScenarioCore {

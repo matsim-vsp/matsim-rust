@@ -9,12 +9,26 @@ use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPlanElement::{Activity, Leg};
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPlan,
-    InternalPlanElement, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
+    InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPerson,
+    InternalPlan, InternalPlanElement, InternalPtRoute, InternalPtRouteDescription, InternalRoute,
+};
+use crate::simulation::scenario::transit::{
+    RouteIndex, TransitLine, TransitRoute, TransitStopFacility,
 };
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use std::time::Duration;
+
+/// A passenger boards a transit vehicle at stop `access`, at `time`. The vehicle serves the
+/// departure of `driver` on `route` of `line`.
+pub(crate) struct TransitBoarding {
+    pub(crate) driver: Id<InternalPerson>,
+    pub(crate) line: Id<TransitLine>,
+    pub(crate) route: Id<TransitRoute>,
+    pub(crate) route_index: RouteIndex,
+    pub(crate) access: Id<TransitStopFacility>,
+    pub(crate) time: SimTime,
+}
 
 pub struct PartialPlan {
     elements: Vec<InternalPlanElement>,
@@ -155,6 +169,25 @@ impl PartialPlan {
     pub(crate) fn person_leaves_vehicle(&mut self, _event: &PersonLeavesVehicleEvent) {
         // The route does not record leaving the vehicle; this only checks the state.
         self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |_| {});
+    }
+
+    /// The passenger boards a transit vehicle. Its leg then gets a PT route, like the
+    /// `DefaultTransitPassengerRoute` of MATSim's `EventsToLegs`.
+    pub(crate) fn transit_boarding(&mut self, boarding: TransitBoarding) {
+        self.with_current_leg(PersonEntersVehicleEvent::TYPE, |leg| {
+            leg.partial_route.handle_transit_boarding(boarding)
+        });
+    }
+
+    /// The passenger leaves the transit vehicle it boarded. `alight` returns the egress stop and
+    /// the distance of the ride.
+    pub(crate) fn transit_alighting(
+        &mut self,
+        alight: impl FnOnce(&TransitBoarding) -> (Id<TransitStopFacility>, f64),
+    ) {
+        self.with_current_leg(PersonLeavesVehicleEvent::TYPE, |leg| {
+            leg.partial_route.handle_transit_alighting(alight)
+        });
     }
 
     pub(crate) fn vehicle_enters_traffic(&mut self, event: &VehicleEntersTrafficEvent) {
@@ -361,6 +394,9 @@ struct PartialRoute {
     vehicle: Option<Id<InternalVehicle>>,
     pt_description: Option<InternalPtRouteDescription>,
 
+    // PT Route Type, while the passenger rides a transit vehicle
+    transit_boarding: Option<TransitBoarding>,
+
     //TODO These values are currently unused
     relative_position_on_departure_link: Option<f64>,
     relative_position_on_arrival_link: Option<f64>,
@@ -380,6 +416,7 @@ impl Default for PartialRoute {
             distance: None,
             vehicle: None,
             pt_description: None,
+            transit_boarding: None,
             relative_position_on_departure_link: None,
             relative_position_on_arrival_link: None,
             route: Vec::default(),
@@ -405,6 +442,33 @@ impl PartialRoute {
         self.route_type = Some(PartialRouteTypes::Network);
 
         self.vehicle = Some(event.vehicle.clone());
+    }
+
+    fn handle_transit_boarding(&mut self, boarding: TransitBoarding) {
+        if let Some(route_type) = self.route_type {
+            panic!("Caught a transit boarding on a {route_type:?} Route Type!")
+        }
+        self.route_type = Some(PartialRouteTypes::Pt);
+        self.transit_boarding = Some(boarding);
+    }
+
+    fn handle_transit_alighting(
+        &mut self,
+        alight: impl FnOnce(&TransitBoarding) -> (Id<TransitStopFacility>, f64),
+    ) {
+        let boarding = self
+            .transit_boarding
+            .take()
+            .unwrap_or_else(|| panic!("Caught a transit alighting without a boarding!"));
+        let (egress, distance) = alight(&boarding);
+        self.distance = Some(distance);
+        self.pt_description = Some(InternalPtRouteDescription {
+            transit_route_id: boarding.route,
+            boarding_time: Some(boarding.time),
+            transit_line_id: boarding.line,
+            access_facility_id: boarding.access,
+            egress_facility_id: egress,
+        });
     }
 
     fn handle_vehicle_enters_traffic(&mut self, event: &VehicleEntersTrafficEvent) {

@@ -1469,7 +1469,7 @@ mod tests {
 
     mod transit {
         use super::super::{prepare_for_mobsim, pt_route_is_valid};
-        use crate::simulation::config::{Config, ScoringMode, Transit, TransitSimulation};
+        use crate::simulation::config::{Config, Transit, TransitSimulation};
         use crate::simulation::id::Id;
         use crate::simulation::replanning::routing::TripRouter;
         use crate::simulation::scenario::population::{
@@ -1493,8 +1493,6 @@ mod tests {
                 simulation,
                 ..Transit::default()
             });
-            // Schedule-based transit does not support scoring yet.
-            config.scoring_mut().mode = ScoringMode::Disabled;
             config
         }
 

@@ -2,6 +2,8 @@ use crate::simulation::events::{EventTrait, EventsManager};
 use crate::simulation::framework_events::{MobsimEvent, MobsimEventsManager, QSimId};
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeExtensionsManager;
+use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::scenario::network::Network;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scoring::backpacking::backpack::PersonExperience;
 use crate::simulation::scoring::backpacking::backpacking_data_collector::{
@@ -10,6 +12,7 @@ use crate::simulation::scoring::backpacking::backpacking_data_collector::{
 use nohash_hasher::IntMap;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 pub(crate) struct BackpackingWorkerResult {
@@ -23,9 +26,17 @@ pub struct BackpackingEngine {
 }
 
 impl BackpackingEngine {
-    pub fn new(home_person_ids: Vec<Id<InternalPerson>>) -> Self {
+    pub fn new(
+        home_person_ids: Vec<Id<InternalPerson>>,
+        transit_schedule: Arc<TransitSimSchedule>,
+        network: Arc<Network>,
+    ) -> Self {
         Self {
-            backpacking_data_collector: BackpackingDataCollector::new(home_person_ids),
+            backpacking_data_collector: BackpackingDataCollector::new(
+                home_person_ids,
+                transit_schedule,
+                network,
+            ),
         }
     }
 
@@ -91,19 +102,52 @@ impl BackpackingEngine {
 
         // Subscribe only to the event types that change a backpack. All other events, e.g. link
         // leave events, which are about half of all events, then don't reach backpacking at all.
-        use BackpackingDataCollector as Collector;
-        Self::forward(&engine, events, Collector::activity_end);
-        Self::forward(&engine, events, Collector::person_departure);
-        Self::forward(&engine, events, Collector::person_enters_vehicle);
-        Self::forward(&engine, events, Collector::vehicle_enters_traffic);
-        Self::forward(&engine, events, Collector::link_enter);
-        Self::forward(&engine, events, Collector::vehicle_leaves_traffic);
-        Self::forward(&engine, events, Collector::person_leaves_vehicle);
-        Self::forward(&engine, events, Collector::teleportation_arrival);
-        Self::forward(&engine, events, Collector::pt_teleportation_arrival);
-        Self::forward(&engine, events, Collector::person_arrival);
-        Self::forward(&engine, events, Collector::activity_start);
-        Self::forward(&engine, events, Collector::person_stuck);
+        Self::forward(&engine, events, BackpackingDataCollector::activity_end);
+        Self::forward(&engine, events, BackpackingDataCollector::person_departure);
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::person_enters_vehicle,
+        );
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::vehicle_enters_traffic,
+        );
+        Self::forward(&engine, events, BackpackingDataCollector::link_enter);
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::vehicle_leaves_traffic,
+        );
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::person_leaves_vehicle,
+        );
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::teleportation_arrival,
+        );
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::pt_teleportation_arrival,
+        );
+        Self::forward(&engine, events, BackpackingDataCollector::person_arrival);
+        Self::forward(&engine, events, BackpackingDataCollector::activity_start);
+        Self::forward(&engine, events, BackpackingDataCollector::person_stuck);
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::transit_driver_starts,
+        );
+        Self::forward(
+            &engine,
+            events,
+            BackpackingDataCollector::vehicle_arrives_at_facility,
+        );
     }
 
     fn forward<E: EventTrait>(
@@ -150,15 +194,16 @@ mod tests {
         let link = |id: &str| Id::<Link>::create(id);
         let time = SimTime::from_secs;
 
-        let engine = Rc::new(RefCell::new(BackpackingEngine::new(vec![
-            driver.clone(),
-            passenger.clone(),
-        ])));
+        let engine = Rc::new(RefCell::new(BackpackingEngine::new(
+            vec![driver.clone(), passenger.clone()],
+            Arc::default(),
+            Arc::default(),
+        )));
         let mut events = EventsManager::new();
         BackpackingEngine::register_event_handlers(engine.clone(), &mut events);
         events.reset_iteration(0);
-        // Backpacking subscribes to the twelve event types it needs, but not to all events.
-        assert!(format!("{events:?}").contains("per_type: 12, catch_all: 0"));
+        // Backpacking subscribes to the 14 event types it needs, but not to all events.
+        assert!(format!("{events:?}").contains("per_type: 14, catch_all: 0"));
 
         for person in [&driver, &passenger] {
             events.process_event(
