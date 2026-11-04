@@ -417,7 +417,7 @@ fn pt_route_is_valid(schedule: &TransitSchedule, route: &InternalPtRoute) -> boo
 /// Whether legs of `mode` ride transit vehicles of the schedule-based transit simulation.
 fn is_transit_passenger_mode(context: &PrepareForMobsimContext<'_>, mode: &Id<String>) -> bool {
     let transit = context.config.transit();
-    transit.simulation == TransitSimulation::ScheduleBased
+    transit.simulation == TransitSimulation::ScheduleBasedTeleportation
         && transit
             .passenger_modes
             .iter()
@@ -1529,8 +1529,9 @@ mod tests {
 
         #[deterministic_id_test]
         fn schedule_based_transit_legs_need_no_travel_time() {
-            let mut scenario =
-                tutorial_without_transit_travel_times(TransitSimulation::ScheduleBased);
+            let mut scenario = tutorial_without_transit_travel_times(
+                TransitSimulation::ScheduleBasedTeleportation,
+            );
 
             // Without routing modules, any trip needing routing would fail.
             prepare_for_mobsim(&mut scenario, &TripRouter::default()).unwrap();
@@ -1545,11 +1546,13 @@ mod tests {
 
         #[deterministic_id_test]
         fn schedule_based_transit_legs_need_a_transit_route() {
-            let mut scenario =
-                tutorial_with_edited_transit_legs(TransitSimulation::ScheduleBased, |leg| {
+            let mut scenario = tutorial_with_edited_transit_legs(
+                TransitSimulation::ScheduleBasedTeleportation,
+                |leg| {
                     let generic = leg.route.as_ref().unwrap().as_generic().clone();
                     leg.route = Some(InternalRoute::Generic(generic));
-                });
+                },
+            );
 
             // Without routing modules, the trip cannot be routed again.
             assert!(prepare_for_mobsim(&mut scenario, &TripRouter::default()).is_err());

@@ -455,6 +455,7 @@ impl BackpackingDataCollector {
 mod tests {
     use super::*;
     use crate::simulation::agents::TransitDriverLogic;
+    use crate::simulation::config::TransitSimulation;
     use crate::simulation::events::{
         ActivityEndEventBuilder, ActivityStartEventBuilder, PersonArrivalEventBuilder,
         PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
@@ -526,6 +527,7 @@ mod tests {
             &network,
             &garage,
             &Population::default(),
+            TransitSimulation::ScheduleBasedTeleportation,
         );
         let departure = transit
             .schedule()

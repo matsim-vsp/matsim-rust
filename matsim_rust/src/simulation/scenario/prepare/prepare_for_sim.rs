@@ -1,5 +1,5 @@
 use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
-use crate::simulation::config::{ModalLinkSelection, TransitSimulation};
+use crate::simulation::config::ModalLinkSelection;
 use crate::simulation::id::Id;
 use crate::simulation::pt::schedule::give_each_departure_its_own_vehicle;
 use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
@@ -15,8 +15,7 @@ use thiserror::Error;
 ///
 /// 1. The facilities are connected to the network, see [`prepare_facilities`].
 /// 2. Every activity gets a link and a coordinate, see [`resolve_activity_locations`].
-/// 3. With schedule-based transit, each departure gets a vehicle of its own, see
-///    [`give_each_departure_its_own_vehicle`].
+/// 3. If the transit simulation has no vehicle blocks, each departure gets a vehicle of its own.
 ///
 /// The first two steps process facilities and persons in parallel.
 pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareError> {
@@ -43,10 +42,12 @@ pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareErro
         })
         .collect();
 
-    if matches!(
-        scenario.config.transit().simulation,
-        TransitSimulation::ScheduleBased
-    ) {
+    if scenario
+        .config
+        .transit()
+        .simulation
+        .needs_vehicle_per_departure()
+    {
         give_each_departure_its_own_vehicle(
             &mut scenario.transit_schedule,
             &mut scenario.transit_garage,

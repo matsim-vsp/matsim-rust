@@ -1,3 +1,4 @@
+use crate::simulation::config::TransitSimulation;
 use crate::simulation::id::Id;
 use crate::simulation::scenario::network::Network;
 use crate::simulation::scenario::population::{InternalPerson, Population};
@@ -48,13 +49,14 @@ impl TransitSimSchedule {
     ///
     /// If the schedule cannot be simulated: a route has no stops, a stop facility has no link or
     /// an unknown link, a stop has no offset, a departure has no vehicle or a vehicle which is not
-    /// in `garage`, a vehicle serves several departures, or a driver id clashes with another driver
-    /// or with a person. [`give_each_departure_its_own_vehicle`] prevents shared vehicles.
+    /// in `garage`, a vehicle serves several departures although `simulation` needs a vehicle per
+    /// departure or a driver id clashes with another driver or with a person.
     pub fn build(
         schedule: Arc<TransitSchedule>,
         network: &Network,
         garage: &Garage,
         population: &Population,
+        simulation: TransitSimulation,
     ) -> Self {
         let mut pending_drivers: Vec<_> = schedule
             .indexed_departures()
@@ -109,7 +111,9 @@ impl TransitSimSchedule {
             // first.
             driver_activity_type: Some(Id::create(DRIVER_ACTIVITY_TYPE)),
         };
-        result.assert_each_vehicle_serves_one_departure();
+        if simulation.needs_vehicle_per_departure() {
+            result.assert_each_vehicle_serves_one_departure();
+        }
         info!(
             "Built transit schedule for simulation with {} routes and {} departures.",
             result.schedule.routes().len(),
@@ -176,15 +180,17 @@ impl TransitSimSchedule {
             .unwrap_or_else(|| panic!("No transit route serves stop {stop}."))
     }
 
-    /// Each vehicle serves one departure, see [`give_each_departure_its_own_vehicle`].
+    /// Each vehicle serves one departure, as a transit simulation without vehicle blocks needs, see
+    /// [`give_each_departure_its_own_vehicle`].
     fn assert_each_vehicle_serves_one_departure(&self) {
         let mut departures: IntMap<Id<InternalVehicle>, DepartureIndex> = IntMap::default();
         // In the order of the departures, so that the message does not depend on the map.
         for (index, _) in self.schedule.indexed_departures() {
             if let Some(previous) = departures.insert(self.vehicle(index).clone(), index) {
                 panic!(
-                    "Transit vehicle {} serves the departures of drivers {} and {}. prepare_for_sim \
-                     gives each departure a vehicle of its own.",
+                    "Transit vehicle {} serves the departures of drivers {} and {}, but the transit \
+                     simulation has no vehicle blocks. prepare_for_sim gives each departure a \
+                     vehicle of its own.",
                     self.vehicle(index),
                     self.driver(previous),
                     self.driver(index)
@@ -194,8 +200,9 @@ impl TransitSimSchedule {
     }
 }
 
-/// Gives each departure a vehicle of its own, so that the id of a vehicle identifies one departure,
-/// also in the events. A vehicle that serves several departures is replaced by a copy for each of
+/// Gives each departure a vehicle of its own, for transit simulations without vehicle blocks
+/// (`Umlauf`), see [`TransitSimulation::needs_vehicle_per_departure`]. Then the id of a vehicle
+/// identifies one departure, also in the events. A vehicle that serves several departures is replaced by a copy for each of
 /// them, with the id `<vehicle>_<line>_<route>_<departure>`. Vehicles that serve one departure keep
 /// their id, and so do departures whose vehicle is missing, which [`TransitSimSchedule::build`]
 /// reports.
@@ -213,7 +220,7 @@ pub fn give_each_departure_its_own_vehicle(schedule: &mut TransitSchedule, garag
             *departures_per_vehicle.entry(vehicle.clone()).or_default() += 1;
         }
     }
-    let shared: Vec<_> = schedule
+    let departures_with_shared_vehicles: Vec<_> = schedule
         .indexed_departures()
         .filter(|(_, departure)| {
             departure
@@ -225,7 +232,9 @@ pub fn give_each_departure_its_own_vehicle(schedule: &mut TransitSchedule, garag
         .collect();
 
     let mut originals = Vec::new();
-    for index in shared {
+
+    // assign a copy of the vehicle to each departure, and remove the originals from the garage
+    for index in departures_with_shared_vehicles {
         let route = schedule.route(schedule.departure_route(index));
         let departure = schedule.departure(index);
         let vehicle_ref = departure
@@ -371,6 +380,7 @@ mod tests {
             &network,
             &garage,
             &Population::default(),
+            TransitSimulation::ScheduleBasedTeleportation,
         )
     }
 
@@ -485,7 +495,7 @@ mod tests {
         config.set_transit(Transit {
             schedule_path: Some(SCHEDULE.into()),
             vehicles_path: Some(VEHICLES.into()),
-            simulation: TransitSimulation::ScheduleBased,
+            simulation: TransitSimulation::ScheduleBasedTeleportation,
             ..Transit::default()
         });
         config
@@ -529,7 +539,13 @@ mod tests {
         let network = Network::from_file(NETWORK);
         let schedule = TransitSchedule::from_file(&path);
         let garage = Garage::from_file(&PathBuf::from(VEHICLES));
-        TransitSimSchedule::build(Arc::new(schedule), &network, &garage, population);
+        TransitSimSchedule::build(
+            Arc::new(schedule),
+            &network,
+            &garage,
+            population,
+            TransitSimulation::ScheduleBasedTeleportation,
+        );
     }
 
     const FACILITIES: &str = r#"

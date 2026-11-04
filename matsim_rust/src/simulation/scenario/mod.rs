@@ -282,7 +282,7 @@ pub struct ScenarioCore {
 pub struct ControllerScenario {
     pub core: ScenarioCore,
     /// What the mobsim adds to `core.transit_schedule`: drivers, vehicles and the partitions of the
-    /// stops. Empty unless transit is simulated [schedule based](TransitSimulation::ScheduleBased).
+    /// stops. Empty unless transit is simulated [schedule based](TransitSimulation::ScheduleBasedTeleportation).
     /// Like the network partitions, it is only handed to the mobsim partitions.
     pub transit_sim_schedule: Arc<TransitSimSchedule>,
     pub population: Population,
@@ -318,12 +318,15 @@ impl From<Scenario> for ControllerScenario {
         // ids. With teleported transit, no driver ids are created.
         let transit_sim_schedule = match scenario.config.transit().simulation {
             TransitSimulation::Teleported => TransitSimSchedule::default(),
-            TransitSimulation::ScheduleBased => TransitSimSchedule::build(
-                transit_schedule.clone(),
-                &scenario.network,
-                &scenario.transit_garage,
-                &scenario.population,
-            ),
+            simulation @ TransitSimulation::ScheduleBasedTeleportation => {
+                TransitSimSchedule::build(
+                    transit_schedule.clone(),
+                    &scenario.network,
+                    &scenario.transit_garage,
+                    &scenario.population,
+                    simulation,
+                )
+            }
         };
         Self {
             core: ScenarioCore {

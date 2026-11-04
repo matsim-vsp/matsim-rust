@@ -170,7 +170,7 @@ impl ControllerBuilder {
         let mut agent_sources = self.agent_sources;
         if matches!(
             config.transit().simulation,
-            TransitSimulation::ScheduleBased
+            TransitSimulation::ScheduleBasedTeleportation
         ) {
             agent_sources.push(Arc::new(TransitDriverAgentSource));
         }
@@ -376,7 +376,7 @@ impl Controller {
         self.write_output_population(output_path.clone());
         if matches!(
             self.config.transit().simulation,
-            TransitSimulation::ScheduleBased
+            TransitSimulation::ScheduleBasedTeleportation
         ) {
             info!("    ... Transit schedule and vehicles ...");
             self.write_output_transit(&output_path);

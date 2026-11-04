@@ -560,6 +560,7 @@ impl TransitEngine {
 mod tests {
     use super::TransitEngine;
     use crate::simulation::agents::{LegAgent, PassengerAgent};
+    use crate::simulation::config::TransitSimulation;
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{
         PersonEntersVehicleEvent, PersonLeavesVehicleEvent, VehicleArrivesAtFacilityEvent,
@@ -658,6 +659,7 @@ mod tests {
             &network,
             &garage,
             &Population::default(),
+            TransitSimulation::ScheduleBasedTeleportation,
         ))
     }
 

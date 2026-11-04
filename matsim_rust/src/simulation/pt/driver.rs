@@ -381,6 +381,7 @@ impl ActivityLogic for FinishedDriver {
 mod tests {
     use super::{PlannedDriver, WaitingDriver};
     use crate::simulation::agents::TransitDriverAgent;
+    use crate::simulation::config::TransitSimulation;
     use crate::simulation::pt::schedule::{
         TransitSimSchedule, give_each_departure_its_own_vehicle,
     };
@@ -409,6 +410,7 @@ mod tests {
             &network,
             &garage,
             &Population::default(),
+            TransitSimulation::ScheduleBasedTeleportation,
         );
         let (index, _) = schedule
             .schedule()

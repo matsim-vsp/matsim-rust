@@ -106,7 +106,7 @@ impl<C: SimCommunicator> LegEngine<C> {
         // A mode without an id has no legs.
         let transit_modes: IntSet<Id<String>> = match transit.simulation {
             TransitSimulation::Teleported => IntSet::default(),
-            TransitSimulation::ScheduleBased => transit
+            TransitSimulation::ScheduleBasedTeleportation => transit
                 .passenger_modes
                 .iter()
                 .filter_map(|mode| Id::try_get_from_ext(mode))
