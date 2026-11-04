@@ -128,7 +128,10 @@ only exception is `scoring.mode: Disabled`: the controller then registers no bac
 experienced plans, and sets the score of each selected plan to `None`. Backpacks do not return to an initial or "home"
 partition.
 Scoring uses the public `PlanScorer` trait and reads only the experienced plan. The controller builder accepts a
-`Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. The alternative
+`Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. It scores activity durations with
+MATSim's default `typicalDurationScoreComputation = relative`, i.e. a zero-utility duration of
+`typicalDuration * exp(-1)`, so an activity of typical duration scores `performing * typicalDuration`. MATSim's
+deprecated `uniform` computation is not supported. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
 
