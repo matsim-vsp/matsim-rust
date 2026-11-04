@@ -232,8 +232,8 @@ impl CharyparNagelScoringFunction {
             params.typical_duration_s,
             agent_params.marginal_utility_of_performing_s,
         );
-        // A very short typical duration makes the zero-utility duration underflow to 0, so a
-        // duration of 0 (or below) can no longer be scored.
+        // An extreme ratio of duration to typical duration overflows the argument of the
+        // logarithm, so such a duration can no longer be scored.
         if !score.is_finite() {
             return Err(format!(
                 "Cannot score person {} activity {}: score is not finite for duration {duration_s} s and typical duration {} s.",
@@ -486,19 +486,18 @@ fn is_aborted(plan: &InternalPlan) -> bool {
     })
 }
 
-/// Scores the duration of one activity like MATSim's `ActivityUtilityParameters` with priority 1:
-/// `zeroUtilityDuration = typicalDuration * exp(-10h / typicalDuration)`, logarithmic above it and
-/// linear (with the slope of the logarithm at that point) below it.
+/// Scores the duration of one activity like MATSim's `ActivityUtilityParameters` with priority 1 and
+/// MATSim's default `typicalDurationScoreComputation = relative` (`SameRelativeScore`):
+/// `zeroUtilityDuration = typicalDuration * exp(-1)`, logarithmic above it and linear (with the
+/// slope of the logarithm at that point) below it. An activity of typical duration thus scores
+/// `beta_performing * typicalDuration`. MATSim's deprecated `uniform` computation
+/// (`typicalDuration * exp(-10h / typicalDuration)`) is not supported.
 fn score_activity(duration_s: f64, typical_duration_s: f64, beta_performing_s: f64) -> f64 {
-    // exp(-10h / typicalDuration) underflows to 0 for very short typical durations. Since
-    // ln(d / (t * exp(-x))) = ln(d / t) + x, the logarithmic branch is evaluated in that form,
-    // which is mathematically identical but never divides by an underflowed zero-utility duration.
-    let zero_utility_exponent = 10.0 * SECONDS_PER_HOUR / typical_duration_s;
-    let zero_utility_duration_s = typical_duration_s * (-zero_utility_exponent).exp();
+    // Since ln(d / (t * exp(-1))) = ln(d / t) + 1, the logarithmic branch is evaluated in that
+    // form, which is mathematically identical and keeps the score at the typical duration exact.
+    let zero_utility_duration_s = typical_duration_s * (-1.0_f64).exp();
     if duration_s >= zero_utility_duration_s {
-        beta_performing_s
-            * typical_duration_s
-            * ((duration_s / typical_duration_s).ln() + zero_utility_exponent)
+        beta_performing_s * typical_duration_s * ((duration_s / typical_duration_s).ln() + 1.0)
     } else {
         let slope = beta_performing_s * typical_duration_s / zero_utility_duration_s;
         -slope * (zero_utility_duration_s - duration_s)
@@ -522,11 +521,11 @@ mod tests {
     fn activity_score_is_linear_below_zero_utility_duration() {
         let typical = 3_600.0;
         let beta = 6.0 / SECONDS_PER_HOUR;
-        // MATSim: typical * exp(-10h / typical) = typical * exp(-10) for a typical duration of 1h.
-        let zero = typical * (-10.0_f64).exp();
+        // MATSim: typical * exp(-1) for its default relative typical duration score computation.
+        let zero = typical * (-1.0_f64).exp();
 
         assert!(score_activity(zero, typical, beta).abs() < 1e-9);
-        assert!((score_activity(typical, typical, beta) - 60.0).abs() < 1e-9);
+        assert!((score_activity(typical, typical, beta) - 6.0).abs() < 1e-9);
         assert!(score_activity(zero / 2.0, typical, beta) < 0.0);
         assert!(score_activity(zero * 2.0, typical, beta) > 0.0);
     }
@@ -535,23 +534,15 @@ mod tests {
     fn activity_score_matches_matsim_zero_utility_duration_for_other_typical_durations() {
         let typical = 8.0 * SECONDS_PER_HOUR;
         let beta = 6.0 / SECONDS_PER_HOUR;
-        // MATSim: typical * exp(-10h / 8h), i.e. not the exp(-1) of a 10h typical duration.
-        let zero = typical * (-10.0_f64 / 8.0).exp();
+        // MATSim's relative computation: typical * exp(-1), not the deprecated uniform
+        // typical * exp(-10h / 8h), which would score 60 instead of 48 at the typical duration.
+        let zero = typical * (-1.0_f64).exp();
 
         assert!(score_activity(zero, typical, beta).abs() < 1e-9);
         // Slope of the logarithm at the zero-utility duration.
         let slope = beta * typical / zero;
         assert!((score_activity(0.0, typical, beta) + slope * zero).abs() < 1e-9);
-        assert!(
-            (score_activity(typical, typical, beta) - beta * typical * 10.0 / 8.0).abs() < 1e-9
-        );
-    }
-
-    #[test]
-    fn activity_score_does_not_divide_by_an_underflowed_zero_utility_duration() {
-        // exp(-36000) underflows to 0, but the logarithmic branch stays finite.
-        let score = score_activity(60.0, 1.0, 6.0 / SECONDS_PER_HOUR);
-        assert!(score.is_finite() && score > 0.0, "{score}");
+        assert!((score_activity(typical, typical, beta) - 48.0).abs() < 1e-9);
     }
 
     #[deterministic_id_test]
@@ -628,8 +619,8 @@ mod tests {
             activity("home", Some(18 * 3_600), None),
         ]);
         let overnight_score = scorer.score(&person, "person", &overnight).unwrap();
-        // The wrapped duration is 12h = typical duration, so the score is beta * typical * 10h / typical = 6 * 10.
-        assert_approx_eq(60.0, overnight_score);
+        // The wrapped duration is 12h = typical duration, so the score is beta * typical = 6 * 12.
+        assert_approx_eq(72.0, overnight_score);
 
         let different = plan(vec![
             activity("home", None, Some(6 * 3_600)),

@@ -6,7 +6,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-92.50400993105983">
+        <plan selected="yes" score="-93.27607106006262">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -77,7 +77,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.204127622508523">
+        <plan selected="yes" score="-14.520311009516924">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -127,7 +127,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.225845442381846">
+        <plan selected="yes" score="-14.542028829390247">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -177,7 +177,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.247564665585543">
+        <plan selected="yes" score="-14.563748052593944">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -227,7 +227,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.269285292511512">
+        <plan selected="yes" score="-14.585468679519913">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -277,7 +277,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.294110585487786">
+        <plan selected="yes" score="-14.610293972496187">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -327,7 +327,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.315834221710553">
+        <plan selected="yes" score="-14.63201760871894">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -377,7 +377,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.337559262888412">
+        <plan selected="yes" score="-14.653742649896813">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -427,7 +427,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.359285709413953">
+        <plan selected="yes" score="-14.67546909642234">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -477,7 +477,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.381013561679964">
+        <plan selected="yes" score="-14.697196948688351">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -527,7 +527,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.405847114660006">
+        <plan selected="yes" score="-14.722030501668378">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -577,7 +577,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.42757798055029">
+        <plan selected="yes" score="-14.743761367558676">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -627,7 +627,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="6.35758931755408">
+        <plan selected="yes" score="6.963055615112431">
             <activity type="h" link="1" x="-25000" y="0" end_time="05:59:00"/>
             <leg mode="walk" dep_time="05:59:00" trav_time="02:10:00">
                 <attributes>
@@ -677,7 +677,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.449310253416513">
+        <plan selected="yes" score="-14.7654936404249">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -727,7 +727,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.471043933652098">
+        <plan selected="yes" score="-14.787227320660499">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -777,7 +777,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.492779021650655">
+        <plan selected="yes" score="-14.808962408659042">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -827,7 +827,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.517620846516998">
+        <plan selected="yes" score="-14.83380423352537">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -877,7 +877,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.53935895247669">
+        <plan selected="yes" score="-14.855542339485076">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -927,7 +927,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.561098467437503">
+        <plan selected="yes" score="-14.877281854445904">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -977,7 +977,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.582839391793726">
+        <plan selected="yes" score="-14.899022778802127">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1027,7 +1027,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.604581725939816">
+        <plan selected="yes" score="-14.920765112948217">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1077,7 +1077,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.629431834600645">
+        <plan selected="yes" score="-14.945615221609017">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1127,7 +1127,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.65117719105409">
+        <plan selected="yes" score="-14.967360578062475">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1177,7 +1177,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-8.60329814277764">
+        <plan selected="yes" score="-3.5518483038028066">
             <activity type="h" link="1" x="-25000" y="0" end_time="05:58:30"/>
             <leg mode="walk" dep_time="05:58:30" trav_time="02:10:00">
                 <attributes>
@@ -1227,7 +1227,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.672923958538235">
+        <plan selected="yes" score="-14.989107345546621">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1277,7 +1277,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.6946721374482">
+        <plan selected="yes" score="-15.010855524456602">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1327,7 +1327,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.71642172817932">
+        <plan selected="yes" score="-15.032605115187721">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1377,7 +1377,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.741280132568505">
+        <plan selected="yes" score="-15.057463519576906">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1427,7 +1427,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.763032749962605">
+        <plan selected="yes" score="-15.079216136970992">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1477,7 +1477,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.784786780421328">
+        <plan selected="yes" score="-15.100970167429715">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1527,7 +1527,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.80654222434068">
+        <plan selected="yes" score="-15.122725611349082">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1577,7 +1577,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.82829908211687">
+        <plan selected="yes" score="-15.144482469125258">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1627,7 +1627,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.853165794194183">
+        <plan selected="yes" score="-15.16934918120257">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1677,7 +1677,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.874925682998366">
+        <plan selected="yes" score="-15.191109070006739">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1727,7 +1727,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="6.35758931755408">
+        <plan selected="yes" score="6.963055615112431">
             <activity type="h" link="1" x="-25000" y="0" end_time="05:59:30"/>
             <leg mode="walk" dep_time="05:59:30" trav_time="02:10:00">
                 <attributes>
@@ -1777,7 +1777,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.89668698690553">
+        <plan selected="yes" score="-15.212870373913916">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1827,7 +1827,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.918449706312572">
+        <plan selected="yes" score="-15.234633093320944">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1877,7 +1877,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.94021384161651">
+        <plan selected="yes" score="-15.256397228624898">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1927,7 +1927,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.965088873367534">
+        <plan selected="yes" score="-15.281272260375921">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -1977,7 +1977,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-24.986856044073924">
+        <plan selected="yes" score="-15.303039431082311">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2027,7 +2027,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.008624631926118">
+        <plan selected="yes" score="-15.324808018934505">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2077,7 +2077,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.030394637321777">
+        <plan selected="yes" score="-15.346578024330164">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2127,7 +2127,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.052166060658834">
+        <plan selected="yes" score="-15.36834944766722">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2177,7 +2177,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.07704942409515">
+        <plan selected="yes" score="-15.393232811103523">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2227,7 +2227,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.09882388721862">
+        <plan selected="yes" score="-15.415007274227008">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2277,7 +2277,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="21.55328761066695">
+        <plan selected="yes" score="21.553287610666935">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2327,7 +2327,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.142377071443065">
+        <plan selected="yes" score="-15.458560458451466">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2377,7 +2377,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.164155793341408">
+        <plan selected="yes" score="-15.480339180349795">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2427,7 +2427,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.18904750050057">
+        <plan selected="yes" score="-15.505230887508958">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2477,7 +2477,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.21082926657877">
+        <plan selected="yes" score="-15.527012653587171">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2527,7 +2527,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.23261245390158">
+        <plan selected="yes" score="-15.548795840909982">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2577,7 +2577,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.254397062868478">
+        <plan selected="yes" score="-15.570580449876879">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2627,7 +2627,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.276183093879034">
+        <plan selected="yes" score="-15.59236648088742">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2677,7 +2677,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.301083156824767">
+        <plan selected="yes" score="-15.617266543833168">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2727,7 +2727,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.32287223641822">
+        <plan selected="yes" score="-15.639055623426607">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2777,7 +2777,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.344662739312355">
+        <plan selected="yes" score="-15.660846126320742">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2827,7 +2827,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.366454665907504">
+        <plan selected="yes" score="-15.682638052915905">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2877,7 +2877,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.388248016604173">
+        <plan selected="yes" score="-15.70443140361256">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2927,7 +2927,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.41315644742636">
+        <plan selected="yes" score="-15.72933983443476">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -2977,7 +2977,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.434952851118453">
+        <plan selected="yes" score="-15.75113623812684">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3027,7 +3027,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.456750680171794">
+        <plan selected="yes" score="-15.772934067180195">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3077,7 +3077,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.478549934987605">
+        <plan selected="yes" score="-15.794733321996006">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3127,7 +3127,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.500350615967193">
+        <plan selected="yes" score="-15.81653400297558">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3177,7 +3177,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.525267426781966">
+        <plan selected="yes" score="-15.841450813790352">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3227,7 +3227,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.547071165179148">
+        <plan selected="yes" score="-15.863254552187534">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3277,7 +3277,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.568876331002592">
+        <plan selected="yes" score="-15.885059718010993">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3327,7 +3327,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.59068292465441">
+        <plan selected="yes" score="-15.906866311662796">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3377,7 +3377,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.61249094653678">
+        <plan selected="yes" score="-15.928674333545182">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3427,7 +3427,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.637416149486626">
+        <plan selected="yes" score="-15.953599536495027">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3477,7 +3477,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.65922723321833">
+        <plan selected="yes" score="-15.975410620226718">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3527,7 +3527,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.681039746445855">
+        <plan selected="yes" score="-15.997223133454256">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3577,7 +3577,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.702853689572123">
+        <plan selected="yes" score="-16.019037076580524">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3627,7 +3627,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.724669063000277">
+        <plan selected="yes" score="-16.040852450008664">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3677,7 +3677,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.74960267025405">
+        <plan selected="yes" score="-16.065786057262436">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3727,7 +3727,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.771421109972884">
+        <plan selected="yes" score="-16.087604496981285">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3777,7 +3777,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.79324098126159">
+        <plan selected="yes" score="-16.109424368269977">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3827,7 +3827,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.815062284523947">
+        <plan selected="yes" score="-16.131245671532334">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3877,7 +3877,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.836885020163933">
+        <plan selected="yes" score="-16.153068407172334">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3927,7 +3927,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.86182704391704">
+        <plan selected="yes" score="-16.178010430925426">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -3977,7 +3977,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.88365285029881">
+        <plan selected="yes" score="-16.199836237307196">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4027,7 +4027,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.905480090328965">
+        <plan selected="yes" score="-16.221663477337366">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4077,7 +4077,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.927308764412217">
+        <plan selected="yes" score="-16.243492151420604">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4127,7 +4127,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.949138872953405">
+        <plan selected="yes" score="-16.265322259961792">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4177,7 +4177,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.974089325427762">
+        <plan selected="yes" score="-16.29027271243615">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4227,7 +4227,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-25.995922509171493">
+        <plan selected="yes" score="-16.31210589617988">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4277,7 +4277,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.017757128646707">
+        <plan selected="yes" score="-16.333940515655094">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4327,7 +4327,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.039593184258976">
+        <plan selected="yes" score="-16.355776571267363">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4377,7 +4377,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.061430676414012">
+        <plan selected="yes" score="-16.3776140634224">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4427,7 +4427,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.08638956985817">
+        <plan selected="yes" score="-16.402572956866557">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4477,7 +4477,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.108230141686263">
+        <plan selected="yes" score="-16.42441352869465">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4527,7 +4527,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.130072151333437">
+        <plan selected="yes" score="-16.446255538341823">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4577,7 +4577,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.15191559920614">
+        <plan selected="yes" score="-16.468098986214528">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4627,7 +4627,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.17376048571103">
+        <plan selected="yes" score="-16.48994387271943">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4677,7 +4677,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.198727832400323">
+        <plan selected="yes" score="-16.51491121940871">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4727,7 +4727,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.220575803058495">
+        <plan selected="yes" score="-16.536759190066896">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4777,7 +4777,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.242425213627946">
+        <plan selected="yes" score="-16.558608600636347">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4827,7 +4827,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.264276064516004">
+        <plan selected="yes" score="-16.58045945152439">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4877,7 +4877,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.28612835613019">
+        <plan selected="yes" score="-16.60231174313858">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4927,7 +4927,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.311104168366683">
+        <plan selected="yes" score="-16.62728755537507">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
@@ -4977,7 +4977,7 @@
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
-        <plan selected="yes" score="-26.33295954862419">
+        <plan selected="yes" score="-16.649142935632575">
             <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
             <leg mode="walk" dep_time="06:00:00" trav_time="02:10:00">
                 <attributes>
