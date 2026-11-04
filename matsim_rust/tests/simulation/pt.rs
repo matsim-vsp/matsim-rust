@@ -33,7 +33,8 @@ fn pt_tutorial_matches_expected_events() {
 
 /// Runs `pt_tutorial` with schedule-based transit and compares the events with the expected ones.
 /// These match SBB's deterministic transit engine in MATSim, apart from its door times (boarding and
-/// alighting one second after the arrival, the departure three seconds later) and the tick per leg.
+/// alighting one second after the arrival, the departure three seconds later), the tick per leg and
+/// the vehicle ids: the tutorial's departures share two vehicles, and each gets a copy of its own.
 /// With two partitions, stop 3 is on its own partition, so that the vehicles change partitions. METIS
 /// would put the whole transit network of the tutorial on one partition.
 ///
@@ -78,6 +79,10 @@ fn pt_tutorial_schedule_based_matches_expected_events() {
             &output_dir.join("output_experienced_plans.xml.zst"),
             &mut Garage::new(),
         ));
+        // The tutorial's departures share two vehicles, so each gets a copy of its own.
+        let transit_vehicles =
+            Garage::from_file(&output_dir.join("output_transitVehicles.xml.zst"));
+        assert_eq!(100, transit_vehicles.vehicles.len());
     }
     // Loaded after the runs, so that it doesn't change the order in which ids are created.
     let expected = Population::from_file(

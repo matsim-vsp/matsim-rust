@@ -270,6 +270,8 @@ pub struct ScenarioCore {
     pub garage: Arc<Garage>,
     /// The transit schedule with all data of its files, also with teleported transit.
     pub transit_schedule: Arc<TransitSchedule>,
+    /// The transit vehicles, which the controller writes to the output with the schedule.
+    pub transit_garage: Arc<Garage>,
     /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
     pub facilities: Arc<ActivityFacilities>,
     pub config: Arc<Config>,
@@ -328,6 +330,7 @@ impl From<Scenario> for ControllerScenario {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
                 transit_schedule,
+                transit_garage: Arc::new(scenario.transit_garage),
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
             },

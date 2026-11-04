@@ -381,7 +381,9 @@ impl ActivityLogic for FinishedDriver {
 mod tests {
     use super::{PlannedDriver, WaitingDriver};
     use crate::simulation::agents::TransitDriverAgent;
-    use crate::simulation::pt::schedule::TransitSimSchedule;
+    use crate::simulation::pt::schedule::{
+        TransitSimSchedule, give_each_departure_its_own_vehicle,
+    };
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
     use crate::simulation::scenario::transit::{DepartureIndex, TransitSchedule};
@@ -397,9 +399,11 @@ mod tests {
     /// stop 2a (arrival 200 s, departure 240 s) and stop 3 (arrival 540 s).
     fn tutorial_departure() -> (TransitSimSchedule, DepartureIndex) {
         let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
-        let schedule =
+        let mut schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
-        let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        let mut garage =
+            Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        give_each_departure_its_own_vehicle(&mut schedule, &mut garage);
         let schedule = TransitSimSchedule::build(
             Arc::new(schedule),
             &network,
@@ -498,7 +502,7 @@ mod tests {
         assert_eq!("11", leg.departure_link().external());
         assert_eq!(None, leg.routing_mode());
         let driver = leg.try_into_transit_driver().unwrap();
-        assert_eq!("tr_1", driver.vehicle().external());
+        assert_eq!("tr_1_Blue Line_1to3_01", driver.vehicle().external());
         assert_eq!(("1", SIX), state(&driver));
 
         let finished = driver

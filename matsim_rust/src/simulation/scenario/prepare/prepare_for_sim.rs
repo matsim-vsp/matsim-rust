@@ -1,6 +1,7 @@
 use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
-use crate::simulation::config::ModalLinkSelection;
+use crate::simulation::config::{ModalLinkSelection, TransitSimulation};
 use crate::simulation::id::Id;
+use crate::simulation::pt::schedule::give_each_departure_its_own_vehicle;
 use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::{InternalActivity, InternalPlan};
@@ -14,8 +15,10 @@ use thiserror::Error;
 ///
 /// 1. The facilities are connected to the network, see [`prepare_facilities`].
 /// 2. Every activity gets a link and a coordinate, see [`resolve_activity_locations`].
+/// 3. With schedule-based transit, each departure gets a vehicle of its own, see
+///    [`give_each_departure_its_own_vehicle`].
 ///
-/// Both steps process facilities and persons in parallel.
+/// The first two steps process facilities and persons in parallel.
 pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareError> {
     let selection = scenario.config.facilities().modal_link_selection;
     prepare_facilities(&mut scenario.facilities, &scenario.network, selection);
@@ -39,6 +42,16 @@ pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareErro
             })
         })
         .collect();
+
+    if matches!(
+        scenario.config.transit().simulation,
+        TransitSimulation::ScheduleBased
+    ) {
+        give_each_departure_its_own_vehicle(
+            &mut scenario.transit_schedule,
+            &mut scenario.transit_garage,
+        );
+    }
 
     PrepareError::from_issues(issues)
 }

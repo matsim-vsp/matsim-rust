@@ -537,6 +537,7 @@ mod tests {
         VehicleArrivesAtFacilityEventBuilder,
     };
     use crate::simulation::pt::driver::PlannedDriver;
+    use crate::simulation::pt::schedule::give_each_departure_its_own_vehicle;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::population::{InternalPlanElement, InternalRoute, Population};
     use crate::simulation::scenario::transit::DepartureIndex;
@@ -590,9 +591,11 @@ mod tests {
     /// `1to3`, which leaves stop 1 at 06:00, halts at stop 2a and reaches stop 3 at 06:09.
     fn tutorial() -> (Arc<TransitSimSchedule>, Arc<Network>, DepartureIndex) {
         let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
-        let schedule =
+        let mut schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
-        let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        let mut garage =
+            Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        give_each_departure_its_own_vehicle(&mut schedule, &mut garage);
         let transit = TransitSimSchedule::build(
             Arc::new(schedule),
             &network,
