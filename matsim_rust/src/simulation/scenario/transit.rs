@@ -1,7 +1,7 @@
 use crate::simulation::InternalAttributes;
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_transit::{load_from_proto, write_to_proto};
-use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
+use crate::simulation::io::xml::attributes::IOAttributes;
 use crate::simulation::io::xml::transit;
 use crate::simulation::io::xml::transit::{
     IODeparture, IODepartures, IOMinimalTransferRelation, IOMinimalTransferTimes, IONetworkRoute,
@@ -76,6 +76,7 @@ pub struct TransitRouteStop {
     pub allow_boarding: bool,
     pub allow_alighting: bool,
     pub minimum_stop_duration: Duration,
+    pub attributes: InternalAttributes,
 }
 
 impl TransitRouteStop {
@@ -587,6 +588,7 @@ impl From<crate::generated::transit::TransitRouteStop> for TransitRouteStop {
             allow_boarding: wire.allow_boarding,
             allow_alighting: wire.allow_alighting,
             minimum_stop_duration: Duration::from_nanos(wire.minimum_stop_duration_ns),
+            attributes: InternalAttributes::from(&wire.attributes),
         }
     }
 }
@@ -679,54 +681,71 @@ impl From<IOTransitRoute> for LoadedRoute {
     }
 }
 
+/// The flags of a stop, which older versions of this code wrote into the stop's attributes instead
+/// of as XML attributes.
+const LEGACY_STOP_FLAGS: [&str; 4] = [
+    "allowBoarding",
+    "allowAlighting",
+    "awaitDeparture",
+    "minimumStopDuration",
+];
+
 fn route_stop_from_io(io: IORouteStop) -> (Id<TransitStopFacility>, TransitRouteStop) {
+    // The flags are XML attributes, as in MATSim's DTD. Files that older versions of this code
+    // wrote have them in the stop's attributes instead. Missing flags get the DTD's defaults.
     let await_departure = io
         .await_departure
         .or_else(|| find_bool_attr(&io.attributes, "awaitDeparture"));
+    let allow_boarding = io
+        .allow_boarding
+        .or_else(|| find_bool_attr(&io.attributes, "allowBoarding"))
+        .unwrap_or(true);
+    let allow_alighting = io
+        .allow_alighting
+        .or_else(|| find_bool_attr(&io.attributes, "allowAlighting"))
+        .unwrap_or(true);
+    let minimum_stop_duration = match &io.minimum_stop_duration {
+        Some(value) => parse_duration_or_secs(value).unwrap_or_else(|| {
+            panic!("Invalid transit duration value for minimumStopDuration: {value}")
+        }),
+        None => find_duration_attr(&io.attributes, "minimumStopDuration").unwrap_or_default(),
+    };
+    // The legacy flags are fields of the stop, so they are not kept as attributes as well.
+    let attributes = io
+        .attributes
+        .map(|mut attrs| {
+            attrs
+                .attributes
+                .retain(|attr| !LEGACY_STOP_FLAGS.contains(&attr.name.as_str()));
+            InternalAttributes::from(attrs)
+        })
+        .unwrap_or_default();
 
     let stop = TransitRouteStop {
         arrival_offset: parse_duration_opt(&io.arrival_offset),
         departure_offset: parse_duration_opt(&io.departure_offset),
         await_departure,
-        allow_boarding: find_bool_attr(&io.attributes, "allowBoarding").unwrap_or(true),
-        allow_alighting: find_bool_attr(&io.attributes, "allowAlighting").unwrap_or(true),
-        minimum_stop_duration: find_duration_attr(&io.attributes, "minimumStopDuration")
-            .unwrap_or_default(),
+        allow_boarding,
+        allow_alighting,
+        minimum_stop_duration,
+        attributes,
     };
     (Id::create(&io.ref_id), stop)
 }
 
 fn io_route_stop(facility: &Id<TransitStopFacility>, stop: &TransitRouteStop) -> IORouteStop {
-    let mut attributes = Vec::new();
-    attributes.push(IOAttribute::new_with_class(
-        "allowBoarding".to_string(),
-        "java.lang.Boolean".to_string(),
-        stop.allow_boarding.to_string(),
-    ));
-    attributes.push(IOAttribute::new_with_class(
-        "allowAlighting".to_string(),
-        "java.lang.Boolean".to_string(),
-        stop.allow_alighting.to_string(),
-    ));
-    if let Some(await_departure) = stop.await_departure {
-        attributes.push(IOAttribute::new_with_class(
-            "awaitDeparture".to_string(),
-            "java.lang.Boolean".to_string(),
-            await_departure.to_string(),
-        ));
-    }
-    attributes.push(IOAttribute::new_with_class(
-        "minimumStopDuration".to_string(),
-        "java.lang.Integer".to_string(),
-        stop.minimum_stop_duration.as_secs().to_string(),
-    ));
-
+    // As MATSim's TransitScheduleWriterV2, write the flags only if they differ from the DTD's
+    // defaults. MATSim always writes awaitDeparture; here it is optional and written if it is set.
     IORouteStop {
         ref_id: facility.external().to_string(),
         arrival_offset: format_duration_opt(stop.arrival_offset),
         departure_offset: format_duration_opt(stop.departure_offset),
+        allow_boarding: (!stop.allow_boarding).then_some(false),
+        allow_alighting: (!stop.allow_alighting).then_some(false),
         await_departure: stop.await_departure,
-        attributes: Some(IOAttributes { attributes }),
+        minimum_stop_duration: (!stop.minimum_stop_duration.is_zero())
+            .then(|| format_duration(stop.minimum_stop_duration)),
+        attributes: IOAttributes::from_internal_none_if_empty(&stop.attributes),
     }
 }
 
@@ -804,7 +823,12 @@ fn find_bool_attr(attributes: &Option<IOAttributes>, name: &str) -> Option<bool>
 }
 
 fn find_duration_attr(attributes: &Option<IOAttributes>, name: &str) -> Option<Duration> {
-    let value = attributes.as_ref()?.find(name)?;
+    parse_duration_or_secs(attributes.as_ref()?.find(name)?)
+}
+
+/// Parses a duration given as time (`hh:mm:ss`) or as seconds. Negative and non-finite seconds
+/// are no duration.
+fn parse_duration_or_secs(value: &str) -> Option<Duration> {
     parse_duration(value).or_else(|| {
         value
             .parse::<u64>()
@@ -814,18 +838,21 @@ fn find_duration_attr(attributes: &Option<IOAttributes>, name: &str) -> Option<D
                 value
                     .parse::<f64>()
                     .ok()
-                    .map(|v| Duration::from_secs_f64(v))
+                    .and_then(|v| Duration::try_from_secs_f64(v).ok())
             })
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
+    use crate::simulation::io::xml::transit::IORouteStop;
     use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::transit::{
-        TransitDeparture, TransitLine, TransitRoute, TransitSchedule, TransitStopFacility,
-        format_duration, format_time, parse_duration, parse_time,
+        TransitDeparture, TransitLine, TransitRoute, TransitRouteStop, TransitSchedule,
+        TransitStopFacility, format_duration, format_time, io_route_stop, parse_duration,
+        parse_time, route_stop_from_io,
     };
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
@@ -961,5 +988,72 @@ mod tests {
         let parsed = parse_duration("00:05:00.123456789").unwrap();
         assert_eq!(Duration::from_nanos(300_123_456_789), parsed);
         assert_eq!("00:05:00.123456789", format_duration(parsed));
+    }
+
+    #[deterministic_id_test]
+    fn route_stop_flags_are_written_as_xml_attributes() {
+        let facility = Id::<TransitStopFacility>::create("facility");
+        let mut attributes = InternalAttributes::default();
+        attributes.insert("platform", "2");
+        let stop = TransitRouteStop {
+            arrival_offset: Some(Duration::from_secs(60)),
+            departure_offset: Some(Duration::from_secs(90)),
+            await_departure: Some(true),
+            allow_boarding: false,
+            allow_alighting: false,
+            minimum_stop_duration: Duration::from_secs(30),
+            attributes,
+        };
+
+        let io = io_route_stop(&facility, &stop);
+        assert_eq!(Some(false), io.allow_boarding);
+        assert_eq!(Some(false), io.allow_alighting);
+        assert_eq!(Some(true), io.await_departure);
+        assert_eq!(Some("00:00:30"), io.minimum_stop_duration.as_deref());
+        let io_attributes = io.attributes.as_ref().unwrap();
+        assert_eq!(1, io_attributes.attributes.len());
+        assert_eq!(Some("2"), io_attributes.find("platform"));
+        assert_eq!((facility.clone(), stop), route_stop_from_io(io));
+
+        // Flags with the DTD's defaults are not written.
+        let default_stop = TransitRouteStop {
+            arrival_offset: None,
+            departure_offset: Some(Duration::ZERO),
+            await_departure: None,
+            allow_boarding: true,
+            allow_alighting: true,
+            minimum_stop_duration: Duration::ZERO,
+            attributes: InternalAttributes::default(),
+        };
+        let io = io_route_stop(&facility, &default_stop);
+        assert_eq!(None, io.allow_boarding);
+        assert_eq!(None, io.allow_alighting);
+        assert_eq!(None, io.await_departure);
+        assert_eq!(None, io.minimum_stop_duration);
+        assert_eq!(None, io.attributes);
+        assert_eq!((facility, default_stop), route_stop_from_io(io));
+    }
+
+    #[deterministic_id_test]
+    fn route_stop_reads_legacy_flags_from_attributes() {
+        let xml = "<stop refId=\"s1\" departureOffset=\"00:00:00\">\
+                       <attributes>\
+                           <attribute name=\"allowBoarding\" class=\"java.lang.Boolean\">false</attribute>\
+                           <attribute name=\"allowAlighting\" class=\"java.lang.Boolean\">true</attribute>\
+                           <attribute name=\"awaitDeparture\" class=\"java.lang.Boolean\">true</attribute>\
+                           <attribute name=\"minimumStopDuration\" class=\"java.lang.Integer\">30</attribute>\
+                           <attribute name=\"platform\" class=\"java.lang.String\">2</attribute>\
+                       </attributes>\
+                   </stop>";
+        let io: IORouteStop = quick_xml::de::from_str(xml).unwrap();
+
+        let (_, stop) = route_stop_from_io(io);
+        assert!(!stop.allow_boarding);
+        assert!(stop.allow_alighting);
+        assert_eq!(Some(true), stop.await_departure);
+        assert_eq!(Duration::from_secs(30), stop.minimum_stop_duration);
+        // Only the attribute that is not a flag is kept.
+        assert_eq!(Some(String::from("2")), stop.attributes.get("platform"));
+        assert_eq!(1, stop.attributes.iter().count());
     }
 }
