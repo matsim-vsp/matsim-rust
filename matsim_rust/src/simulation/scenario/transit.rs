@@ -345,6 +345,11 @@ impl TransitSchedule {
         &self.departures[index.0 as usize]
     }
 
+    /// The departure, e.g. to give it another vehicle while the scenario is prepared.
+    pub(crate) fn departure_mut(&mut self, index: DepartureIndex) -> &mut TransitDeparture {
+        &mut self.departures[index.0 as usize]
+    }
+
     /// The route which the departure serves.
     pub fn departure_route(&self, index: DepartureIndex) -> RouteIndex {
         self.departure_routes[index.0 as usize]

@@ -37,9 +37,21 @@ pub(crate) fn write_to_xml(garage: &Garage, path: &Path) {
         })
         .collect();
 
+    // Sorted by id, so that the file does not depend on the order of the map.
+    let mut vehicles: Vec<_> = garage
+        .vehicles
+        .values()
+        .map(|vehicle| IOVehicle {
+            id: vehicle.id.external().to_owned(),
+            vehicle_type: vehicle.vehicle_type.external().to_owned(),
+            attributes: IOAttributes::from_internal_none_if_empty(&vehicle.attributes),
+        })
+        .collect();
+    vehicles.sort_by(|a, b| a.id.cmp(&b.id));
+
     let io_vehicles = IOVehicleDefinitions {
         veh_types,
-        vehicles: vec![],
+        vehicles,
     };
 
     xml::write_to_file(

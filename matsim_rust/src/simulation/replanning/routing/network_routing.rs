@@ -511,6 +511,7 @@ mod tests {
                 network,
                 garage: Arc::new(Garage::default()),
                 transit_schedule: Arc::default(),
+                transit_garage: Arc::default(),
                 facilities: Arc::new(ActivityFacilities::default()),
                 config: Arc::new(Config::default()),
             },

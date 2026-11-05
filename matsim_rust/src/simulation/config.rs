@@ -553,13 +553,13 @@ pub struct Vehicles {
 pub struct Transit {
     pub schedule_path: Option<PathBuf>,
     /// Transit vehicles and their types. Only needed if `simulation` is
-    /// [`TransitSimulation::ScheduleBased`].
+    /// [`TransitSimulation::ScheduleBasedTeleportation`].
     #[serde(default)]
     pub vehicles_path: Option<PathBuf>,
     #[serde(default)]
     pub simulation: TransitSimulation,
     /// Leg modes whose legs ride transit vehicles if `simulation` is
-    /// [`TransitSimulation::ScheduleBased`], like MATSim's `transit.transitModes`.
+    /// [`TransitSimulation::ScheduleBasedTeleportation`], like MATSim's `transit.transitModes`.
     #[serde(default = "default_transit_passenger_modes")]
     pub passenger_modes: Vec<String>,
 }
@@ -585,15 +585,27 @@ pub enum TransitSimulation {
     /// Transit legs are teleported with the travel time of their route.
     #[default]
     Teleported,
-    /// Transit vehicles move from stop to stop according to the schedule, without using the
-    /// network, and passengers board and alight them.
-    ScheduleBased,
+    /// Transit vehicles jump from stop to stop according to the schedule, without using the
+    /// network, and passengers board and alight them. There are no vehicle blocks (`Umlauf`), so
+    /// each departure gets a vehicle of its own.
+    ScheduleBasedTeleportation,
+}
+
+impl TransitSimulation {
+    /// Whether each departure needs a vehicle of its own. Without vehicle blocks (`Umlauf`), a
+    /// vehicle cannot serve several departures one after the other.
+    pub fn needs_vehicle_per_departure(self) -> bool {
+        match self {
+            Self::Teleported => false,
+            Self::ScheduleBasedTeleportation => true,
+        }
+    }
 }
 
 fn parse_transit_simulation(value: &str) -> TransitSimulation {
     match value.to_lowercase().replace(['-', '_'], "").as_str() {
         "teleported" => TransitSimulation::Teleported,
-        "schedulebased" => TransitSimulation::ScheduleBased,
+        "schedulebasedteleportation" => TransitSimulation::ScheduleBasedTeleportation,
         _ => panic!("Invalid transit simulation: {}", value),
     }
 }
@@ -1021,6 +1033,11 @@ pub struct AgentParameter {
     pub waiting: f64,                   // utils/hour
     pub marginal_utility_of_money: f64, // utils/money
     pub aborted_plan_score: f64,        // utils/hour
+    /// The marginal utility of waiting for a transit vehicle, in utils/hour. Without a value, it
+    /// is the marginal utility of traveling by `pt`, so that waiting costs as much as riding, like
+    /// MATSim's `waitingPt`.
+    pub waiting_pt: Option<f64>, // utils/hour
+    pub utility_of_line_switch: f64,    // utils
 }
 
 impl Default for AgentParameter {
@@ -1033,6 +1050,8 @@ impl Default for AgentParameter {
             waiting: -0.0,
             marginal_utility_of_money: 1.0,
             aborted_plan_score: -18.0,
+            waiting_pt: None,
+            utility_of_line_switch: -1.0,
         }
     }
 }
@@ -2203,6 +2222,8 @@ mod tests {
                 waiting: -3.0
                 marginal_utility_of_money: 2.0
                 aborted_plan_score: -24.0
+                waiting_pt: -9.0
+                utility_of_line_switch: -0.5
             fraction_of_iterations_to_start_score_msa: 0.75
         "#;
 
@@ -2232,6 +2253,8 @@ mod tests {
                 waiting: -3.0,
                 marginal_utility_of_money: 2.0,
                 aborted_plan_score: -24.0,
+                waiting_pt: Some(-9.0),
+                utility_of_line_switch: -0.5,
             }],
             fraction_of_iterations_to_start_score_msa: Some(0.75),
         };
@@ -2446,7 +2469,7 @@ modules:
     type: Transit
     schedule_path: schedule.xml.gz
     vehicles_path: transitVehicles.xml.gz
-    simulation: ScheduleBased
+    simulation: ScheduleBasedTeleportation
 "#;
 
         let parsed_config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
@@ -2456,7 +2479,10 @@ modules:
             Some(PathBuf::from("transitVehicles.xml.gz")),
             transit.vehicles_path
         );
-        assert_eq!(TransitSimulation::ScheduleBased, transit.simulation);
+        assert_eq!(
+            TransitSimulation::ScheduleBasedTeleportation,
+            transit.simulation
+        );
         assert_eq!(vec!["pt".to_string()], transit.passenger_modes);
     }
 
@@ -2466,7 +2492,7 @@ modules:
         config.apply_overrides(&[
             (
                 "transit.simulation".to_string(),
-                "schedule_based".to_string(),
+                "schedule_based_teleportation".to_string(),
             ),
             (
                 "transit.vehicles_path".to_string(),
@@ -2475,7 +2501,7 @@ modules:
         ]);
 
         assert_eq!(
-            TransitSimulation::ScheduleBased,
+            TransitSimulation::ScheduleBasedTeleportation,
             config.transit().simulation
         );
         assert_eq!(

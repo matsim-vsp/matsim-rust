@@ -131,7 +131,10 @@ Scoring uses the public `PlanScorer` trait and reads only the experienced plan. 
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. It scores activity durations with
 MATSim's default `typicalDurationScoreComputation = relative`, i.e. a zero-utility duration of
 `typicalDuration * exp(-1)`, so an activity of typical duration scores `performing * typicalDuration`. MATSim's
-deprecated `uniform` computation is not supported. The alternative
+deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelLegScoring`, it scores the time until
+boarding of a leg with a transit route with `waiting_pt` instead of the marginal utility of traveling, by default with
+the one of traveling by `pt`, and adds `utility_of_line_switch` for each leg of a `transit.passenger_modes` mode after
+the first one in a trip. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
 
@@ -185,12 +188,11 @@ The Queue link dynamics deviate from QSim in the following points:
 
 ### Schedule-Based Transit
 
-By default, transit legs are teleported with the travel time of their route. With `transit.simulation: ScheduleBased`,
-transit vehicles move from stop to stop according to the schedule instead, and passengers wait at stops, board and
-alight, as in SBB's deterministic transit engine for MATSim (`SBBTransitQSimEngine`). The transit vehicles are read from
-`transit.vehicles_path`. The legs of `transit.passenger_modes` (default `pt`) ride them; these modes must not be main
-modes. Backpacking cannot build experienced plans of transit legs yet, so this setting requires `scoring.mode:
-Disabled`.
+By default, transit legs are teleported with the travel time of their route. With
+`transit.simulation: ScheduleBasedTeleportation`, transit vehicles jump from stop to stop according to the schedule
+instead, without simulation on the network, and passengers wait at stops, board and alight, as in SBB's deterministic transit
+engine for MATSim (`SBBTransitQSimEngine`). The transit vehicles are read from `transit.vehicles_path`. The legs of
+`transit.passenger_modes` (default `pt`) ride them; these modes must not be main modes.
 
 `TransitSchedule` holds all data of the schedule files, independent of the simulation: routes and departures in dense
 vectors, routes sorted by the external ids of line and route, the routes of a line and the departures of a route
@@ -204,8 +206,18 @@ population is loaded, so that the ids of persons do not depend on transit. `Cont
 and hands it to each `MobsimScenarioPartition`, so replanning and plan preparation only see the `TransitSchedule`. The
 transit engine processes stops in the order of their ids. Drivers have the external ids
 `pt_<line>_<route>_<departure>` as in SBB's engine, and their ids are created in the order of these external ids.
-Building it panics if the schedule cannot be simulated, e.g. if a stop has no link or a vehicle serves two departures at
-the same time. Plan preparation requires no travel times for transit legs, but a transit route that the schedule serves.
+Building it panics if the schedule cannot be simulated, e.g. if a stop has no link or, with
+`ScheduleBasedTeleportation`, a vehicle serves several departures. Plan preparation requires no travel times for transit
+legs, but a transit route that the schedule serves.
+
+`ScheduleBasedTeleportation` cannot simulate vehicle blocks (`Umlauf` in MATSim), in which one vehicle serves several
+departures one after the other. So each departure has a vehicle of its own, and the id of a vehicle in the events
+identifies one departure. `prepare_for_sim` replaces a vehicle that serves several departures by a copy for each of
+them, with the same type and the id `<vehicle>_<line>_<route>_<departure>`; vehicles that serve one departure keep their
+id. `TransitSimulation::needs_vehicle_per_departure` decides this, so that a later simulation with vehicle blocks, e.g.
+on the links of the network, can let vehicles serve several departures. The controller writes the schedule and the
+transit vehicles with the copies to `output_transitSchedule` and `output_transitVehicles`, so that the output matches
+the events and can be used as input again.
 
 Each departure has a driver, an agent without a person. Like the drivers of MATSim's transit engines, it passes through
 three phases: it waits in a `pt interaction` activity at the start link of its route until the departure time, drives
@@ -218,13 +230,13 @@ A driver that is still waiting when the mobsim ends becomes stuck, as in MATSim'
 The `TransitEngine` is part of the `LegEngine` and runs after the network moves and before the messages are exchanged.
 The `LegEngine` passes it every agent that offers the role of a driver (`TransitDriverLogic`), whatever its mode, and
 the legs of passenger modes that offer the role of a passenger (`PassengerLogic`). When a driver's leg starts, the
-engine creates a `TransitVehicle` for it. There are no vehicle blocks (`Umlauf` in MATSim): a vehicle that serves
-several departures is created anew for each of them. When its activity ends, the driver copies its departure from the
-schedule into a plan of its own and no longer depends on the schedule. It knows its stops and tells the engine when the
-vehicle arrives and departs: at the departure time plus the arrival offset, but not before the earliest arrival the
-engine allows, and at the departure time plus the departure offset, but not before the arrival. At the last stop, the
-driver leaves the vehicle and ends its leg; drivers that are still in a vehicle when the mobsim ends are dropped, as in
-SBB's engine.
+engine creates a `TransitVehicle` for it. Each driver serves one departure; drivers that serve the departures of a
+vehicle block one after the other could come with a simulation on the network. When its activity ends, the driver copies
+its departure from the schedule into a plan of its own and no longer depends on the schedule. It knows its stops and
+tells the engine when the vehicle arrives and departs: at the departure time plus the arrival offset, but not before the
+earliest arrival the engine allows, and at the departure time plus the departure offset, but not before the arrival. At
+the last stop, the driver leaves the vehicle and ends its leg; drivers that are still in a vehicle when the mobsim ends
+are dropped, as in SBB's engine.
 
 Passengers are agents with the role `PassengerLogic`. The engine asks a riding passenger at each stop whether it
 alights, and a waiting passenger about each vehicle at its stop whether it boards. Plan-based agents follow MATSim's
@@ -244,6 +256,17 @@ partitions neighbors. Like teleported agents, such vehicles are only received wh
 neighbors, and the engine panics if one arrives after it was due. Enable `computational_setup.global_sync` if this
 happens.
 
+Backpacking builds the experienced plans of transit legs like MATSim's `EventsToLegs`. It keeps the transit vehicles
+that are active on its partition: `TransitDriverStarts` gives the line and the route, and `VehicleArrivesAtFacility` the
+stop. Since each departure has a vehicle of its own, the id of the vehicle in an event identifies it. A passenger who
+enters a vehicle gets a PT route with the vehicle's stop as access stop and the time of the event as boarding time; when
+the passenger leaves the vehicle, its stop is the egress stop. The distance is that of `RouteUtils.calcDistance`: the
+lengths of the links of the route's network route after the access link up to and including the egress link (`calc_transit_distance`). A
+partition that receives a vehicle takes the line and the route from its driver. Drivers
+have no person and thus no backpack, so backpacking ignores their events. It knows the drivers of the active vehicles;
+other drivers, e.g. those who still wait for their departure when the mobsim ends and get stuck, are rare and searched
+in the schedule.
+
 Deviations from SBB's engine:
 
 - A vehicle needs at least one tick from one stop to the next, so that the result does not depend on whether the next
@@ -251,11 +274,14 @@ Deviations from SBB's engine:
 - Boarding and alighting take no time. With MATSim's default `ComplexTransitStopHandler`, SBB boards and alights one
   second after the arrival and departs up to three seconds later, even with zero access and egress times.
 - Vehicles have no capacity, `delay` is always 0, and there are no chained departures and no link events.
+- SBB keeps the ids of vehicles that serve several departures. matsim-rust gives each departure a copy of its own.
+- Experienced transit legs have no attributes `enterVehicleTime` and `vehicleId`, like the other experienced legs of
+  matsim-rust.
 - Passengers who are still in a vehicle at the end of the mobsim report the link of their access stop in the stuck
   event, SBB the link of the next stop.
 
-Apart from these deviations and the tick per leg, the events of `pt_tutorial` match those of SBB's engine
-(`tests/simulation/pt.rs`).
+Apart from these deviations and the tick per leg, the events of `pt_tutorial` match those of SBB's engine, and so do
+the experienced plan and its score (`tests/simulation/pt.rs`).
 
 ### External Services
 

@@ -923,6 +923,7 @@ mod tests {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
             transit_schedule: Arc::default(),
+            transit_garage: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
@@ -970,6 +971,7 @@ mod tests {
             network: Arc::new(Network::new()),
             garage: Arc::new(Garage::default()),
             transit_schedule: Arc::default(),
+            transit_garage: Arc::default(),
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),

@@ -15,6 +15,7 @@ use crate::simulation::messaging::partition_change::{
 };
 use crate::simulation::pt::schedule::TransitSimSchedule;
 use crate::simulation::scenario::transit::TransitStopFacility;
+use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::TransitVehicle;
@@ -66,11 +67,10 @@ enum Doors {
     Boarding { complete: bool },
 }
 
-/// The departure of the vehicle with the given `vehicle_driver_reference`, which halts at `stop`.
-/// Each departure has its own driver, so the order identifies the vehicle even if two copies of the same vehicle halt at the stop.
+/// The departure of `vehicle`, which halts at `stop`. Each departure has a vehicle of its own.
 struct DepartureTracker {
     stop: Id<TransitStopFacility>,
-    vehicle_driver_reference: u64,
+    vehicle: Id<InternalVehicle>,
     time: SimTime,
 }
 
@@ -253,11 +253,10 @@ impl TransitEngine {
 
             let due = DepartureTracker {
                 stop: stop.clone(),
-                vehicle_driver_reference: order(&vehicle),
+                vehicle: vehicle.id().clone(),
                 time: vehicle.driver().next_time(),
             };
-            let due_order = due.vehicle_driver_reference;
-            self.departing.add_with_order(due, now, due_order);
+            self.departing.add_with_order(due, now, order(&vehicle));
             self.stops
                 .get_mut(&stop)
                 .expect("Vehicles only halt at stops that a route serves.")
@@ -358,19 +357,17 @@ impl TransitEngine {
                 .halting_vehicles;
             let position = halting_vehicle
                 .iter()
-                .position(|halting_vehicle| {
-                    order(&halting_vehicle.vehicle) == due.vehicle_driver_reference
-                })
+                .position(|halting_vehicle| halting_vehicle.vehicle.id() == &due.vehicle)
                 .expect("A vehicle that is due to depart halts at its stop.");
             let candidate = &halting_vehicle[position];
             let ready = candidate.doors == Doors::Boarding { complete: true }
                 && candidate.doors_used_until <= now;
             if !ready {
+                let later_order = order(&candidate.vehicle);
                 let later_departure = DepartureTracker {
                     time: candidate.doors_used_until.max(next),
                     ..due
                 };
-                let later_order = later_departure.vehicle_driver_reference;
                 self.departing
                     .add_with_order(later_departure, now, later_order);
                 continue;
@@ -563,13 +560,16 @@ impl TransitEngine {
 mod tests {
     use super::TransitEngine;
     use crate::simulation::agents::{LegAgent, PassengerAgent};
+    use crate::simulation::config::TransitSimulation;
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{
         PersonEntersVehicleEvent, PersonLeavesVehicleEvent, VehicleArrivesAtFacilityEvent,
     };
     use crate::simulation::id::Id;
     use crate::simulation::pt::driver::PlannedDriver;
-    use crate::simulation::pt::schedule::TransitSimSchedule;
+    use crate::simulation::pt::schedule::{
+        TransitSimSchedule, give_each_departure_its_own_vehicle,
+    };
     use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::Population;
     use crate::simulation::scenario::transit::TransitSchedule;
@@ -585,6 +585,8 @@ mod tests {
     /// The tutorial's route 1to3 departs at 06:00, 06:15 and 06:30 from stop 1, halts at stop 2a
     /// from 3:20 to 4:00 minutes later and reaches stop 3 after 9 minutes.
     const SIX: u64 = 6 * 3600;
+    /// The vehicle of the 06:15 departure of route 1to3, a copy of the shared vehicle `tr_2`.
+    const DEPARTURE_0615: &str = "tr_2_Blue Line_1to3_02";
 
     type Exchange = (u64, &'static str, String, String);
     type Exchanges = Rc<RefCell<Vec<Exchange>>>;
@@ -647,14 +649,17 @@ mod tests {
                 network.get_link_mut(&Id::get_from_ext(link)).partition = 1;
             }
         }
-        let schedule =
+        let mut schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
-        let garage = Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        let mut garage =
+            Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
+        give_each_departure_its_own_vehicle(&mut schedule, &mut garage);
         Arc::new(TransitSimSchedule::build(
             Arc::new(schedule),
             &network,
             &garage,
             &Population::default(),
+            TransitSimulation::ScheduleBasedTeleportation,
         ))
     }
 
@@ -713,8 +718,8 @@ mod tests {
             assert_eq!(
                 *exchanges.borrow(),
                 [
-                    exchange(SIX + 900, "enters", "1", "tr_2"),
-                    exchange(SIX + 1440, "leaves", "1", "tr_2"),
+                    exchange(SIX + 900, "enters", "1", DEPARTURE_0615),
+                    exchange(SIX + 1440, "leaves", "1", DEPARTURE_0615),
                 ]
             );
             let [(tick, passenger)] = alighted.as_slice() else {
@@ -762,10 +767,10 @@ mod tests {
         assert_eq!(
             boardings,
             [
-                exchange(SIX + 900, "enters", "1", "tr_2"),
-                exchange(SIX + 900, "enters", "2", "tr_2"),
-                exchange(SIX + 1110, "enters", "4", "tr_2"),
-                exchange(SIX + 1800, "enters", "3", "tr_1"),
+                exchange(SIX + 900, "enters", "1", DEPARTURE_0615),
+                exchange(SIX + 900, "enters", "2", DEPARTURE_0615),
+                exchange(SIX + 1110, "enters", "4", DEPARTURE_0615),
+                exchange(SIX + 1800, "enters", "3", "tr_1_Blue Line_1to3_03"),
             ]
         );
     }

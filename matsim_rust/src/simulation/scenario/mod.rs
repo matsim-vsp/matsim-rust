@@ -6,7 +6,7 @@ pub mod transit;
 pub mod trip_structure_utils;
 pub mod vehicles;
 
-use crate::simulation::config::{Config, ScoringMode, TransitSimulation};
+use crate::simulation::config::{Config, TransitSimulation};
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::sim_network::SimNetworkPartition;
 use crate::simulation::pt::schedule::TransitSimSchedule;
@@ -270,6 +270,8 @@ pub struct ScenarioCore {
     pub garage: Arc<Garage>,
     /// The transit schedule with all data of its files, also with teleported transit.
     pub transit_schedule: Arc<TransitSchedule>,
+    /// The transit vehicles, which the controller writes to the output with the schedule.
+    pub transit_garage: Arc<Garage>,
     /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
     pub facilities: Arc<ActivityFacilities>,
     pub config: Arc<Config>,
@@ -280,7 +282,7 @@ pub struct ScenarioCore {
 pub struct ControllerScenario {
     pub core: ScenarioCore,
     /// What the mobsim adds to `core.transit_schedule`: drivers, vehicles and the partitions of the
-    /// stops. Empty unless transit is simulated [schedule based](TransitSimulation::ScheduleBased).
+    /// stops. Empty unless transit is simulated [schedule based](TransitSimulation::ScheduleBasedTeleportation).
     /// Like the network partitions, it is only handed to the mobsim partitions.
     pub transit_sim_schedule: Arc<TransitSimSchedule>,
     pub population: Population,
@@ -316,20 +318,13 @@ impl From<Scenario> for ControllerScenario {
         // ids. With teleported transit, no driver ids are created.
         let transit_sim_schedule = match scenario.config.transit().simulation {
             TransitSimulation::Teleported => TransitSimSchedule::default(),
-            TransitSimulation::ScheduleBased => {
-                // Backpacking cannot build experienced plans of transit legs yet, and it panics
-                // for drivers, which have no backpack.
-                assert_eq!(
-                    scenario.config.scoring().mode,
-                    ScoringMode::Disabled,
-                    "Schedule-based transit does not support scoring yet. Set scoring.mode to \
-                     Disabled."
-                );
+            simulation @ TransitSimulation::ScheduleBasedTeleportation => {
                 TransitSimSchedule::build(
                     transit_schedule.clone(),
                     &scenario.network,
                     &scenario.transit_garage,
                     &scenario.population,
+                    simulation,
                 )
             }
         };
@@ -338,6 +333,7 @@ impl From<Scenario> for ControllerScenario {
                 network: Arc::new(scenario.network),
                 garage: Arc::new(scenario.garage),
                 transit_schedule,
+                transit_garage: Arc::new(scenario.transit_garage),
                 facilities: Arc::new(scenario.facilities),
                 config: scenario.config,
             },

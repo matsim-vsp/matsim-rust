@@ -35,6 +35,9 @@ struct AgentScoringParams {
     marginal_utility_of_performing_s: f64,
     marginal_utility_of_money: f64,
     aborted_plan_score_h: f64,
+    /// `None` takes the marginal utility of traveling by `pt`.
+    marginal_utility_of_waiting_pt_s: Option<f64>,
+    utility_of_line_switch: f64,
 }
 
 /// Scores the event-reconstructed plan of one person.
@@ -46,6 +49,8 @@ pub struct CharyparNagelScoringFunction {
     activity_params: BTreeMap<String, ActivityScoringParams>,
     mode_params: BTreeMap<String, ModeScoringParams>,
     agent_params: BTreeMap<String, AgentScoringParams>,
+    /// The transit passenger modes, whose legs after the first in a trip count as line switches.
+    passenger_modes: BTreeSet<String>,
     network: Arc<Network>,
     qsim_end_time_s: f64,
 }
@@ -96,6 +101,10 @@ impl CharyparNagelScoringFunction {
                         marginal_utility_of_performing_s: params.performing / SECONDS_PER_HOUR,
                         marginal_utility_of_money: params.marginal_utility_of_money,
                         aborted_plan_score_h: params.aborted_plan_score,
+                        marginal_utility_of_waiting_pt_s: params
+                            .waiting_pt
+                            .map(|waiting_pt| waiting_pt / SECONDS_PER_HOUR),
+                        utility_of_line_switch: params.utility_of_line_switch,
                     },
                 )
             })
@@ -105,6 +114,7 @@ impl CharyparNagelScoringFunction {
             activity_params,
             mode_params,
             agent_params,
+            passenger_modes: config.transit().passenger_modes.iter().cloned().collect(),
             network,
             qsim_end_time_s: f64::from(config.qsim().end_time),
         }
@@ -259,6 +269,7 @@ impl CharyparNagelScoringFunction {
             .enumerate()
         {
             let mut seen_modes_in_trip = BTreeSet::new();
+            let mut transit_legs_in_trip = 0;
             for (leg_index, leg) in trip.legs(&plan.elements).enumerate() {
                 score += self.score_leg(
                     person_id,
@@ -269,6 +280,17 @@ impl CharyparNagelScoringFunction {
                     &mut seen_modes_in_trip,
                     &mut seen_modes_in_plan,
                 )?;
+                if self.passenger_modes.contains(leg.mode.external()) {
+                    transit_legs_in_trip += 1;
+                    if transit_legs_in_trip > 1 {
+                        require_finite(
+                            person_id,
+                            agent_params.utility_of_line_switch,
+                            "utility of line switch",
+                        )?;
+                        score += agent_params.utility_of_line_switch;
+                    }
+                }
             }
         }
 
@@ -345,6 +367,7 @@ impl CharyparNagelScoringFunction {
                 * params.monetary_distance_cost_rate
                 * agent_params.marginal_utility_of_money;
         }
+        score += self.wait_score(person_id, trip_index, leg_index, leg, params, agent_params)?;
         if seen_modes_in_trip.insert(mode.to_string()) {
             score += params.constant;
         }
@@ -363,6 +386,59 @@ impl CharyparNagelScoringFunction {
         }
 
         Ok(score)
+    }
+
+    /// Like MATSim, the time from the departure until boarding counts as waiting instead of
+    /// traveling for legs with a transit route. With the default marginal utility of waiting, both
+    /// cost the same for `pt`, so the score does not change. A boarding before the departure,
+    /// possible with the planned boarding time of teleported transit, is not rejected, as in
+    /// MATSim.
+    fn wait_score(
+        &self,
+        person_id: &Id<InternalPerson>,
+        trip_index: usize,
+        leg_index: usize,
+        leg: &InternalLeg,
+        params: &ModeScoringParams,
+        agent_params: &AgentScoringParams,
+    ) -> Result<f64, String> {
+        let Some(InternalRoute::Pt(route)) = &leg.route else {
+            return Ok(0.0);
+        };
+        let context = || {
+            format!(
+                "Cannot score person {} trip {trip_index} leg {leg_index}",
+                person_id.external()
+            )
+        };
+        let boarding_s = route
+            .description
+            .boarding_time
+            .ok_or_else(|| format!("{}: boarding time is missing.", context()))?
+            .as_duration()
+            .as_secs_f64();
+        let departure_s = required_time(person_id, leg.dep_time, "departure")?;
+        let waiting_s = match agent_params.marginal_utility_of_waiting_pt_s {
+            Some(waiting_s) => waiting_s,
+            None => {
+                self.mode_params
+                    .get("pt")
+                    .ok_or_else(|| {
+                        format!(
+                            "{}: the marginal utility of waiting for transit falls back to that of \
+                             traveling by pt, but no scoring parameters are configured for mode pt.",
+                            context()
+                        )
+                    })?
+                    .marginal_utility_of_traveling_s
+            }
+        };
+        require_finite(
+            person_id,
+            waiting_s,
+            "marginal utility of waiting for transit",
+        )?;
+        Ok((boarding_s - departure_s) * (waiting_s - params.marginal_utility_of_traveling_s))
     }
 
     fn leg_distance(
@@ -511,7 +587,9 @@ mod tests {
     use crate::simulation::config::{ActivityParameter, AgentParameter, ModeParameter};
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::{Link, Node};
-    use crate::simulation::scenario::population::{InternalGenericRoute, InternalNetworkRoute};
+    use crate::simulation::scenario::population::{
+        InternalGenericRoute, InternalNetworkRoute, InternalPtRoute, InternalPtRouteDescription,
+    };
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
     use nohash_hasher::IntSet;
@@ -734,6 +812,47 @@ mod tests {
             time_only_scorer
                 .score_trips(&person, &two_trips, params)
                 .unwrap(),
+        );
+    }
+
+    /// Like MATSim, the time until boarding counts as waiting instead of traveling, and each
+    /// transit leg after the first in a trip is a line switch.
+    #[deterministic_id_test]
+    fn scores_waiting_for_transit_and_line_switches() {
+        let scorer = make_scorer(
+            vec![],
+            vec![
+                mode("pt", -6.0, 0.0, 0.0, 0.0),
+                mode("walk", -3.0, 0.0, 0.0, 0.0),
+            ],
+            Network::new(),
+        );
+        let person = Id::create("person");
+        // One trip with two rides, after 10 and 5 minutes of waiting.
+        let trip_plan = plan(vec![
+            activity("home", None, Some(0)),
+            generic_leg("walk", 600, None),
+            activity("pt interaction", Some(600), Some(600)),
+            pt_leg(600, 1_800, 1_200),
+            activity("pt interaction", Some(2_400), Some(2_400)),
+            pt_leg(2_400, 900, 2_700),
+            activity("work", Some(3_300), None),
+        ]);
+        let mut params = *scorer.agent_params.get("person").unwrap();
+
+        // By default, waiting costs as much as riding.
+        let traveling = -0.5 + (1_800.0 + 900.0) * -6.0 / SECONDS_PER_HOUR;
+        let line_switch = -1.0;
+        assert_approx_eq(
+            traveling + line_switch,
+            scorer.score_trips(&person, &trip_plan, &params).unwrap(),
+        );
+
+        params.marginal_utility_of_waiting_pt_s = Some(-12.0 / SECONDS_PER_HOUR);
+        let waiting = (600.0 + 300.0) * (-12.0 + 6.0) / SECONDS_PER_HOUR;
+        assert_approx_eq(
+            traveling + line_switch + waiting,
+            scorer.score_trips(&person, &trip_plan, &params).unwrap(),
         );
     }
 
@@ -1004,6 +1123,32 @@ mod tests {
             start_s.map(SimTime::from_secs),
             end_s.map(SimTime::from_secs),
             None,
+        ))
+    }
+
+    fn pt_leg(departure_s: u64, travel_time_s: u64, boarding_s: u64) -> InternalPlanElement {
+        let route = InternalPtRoute {
+            generic_delegate: InternalGenericRoute::new(
+                Id::create("start"),
+                Id::create("end"),
+                Some(Duration::from_secs(travel_time_s)),
+                Some(0.0),
+                None,
+            ),
+            description: InternalPtRouteDescription {
+                transit_route_id: Id::create("route"),
+                boarding_time: Some(SimTime::from_secs(boarding_s)),
+                transit_line_id: Id::create("line"),
+                access_facility_id: Id::create("access"),
+                egress_facility_id: Id::create("egress"),
+            },
+        };
+        InternalPlanElement::Leg(InternalLeg::new(
+            InternalRoute::Pt(route),
+            "pt",
+            "pt",
+            Duration::from_secs(travel_time_s),
+            Some(SimTime::from_secs(departure_s)),
         ))
     }
 

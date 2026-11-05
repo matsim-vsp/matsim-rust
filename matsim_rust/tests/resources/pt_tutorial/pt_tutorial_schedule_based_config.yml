@@ -1,15 +1,13 @@
 modules:
   scoring:
     type: Scoring
-    # Schedule-based transit does not support scoring yet.
-    mode: Disabled
     activity_params:
       - activity_type: h
-        typical_duration_s: 43200.0
+        typical_duration_s: 36000.0
       - activity_type: w
-        typical_duration_s: 28800.0
+        typical_duration_s: 36000.0
       - activity_type: s
-        typical_duration_s: 2400.0
+        typical_duration_s: 36000.0
     mode_params:
       - mode: walk
         marginal_utility_of_traveling: -6.0
@@ -38,7 +36,7 @@ modules:
     type: Transit
     schedule_path: ./assets/pt_tutorial/transitschedule.xml
     vehicles_path: ./assets/pt_tutorial/transitVehicles.xml
-    simulation: ScheduleBased
+    simulation: ScheduleBasedTeleportation
   partitioning:
     type: Partitioning
     num_parts: 1

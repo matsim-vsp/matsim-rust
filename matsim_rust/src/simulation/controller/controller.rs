@@ -26,6 +26,7 @@ use crate::simulation::replanning::routing::{RoutingModule, TripRouter};
 use crate::simulation::scenario::population::Population;
 use crate::simulation::scenario::prepare::prepare_for_mobsim::prepare_for_mobsim;
 use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
+use crate::simulation::scenario::vehicles;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
 use crate::simulation::scoring::{PersonExperiences, PlanScorer};
@@ -169,7 +170,7 @@ impl ControllerBuilder {
         let mut agent_sources = self.agent_sources;
         if matches!(
             config.transit().simulation,
-            TransitSimulation::ScheduleBased
+            TransitSimulation::ScheduleBasedTeleportation
         ) {
             agent_sources.push(Arc::new(TransitDriverAgentSource));
         }
@@ -373,6 +374,13 @@ impl Controller {
         self.write_output_network(output_path.clone());
         info!("    ... Population ...");
         self.write_output_population(output_path.clone());
+        if matches!(
+            self.config.transit().simulation,
+            TransitSimulation::ScheduleBasedTeleportation
+        ) {
+            info!("    ... Transit schedule and vehicles ...");
+            self.write_output_transit(&output_path);
+        }
 
         if self.config.output().write_events == WriteEvents::File {
             info!("Copying events to main output directory");
@@ -575,6 +583,20 @@ impl Controller {
             .core
             .network
             .to_file_with_link_attribute_overrides(&net_out_path, &attribute_overrides);
+    }
+
+    fn write_output_transit(&self, output_path: impl AsRef<Path>) {
+        let compression_type = self.config.controller().compression_type;
+        let schedule_path = create_output_filename(
+            &output_path,
+            &PathBuf::from(compression_type.with_extension("output_transitSchedule")),
+        );
+        self.scenario.core.transit_schedule.to_file(&schedule_path);
+        let vehicles_path = create_output_filename(
+            &output_path,
+            &PathBuf::from(compression_type.with_extension("output_transitVehicles")),
+        );
+        vehicles::to_file(&self.scenario.core.transit_garage, &vehicles_path);
     }
 
     fn write_output_population(&mut self, output_path: impl AsRef<Path>) {

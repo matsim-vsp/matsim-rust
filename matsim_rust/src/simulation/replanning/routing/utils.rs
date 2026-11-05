@@ -1,4 +1,5 @@
-use crate::simulation::scenario::network::Network;
+use crate::simulation::id::Id;
+use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::InternalNetworkRoute;
 
 pub fn calc_distance(
@@ -29,6 +30,58 @@ pub fn calc_distance(
     }
 
     route_distance
+}
+
+/// The distance a passenger travels on a transit route from the link of the access stop to the
+/// link of the egress stop, like MATSim's `RouteUtils.calcDistance(TransitRoute,
+/// TransitStopFacility, TransitStopFacility, Network)`: the lengths of the links after the access
+/// link up to and including the egress link.
+///
+/// Like Java, it takes the first occurrence of the access link and then the first occurrence of
+/// the egress link after it. On routes that pass a link twice, the result can thus differ from the
+/// distance between the stops along the route. A route without links has distance 0.
+///
+/// In the end, this function sums up the lengths of links; thus it is expected to be relatively fast.
+pub fn calc_transit_distance(
+    network_route: &[Id<Link>],
+    access_link: &Id<Link>,
+    egress_link: &Id<Link>,
+    network: &Network,
+) -> f64 {
+    let (Some(start_link), Some(end_link)) = (network_route.first(), network_route.last()) else {
+        return 0.0;
+    };
+    // `network_route` contains the start and end links, Java's `getLinkIds` only the links between
+    // them.
+    let between = if network_route.len() > 2 {
+        &network_route[1..network_route.len() - 1]
+    } else {
+        &[]
+    };
+    // Java skips the links up to and including the access link. If the access link is the start
+    // link or does not occur between start and end (`indexOf` returns -1), it skips none.
+    let skip = if start_link == access_link {
+        0
+    } else {
+        between
+            .iter()
+            .position(|link| link == access_link)
+            .map_or(0, |index| index + 1)
+    };
+
+    let mut distance = 0.0;
+    for link in &between[skip..] {
+        distance += network.get_link(link).length;
+        if link == egress_link {
+            break;
+        }
+    }
+    // The end link is not among the links between, so Java adds it separately, even if the egress
+    // link already occurred before.
+    if end_link == egress_link {
+        distance += network.get_link(end_link).length;
+    }
+    distance
 }
 
 #[cfg(test)]
@@ -76,6 +129,38 @@ mod tests {
         assert_eq!(
             75. + 200. - 25.,
             calc_distance(&round_trip, 0.25, 0.75, &network)
+        );
+    }
+
+    #[deterministic_id_test]
+    fn calculates_transit_distance_like_java() {
+        let (network, start, middle, end) = network();
+        let route = vec![start.clone(), middle.clone(), end.clone()];
+
+        // From a stop on the start link, the start link does not count.
+        assert_eq!(
+            200. + 300.,
+            calc_transit_distance(&route, &start, &end, &network)
+        );
+        assert_eq!(
+            200.,
+            calc_transit_distance(&route, &start, &middle, &network)
+        );
+        assert_eq!(300., calc_transit_distance(&route, &middle, &end, &network));
+        assert_eq!(0., calc_transit_distance(&[], &start, &end, &network));
+
+        // Java looks for the first occurrence of the access link and counts the end link again,
+        // although the egress link already occurred.
+        let repeating = vec![
+            start.clone(),
+            middle.clone(),
+            end.clone(),
+            middle.clone(),
+            end.clone(),
+        ];
+        assert_eq!(
+            300. + 300.,
+            calc_transit_distance(&repeating, &middle, &end, &network)
         );
     }
 
