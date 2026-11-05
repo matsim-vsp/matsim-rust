@@ -21,6 +21,7 @@ modules:
     method: !Metis
   output:
     type: Output
+    compression_type: Zst
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/output-simulate-network-route
   routing:
@@ -37,5 +38,4 @@ modules:
     main_modes: [ "car" ]
   controller:
     type: Controller
-    compression_type: Zst
     last_iteration: 0

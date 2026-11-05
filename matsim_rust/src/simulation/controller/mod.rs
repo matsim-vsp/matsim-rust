@@ -456,7 +456,7 @@ impl MobsimWorker {
                 output_path,
                 rank,
                 config.output().write_events.clone(),
-                config.controller().compression_type,
+                config.output().compression_type,
                 config.controller().write_events_interval,
                 config.controller().last_iteration,
             )(&mut events);

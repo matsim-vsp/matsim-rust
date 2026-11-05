@@ -20,6 +20,7 @@ modules:
     main_modes: [ "car" ]
   output:
     type: Output
+    compression_type: Zst
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/execute_3_links_single_part
     write_events: File
@@ -29,5 +30,4 @@ modules:
     network_modes: [ "car", "bike" ]
   controller:
     type: Controller
-    compression_type: Zst
     last_iteration: 0

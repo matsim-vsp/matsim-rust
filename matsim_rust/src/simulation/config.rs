@@ -731,6 +731,8 @@ pub struct Output {
     pub logging: Logging,
     #[serde(default)]
     pub write_events: WriteEvents,
+    #[serde(default)]
+    pub compression_type: CompressionType,
 }
 
 impl Default for Output {
@@ -741,6 +743,7 @@ impl Default for Output {
             profiling: Profiling::None,
             logging: Logging::Info,
             write_events: WriteEvents::File,
+            compression_type: CompressionType::Proto,
         }
     }
 }
@@ -759,6 +762,10 @@ register_override!("output.write_events", |config, value| {
         "file" => WriteEvents::File,
         _ => panic!("Invalid write_events: {}", value),
     };
+});
+
+register_override!("output.compression_type", |config, value| {
+    config.output_mut().compression_type = parse_compression_type(value);
 });
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1147,7 +1154,6 @@ pub struct Controller {
     pub last_iteration: u32,
     pub write_events_interval: u32,
     pub write_plans_interval: u32,
-    pub compression_type: CompressionType,
 }
 
 impl Controller {
@@ -1194,7 +1200,6 @@ impl From<&Simulation> for Controller {
             last_iteration: value.last_iteration,
             write_events_interval: value.write_events_interval,
             write_plans_interval: value.write_plans_interval,
-            compression_type: CompressionType::Proto,
         }
     }
 }
@@ -1250,10 +1255,6 @@ register_override!("controller.write_events_interval", |config, value| {
 
 register_override!("controller.write_plans_interval", |config, value| {
     config.controller_mut().write_plans_interval = value.parse().unwrap();
-});
-
-register_override!("controller.compression_type", |config, value| {
-    config.controller_mut().compression_type = parse_compression_type(value);
 });
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -1496,7 +1497,6 @@ impl Default for Controller {
             last_iteration: 1000,
             write_events_interval: 50,
             write_plans_interval: 50,
-            compression_type: CompressionType::Proto,
         }
     }
 }
@@ -1869,13 +1869,13 @@ mod tests {
             last_iteration: 4,
             write_events_interval: 3,
             write_plans_interval: 5,
-            compression_type: CompressionType::Zst,
         };
 
         config.set_partitioning(partitioning);
         config.set_computational_setup(computational_setup);
         config.set_qsim(qsim);
         config.set_controller(controller);
+        config.output_mut().compression_type = CompressionType::Zst;
 
         let yaml = serde_yaml::to_string(&config).expect("Failed to serialize yaml");
 
@@ -1914,7 +1914,7 @@ mod tests {
         assert_eq!(parsed_config.controller().write_events_interval, 3);
         assert_eq!(parsed_config.controller().write_plans_interval, 5);
         assert_eq!(
-            parsed_config.controller().compression_type,
+            parsed_config.output().compression_type,
             CompressionType::Zst
         );
         assert_eq!(parsed_config.qsim().start_time, 0);
@@ -1926,14 +1926,13 @@ mod tests {
     }
 
     #[test]
-    fn controller_defaults_include_iteration_range_and_compression() {
+    fn controller_defaults_include_iteration_range() {
         let config = Config::default();
 
         assert_eq!(config.controller().first_iteration, 0);
         assert_eq!(config.controller().last_iteration, 1000);
         assert_eq!(config.controller().write_events_interval, 50);
         assert_eq!(config.controller().write_plans_interval, 50);
-        assert_eq!(config.controller().compression_type, CompressionType::Proto);
     }
 
     #[test]
@@ -1959,10 +1958,6 @@ mod tests {
         assert_eq!(parsed_config.controller().last_iteration, 4);
         assert_eq!(parsed_config.controller().write_events_interval, 3);
         assert_eq!(parsed_config.controller().write_plans_interval, 5);
-        assert_eq!(
-            parsed_config.controller().compression_type,
-            CompressionType::Proto
-        );
         assert_eq!(parsed_config.qsim().start_time, 1);
         assert_eq!(parsed_config.qsim().end_time, 42);
         assert_eq!(parsed_config.qsim().ticks_per_second, 10);
@@ -2754,6 +2749,7 @@ modules:
             profiling: Profiling::None,
             logging: Logging::Info,
             write_events: WriteEvents::None,
+            compression_type: CompressionType::Proto,
         });
         config.set_partitioning(Partitioning {
             num_parts: 1,
@@ -2811,7 +2807,6 @@ modules:
                 "controller.write_plans_interval".to_string(),
                 "9".to_string(),
             ),
-            ("controller.compression_type".to_string(), "zst".to_string()),
             ("qsim.start_time".to_string(), "1".to_string()),
             ("qsim.end_time".to_string(), "2".to_string()),
             ("qsim.ticks_per_second".to_string(), "10".to_string()),
@@ -2824,7 +2819,6 @@ modules:
         assert_eq!(config.controller().last_iteration, 34);
         assert_eq!(config.controller().write_events_interval, 7);
         assert_eq!(config.controller().write_plans_interval, 9);
-        assert_eq!(config.controller().compression_type, CompressionType::Zst);
         assert_eq!(config.qsim().start_time, 1);
         assert_eq!(config.qsim().end_time, 2);
         assert_eq!(config.qsim().ticks_per_second, 10);
@@ -2883,6 +2877,15 @@ modules:
 
         config.apply_overrides(&[("output.write_events".to_string(), "none".to_string())]);
         assert_eq!(config.output().write_events, WriteEvents::None);
+    }
+
+    #[test]
+    fn override_output_compression_type() {
+        let mut config = base_config();
+        assert_eq!(config.output().compression_type, CompressionType::Proto);
+
+        config.apply_overrides(&[("output.compression_type".to_string(), "zst".to_string())]);
+        assert_eq!(config.output().compression_type, CompressionType::Zst);
     }
 
     #[test]

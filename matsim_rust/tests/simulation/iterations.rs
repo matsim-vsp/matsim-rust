@@ -32,7 +32,7 @@ fn equil_single_part_writes_events_at_interval_and_last_iteration() {
     config.controller_mut().first_iteration = 0;
     config.controller_mut().last_iteration = 5;
     config.controller_mut().write_events_interval = 3;
-    config.controller_mut().compression_type = CompressionType::Gz;
+    config.output_mut().compression_type = CompressionType::Gz;
     config.output_mut().write_events = WriteEvents::File;
     config.output_mut().output_dir = output_dir.clone();
 
@@ -78,7 +78,7 @@ fn equil_single_part_keep_last_selected_produces_same_events_each_iteration() {
     config.controller_mut().first_iteration = 1;
     config.controller_mut().last_iteration = 3;
     config.controller_mut().write_events_interval = 1;
-    config.controller_mut().compression_type = CompressionType::Gz;
+    config.output_mut().compression_type = CompressionType::Gz;
     config.output_mut().write_events = WriteEvents::File;
     config.output_mut().output_dir = output_dir.clone();
     config.replanning_mut().strategy_settings = vec![StrategySetting {
@@ -107,7 +107,7 @@ fn equil_single_part_writes_events_for_single_last_iteration() {
     config.controller_mut().first_iteration = 0;
     config.controller_mut().last_iteration = 0;
     config.controller_mut().write_events_interval = 50;
-    config.controller_mut().compression_type = CompressionType::Gz;
+    config.output_mut().compression_type = CompressionType::Gz;
     config.output_mut().write_events = WriteEvents::File;
     config.output_mut().output_dir = output_dir.clone();
 
@@ -178,7 +178,7 @@ fn equil_single_part_writes_plans_at_interval_and_last_iteration() {
     config.controller_mut().first_iteration = 0;
     config.controller_mut().last_iteration = 5;
     config.controller_mut().write_plans_interval = 3;
-    config.controller_mut().compression_type = CompressionType::Gz;
+    config.output_mut().compression_type = CompressionType::Gz;
     config.output_mut().write_events = WriteEvents::None;
     config.output_mut().output_dir = output_dir.clone();
 
@@ -207,7 +207,7 @@ fn equil_single_part_writes_plans_for_single_last_iteration() {
     config.controller_mut().first_iteration = 0;
     config.controller_mut().last_iteration = 0;
     config.controller_mut().write_plans_interval = 50;
-    config.controller_mut().compression_type = CompressionType::Gz;
+    config.output_mut().compression_type = CompressionType::Gz;
     config.output_mut().write_events = WriteEvents::None;
     config.output_mut().output_dir = output_dir.clone();
 

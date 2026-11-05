@@ -23,6 +23,7 @@ modules:
         - Constant
   output:
     type: Output
+    compression_type: Zst
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/equil_single_part
     write_events: File
@@ -33,7 +34,6 @@ modules:
   controller:
     type: Controller
     last_iteration: 0
-    compression_type: Zst
     write_events_interval: 1
     write_plans_interval: 1
   qsim:

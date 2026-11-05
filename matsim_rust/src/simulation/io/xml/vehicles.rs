@@ -23,9 +23,13 @@ pub(crate) fn write_to_xml(garage: &Garage, path: &Path) {
             capacity: None,
             length: Some(IODimension { meter: t.length }),
             width: Some(IODimension { meter: t.width }),
-            maximum_velocity: Some(IOVelocity {
-                meter_per_second: t.max_v,
-            }),
+            maximum_velocity: if t.max_v == f64::MAX {
+                None
+            } else {
+                Some(IOVelocity {
+                    meter_per_second: t.max_v,
+                })
+            },
             engine_information: None,
             cost_information: None,
             passenger_car_equivalents: Some(IOPassengerCarEquivalents { pce: t.pce }),
@@ -85,15 +89,25 @@ pub struct IOVehicle {
 pub struct IOVehicleType {
     #[serde(rename = "@id")]
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity: Option<IOCapacity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<IODimension>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<IODimension>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum_velocity: Option<IOVelocity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub engine_information: Option<IOEngineInformation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_information: Option<IOCostInformation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub passenger_car_equivalents: Option<IOPassengerCarEquivalents>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub network_mode: Option<IONetworkMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_efficiency_factor: Option<IOFowEfficiencyFactor>,
     #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
     pub attributes: Option<IOAttributes>,
