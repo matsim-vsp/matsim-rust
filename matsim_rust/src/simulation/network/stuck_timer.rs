@@ -18,10 +18,13 @@ impl StuckTimer {
         self.timer_started = Some(now.into());
     }
 
+    /// Tests whether the front vehicle has waited for more than the stuck threshold. A vehicle is therefore moved at the
+    /// earliest one tick after the threshold has passed, and a threshold of zero still moves at most one vehicle per tick,
+    /// since popping a vehicle restarts the timer.
     pub fn is_stuck(&self, now: impl Into<Tick>) -> bool {
         let now = now.into();
         if let Some(time) = self.timer_started {
-            now - time >= self.stuck_threshold
+            now - time > self.stuck_threshold
         } else {
             false
         }
@@ -57,9 +60,17 @@ mod tests {
 
         timer.restart(Tick::new(17));
         assert!(!timer.is_stuck(Tick::new(18)));
-        assert!(timer.is_stuck(Tick::new(17 + 42)));
+        // stuck only after more than the threshold
+        assert!(!timer.is_stuck(Tick::new(17 + 42)));
+        assert!(timer.is_stuck(Tick::new(17 + 43)));
 
         timer.restart(Tick::new(18));
-        assert!(!timer.is_stuck(Tick::new(17 + 42)));
+        assert!(!timer.is_stuck(Tick::new(17 + 43)));
+
+        // with a threshold of zero, the vehicle behind a stuck one waits for the next tick
+        let mut timer = StuckTimer::new(Tick::new(0));
+        timer.restart(Tick::new(5));
+        assert!(!timer.is_stuck(Tick::new(5)));
+        assert!(timer.is_stuck(Tick::new(6)));
     }
 }

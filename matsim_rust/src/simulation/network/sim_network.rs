@@ -1477,10 +1477,10 @@ mod tests {
     }
 
     /// Setting: C has exactly one available slot, A offers A1 and A2, and the stuck threshold is ten ticks.
-    /// Execution: A1 occupies C's last slot at tick 1, making A2 the blocked front vehicle from tick 1 onward; A2 is checked again at ticks 10 and 11.
-    /// Expectation: A2 remains blocked at tick 10 after waiting nine ticks and leaves A exactly at tick 11 because the current implementation uses an inclusive `>=` comparison.
+    /// Execution: A1 occupies C's last slot at tick 1, making A2 the blocked front vehicle from tick 1 onward; A2 is checked again at ticks 11 and 12.
+    /// Expectation: A2 remains blocked at tick 11 after waiting exactly ten ticks and leaves A at tick 12, after more than the threshold.
     #[deterministic_id_test]
-    fn stuck_vehicle_moves_at_inclusive_threshold() {
+    fn stuck_vehicle_moves_after_threshold() {
         let mut global_network = Network::new();
         add_test_nodes(&mut global_network, &["S", "K", "T", "END"]);
         add_test_link(&mut global_network, "A", "S", "K", 1.0, 7200.0, 100.0);
@@ -1499,10 +1499,10 @@ mod tests {
         network.move_nodes(&mut env, 1);
         assert_eq!(vec!["11"], events.leaves_on("A"));
 
-        network.move_nodes(&mut env, 10);
+        network.move_nodes(&mut env, 11);
         assert_eq!(vec!["11"], events.leaves_on("A"));
 
-        network.move_nodes(&mut env, 11);
+        network.move_nodes(&mut env, 12);
         assert_eq!(vec!["11", "12"], events.leaves_on("A"));
     }
 
@@ -1990,19 +1990,19 @@ mod tests {
                 assert!(link1.offers_veh().is_none());
 
                 // veh0 reaches buffer at 1001 and is released immediately.
-                // veh1 reaches the buffer at 1011 and is released at 1021.
+                // veh1 reaches the buffer at 1011 and is released at 1022.
                 // Each following vehicle enters the buffer after nine refill ticks and is released
-                // ten ticks later at the inclusive stuck threshold.
+                // eleven ticks later, after more than the stuck threshold.
                 // ...
-                if (1011..1021).contains(&now)
-                    || (1030..1040).contains(&now)
-                    || (1049..1059).contains(&now)
-                    || (1068..1078).contains(&now)
-                    || (1087..1097).contains(&now)
-                    || (1106..1116).contains(&now)
-                    || (1125..1135).contains(&now)
-                    || (1144..1154).contains(&now)
-                    || (1163..1173).contains(&now)
+                if (1011..1022).contains(&now)
+                    || (1031..1042).contains(&now)
+                    || (1051..1062).contains(&now)
+                    || (1071..1082).contains(&now)
+                    || (1091..1102).contains(&now)
+                    || (1111..1122).contains(&now)
+                    || (1131..1142).contains(&now)
+                    || (1151..1162).contains(&now)
+                    || (1171..1182).contains(&now)
                 {
                     assert!(
                         link2.offers_veh().is_some(),
