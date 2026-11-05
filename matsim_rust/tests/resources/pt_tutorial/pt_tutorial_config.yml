@@ -46,6 +46,7 @@ modules:
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/pt_tutorial
     write_events: XmlGz
+    CompressionType: Zst
   routing:
     type: Routing
     mode: UsePlans
