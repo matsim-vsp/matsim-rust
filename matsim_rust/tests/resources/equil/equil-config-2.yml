@@ -23,6 +23,7 @@ modules:
         - Constant
   output:
     type: Output
+    compression_type: Zst
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/equil_with_channels
     write_events: File
@@ -33,7 +34,6 @@ modules:
   controller:
     type: Controller
     last_iteration: 0
-    compression_type: Zst
   qsim:
     type: QSim
     main_modes: [ "car" ]

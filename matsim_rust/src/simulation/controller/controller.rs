@@ -364,7 +364,7 @@ impl Controller {
         self.shutdown_adapters();
 
         info!("Writing output files:");
-        if self.config.controller().compression_type.is_protobuf() {
+        if self.config.output().compression_type.is_protobuf() {
             info!("    ... ID store ...");
             Self::write_output_id_store(&output_path);
         }
@@ -572,7 +572,7 @@ impl Controller {
             &output_path,
             &PathBuf::from(
                 self.config
-                    .controller()
+                    .output()
                     .compression_type
                     .with_extension("output_network"),
             ),
@@ -586,7 +586,7 @@ impl Controller {
     }
 
     fn write_output_transit(&self, output_path: impl AsRef<Path>) {
-        let compression_type = self.config.controller().compression_type;
+        let compression_type = self.config.output().compression_type;
         let schedule_path = create_output_filename(
             &output_path,
             &PathBuf::from(compression_type.with_extension("output_transitSchedule")),
@@ -604,7 +604,7 @@ impl Controller {
             &output_path,
             &PathBuf::from(
                 self.config
-                    .controller()
+                    .output()
                     .compression_type
                     .with_extension("output_plans"),
             ),
@@ -646,7 +646,7 @@ impl Controller {
         population.to_file(
             &iter_path.join(
                 self.config
-                    .controller()
+                    .output()
                     .compression_type
                     .with_extension("output_plans"),
             ),
@@ -716,7 +716,7 @@ pub(crate) fn write_experienced_population(
         .sorted_by(|a, b| a.id().cmp(&b.id()))
         .collect();
     let filename = config
-        .controller()
+        .output()
         .compression_type
         .with_extension("output_experienced_plans");
     let iteration_path = output_path

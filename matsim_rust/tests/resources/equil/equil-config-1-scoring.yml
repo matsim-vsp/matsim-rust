@@ -16,6 +16,7 @@ modules:
         - Constant
   output:
     type: Output
+    compression_type: XmlZst
     overwrite_files: DeleteDirectoryIfExists
     output_dir: ./test_output/simulation/scoring_backpacking_1
     write_events: None
@@ -26,7 +27,6 @@ modules:
   controller:
     type: Controller
     last_iteration: 1
-    compression_type: XmlZst
     write_events_interval: 1
     write_plans_interval: 1
   qsim:

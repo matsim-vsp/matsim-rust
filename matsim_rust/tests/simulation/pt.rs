@@ -12,6 +12,7 @@ use matsim_rust::simulation::scenario::vehicles::Garage;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
+/// Runs `pt_tutorial` and compares the events with the expected ones. Uses only teleported PT.
 #[deterministic_id_test(matsim_rust)]
 fn pt_tutorial_matches_expected_events() {
     let config = Config::from_args(CommandLineArgs::new_with_path(
@@ -63,7 +64,7 @@ fn pt_tutorial_schedule_based_matches_expected_events() {
             "./test_output/simulation/pt_tutorial_schedule_based_{parts}"
         ));
         config.output_mut().output_dir = output_dir.clone();
-        config.controller_mut().compression_type = CompressionType::Zst;
+        config.output_mut().compression_type = CompressionType::Zst;
 
         let scenario = Scenario::load(config);
         ControllerBuilder::default_with_scenario(scenario)
