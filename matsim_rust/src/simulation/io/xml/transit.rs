@@ -117,6 +117,8 @@ pub struct IOTransitLine {
 pub struct IOTransitRoute {
     #[serde(rename = "@id")]
     pub id: String,
+    #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<IOAttributes>,
     #[serde(rename = "description", skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(rename = "transportMode")]
@@ -127,8 +129,6 @@ pub struct IOTransitRoute {
     pub route: IONetworkRoute,
     #[serde(rename = "departures")]
     pub departures: IODepartures,
-    #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
-    pub attributes: Option<IOAttributes>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
@@ -145,12 +145,23 @@ pub struct IORouteStop {
     pub arrival_offset: Option<String>,
     #[serde(rename = "@departureOffset", skip_serializing_if = "Option::is_none")]
     pub departure_offset: Option<String>,
+    #[serde(rename = "@allowBoarding", skip_serializing_if = "Option::is_none")]
+    pub allow_boarding: Option<bool>,
+    #[serde(rename = "@allowAlighting", skip_serializing_if = "Option::is_none")]
+    pub allow_alighting: Option<bool>,
     #[serde(
-        rename = "@awaitDepartureTime",
-        alias = "@awaitDeparture",
+        rename = "@awaitDeparture",
+        alias = "@awaitDepartureTime",
         skip_serializing_if = "Option::is_none"
     )]
     pub await_departure: Option<bool>,
+    #[serde(
+        rename = "@minimumStopDuration",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub minimum_stop_duration: Option<String>,
+    // Not part of the DTD, which declares stops as empty. Kept for attributes other than the ones
+    // above, and read for the flags of files that older versions of this code wrote.
     #[serde(rename = "attributes", skip_serializing_if = "Option::is_none")]
     pub attributes: Option<IOAttributes>,
 }

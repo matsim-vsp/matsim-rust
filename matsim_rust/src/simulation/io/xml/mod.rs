@@ -160,10 +160,14 @@ fn write_xml_payload<T: Serialize>(
             .expect("Failed to write XML declaration");
     }
 
-    writer
-        .write_all(dtd_spec.as_bytes())
-        .expect("Failed to write header");
-    writer.write_all(b"\n\n").expect("Failed to write newlines");
+    // Formats defined by an XML schema instead of a DTD pass an empty header.
+    if !dtd_spec.is_empty() {
+        writer
+            .write_all(dtd_spec.as_bytes())
+            .expect("Failed to write header");
+        writer.write_all(b"\n").expect("Failed to write newlines");
+    }
+    writer.write_all(b"\n").expect("Failed to write newlines");
 
     let mut fmt_writer = ToFmtWrite(writer);
     let mut serializer = quick_xml::se::Serializer::new(&mut fmt_writer);

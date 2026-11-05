@@ -36,6 +36,7 @@ message TransitRouteStop {
   bool allow_boarding = 5;
   bool allow_alighting = 6;
   uint64 minimum_stop_duration_ns = 7;
+  map<string, general.AttributeValue> attributes = 8;
 }
 
 message TransitDeparture {

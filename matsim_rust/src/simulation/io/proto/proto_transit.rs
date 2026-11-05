@@ -99,6 +99,7 @@ fn wire_route_stop(
         allow_boarding: stop.allow_boarding,
         allow_alighting: stop.allow_alighting,
         minimum_stop_duration_ns: duration_to_nanos(stop.minimum_stop_duration),
+        attributes: stop.attributes.as_cloned_map(),
     }
 }
 
@@ -191,6 +192,7 @@ mod tests {
                         allow_boarding: false,
                         allow_alighting: true,
                         minimum_stop_duration_ns: 3_456_789,
+                        attributes: attributes.clone(),
                     }],
                     network_route: vec![link_id.internal()],
                     departures: vec![WireTransitDeparture {
