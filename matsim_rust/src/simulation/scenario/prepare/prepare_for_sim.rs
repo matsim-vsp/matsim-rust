@@ -407,6 +407,7 @@ mod tests {
             transit_schedule: TransitSchedule::default(),
             transit_garage: Garage::default(),
             facilities,
+            scoring_parameters: Vec::new(),
             config: Arc::new(Config::default()),
         }
     }

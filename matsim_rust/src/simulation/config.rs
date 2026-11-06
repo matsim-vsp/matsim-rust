@@ -1,6 +1,6 @@
 use crate::simulation::build_info::GIT_VERSION;
 use crate::simulation::config::VertexWeight::InLinkCapacity;
-use crate::simulation::io::is_url;
+use crate::simulation::io::{OutputFile, is_url};
 use crate::simulation::replanning::{KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME};
 use ahash::HashMap;
 use clap::{Parser, ValueEnum};
@@ -528,7 +528,8 @@ impl Config {
 }
 
 pub fn write_config(config: &Config, output_path: PathBuf) {
-    let output_config = output_path.join("output_config.yml");
+    let output_config =
+        output_path.join(OutputFile::Config.file_name(config.output().compression_type));
     let file = File::create(&output_config).expect("Failed to create output config file");
     let writer = BufWriter::new(file);
     serde_yaml::to_writer(writer, config).expect("Failed to write output config file");
@@ -911,10 +912,10 @@ impl Default for Replanning {
 pub struct Scoring {
     pub mode: ScoringMode,
     pub write_experienced_plans: bool,
-    pub activity_params: Vec<ActivityParameter>,
-    pub mode_params: Vec<ModeParameter>,
-    pub agent_params: Vec<AgentParameter>,
     pub fraction_of_iterations_to_start_score_msa: Option<f64>,
+    /// A YAML file with the list of scoring parameter sets, relative to the config file. Without a file, the
+    /// scenario gets one default set.
+    pub scoring_parameters_path: Option<PathBuf>,
 }
 
 /// `Disabled` skips backpacking and scoring entirely. Selected plans then receive no score.
@@ -930,22 +931,8 @@ impl Default for Scoring {
         Self {
             mode: ScoringMode::Enabled,
             write_experienced_plans: true,
-            activity_params: vec![
-                ActivityParameter::default_for_activity_type("home"),
-                ActivityParameter::default_for_activity_type("work"),
-                ActivityParameter::default_for_activity_type("leisure"),
-                ActivityParameter::default_for_activity_type("shop"),
-                ActivityParameter::default_for_activity_type("errands"),
-            ],
-            mode_params: vec![
-                ModeParameter::default_for_mode("car"),
-                ModeParameter::default_for_mode("walk"),
-                ModeParameter::default_for_mode("ride"),
-                ModeParameter::default_for_mode("freight"),
-                ModeParameter::default_for_mode("bike"),
-            ],
-            agent_params: vec![AgentParameter::default()],
             fraction_of_iterations_to_start_score_msa: None,
+            scoring_parameters_path: None,
         }
     }
 }
@@ -960,6 +947,10 @@ register_override!("scoring.mode", |config, value| {
 
 register_override!("scoring.write_experienced_plans", |config, value| {
     config.scoring_mut().write_experienced_plans = value.parse().unwrap();
+});
+
+register_override!("scoring.scoring_parameters_path", |config, value| {
+    config.scoring_mut().scoring_parameters_path = Some(PathBuf::from(value));
 });
 
 register_override!(
@@ -1026,39 +1017,6 @@ impl Default for ModeParameter {
             daily_money_constant: 0.0,
             daily_utility_constant: 0.0,
             constant: 0.0,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(default)]
-pub struct AgentParameter {
-    pub subpopulation: String,
-    pub late_arrival: f64,              // utils/hour
-    pub early_departure: f64,           // utils/hour
-    pub performing: f64,                // utils/hour
-    pub waiting: f64,                   // utils/hour
-    pub marginal_utility_of_money: f64, // utils/money
-    pub aborted_plan_score: f64,        // utils/hour
-    /// The marginal utility of waiting for a transit vehicle, in utils/hour. Without a value, it
-    /// is the marginal utility of traveling by `pt`, so that waiting costs as much as riding, like
-    /// MATSim's `waitingPt`.
-    pub waiting_pt: Option<f64>, // utils/hour
-    pub utility_of_line_switch: f64,    // utils
-}
-
-impl Default for AgentParameter {
-    fn default() -> Self {
-        Self {
-            subpopulation: "person".to_string(),
-            late_arrival: -18.0,
-            early_departure: -0.0,
-            performing: 6.0,
-            waiting: -0.0,
-            marginal_utility_of_money: 1.0,
-            aborted_plan_score: -18.0,
-            waiting_pt: None,
-            utility_of_line_switch: -1.0,
         }
     }
 }
@@ -1814,11 +1772,10 @@ mod tests {
     use crate::simulation::config::Profiling;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
-        ActivityParameter, ActivityScoring, AgentParameter, CommandLineArgs, CompressionType,
-        ComputationalSetup, Config, Controller, EdgeWeight, MetisOptions, ModeParameter,
-        NonMainModeLinks, PartitionMethod, Partitioning, QSim, Replanning, Routing, Scoring,
-        ScoringMode, StrategySetting, TeleportedParams, TravelTimeCalculator, VertexWeight,
-        parse_key_val,
+        CommandLineArgs, CompressionType, ComputationalSetup, Config, Controller, EdgeWeight,
+        MetisOptions, NonMainModeLinks, PartitionMethod, Partitioning, QSim, Replanning, Routing,
+        Scoring, ScoringMode, StrategySetting, TeleportedParams, TravelTimeCalculator,
+        VertexWeight, parse_key_val,
     };
     use crate::simulation::config::{
         Ids, Network, Population, Transit, TransitSimulation, Vehicles,
@@ -2198,60 +2155,16 @@ mod tests {
             type: Scoring
             mode: Disabled
             write_experienced_plans: true
-            activity_params:
-              - activity_type: home
-                typical_duration_s: 43200.0
-            mode_params:
-              - mode: car
-                marginal_utility_of_traveling: -0.001
-                marginal_utility_of_distance: -0.002
-                monetary_distance_cost_rate: -0.003
-                constant: 1.5
-                daily_money_constant: -2.5
-                daily_utility_constant: 3.5
-            agent_params:
-              - subpopulation: freight
-                late_arrival: -12.0
-                early_departure: -6.0
-                performing: 4.0
-                waiting: -3.0
-                marginal_utility_of_money: 2.0
-                aborted_plan_score: -24.0
-                waiting_pt: -9.0
-                utility_of_line_switch: -0.5
             fraction_of_iterations_to_start_score_msa: 0.75
+            scoring_parameters_path: scoring-parameters.yml
         "#;
 
         let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
         let expected = Scoring {
             mode: ScoringMode::Disabled,
             write_experienced_plans: true,
-            activity_params: vec![ActivityParameter {
-                activity_type: "home".to_string(),
-                typical_duration_s: 43_200.0,
-                activity_scoring: ActivityScoring::ConsiderFullActivity,
-            }],
-            mode_params: vec![ModeParameter {
-                mode: "car".to_string(),
-                marginal_utility_of_traveling: -0.001,
-                marginal_utility_of_distance: -0.002,
-                monetary_distance_cost_rate: -0.003,
-                constant: 1.5,
-                daily_money_constant: -2.5,
-                daily_utility_constant: 3.5,
-            }],
-            agent_params: vec![AgentParameter {
-                subpopulation: "freight".to_string(),
-                late_arrival: -12.0,
-                early_departure: -6.0,
-                performing: 4.0,
-                waiting: -3.0,
-                marginal_utility_of_money: 2.0,
-                aborted_plan_score: -24.0,
-                waiting_pt: Some(-9.0),
-                utility_of_line_switch: -0.5,
-            }],
             fraction_of_iterations_to_start_score_msa: Some(0.75),
+            scoring_parameters_path: Some(PathBuf::from("scoring-parameters.yml")),
         };
         assert_eq!(config.scoring(), &expected);
 
@@ -2259,21 +2172,6 @@ mod tests {
         let roundtrip: Config =
             serde_yaml::from_str(&serialized).expect("failed to deserialize roundtrip config");
         assert_eq!(roundtrip.scoring(), &expected);
-    }
-
-    #[test]
-    fn scoring_yaml_uses_defaults_for_missing_lists_and_agent_fields() {
-        let yaml = r#"
-        modules:
-          scoring:
-            type: Scoring
-            agent_params:
-              - {}
-        "#;
-
-        let config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
-
-        assert_eq!(config.scoring(), &Scoring::default());
     }
 
     #[test]

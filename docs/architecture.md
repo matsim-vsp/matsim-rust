@@ -138,6 +138,20 @@ the first one in a trip. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
 
+Like MATSim's `scoringParameters`, the scoring parameters come in sets per subpopulation. Each `ScoringParameterSet`
+holds the person parameters such as `performing` together with its `activity_params` and `mode_params`. The set without
+`subpopulation` is the default set. A person whose subpopulation has no set of its own uses it, like with MATSim's
+`getScoringParametersOrDefault`, and activity and mode parameters are not merged with those of the default set. A person
+without a subpopulation attribute belongs to `person`. The sets are only read from a file:
+`scoring.scoring_parameters_path` names a YAML file with a list of sets, relative to the config, and without it there is
+one default set. Like the network and the population, `Scenario::load` reads the sets into
+`ScenarioCore::scoring_parameters`, from where the scoring function and the router take them, and rejects several sets
+for one subpopulation as well as activity types or modes that occur twice in a set. The controller always writes the
+sets to `output_scoring_parameters.yml`, while the output config keeps the input path, as it does for the network.
+Deviating from MATSim's
+`RandomizingTimeDistanceTravelDisutility`, which uses the default set for everyone, `ScoringBasedTravelTimeAndDisutility`
+routes with the person's set; routing without a person and the ALT lower bound use the smallest cost factors of all sets.
+
 ### Link Dynamics
 
 `qsim.traffic_dynamics` selects `Queue` (the default, including legacy `Simulation` configs) or
