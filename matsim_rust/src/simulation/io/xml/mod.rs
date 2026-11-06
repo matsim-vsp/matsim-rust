@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use tracing::info;
 
 pub mod attributes;
+pub mod config;
 mod element_splitter;
 pub mod events;
 pub mod facilities;

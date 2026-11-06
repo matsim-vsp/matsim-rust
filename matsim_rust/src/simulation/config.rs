@@ -976,6 +976,14 @@ pub struct ActivityParameter {
     pub typical_duration_s: f64,
     #[serde(default)]
     pub activity_scoring: ActivityScoring,
+    /// Like MATSim's `openingTime`, in seconds after midnight; it may lie beyond 24 hours. An agent
+    /// that arrives earlier waits until then. Without a value, the activity can start on arrival.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_time_s: Option<f64>,
+    /// Like MATSim's `closingTime`, in seconds after midnight; it may lie beyond 24 hours. An agent
+    /// that leaves later waits from then on. Without a value, the activity can last until departure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closing_time_s: Option<f64>,
 }
 
 impl ActivityParameter {
@@ -984,6 +992,8 @@ impl ActivityParameter {
             activity_type: activity_type.to_string(),
             typical_duration_s: 1.0,
             activity_scoring: ActivityScoring::ConsiderFullActivity,
+            opening_time_s: None,
+            closing_time_s: None,
         }
     }
 }

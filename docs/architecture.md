@@ -131,7 +131,12 @@ Scoring uses the public `PlanScorer` trait and reads only the experienced plan. 
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. It scores activity durations with
 MATSim's default `typicalDurationScoreComputation = relative`, i.e. a zero-utility duration of
 `typicalDuration * exp(-1)`, so an activity of typical duration scores `performing * typicalDuration`. MATSim's
-deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelLegScoring`, it scores the time until
+deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelActivityScoring`, an activity is only
+performed between its `opening_time_s` and `closing_time_s`, which may lie beyond 24 hours; the time before and after
+counts as waiting with `waiting`. `latestStartTime`, `earliestEndTime` and `minimalDuration` are not supported.
+`convert_scoring_parameters` converts the scoring module of a MATSim config, typically an `output_config.xml`, into a
+scoring parameters file and rejects such unsupported values instead of dropping them. It derives `aborted_plan_score`
+like MATSim's `ScoringParameters`. Like MATSim's `CharyparNagelLegScoring`, the scoring function scores the time until
 boarding of a leg with a transit route with `waiting_pt` instead of the marginal utility of traveling, by default with
 the one of traveling by `pt`, and adds `utility_of_line_switch` for each leg of a `transit.passenger_modes` mode after
 the first one in a trip. The alternative

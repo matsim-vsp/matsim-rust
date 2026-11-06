@@ -20,6 +20,8 @@ const SECONDS_PER_DAY: f64 = 86_400.0;
 struct ActivityScoringParams {
     typical_duration_s: f64,
     activity_scoring: ActivityScoring,
+    opening_time_s: Option<f64>,
+    closing_time_s: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +37,7 @@ struct ModeScoringParams {
 #[derive(Debug, Clone, Copy)]
 struct AgentScoringParams {
     marginal_utility_of_performing_s: f64,
+    marginal_utility_of_waiting_s: f64,
     marginal_utility_of_money: f64,
     aborted_plan_score_h: f64,
     /// `None` takes the marginal utility of traveling by `pt`.
@@ -61,6 +64,8 @@ impl SubpopulationScoringParams {
                     ActivityScoringParams {
                         typical_duration_s: params.typical_duration_s,
                         activity_scoring: params.activity_scoring,
+                        opening_time_s: params.opening_time_s,
+                        closing_time_s: params.closing_time_s,
                     },
                 )
             })
@@ -85,6 +90,7 @@ impl SubpopulationScoringParams {
             .collect();
         let agent = AgentScoringParams {
             marginal_utility_of_performing_s: set.performing / SECONDS_PER_HOUR,
+            marginal_utility_of_waiting_s: set.waiting / SECONDS_PER_HOUR,
             marginal_utility_of_money: set.marginal_utility_of_money,
             aborted_plan_score_h: set.aborted_plan_score,
             marginal_utility_of_waiting_pt_s: set
@@ -175,10 +181,11 @@ impl CharyparNagelScoringFunction {
                 let Some((start_s, end_s)) = completed_activity_interval(activity) else {
                     return Ok(score);
                 };
-                self.score_activity_duration(
+                self.score_activity_interval(
                     person_id,
                     activity,
-                    end_s - start_s,
+                    start_s,
+                    end_s,
                     subpopulation_params,
                 )
                 .map(|activity_score| score + activity_score)
@@ -186,9 +193,10 @@ impl CharyparNagelScoringFunction {
         }
 
         if activities.len() == 1 {
-            return self.score_activity_duration(
+            return self.score_activity_interval(
                 person_id,
                 activities[0],
+                0.0,
                 SECONDS_PER_DAY,
                 subpopulation_params,
             );
@@ -201,22 +209,31 @@ impl CharyparNagelScoringFunction {
         if first.act_type == last.act_type {
             let first_end_s = required_time(person_id, first.end_time, "first activity end")?;
             let last_start_s = required_time(person_id, last.start_time, "last activity start")?;
-            score += self.score_activity_duration(
+            // Like MATSim, the overnight activity lasts from the start of the last activity until the
+            // end of the first one on the next day.
+            score += self.score_activity_interval(
                 person_id,
                 first,
-                first_end_s + SECONDS_PER_DAY - last_start_s,
+                last_start_s,
+                first_end_s + SECONDS_PER_DAY,
                 subpopulation_params,
             )?;
         } else {
             let first_end_s = required_time(person_id, first.end_time, "first activity end")?;
-            score +=
-                self.score_activity_duration(person_id, first, first_end_s, subpopulation_params)?;
+            score += self.score_activity_interval(
+                person_id,
+                first,
+                0.0,
+                first_end_s,
+                subpopulation_params,
+            )?;
 
             let last_start_s = required_time(person_id, last.start_time, "last activity start")?;
-            score += self.score_activity_duration(
+            score += self.score_activity_interval(
                 person_id,
                 last,
-                SECONDS_PER_DAY - last_start_s,
+                last_start_s,
+                SECONDS_PER_DAY,
                 subpopulation_params,
             )?;
         }
@@ -224,10 +241,11 @@ impl CharyparNagelScoringFunction {
         for activity in &activities[1..activities.len() - 1] {
             let start_s = required_time(person_id, activity.start_time, "activity start")?;
             let end_s = required_time(person_id, activity.end_time, "activity end")?;
-            score += self.score_activity_duration(
+            score += self.score_activity_interval(
                 person_id,
                 activity,
-                end_s - start_s,
+                start_s,
+                end_s,
                 subpopulation_params,
             )?;
         }
@@ -235,11 +253,15 @@ impl CharyparNagelScoringFunction {
         Ok(score)
     }
 
-    fn score_activity_duration(
+    /// Scores an activity from the arrival to the departure of the agent, like MATSim's
+    /// `CharyparNagelActivityScoring.calcActScore` without `latestStartTime`, `earliestEndTime` and
+    /// `minimalDuration`.
+    fn score_activity_interval(
         &self,
         person_id: &Id<InternalPerson>,
         activity: &InternalActivity,
-        duration_s: f64,
+        arrival_s: f64,
+        departure_s: f64,
         subpopulation_params: &SubpopulationScoringParams,
     ) -> Result<f64, String> {
         let agent_params = &subpopulation_params.agent;
@@ -257,6 +279,34 @@ impl CharyparNagelScoringFunction {
         if params.activity_scoring == ActivityScoring::Ignore {
             return Ok(0.0);
         }
+
+        // The activity is only performed while it is open; before and after, the agent waits:
+        // As in MATSim, an opening time after the departure without a closing time gives a negative duration,
+        // scored on the linear branch.
+        let mut activity_start_s = arrival_s;
+        let mut activity_end_s = departure_s;
+        if let Some(opening_s) = params.opening_time_s
+            && arrival_s < opening_s
+        {
+            // opened before activity start => activity started later
+            activity_start_s = opening_s;
+        }
+        if let Some(closing_s) = params.closing_time_s
+            && closing_s < departure_s
+        {
+            // closed before activity end => activity ended earlier
+            activity_end_s = closing_s;
+        }
+        if let (Some(opening_s), Some(closing_s)) = (params.opening_time_s, params.closing_time_s)
+            && (opening_s > departure_s || closing_s < arrival_s)
+        {
+            // activity time and opening times didn't overlap
+            activity_start_s = departure_s;
+            activity_end_s = departure_s;
+        }
+        let duration_s = activity_end_s - activity_start_s;
+        let waiting_s =
+            (activity_start_s - arrival_s).max(0.0) + (departure_s - activity_end_s).max(0.0);
 
         if !duration_s.is_finite() {
             return Err(format!(
@@ -279,11 +329,20 @@ impl CharyparNagelScoringFunction {
             "marginal utility of performing",
         )?;
 
-        let score = score_activity(
+        let mut score = score_activity(
             duration_s,
             params.typical_duration_s,
             agent_params.marginal_utility_of_performing_s,
         );
+        // Only added when the agent waits, so that scores without opening times stay unchanged.
+        if waiting_s > 0.0 {
+            require_finite(
+                person_id,
+                agent_params.marginal_utility_of_waiting_s,
+                "marginal utility of waiting",
+            )?;
+            score += agent_params.marginal_utility_of_waiting_s * waiting_s;
+        }
         // An extreme ratio of duration to typical duration overflows the argument of the
         // logarithm, so such a duration can no longer be scored.
         if !score.is_finite() {
@@ -1136,6 +1195,8 @@ mod tests {
                 activity_type: "home".to_string(),
                 typical_duration_s: SECONDS_PER_DAY,
                 activity_scoring: ActivityScoring::ConsiderFullActivity,
+                opening_time_s: None,
+                closing_time_s: None,
             }],
             mode_params: Vec::new(),
             ..ScoringParameterSet::default()
@@ -1164,6 +1225,73 @@ mod tests {
         assert!(error.contains("no scoring parameters configured for subpopulation person"));
     }
 
+    /// Like MATSim's `calcActScore`, an activity is only performed while it is open, and the agent
+    /// waits before and after.
+    #[deterministic_id_test]
+    fn activity_score_respects_opening_times_like_matsim() {
+        let params =
+            |activity_type: &str, typical_h: f64, open_h: Option<f64>, close_h: Option<f64>| {
+                ActivityParameter {
+                    activity_type: activity_type.to_string(),
+                    typical_duration_s: typical_h * SECONDS_PER_HOUR,
+                    activity_scoring: ActivityScoring::ConsiderFullActivity,
+                    opening_time_s: open_h.map(|h| h * SECONDS_PER_HOUR),
+                    closing_time_s: close_h.map(|h| h * SECONDS_PER_HOUR),
+                }
+            };
+        let set = ScoringParameterSet {
+            waiting: -3.0,
+            activity_params: vec![
+                params("home", 12.0, None, None),
+                params("work", 8.0, Some(8.0), Some(17.0)),
+                params("shop", 1.0, Some(8.0), Some(20.0)),
+                params("leisure", 6.0, Some(9.0), Some(25.0)),
+            ],
+            mode_params: Vec::new(),
+            ..ScoringParameterSet::default()
+        };
+        let scorer =
+            CharyparNagelScoringFunction::new(&Config::default(), &[set], Arc::new(Network::new()));
+        let person = Id::create("person");
+        let score = |elements: Vec<InternalPlanElement>| {
+            scorer.score(&person, "person", &plan(elements)).unwrap()
+        };
+        // With performing 6 per hour, d hours of an activity with typical duration t score
+        // 6 t (ln(d / t) + 1).
+        let performed = |d_h: f64, t_h: f64| 6.0 * t_h * ((d_h / t_h).ln() + 1.0);
+        const H: u64 = 3_600;
+
+        // Work is open from 8 to 17: the agent waits 2 h before and 2 h after 9 h of work.
+        assert_approx_eq(
+            performed(11.0, 12.0) + performed(9.0, 8.0) - 3.0 * 4.0,
+            score(vec![
+                activity("home", None, Some(6 * H)),
+                activity("work", Some(6 * H), Some(19 * H)),
+                activity("home", Some(19 * H), None),
+            ]),
+        );
+        // The shop has closed when the agent arrives: it only waits, and the shop scores like a
+        // duration of zero, i.e. -performing * typical duration.
+        assert_approx_eq(
+            performed(10.0, 12.0) - 6.0 * 1.0 - 3.0 * 1.0,
+            score(vec![
+                activity("home", None, Some(8 * H)),
+                activity("shop", Some(21 * H), Some(22 * H)),
+                activity("home", Some(22 * H), None),
+            ]),
+        );
+        // Leisure closes at 25, i.e. at 1 at night: of the overnight leisure from 20 to 2, the
+        // agent performs 5 h and then waits 1 h.
+        assert_approx_eq(
+            performed(18.0, 12.0) + performed(5.0, 6.0) - 3.0 * 1.0,
+            score(vec![
+                activity("leisure", None, Some(2 * H)),
+                activity("home", Some(2 * H), Some(20 * H)),
+                activity("leisure", Some(20 * H), None),
+            ]),
+        );
+    }
+
     fn make_scorer(
         activity_params: Vec<(&str, f64, ActivityScoring)>,
         mode_params: Vec<ModeParameter>,
@@ -1177,6 +1305,8 @@ mod tests {
                         activity_type: activity_type.to_string(),
                         typical_duration_s,
                         activity_scoring,
+                        opening_time_s: None,
+                        closing_time_s: None,
                     },
                 )
                 .collect(),

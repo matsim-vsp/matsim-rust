@@ -157,6 +157,14 @@ cargo run --bin convert_to_binary --release -- --network network.xml --populatio
 Optionally, `--transit-schedule` and `--facilities` convert a transit schedule and an activity facilities file as
 well. Facilities are referenced in the config via `facilities.path`.
 
+The scoring parameters of a MATSim run, including the activity parameters that scenarios such as Berlin create in
+code, can be taken from its output config. The resulting file is referenced in the config via
+`scoring.scoring_parameters_path`:
+
+```shell
+cargo run --bin convert_scoring_parameters --release -- --config output_config.xml --output scoring-parameters.yml
+```
+
 ## RustRover settings
 
 If you use RustRover, you need to disable "Optimize Import". Otherwise, the imports are sorted differently compared to

@@ -136,8 +136,8 @@ pub fn write_scoring_parameter_sets(sets: &[ScoringParameterSet], path: &Path) {
     });
 }
 
-/// Rejects several sets for the same subpopulation, including several default sets, and activity types or modes
-/// that occur more than once within a set.
+/// Rejects several sets for the same subpopulation, including several default sets, activity types or modes that
+/// occur more than once within a set, and opening or closing times that are negative, not finite, or out of order.
 pub fn validate_scoring_parameter_sets(sets: &[ScoringParameterSet]) -> Result<(), String> {
     let mut subpopulations = BTreeSet::new();
     for set in sets {
@@ -159,6 +159,15 @@ pub fn validate_scoring_parameter_sets(sets: &[ScoringParameterSet]) -> Result<(
                 set.describe_subpopulation()
             ));
         }
+        for params in &set.activity_params {
+            validate_opening_interval(params).map_err(|e| {
+                format!(
+                    "Activity type {} in the scoring parameters for {}: {e}",
+                    params.activity_type,
+                    set.describe_subpopulation()
+                )
+            })?;
+        }
         let mut modes = BTreeSet::new();
         if let Some(params) = set
             .mode_params
@@ -171,6 +180,30 @@ pub fn validate_scoring_parameter_sets(sets: &[ScoringParameterSet]) -> Result<(
                 set.describe_subpopulation()
             ));
         }
+    }
+    Ok(())
+}
+
+/// MATSim's activity scoring assumes that an activity opens no later than it closes, without checking it.
+fn validate_opening_interval(params: &ActivityParameter) -> Result<(), String> {
+    for (name, time) in [
+        ("opening time", params.opening_time_s),
+        ("closing time", params.closing_time_s),
+    ] {
+        if let Some(time) = time
+            && (!time.is_finite() || time < 0.0)
+        {
+            return Err(format!(
+                "{name} must be finite and not negative, got {time}."
+            ));
+        }
+    }
+    if let (Some(opening), Some(closing)) = (params.opening_time_s, params.closing_time_s)
+        && opening > closing
+    {
+        return Err(format!(
+            "opening time {opening} s lies after closing time {closing} s."
+        ));
     }
     Ok(())
 }
@@ -433,6 +466,8 @@ mod tests {
                     activity_type: "home".to_string(),
                     typical_duration_s: 43_200.0,
                     activity_scoring: ActivityScoring::ConsiderFullActivity,
+                    opening_time_s: None,
+                    closing_time_s: None,
                 }],
                 mode_params: vec![ModeParameter {
                     mode: "car".to_string(),
@@ -480,6 +515,17 @@ mod tests {
             validate_scoring_parameter_sets(&sets),
             Err(
                 "Mode car occurs several times in the scoring parameters for the default subpopulation."
+                    .into()
+            )
+        );
+
+        sets[0].mode_params.pop();
+        sets[0].activity_params[0].opening_time_s = Some(20.0 * 3_600.0);
+        sets[0].activity_params[0].closing_time_s = Some(8.0 * 3_600.0);
+        assert_eq!(
+            validate_scoring_parameter_sets(&sets),
+            Err(
+                "Activity type home in the scoring parameters for the default subpopulation: opening time 72000 s lies after closing time 28800 s."
                     .into()
             )
         );
