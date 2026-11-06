@@ -7,10 +7,13 @@ use crate::simulation::scoring::{ScoringParameterSet, validate_scoring_parameter
 use crate::simulation::time::SimTime;
 use serde::Deserialize;
 use std::path::Path;
+use tracing::warn;
 
 /// The scoring module is called `planCalcScore` in older configs.
 const SCORING_MODULE_NAMES: [&str; 2] = ["scoring", "planCalcScore"];
 
+/// This struct represents the MATSim java config. Right now, it is only used to read the scoring module. Internally, the rust
+/// [`Config`](crate::simulation::config::Config) is used.
 #[derive(Debug, Deserialize, PartialEq, Clone, Default)]
 pub struct IOConfig {
     #[serde(rename = "module", default)]
@@ -54,7 +57,9 @@ impl IOConfig {
 /// Converts the `scoringParameters` sets of the scoring module, in the order of the config, like
 /// MATSim reads them. Parameters that this simulation cannot honor are rejected instead of dropped:
 /// unknown names, `latestStartTime`, `earliestEndTime`, `minimalDuration`, a `priority` other than 1,
-/// and a `typicalDurationScoreComputation` other than `relative`.
+/// and a `typicalDurationScoreComputation` other than `relative`. Unknown parameter sets, such as
+/// `tasteVariations`, are skipped with a warning. Missing values take MATSim's defaults, so that a
+/// reduced output config, which omits them, gives the same sets as the full one.
 pub fn scoring_parameter_sets(config: &IOConfig) -> Result<Vec<ScoringParameterSet>, String> {
     let module = config
         .modules
@@ -64,12 +69,17 @@ pub fn scoring_parameter_sets(config: &IOConfig) -> Result<Vec<ScoringParameterS
     let sets = module
         .parameter_sets
         .iter()
-        .map(|set| match set.set_type.as_str() {
-            "scoringParameters" => scoring_parameter_set(set),
-            other => Err(format!(
-                "Unsupported parameter set {other} in the scoring module."
-            )),
+        .filter(|set| {
+            let known = set.set_type == "scoringParameters";
+            if !known {
+                warn!(
+                    "Skipping the unsupported parameter set {} in the scoring module.",
+                    set.set_type
+                );
+            }
+            known
         })
+        .map(scoring_parameter_set)
         .collect::<Result<Vec<_>, _>>()?;
     validate_scoring_parameter_sets(&sets)?;
     Ok(sets)
@@ -104,11 +114,9 @@ fn scoring_parameter_set(set: &IOConfigParameterSet) -> Result<ScoringParameterS
         match nested.set_type.as_str() {
             "activityParams" => result.activity_params.push(activity_parameter(nested)?),
             "modeParams" => result.mode_params.push(mode_parameter(nested)?),
-            other => {
-                return Err(format!(
-                    "Unsupported parameter set {other} in the scoring parameters for {describe}."
-                ));
-            }
+            other => warn!(
+                "Skipping the unsupported parameter set {other} in the scoring parameters for {describe}."
+            ),
         }
     }
 
@@ -135,7 +143,7 @@ fn activity_parameter(set: &IOConfigParameterSet) -> Result<ActivityParameter, S
     let mut typical_duration_s = None;
     let mut opening_time_s = None;
     let mut closing_time_s = None;
-    let mut score_at_all = true;
+    let mut score_at_all = None;
     let mut unsupported = Vec::new();
     let mut unknown = Vec::new();
     for param in &set.params {
@@ -144,7 +152,7 @@ fn activity_parameter(set: &IOConfigParameterSet) -> Result<ActivityParameter, S
             "typicalDuration" => typical_duration_s = parse_time(param)?,
             "openingTime" => opening_time_s = parse_time(param)?,
             "closingTime" => closing_time_s = parse_time(param)?,
-            "scoringThisActivityAtAll" => score_at_all = parse_bool(param)?,
+            "scoringThisActivityAtAll" => score_at_all = Some(parse_bool(param)?),
             "latestStartTime" | "earliestEndTime" | "minimalDuration" => {
                 if parse_time(param)?.is_some() {
                     unsupported.push(format!("{} {}", param.name, param.value));
@@ -166,6 +174,12 @@ fn activity_parameter(set: &IOConfigParameterSet) -> Result<ActivityParameter, S
     let activity_type =
         activity_type.ok_or_else(|| "Activity parameters without activityType.".to_string())?;
     let context = format!("the activity parameters of {activity_type}");
+    // MATSim's default config already contains `car interaction`, `pt interaction` and further stage
+    // activities that are not scored, and `checkConsistency` adds them for the other modes. A
+    // reduced output config therefore omits `scoringThisActivityAtAll=false` for some of them.
+    // Like MATSim's `StageActivityTypeIdentifier`, a type ending with `interaction` is a stage
+    // activity.
+    let score_at_all = score_at_all.unwrap_or(!activity_type.ends_with("interaction"));
     reject_unknown(&unknown, &context)?;
     if !unsupported.is_empty() {
         return Err(format!(
@@ -302,8 +316,8 @@ mod tests {
 				<param name="typicalDurationScoreComputation" value="relative" />
 			</parameterset>
 			<parameterset type="activityParams" >
+				<!-- Like in a reduced output config, which omits MATSim's default scoringThisActivityAtAll=false. -->
 				<param name="activityType" value="car interaction" />
-				<param name="scoringThisActivityAtAll" value="false" />
 				<param name="typicalDuration" value="undefined" />
 			</parameterset>
 			<parameterset type="modeParams" >
@@ -316,6 +330,10 @@ mod tests {
 			<parameterset type="modeParams" >
 				<param name="marginalUtilityOfTraveling_util_hr" value="-20.0" />
 				<param name="mode" value="ride" />
+			</parameterset>
+			<!-- Not supported, so skipped with a warning. -->
+			<parameterset type="tasteVariations" >
+				<param name="mode" value="car" />
 			</parameterset>
 		</parameterset>
 		<parameterset type="scoringParameters" >

@@ -135,7 +135,10 @@ deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelA
 performed between its `opening_time_s` and `closing_time_s`, which may lie beyond 24 hours; the time before and after
 counts as waiting with `waiting`. `latestStartTime`, `earliestEndTime` and `minimalDuration` are not supported.
 `convert_scoring_parameters` converts the scoring module of a MATSim config, typically an `output_config.xml`, into a
-scoring parameters file and rejects such unsupported values instead of dropping them. It derives `aborted_plan_score`
+scoring parameters file and rejects such unsupported values instead of dropping them; unknown parameter sets such
+as `tasteVariations` are skipped with a warning. Missing values take MATSim's
+defaults, including `scoringThisActivityAtAll=false` for types ending with `interaction`, so a reduced output config
+gives the same file. It derives `aborted_plan_score`
 like MATSim's `ScoringParameters`. Like MATSim's `CharyparNagelLegScoring`, the scoring function scores the time until
 boarding of a leg with a transit route with `waiting_pt` instead of the marginal utility of traveling, by default with
 the one of traveling by `pt`, and adds `utility_of_line_switch` for each leg of a `transit.passenger_modes` mode after
