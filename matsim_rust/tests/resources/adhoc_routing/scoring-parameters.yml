@@ -1,0 +1,5 @@
+- activity_params:
+    - activity_type: home_28800.0
+      typical_duration_s: 28800.0
+    - activity_type: errands_2400.0
+      typical_duration_s: 2400.0

@@ -695,6 +695,7 @@ impl ScoringPool {
             plan_scorer: plan_scorer.unwrap_or_else(|| {
                 Box::new(CharyparNagelScoringFunction::new(
                     scenario_core.config.as_ref(),
+                    &scenario_core.scoring_parameters,
                     scenario_core.network.clone(),
                 ))
             }),
@@ -816,11 +817,8 @@ impl IterationEventsWriter {
         let writer = match &self.write_events {
             WriteEvents::None => return,
             WriteEvents::File => {
-                let events_path = events_dir.join(format!(
-                    "events.{}.{}",
-                    self.rank,
-                    self.compression_type.extension()
-                ));
+                let events_path =
+                    events_dir.join(io::events_file_name(self.rank, self.compression_type));
                 info!("adding events writer with path: {events_path:?}");
                 match self.compression_type {
                     CompressionType::Proto => {
@@ -927,6 +925,7 @@ mod tests {
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
+            scoring_parameters: Arc::default(),
             config: config.clone(),
         };
 
@@ -975,6 +974,7 @@ mod tests {
             facilities: Arc::new(
                 crate::simulation::scenario::facilities::ActivityFacilities::default(),
             ),
+            scoring_parameters: Arc::default(),
             config: Arc::new(config),
         };
         let pool = ReplanningPool::new(&scenario_core, TripRouter::default());

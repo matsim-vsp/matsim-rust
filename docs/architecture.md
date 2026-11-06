@@ -131,12 +131,34 @@ Scoring uses the public `PlanScorer` trait and reads only the experienced plan. 
 `Box<dyn PlanScorer>`; without one, it creates `CharyparNagelScoringFunction`. It scores activity durations with
 MATSim's default `typicalDurationScoreComputation = relative`, i.e. a zero-utility duration of
 `typicalDuration * exp(-1)`, so an activity of typical duration scores `performing * typicalDuration`. MATSim's
-deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelLegScoring`, it scores the time until
+deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelActivityScoring`, an activity is only
+performed between its `opening_time_s` and `closing_time_s`, which may lie beyond 24 hours; the time before and after
+counts as waiting with `waiting`. `latestStartTime`, `earliestEndTime` and `minimalDuration` are not supported.
+`convert_scoring_parameters` converts the scoring module of a MATSim config, typically an `output_config.xml`, into a
+scoring parameters file and rejects such unsupported values instead of dropping them; unknown parameter sets such
+as `tasteVariations` are skipped with a warning. Missing values take MATSim's
+defaults, including `scoringThisActivityAtAll=false` for types ending with `interaction`, so a reduced output config
+gives the same file. It derives `aborted_plan_score`
+like MATSim's `ScoringParameters`. Like MATSim's `CharyparNagelLegScoring`, the scoring function scores the time until
 boarding of a leg with a transit route with `waiting_pt` instead of the marginal utility of traveling, by default with
 the one of traveling by `pt`, and adds `utility_of_line_switch` for each leg of a `transit.passenger_modes` mode after
 the first one in a trip. The alternative
 `OnlyTravelTimeDependentScoring` assigns the negative elapsed seconds of completed trips, including transfer waits.
 An empty experienced plan receives zero points from either built-in scorer.
+
+Like MATSim's `scoringParameters`, the scoring parameters come in sets per subpopulation. Each `ScoringParameterSet`
+holds the person parameters such as `performing` together with its `activity_params` and `mode_params`. The set without
+`subpopulation` is the default set. A person whose subpopulation has no set of its own uses it, like with MATSim's
+`getScoringParametersOrDefault`, and activity and mode parameters are not merged with those of the default set. A person
+without a subpopulation attribute belongs to `person`. The sets are only read from a file:
+`scoring.scoring_parameters_path` names a YAML file with a list of sets, relative to the config, and without it there is
+one default set. Like the network and the population, `Scenario::load` reads the sets into
+`ScenarioCore::scoring_parameters`, from where the scoring function and the router take them, and rejects several sets
+for one subpopulation as well as activity types or modes that occur twice in a set. The controller always writes the
+sets to `output_scoring_parameters.yml`, while the output config keeps the input path, as it does for the network.
+Deviating from MATSim's
+`RandomizingTimeDistanceTravelDisutility`, which uses the default set for everyone, `ScoringBasedTravelTimeAndDisutility`
+routes with the person's set; routing without a person and the ALT lower bound use the smallest cost factors of all sets.
 
 ### Link Dynamics
 
