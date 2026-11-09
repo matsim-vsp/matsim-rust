@@ -135,8 +135,10 @@ deprecated `uniform` computation is not supported. Like MATSim's `CharyparNagelA
 performed between its `opening_time_s` and `closing_time_s`, which may lie beyond 24 hours; the time before and after
 counts as waiting with `waiting`. `latestStartTime`, `earliestEndTime` and `minimalDuration` are not supported.
 `convert_scoring_parameters` converts the scoring module of a MATSim config, typically an `output_config.xml`, into a
-scoring parameters file and rejects such unsupported values instead of dropping them; unknown parameter sets such
-as `tasteVariations` are skipped with a warning. Missing values take MATSim's
+scoring parameters file and rejects such unsupported values instead of dropping them, as well as unknown parameter
+sets and module settings that this simulation does not implement: `usingOldScoringBelowZeroUtilityDuration=true`,
+`learningRate` or `brainExpBeta` other than 1, and a `typicalDurationSource` other than `activityParams`. Only
+`tasteVariations` is skipped with a warning. Missing values take MATSim's
 defaults, including `scoringThisActivityAtAll=false` for types ending with `interaction`, so a reduced output config
 gives the same file. It derives `aborted_plan_score`
 like MATSim's `ScoringParameters`. Like MATSim's `CharyparNagelLegScoring`, the scoring function scores the time until
@@ -239,7 +241,7 @@ them, with the same type and the id `<vehicle>_<line>_<route>_<departure>`; vehi
 id. `TransitSimulation::needs_vehicle_per_departure` decides this, so that a later simulation with vehicle blocks, e.g.
 on the links of the network, can let vehicles serve several departures. The controller writes the schedule and the
 transit vehicles with the copies to `output_transitSchedule` and `output_transitVehicles`, so that the output matches
-the events and can be used as input again.
+the events and can be used as input again. With teleported transit, it writes both unchanged if a schedule was read.
 
 Each departure has a driver, an agent without a person. Like the drivers of MATSim's transit engines, it passes through
 three phases: it waits in a `pt interaction` activity at the start link of its route until the departure time, drives

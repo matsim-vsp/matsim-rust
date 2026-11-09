@@ -375,12 +375,20 @@ impl Controller {
         self.write_output_scoring_parameters(&output_path);
         info!("    ... Network ...");
         self.write_output_network(output_path.clone());
+        info!("    ... Facilities ...");
+        self.write_output_facilities(&output_path);
+        info!("    ... Vehicles ...");
+        self.write_output_vehicles(&output_path);
         info!("    ... Population ...");
         self.write_output_population(output_path.clone());
-        if matches!(
-            self.config.transit().simulation,
-            TransitSimulation::ScheduleBasedTeleportation
-        ) {
+        // Like MATSim, the transit files are only written if transit is used: with a schedule as input, also if
+        // transit is teleported, or if it is simulated schedule based.
+        if self.config.transit().schedule_path.is_some()
+            || matches!(
+                self.config.transit().simulation,
+                TransitSimulation::ScheduleBasedTeleportation
+            )
+        {
             info!("    ... Transit schedule and vehicles ...");
             self.write_output_transit(&output_path);
         }
@@ -588,6 +596,22 @@ impl Controller {
             .core
             .network
             .to_file_with_link_attribute_overrides(&net_out_path, &attribute_overrides);
+    }
+
+    /// Writes the facilities as `prepare_for_sim` prepared them, i.e. with the base links that it assigned.
+    fn write_output_facilities(&self, output_path: impl AsRef<Path>) {
+        let path = output_path
+            .as_ref()
+            .join(OutputFile::Facilities.file_name(self.config.output().compression_type));
+        self.scenario.core.facilities.to_file(&path);
+    }
+
+    /// Writes the vehicles of the persons, also those created while loading the population.
+    fn write_output_vehicles(&self, output_path: impl AsRef<Path>) {
+        let path = output_path
+            .as_ref()
+            .join(OutputFile::Vehicles.file_name(self.config.output().compression_type));
+        vehicles::to_file(&self.scenario.core.garage, &path);
     }
 
     fn write_output_transit(&self, output_path: impl AsRef<Path>) {
