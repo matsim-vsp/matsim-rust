@@ -10,6 +10,9 @@ use crate::simulation::config::{Config, TransitSimulation};
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::network::sim_network::SimNetworkPartition;
 use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::scoring::{
+    ScoringParameterSet, read_scoring_parameter_sets, validate_scoring_parameter_sets,
+};
 use crate::simulation::{id, io};
 use facilities::ActivityFacilities;
 use network::Network;
@@ -164,6 +167,7 @@ pub struct Scenario {
     /// Transit vehicles and their types, separate from the vehicles of persons.
     pub transit_garage: Garage,
     pub facilities: ActivityFacilities,
+    pub scoring_parameters: Vec<ScoringParameterSet>,
     pub config: Arc<Config>,
 }
 
@@ -173,6 +177,10 @@ impl Scenario {
         info!("Start loading mod.");
 
         let config = config.into();
+
+        // Loaded first, so that an error in the scoring parameters shows before the long loading of the other
+        // files. It creates no IDs.
+        let scoring_parameters = Self::load_scoring_parameters(&config);
 
         if let Some(path) = &config.ids().path {
             info!("Loading IDs from {:?}", path);
@@ -198,8 +206,20 @@ impl Scenario {
             transit_schedule,
             transit_garage,
             facilities,
+            scoring_parameters,
             config,
         }
+    }
+
+    fn load_scoring_parameters(config: &Config) -> Vec<ScoringParameterSet> {
+        let sets = match &config.scoring().scoring_parameters_path {
+            Some(path) => read_scoring_parameter_sets(&io::resolve_path(config.context(), path)),
+            None => vec![ScoringParameterSet::default()],
+        };
+        if let Err(e) = validate_scoring_parameter_sets(&sets) {
+            panic!("Invalid scoring parameters: {e}");
+        }
+        sets
     }
 
     fn load_network(config: &Config) -> Network {
@@ -274,6 +294,9 @@ pub struct ScenarioCore {
     pub transit_garage: Arc<Garage>,
     /// Activity facilities, prepared by `prepare_for_sim` before the controller shares them.
     pub facilities: Arc<ActivityFacilities>,
+    /// The scoring parameter sets of `Scenario::scoring_parameters`, which the scoring function and the router
+    /// read.
+    pub scoring_parameters: Arc<Vec<ScoringParameterSet>>,
     pub config: Arc<Config>,
 }
 
@@ -335,6 +358,7 @@ impl From<Scenario> for ControllerScenario {
                 transit_schedule,
                 transit_garage: Arc::new(scenario.transit_garage),
                 facilities: Arc::new(scenario.facilities),
+                scoring_parameters: Arc::new(scenario.scoring_parameters),
                 config: scenario.config,
             },
             transit_sim_schedule: Arc::new(transit_sim_schedule),
@@ -433,6 +457,7 @@ mod tests {
         TransitLine, TransitRoute, TransitSchedule, TransitStopFacility,
     };
     use crate::simulation::scenario::vehicles::Garage;
+    use crate::simulation::scoring::ScoringParameterSet;
     use macros::deterministic_id_test;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -446,6 +471,93 @@ mod tests {
 
         let controller_scenario: ControllerScenario = scenario.into();
         assert!(controller_scenario.transit_sim_schedule.is_empty());
+    }
+
+    #[deterministic_id_test]
+    fn scenario_loads_scoring_parameters_from_file_or_takes_default_set() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yml"),
+            r#"
+            modules:
+              scoring:
+                type: Scoring
+                scoring_parameters_path: scoring-parameters.yml
+            "#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("scoring-parameters.yml"),
+            r#"
+            - performing: 6.88
+            - subpopulation: freight
+              performing: 4.0
+            "#,
+        )
+        .unwrap();
+
+        let scenario = Scenario::load(Config::from_path(dir.path().join("config.yml")));
+        assert_eq!(
+            scenario.scoring_parameters,
+            vec![
+                ScoringParameterSet {
+                    performing: 6.88,
+                    ..ScoringParameterSet::default()
+                },
+                ScoringParameterSet {
+                    subpopulation: Some("freight".to_string()),
+                    performing: 4.0,
+                    ..ScoringParameterSet::default()
+                },
+            ]
+        );
+
+        let scenario = Scenario::load(Config::default());
+        assert_eq!(
+            scenario.scoring_parameters,
+            vec![ScoringParameterSet::default()]
+        );
+    }
+
+    #[deterministic_id_test]
+    fn scenario_loads_scoring_parameters_from_matsim_config() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yml"),
+            r#"
+            modules:
+              scoring:
+                type: Scoring
+                scoring_parameters_path: scoring.xml
+            "#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("scoring.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<config>
+	<module name="scoring">
+		<parameterset type="scoringParameters">
+			<param name="performing" value="6.88" />
+		</parameterset>
+		<parameterset type="scoringParameters">
+			<param name="subpopulation" value="freight" />
+			<param name="performing" value="4.0" />
+		</parameterset>
+	</module>
+</config>
+"#,
+        )
+        .unwrap();
+
+        let scenario = Scenario::load(Config::from_path(dir.path().join("config.yml")));
+        let sets: Vec<_> = scenario
+            .scoring_parameters
+            .iter()
+            .map(|set| (set.subpopulation.clone(), set.performing))
+            .collect();
+        assert_eq!(sets, vec![(None, 6.88), (Some("freight".to_string()), 4.0)]);
     }
 
     #[deterministic_id_test]
@@ -515,6 +627,7 @@ mod tests {
             transit_schedule: TransitSchedule::default(),
             transit_garage: Garage::default(),
             facilities: ActivityFacilities::default(),
+            scoring_parameters: Vec::new(),
             config,
         }
         .into();

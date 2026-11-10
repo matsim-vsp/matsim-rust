@@ -1,5 +1,5 @@
 use macros::deterministic_id_test;
-use matsim_rust::simulation::config::{CommandLineArgs, Config, ModeParameter, WriteEvents};
+use matsim_rust::simulation::config::{CommandLineArgs, Config, WriteEvents};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::events::utils::compare_event_folder;
 use matsim_rust::simulation::events::{LinkEnterEvent, LinkLeaveEvent, PersonStuckEvent};
@@ -267,10 +267,6 @@ fn run_stuck_scenario(
     if let Some(population_path) = population_path {
         config.population_mut().path = Some(PathBuf::from(population_path));
         config.qsim_mut().main_modes.push("bike".to_string());
-        config
-            .scoring_mut()
-            .mode_params
-            .push(ModeParameter::default_for_mode("bike"));
     }
     config.qsim_mut().start_time = start_time;
     config.qsim_mut().end_time = end_time;

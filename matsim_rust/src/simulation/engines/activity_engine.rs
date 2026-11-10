@@ -3,9 +3,9 @@ use crate::simulation::agents::EndTime;
 use crate::simulation::config::Config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{ActivityEndEventBuilder, ActivityStartEventBuilder};
+use crate::simulation::queue::TimeQueue;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::time::{SimClock, SimTime, Tick};
-use crate::simulation::time_queue::TimeQueue;
 use tracing::instrument;
 
 pub struct ActivityEngine {

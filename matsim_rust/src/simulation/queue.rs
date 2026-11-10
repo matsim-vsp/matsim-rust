@@ -5,8 +5,9 @@ use crate::simulation::id::serializable_type::StableTypeId;
 use crate::simulation::time::SimTime;
 use nohash_hasher::IntMap;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, VecDeque};
 
+#[derive(Debug)]
 struct Entry<T> {
     end_time: SimTime,
     order: u64,
@@ -45,28 +46,20 @@ impl<T> Ord for Entry<T> {
 /// This is acceptable for simulation purposes as it would take an astronomically large number
 /// of insertions to overflow, and wrapping would only affect ordering in the unlikely event
 /// of having entries with both the same time and counter values after overflow.
-pub struct TimeQueue<T, I>
-where
-    T: EndTime,
-{
+#[derive(Debug)]
+pub struct TimeQueue<T, I> {
     q: BinaryHeap<Entry<T>>,
     counter: u64,
     _phantom: std::marker::PhantomData<I>,
 }
 
-impl<T, I> Default for TimeQueue<T, I>
-where
-    T: EndTime,
-{
+impl<T, I> Default for TimeQueue<T, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, I> TimeQueue<T, I>
-where
-    T: EndTime,
-{
+impl<T, I> TimeQueue<T, I> {
     pub fn new() -> Self {
         TimeQueue {
             q: BinaryHeap::new(),
@@ -75,7 +68,10 @@ where
         }
     }
 
-    pub fn add(&mut self, value: T, now: SimTime) {
+    pub fn add(&mut self, value: T, now: SimTime)
+    where
+        T: EndTime,
+    {
         let order = self.counter;
         self.counter = self.counter.wrapping_add(1);
         self.add_with_order(value, now, order);
@@ -83,8 +79,15 @@ where
 
     /// Adds a value using an explicit tie-break order for entries with the same end time.
     /// Callers must provide unique, stable order values for their entries.
-    pub fn add_with_order(&mut self, value: T, now: SimTime, order: u64) {
+    pub fn add_with_order(&mut self, value: T, now: SimTime, order: u64)
+    where
+        T: EndTime,
+    {
         let end_time = value.end_time(now);
+        self.insert(value, end_time, order);
+    }
+
+    fn insert(&mut self, value: T, end_time: SimTime, order: u64) {
         self.q.push(Entry {
             end_time,
             order,
@@ -111,10 +114,82 @@ where
         self.q.drain().map(|entry| entry.value).collect()
     }
 
-    #[cfg(test)]
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.q.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.q.is_empty()
+    }
+}
+
+/// A queue whose head is chosen by its implementation: insertion order or earliest end time.
+/// Polling does not check whether the head is due; the caller controls when it may leave.
+#[enum_dispatch::enum_dispatch]
+pub trait Queue<T> {
+    fn push(&mut self, value: T, end_time: SimTime);
+    fn peek(&self) -> Option<&T>;
+    fn poll(&mut self) -> Option<T>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Removes all entries. The returned order is unspecified.
+    fn drain(&mut self) -> Vec<T>;
+}
+
+/// The travelling queue of a link. Only this queue permits passing; the downstream buffer remains FIFO.
+/// Defined next to [`Queue`], because `enum_dispatch` needs the trait and the enum in one module scope.
+#[enum_dispatch::enum_dispatch(Queue<T>)]
+#[derive(Debug)]
+pub(crate) enum LinkQueue<T> {
+    Fifo(VecDeque<T>),
+    PassingQ(TimeQueue<T, ()>),
+}
+
+impl<T> Queue<T> for VecDeque<T> {
+    fn push(&mut self, value: T, _end_time: SimTime) {
+        self.push_back(value);
+    }
+
+    fn peek(&self) -> Option<&T> {
+        self.front()
+    }
+
+    fn poll(&mut self) -> Option<T> {
+        self.pop_front()
+    }
+
+    fn len(&self) -> usize {
+        VecDeque::len(self)
+    }
+
+    fn drain(&mut self) -> Vec<T> {
+        VecDeque::drain(self, ..).collect()
+    }
+}
+
+impl<T, I> Queue<T> for TimeQueue<T, I> {
+    fn push(&mut self, value: T, end_time: SimTime) {
+        let order = self.counter;
+        self.counter = self.counter.wrapping_add(1);
+        self.insert(value, end_time, order);
+    }
+
+    fn peek(&self) -> Option<&T> {
+        self.q.peek().map(|entry| &entry.value)
+    }
+
+    fn poll(&mut self) -> Option<T> {
+        self.q.pop().map(|entry| entry.value)
+    }
+
+    fn len(&self) -> usize {
+        TimeQueue::len(self)
+    }
+
+    fn drain(&mut self) -> Vec<T> {
+        TimeQueue::drain(self)
     }
 }
 

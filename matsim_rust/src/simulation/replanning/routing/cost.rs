@@ -1,4 +1,3 @@
-use crate::simulation::config::Config;
 use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::travel_time_calculator::{
     GlobalTravelTimeCalculator, TravelTimeGetter,
@@ -6,6 +5,7 @@ use crate::simulation::replanning::routing::travel_time_calculator::{
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::vehicles::InternalVehicle;
+use crate::simulation::scoring::ScoringParameterSet;
 use crate::simulation::time::SimTime;
 use nohash_hasher::IntMap;
 use std::fmt::Debug;
@@ -57,78 +57,89 @@ pub trait TravelDisutility: Debug + Send + Sync {
     fn get_link_min_travel_disutility(&self, link: &Link) -> Disutility;
 }
 
-#[derive(Clone, Debug)]
-struct SubpopulationParams {
-    performing: f64,
-    marginal_utility_of_money: f64,
+/// The cost factors of the router mode for one scoring parameter set.
+#[derive(Clone, Copy, Debug)]
+struct CostFactors {
+    /// disutility per second of travel time
+    travel_time_s: f64,
+    /// disutility per meter of distance
+    distance_m: f64,
 }
 
+impl CostFactors {
+    /// Returns `None` if the set has no parameters for the mode.
+    fn new(set: &ScoringParameterSet, mode: &str) -> Option<Self> {
+        let mode_params = set.mode_params.iter().find(|params| params.mode == mode)?;
+        Some(CostFactors {
+            // traveling is normally negative, so convert it into positive disutility by negating it
+            travel_time_s: (-mode_params.marginal_utility_of_traveling + set.performing) / 3600.,
+            distance_m: -mode_params.marginal_utility_of_distance
+                - mode_params.monetary_distance_cost_rate * set.marginal_utility_of_money,
+        })
+    }
+}
+
+/// Routes with the travel disutility of the person's scoring parameter set, i.e. the set of their
+/// subpopulation, or the default set if their subpopulation has none. This deliberately deviates
+/// from MATSim's `RandomizingTimeDistanceTravelDisutility`, which uses the default set for all
+/// persons.
 #[derive(Clone, Debug)]
 pub struct ScoringBasedTravelTimeAndDisutility {
     mode: Id<String>,
-    params_per_subpopulation: IntMap<Id<String>, SubpopulationParams>,
-    min_params: SubpopulationParams,
-    monetary_distance_rate: f64,
-    marginal_utility_traveling: f64,
-    marginal_utility_distance: f64,
+    /// `None` for the sets without parameters for the mode.
+    factors_per_subpopulation: IntMap<Id<String>, Option<CostFactors>>,
+    default_factors: Option<Option<CostFactors>>,
+    /// The smallest factors over all sets with parameters for the mode. Each factor multiplies a
+    /// non-negative quantity, so their minima give a lower bound on the disutility of every set.
+    min_factors: CostFactors,
     travel_time: Arc<GlobalTravelTimeCalculator>,
 }
 
 impl ScoringBasedTravelTimeAndDisutility {
     pub fn new(
-        config: &Config,
+        scoring_parameters: &[ScoringParameterSet],
         mode: Id<String>,
         travel_time: Arc<GlobalTravelTimeCalculator>,
     ) -> Self {
-        let params_per_subpopulation = config
-            .scoring()
-            .agent_params
-            .iter()
-            .map(|p| {
-                (
-                    Id::create(&p.subpopulation),
-                    SubpopulationParams {
-                        performing: p.performing,
-                        marginal_utility_of_money: p.marginal_utility_of_money,
-                    },
-                )
-            })
-            .collect::<IntMap<_, _>>();
+        let mut factors_per_subpopulation = IntMap::default();
+        let mut default_factors = None;
+        for set in scoring_parameters {
+            let factors = CostFactors::new(set, mode.external());
+            match &set.subpopulation {
+                Some(subpopulation) => {
+                    factors_per_subpopulation.insert(Id::create(subpopulation), factors);
+                }
+                None => default_factors = Some(factors),
+            }
+        }
 
-        let min_performing = params_per_subpopulation
-            .iter()
-            .map(|(_, params)| params.performing)
-            .reduce(f64::min)
-            .unwrap();
-
-        let min_marginal_utility_of_money = params_per_subpopulation
-            .iter()
-            .map(|(_, params)| params.marginal_utility_of_money)
-            .reduce(f64::min)
-            .unwrap();
-
-        let mode_params = config
-            .scoring()
-            .mode_params
-            .iter()
-            .find(|params| params.mode == mode.external())
-            .unwrap_or_else(|| {
-                panic!(
-                    "No scoring parameters configured for network mode {}",
-                    mode.external()
-                )
-            });
+        let all_factors = || {
+            factors_per_subpopulation
+                .values()
+                .chain(default_factors.iter())
+                .flatten()
+        };
+        let min_factors = CostFactors {
+            travel_time_s: all_factors()
+                .map(|factors| factors.travel_time_s)
+                .reduce(f64::min)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No scoring parameters configured for network mode {}",
+                        mode.external()
+                    )
+                }),
+            distance_m: all_factors()
+                .map(|factors| factors.distance_m)
+                .reduce(f64::min)
+                .unwrap(),
+        };
 
         ScoringBasedTravelTimeAndDisutility {
             mode,
-            params_per_subpopulation,
-            min_params: SubpopulationParams {
-                performing: min_performing,
-                marginal_utility_of_money: min_marginal_utility_of_money,
-            },
-            monetary_distance_rate: mode_params.monetary_distance_cost_rate,
-            marginal_utility_traveling: mode_params.marginal_utility_of_traveling,
-            marginal_utility_distance: mode_params.marginal_utility_of_distance,
+            factors_per_subpopulation,
+            default_factors,
+            min_factors,
             travel_time,
         }
     }
@@ -139,29 +150,31 @@ impl ScoringBasedTravelTimeAndDisutility {
         travel_time: Duration,
         person: Option<&InternalPerson>,
     ) -> Disutility {
-        let person_params = if let Some(person) = person {
-            self.params_per_subpopulation
-                .get(person.subpopulation())
+        let factors = if let Some(person) = person {
+            let subpopulation = person.subpopulation();
+            self.factors_per_subpopulation
+                .get(subpopulation)
+                .or(self.default_factors.as_ref())
                 .unwrap_or_else(|| {
                     panic!(
-                        "No scoring parameters configured for subpopulation {}",
-                        person.subpopulation().external()
+                        "No scoring parameters configured for subpopulation {} and no default scoring parameters",
+                        subpopulation.external()
+                    )
+                })
+                .as_ref()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No scoring parameters configured for network mode {} in the scoring parameters of subpopulation {}",
+                        self.mode.external(),
+                        subpopulation.external()
                     )
                 })
         } else {
             // Person-less routing uses the same conservative coefficient as the global lower bound.
-            &self.min_params
+            &self.min_factors
         };
 
-        // traveling is normally negative, so convert it into positive disutility by negating it
-        let travel_cost_factor =
-            (-self.marginal_utility_traveling + person_params.performing) / 3600.;
-
-        let distance_term = (-self.marginal_utility_distance
-            - self.monetary_distance_rate * person_params.marginal_utility_of_money)
-            * link.length;
-
-        travel_time.as_secs_f64() * travel_cost_factor + distance_term
+        travel_time.as_secs_f64() * factors.travel_time_s + link.length * factors.distance_m
     }
 }
 
@@ -302,7 +315,7 @@ fn travel_time(length: f64, speed: f64) -> Duration {
 #[cfg(test)]
 mod tests {
     use crate::simulation::InternalAttributes;
-    use crate::simulation::config::{AgentParameter, Config, ModeParameter, Scoring, ScoringMode};
+    use crate::simulation::config::ModeParameter;
     use crate::simulation::events::{LinkEnterEvent, LinkLeaveEvent, VehicleEntersTrafficEvent};
     use crate::simulation::id::Id;
     use crate::simulation::io::xml::attributes::{IOAttribute, IOAttributes};
@@ -322,6 +335,7 @@ mod tests {
     use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::population::{InternalPerson, SUBPOPULATION};
     use crate::simulation::scenario::vehicles::InternalVehicle;
+    use crate::simulation::scoring::ScoringParameterSet;
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
     use std::sync::Arc;
@@ -339,27 +353,32 @@ mod tests {
         }
     }
 
-    fn scoring_config() -> Config {
-        let mut config = Config::default();
-        config.set_scoring(Scoring {
-            mode: ScoringMode::Enabled,
-            write_experienced_plans: false,
-            activity_params: Vec::new(),
-            mode_params: vec![
-                mode_params("car", -6.0, -0.01),
-                mode_params("walk", -3.0, 0.0),
-            ],
-            agent_params: vec![
-                AgentParameter::default(),
-                AgentParameter {
-                    subpopulation: "freight".to_string(),
-                    performing: 2.0,
-                    ..AgentParameter::default()
+    /// Parameter sets for the subpopulations `person` and `freight`, without a default set.
+    fn scoring_sets() -> Vec<ScoringParameterSet> {
+        scoring_sets_for_subpopulations(&[Some("person"), Some("freight")])
+    }
+
+    /// One parameter set per given subpopulation, with `performing` 2 for `freight` and 6 otherwise.
+    fn scoring_sets_for_subpopulations(
+        subpopulations: &[Option<&str>],
+    ) -> Vec<ScoringParameterSet> {
+        subpopulations
+            .iter()
+            .map(|subpopulation| ScoringParameterSet {
+                subpopulation: subpopulation.map(str::to_string),
+                performing: if *subpopulation == Some("freight") {
+                    2.0
+                } else {
+                    6.0
                 },
-            ],
-            ..Default::default()
-        });
-        config
+                activity_params: Vec::new(),
+                mode_params: vec![
+                    mode_params("car", -6.0, -0.01),
+                    mode_params("walk", -3.0, 0.0),
+                ],
+                ..ScoringParameterSet::default()
+            })
+            .collect()
     }
 
     fn global_travel_time(
@@ -468,7 +487,7 @@ mod tests {
     // checks if the correct travel times and disutilities are used for different modes, even when no vehicle is provided
     #[deterministic_id_test]
     fn scoring_costs_use_router_mode_without_vehicle() {
-        let config = scoring_config();
+        let sets = scoring_sets();
         let mut partition =
             PartitionTravelTimeCollector::new(Duration::from_secs(10), Duration::from_secs(100));
         let link = link("mode-specific", 100.0, 10.0);
@@ -476,13 +495,9 @@ mod tests {
         observe_travel_time(&mut partition, "walk", &link.id, "walk-vehicle", 30);
         let travel_time = global_travel_time(vec![partition], &[link.clone()]);
 
-        let car = ScoringBasedTravelTimeAndDisutility::new(
-            &config,
-            Id::create("car"),
-            travel_time.clone(),
-        );
-        let walk =
-            ScoringBasedTravelTimeAndDisutility::new(&config, Id::create("walk"), travel_time);
+        let car =
+            ScoringBasedTravelTimeAndDisutility::new(&sets, Id::create("car"), travel_time.clone());
+        let walk = ScoringBasedTravelTimeAndDisutility::new(&sets, Id::create("walk"), travel_time);
         let person = person("default-person", "person");
 
         assert_eq!(
@@ -506,9 +521,9 @@ mod tests {
     #[deterministic_id_test]
     #[should_panic(expected = "No scoring parameters configured for network mode freight")]
     fn scoring_costs_require_parameters_for_router_mode() {
-        let config = scoring_config();
+        let sets = scoring_sets();
         ScoringBasedTravelTimeAndDisutility::new(
-            &config,
+            &sets,
             Id::create("freight"),
             global_travel_time(Vec::new(), &[]),
         );
@@ -517,9 +532,9 @@ mod tests {
     #[deterministic_id_test]
     #[should_panic(expected = "No scoring parameters configured for subpopulation missing")]
     fn scoring_costs_require_parameters_for_person_subpopulation() {
-        let config = scoring_config();
+        let sets = scoring_sets();
         let costs = ScoringBasedTravelTimeAndDisutility::new(
-            &config,
+            &sets,
             Id::create("car"),
             global_travel_time(Vec::new(), &[]),
         );
@@ -527,5 +542,26 @@ mod tests {
         let person = person("missing-person", "missing");
 
         costs.travel_disutility(&link, SimTime::from_secs(0), Some(&person), None);
+    }
+
+    #[deterministic_id_test]
+    fn scoring_costs_fall_back_to_default_set() {
+        let sets = scoring_sets_for_subpopulations(&[None, Some("freight")]);
+        let mut partition =
+            PartitionTravelTimeCollector::new(Duration::from_secs(10), Duration::from_secs(100));
+        let link = link("default-subpopulation", 100.0, 10.0);
+        observe_travel_time(&mut partition, "car", &link.id, "car-vehicle", 20);
+        let costs = ScoringBasedTravelTimeAndDisutility::new(
+            &sets,
+            Id::create("car"),
+            global_travel_time(vec![partition], &[link.clone()]),
+        );
+
+        let disutility = |subpopulation: &str| {
+            let person = person(&format!("{subpopulation}-person"), subpopulation);
+            costs.travel_disutility(&link, SimTime::from_secs(0), Some(&person), None)
+        };
+        assert_close(1.0 + 20.0 * 8.0 / 3600.0, disutility("freight"));
+        assert_close(1.0 + 20.0 * 12.0 / 3600.0, disutility("missing"));
     }
 }

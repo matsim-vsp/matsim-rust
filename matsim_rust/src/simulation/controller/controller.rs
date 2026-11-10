@@ -1,16 +1,18 @@
 use crate::external_services::AdapterHandle;
 use crate::simulation::config::{
-    Config, Logging, OverwriteFiles, ScoringMode, TransitSimulation, WriteEvents, write_config,
+    CompressionType, Config, Logging, OverwriteFiles, ScoringMode, TransitSimulation, WriteEvents,
+    write_config,
 };
 use crate::simulation::controller::{
     ExternalServices, MobsimWorkerPool, MobsimWorkerPoolArgumentsBuilder, ReplanningPool,
-    ScoringPool, create_output_filename,
+    ScoringPool,
 };
 use crate::simulation::framework_events::{
     ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn,
     WorkerListenerRegisterFunction,
 };
 use crate::simulation::id::Id;
+use crate::simulation::io::OutputFile;
 use crate::simulation::network::LinkStorageCapacities;
 use crate::simulation::population::agent_source::{
     DynAgentSource, IntoDynAgentSource, TransitDriverAgentSource, default_agent_sources,
@@ -29,7 +31,7 @@ use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
 use crate::simulation::scenario::vehicles;
 use crate::simulation::scenario::{ControllerScenario, Scenario};
 use crate::simulation::scoring;
-use crate::simulation::scoring::{PersonExperiences, PlanScorer};
+use crate::simulation::scoring::{PersonExperiences, PlanScorer, write_scoring_parameter_sets};
 use crate::simulation::{id, io, logging};
 use derive_more::Debug;
 use fs_extra::dir::CopyOptions;
@@ -271,7 +273,7 @@ impl ControllerBuilder {
                 ));
             };
             let time_utility = Arc::new(ScoringBasedTravelTimeAndDisutility::new(
-                config,
+                &controller_scenario.core.scoring_parameters,
                 id.clone(),
                 global_ttc.clone(),
             ));
@@ -370,14 +372,23 @@ impl Controller {
         }
         info!("    ... Config ...");
         self.write_output_config(output_path.clone());
+        self.write_output_scoring_parameters(&output_path);
         info!("    ... Network ...");
         self.write_output_network(output_path.clone());
+        info!("    ... Facilities ...");
+        self.write_output_facilities(&output_path);
+        info!("    ... Vehicles ...");
+        self.write_output_vehicles(&output_path);
         info!("    ... Population ...");
         self.write_output_population(output_path.clone());
-        if matches!(
-            self.config.transit().simulation,
-            TransitSimulation::ScheduleBasedTeleportation
-        ) {
+        // Like MATSim, the transit files are only written if transit is used: with a schedule as input, also if
+        // transit is teleported, or if it is simulated schedule based.
+        if self.config.transit().schedule_path.is_some()
+            || matches!(
+                self.config.transit().simulation,
+                TransitSimulation::ScheduleBasedTeleportation
+            )
+        {
             info!("    ... Transit schedule and vehicles ...");
             self.write_output_transit(&output_path);
         }
@@ -567,16 +578,18 @@ impl Controller {
         write_config(self.config.as_ref(), output_path);
     }
 
+    /// Writes the scoring parameter sets of the scenario, also the default set if the config names no
+    /// file. The output config keeps the path of the input file, as it does for the network.
+    fn write_output_scoring_parameters(&self, output_path: impl AsRef<Path>) {
+        let path = output_path
+            .as_ref()
+            .join(OutputFile::ScoringParameters.file_name(self.config.output().compression_type));
+        write_scoring_parameter_sets(&self.scenario.core.scoring_parameters, &path);
+    }
+
     fn write_output_network(&mut self, output_path: PathBuf) {
-        let net_out_path = create_output_filename(
-            &output_path,
-            &PathBuf::from(
-                self.config
-                    .output()
-                    .compression_type
-                    .with_extension("output_network"),
-            ),
-        );
+        let net_out_path =
+            output_path.join(OutputFile::Network.file_name(self.config.output().compression_type));
 
         let attribute_overrides = self.link_storage_capacities.attribute_overrides();
         self.scenario
@@ -585,30 +598,38 @@ impl Controller {
             .to_file_with_link_attribute_overrides(&net_out_path, &attribute_overrides);
     }
 
+    /// Writes the facilities as `prepare_for_sim` prepared them, i.e. with the base links that it assigned.
+    fn write_output_facilities(&self, output_path: impl AsRef<Path>) {
+        let path = output_path
+            .as_ref()
+            .join(OutputFile::Facilities.file_name(self.config.output().compression_type));
+        self.scenario.core.facilities.to_file(&path);
+    }
+
+    /// Writes the vehicles of the persons, also those created while loading the population.
+    fn write_output_vehicles(&self, output_path: impl AsRef<Path>) {
+        let path = output_path
+            .as_ref()
+            .join(OutputFile::Vehicles.file_name(self.config.output().compression_type));
+        vehicles::to_file(&self.scenario.core.garage, &path);
+    }
+
     fn write_output_transit(&self, output_path: impl AsRef<Path>) {
         let compression_type = self.config.output().compression_type;
-        let schedule_path = create_output_filename(
-            &output_path,
-            &PathBuf::from(compression_type.with_extension("output_transitSchedule")),
-        );
+        let schedule_path = output_path
+            .as_ref()
+            .join(OutputFile::TransitSchedule.file_name(compression_type));
         self.scenario.core.transit_schedule.to_file(&schedule_path);
-        let vehicles_path = create_output_filename(
-            &output_path,
-            &PathBuf::from(compression_type.with_extension("output_transitVehicles")),
-        );
+        let vehicles_path = output_path
+            .as_ref()
+            .join(OutputFile::TransitVehicles.file_name(compression_type));
         vehicles::to_file(&self.scenario.core.transit_garage, &vehicles_path);
     }
 
     fn write_output_population(&mut self, output_path: impl AsRef<Path>) {
-        let pop_out_path = create_output_filename(
-            &output_path,
-            &PathBuf::from(
-                self.config
-                    .output()
-                    .compression_type
-                    .with_extension("output_plans"),
-            ),
-        );
+        let pop_out_path = output_path
+            .as_ref()
+            .join(OutputFile::Plans.file_name(self.config.output().compression_type));
 
         self.scenario.population.to_file(&pop_out_path);
     }
@@ -633,7 +654,11 @@ impl Controller {
     }
 
     fn write_output_id_store(output_path: impl AsRef<Path>) {
-        id::store_to_file(&output_path.as_ref().join("output_ids.binpb"));
+        id::store_to_file(
+            &output_path
+                .as_ref()
+                .join(OutputFile::Ids.file_name(CompressionType::Proto)),
+        );
     }
 
     fn write_iteration_files(
@@ -644,12 +669,7 @@ impl Controller {
     ) {
         let iter_path = iters_path.as_ref().join(format!("it.{}", iteration));
         population.to_file(
-            &iter_path.join(
-                self.config
-                    .output()
-                    .compression_type
-                    .with_extension("output_plans"),
-            ),
+            &iter_path.join(OutputFile::Plans.file_name(self.config.output().compression_type)),
         );
     }
 }
@@ -715,10 +735,7 @@ pub(crate) fn write_experienced_population(
         })
         .sorted_by(|a, b| a.id().cmp(&b.id()))
         .collect();
-    let filename = config
-        .output()
-        .compression_type
-        .with_extension("output_experienced_plans");
+    let filename = OutputFile::ExperiencedPlans.file_name(config.output().compression_type);
     let iteration_path = output_path
         .join("ITERS")
         .join(format!("it.{iteration}"))

@@ -162,7 +162,6 @@ mod tests {
     use crate::simulation::scenario::population::{
         InternalActivity, InternalPerson, InternalPlan, Population,
     };
-    use crate::simulation::scenario::vehicles::Garage;
     use crate::simulation::scenario::{
         Coordinate, MobsimScenarioPartition, PopulationShard, ScenarioCore,
     };
@@ -228,13 +227,11 @@ mod tests {
             rank: 0,
             scenario: ScenarioCore {
                 network,
-                garage: Arc::new(Garage::default()),
-                transit_schedule: Arc::default(),
-                transit_garage: Arc::default(),
                 facilities: Arc::new(
                     crate::simulation::scenario::facilities::ActivityFacilities::default(),
                 ),
                 config,
+                ..ScenarioCore::default()
             },
             network_partition,
             transit_sim_schedule: Arc::default(),

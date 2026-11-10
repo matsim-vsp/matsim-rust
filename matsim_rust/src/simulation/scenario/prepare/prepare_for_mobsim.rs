@@ -1141,6 +1141,7 @@ mod tests {
             transit_schedule: TransitSchedule::default(),
             transit_garage: Garage::default(),
             facilities,
+            scoring_parameters: Vec::new(),
             config: Arc::new(config),
         };
         prepare_for_sim(&mut scenario).unwrap();
@@ -1181,6 +1182,7 @@ mod tests {
             transit_schedule: TransitSchedule::default(),
             transit_garage: Garage::default(),
             facilities: ActivityFacilities::default(),
+            scoring_parameters: Vec::new(),
             config: Arc::new(Config::default()),
         }
         .into()
@@ -1199,6 +1201,7 @@ mod tests {
             transit_schedule: TransitSchedule::default(),
             transit_garage: Garage::default(),
             facilities: ActivityFacilities::default(),
+            scoring_parameters: Vec::new(),
             config: Arc::new(config),
         }
         .into()

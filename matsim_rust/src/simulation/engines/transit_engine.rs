@@ -14,10 +14,10 @@ use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
 use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::queue::TimeQueue;
 use crate::simulation::scenario::transit::TransitStopFacility;
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::{SimClock, SimTime, Tick};
-use crate::simulation::time_queue::TimeQueue;
 use crate::simulation::vehicles::TransitVehicle;
 use itertools::Itertools;
 use nohash_hasher::IntMap;
