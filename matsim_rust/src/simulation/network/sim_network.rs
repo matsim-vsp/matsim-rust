@@ -397,7 +397,7 @@ impl SimNetworkPartition {
 
         self.veh_counter += 1;
 
-        // A vehicle at the end of the queue does not change when a sleeping link has to be moved.
+        // Inserting an earlier head wakes a passing queue; otherwise its scheduled wake-up remains valid.
         if !link.is_sleeping() {
             self.active_links.activate(link.id().clone());
         }
@@ -803,8 +803,7 @@ impl SimNetworkPartition {
 
         new_link.push_veh(vehicle, QStart, now);
 
-        // activate new link, unless it sleeps. A vehicle at the end of the queue does not change
-        // when a sleeping link has to be moved.
+        // Activate the new link if it is awake, including when passing brought its next exit forward.
         if !new_link.is_sleeping() {
             active_links.activate(next_link);
         }

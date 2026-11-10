@@ -13,10 +13,10 @@ use crate::simulation::messaging::partition_change::{
 };
 use crate::simulation::messaging::sim_communication::SimCommunicator;
 use crate::simulation::messaging::sim_communication::message_broker::NetMessageBroker;
+use crate::simulation::queue::TimeQueue;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::simulation::Simulation;
 use crate::simulation::time::{SimClock, SimTime, Tick};
-use crate::simulation::time_queue::TimeQueue;
 
 pub(crate) struct TeleportationAgentWithFixedEnd {
     pub(crate) agent: TeleportationAgent,

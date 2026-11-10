@@ -29,6 +29,7 @@ pub mod network;
 pub mod population;
 pub mod profiling;
 pub mod pt;
+pub mod queue;
 pub mod random;
 pub mod replanning;
 pub mod scenario;
@@ -36,7 +37,6 @@ pub mod scoring;
 #[allow(clippy::module_inception)]
 pub mod simulation;
 pub mod time;
-pub mod time_queue;
 pub mod vehicles;
 
 pub trait Identifiable<I: StableTypeId> {

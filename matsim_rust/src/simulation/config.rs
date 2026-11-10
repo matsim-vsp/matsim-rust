@@ -1041,6 +1041,15 @@ pub struct QSim {
     pub stuck_threshold: u32,
     pub main_modes: Vec<String>,
     pub traffic_dynamics: TrafficDynamics,
+    pub link_dynamics: LinkDynamics,
+}
+
+/// Ordering of vehicles travelling along a link, independently of capacity dynamics.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkDynamics {
+    #[default]
+    Fifo,
+    PassingQ,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1145,6 +1154,7 @@ pub struct Simulation {
     pub stuck_threshold: u32,
     pub main_modes: Vec<String>,
     pub traffic_dynamics: TrafficDynamics,
+    pub link_dynamics: LinkDynamics,
 }
 
 impl From<&Simulation> for QSim {
@@ -1157,6 +1167,7 @@ impl From<&Simulation> for QSim {
             stuck_threshold: value.stuck_threshold,
             main_modes: value.main_modes.clone(),
             traffic_dynamics: value.traffic_dynamics,
+            link_dynamics: value.link_dynamics,
         }
     }
 }
@@ -1186,6 +1197,14 @@ register_override!("qsim.ticks_per_second", |config, value| {
 
 register_override!("qsim.sample_size", |config, value| {
     config.qsim_mut().sample_size = value.parse().unwrap();
+});
+
+register_override!("qsim.link_dynamics", |config, value| {
+    config.qsim_mut().link_dynamics = match value.to_ascii_lowercase().as_str() {
+        "fifo" => LinkDynamics::Fifo,
+        "passingq" => LinkDynamics::PassingQ,
+        _ => panic!("Invalid qsim.link_dynamics: {value}"),
+    };
 });
 
 register_override!("qsim.traffic_dynamics", |config, value| {
@@ -1454,6 +1473,7 @@ impl Default for QSim {
             stuck_threshold: 10,
             main_modes: vec![],
             traffic_dynamics: TrafficDynamics::Queue,
+            link_dynamics: LinkDynamics::Fifo,
         }
     }
 }
@@ -1485,6 +1505,7 @@ impl Default for Simulation {
             stuck_threshold: qsim.stuck_threshold,
             main_modes: qsim.main_modes,
             traffic_dynamics: qsim.traffic_dynamics,
+            link_dynamics: qsim.link_dynamics,
         }
     }
 }
@@ -1830,6 +1851,7 @@ mod tests {
             stuck_threshold: 1,
             main_modes: vec!["bike".to_string()],
             traffic_dynamics: config::TrafficDynamics::Queue,
+            link_dynamics: config::LinkDynamics::Fifo,
         };
         let controller = Controller {
             first_iteration: 2,
