@@ -913,8 +913,8 @@ pub struct Scoring {
     pub mode: ScoringMode,
     pub write_experienced_plans: bool,
     pub fraction_of_iterations_to_start_score_msa: Option<f64>,
-    /// A YAML file with the list of scoring parameter sets, relative to the config file. Without a file, the
-    /// scenario gets one default set.
+    /// A YAML file with the list of scoring parameter sets, or a MATSim config (`.xml`, `.xml.gz`, `.xml.zst`)
+    /// whose scoring module is read, relative to the config file. Without a file, the scenario gets one default set.
     pub scoring_parameters_path: Option<PathBuf>,
 }
 

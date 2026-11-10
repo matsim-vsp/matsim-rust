@@ -3,6 +3,7 @@ use crate::simulation::framework_events::{
     ControllerEvent, ControllerEventsManager, ControllerListenerRegisterFn, QSimId,
     WorkerListenerRegisterFunction,
 };
+use crate::simulation::io::xml::config::{IOConfig, scoring_parameter_sets};
 use crate::simulation::scenario::ControllerScenario;
 use crate::simulation::scenario::population::{InternalPerson, Population};
 use crate::simulation::scoring::backpacking::backpacking_engine::{
@@ -103,9 +104,18 @@ impl Default for ScoringParameterSet {
     }
 }
 
-/// Reads a YAML file with a list of scoring parameter sets.
+/// Reads the scoring parameter sets from a YAML file with a list of sets, or from the scoring module of a MATSim
+/// config (`.xml`, `.xml.gz` or `.xml.zst`), see [`scoring_parameter_sets`].
 pub fn read_scoring_parameter_sets(path: &Path) -> Vec<ScoringParameterSet> {
     info!("Loading scoring parameters from {:?}", path);
+    if is_matsim_config(path) {
+        return scoring_parameter_sets(&IOConfig::from_file(path)).unwrap_or_else(|e| {
+            panic!(
+                "Failed to read the scoring parameters from the MATSim config at {:?}: {}",
+                path, e
+            )
+        });
+    }
     let file = File::open(path).unwrap_or_else(|e| {
         panic!(
             "Failed to open scoring parameters file at {:?}. Original error was {}",
@@ -118,6 +128,16 @@ pub fn read_scoring_parameter_sets(path: &Path) -> Vec<ScoringParameterSet> {
             path, e
         )
     })
+}
+
+fn is_matsim_config(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    [".xml", ".xml.gz", ".xml.zst"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
 }
 
 /// Writes the scoring parameter sets as a YAML list, which `read_scoring_parameter_sets` reads.

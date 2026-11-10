@@ -138,6 +138,15 @@ pub trait Queue<T> {
     fn drain(&mut self) -> Vec<T>;
 }
 
+/// The travelling queue of a link. Only this queue permits passing; the downstream buffer remains FIFO.
+/// Defined next to [`Queue`], because `enum_dispatch` needs the trait and the enum in one module scope.
+#[enum_dispatch::enum_dispatch(Queue<T>)]
+#[derive(Debug)]
+pub(crate) enum LinkQueue<T> {
+    Fifo(VecDeque<T>),
+    PassingQ(TimeQueue<T, ()>),
+}
+
 impl<T> Queue<T> for VecDeque<T> {
     fn push(&mut self, value: T, _end_time: SimTime) {
         self.push_back(value);

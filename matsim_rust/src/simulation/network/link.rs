@@ -192,14 +192,6 @@ impl SimLink {
     }
 }
 
-/// Only the travelling queue permits passing; the downstream buffer remains FIFO.
-#[enum_dispatch::enum_dispatch(Queue<T>)]
-#[derive(Debug)]
-pub(crate) enum LinkQueue<T> {
-    Fifo(VecDeque<T>),
-    PassingQ(TimeQueue<T, ()>),
-}
-
 #[derive(Debug)]
 pub struct LocalLink {
     pub id: Id<Link>,

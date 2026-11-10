@@ -520,6 +520,47 @@ mod tests {
     }
 
     #[deterministic_id_test]
+    fn scenario_loads_scoring_parameters_from_matsim_config() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yml"),
+            r#"
+            modules:
+              scoring:
+                type: Scoring
+                scoring_parameters_path: scoring.xml
+            "#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("scoring.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<config>
+	<module name="scoring">
+		<parameterset type="scoringParameters">
+			<param name="performing" value="6.88" />
+		</parameterset>
+		<parameterset type="scoringParameters">
+			<param name="subpopulation" value="freight" />
+			<param name="performing" value="4.0" />
+		</parameterset>
+	</module>
+</config>
+"#,
+        )
+        .unwrap();
+
+        let scenario = Scenario::load(Config::from_path(dir.path().join("config.yml")));
+        let sets: Vec<_> = scenario
+            .scoring_parameters
+            .iter()
+            .map(|set| (set.subpopulation.clone(), set.performing))
+            .collect();
+        assert_eq!(sets, vec![(None, 6.88), (Some("freight".to_string()), 4.0)]);
+    }
+
+    #[deterministic_id_test]
     fn scenario_loads_xml_transit_schedule_and_creates_ids() {
         let mut config = Config::default();
         config.set_transit(Transit {
