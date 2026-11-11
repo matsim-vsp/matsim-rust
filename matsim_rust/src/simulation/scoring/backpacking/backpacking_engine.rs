@@ -176,11 +176,12 @@ mod tests {
         VehicleEntersTrafficEventBuilder, VehicleLeavesTrafficEventBuilder,
     };
     use crate::simulation::scenario::Coordinate;
-    use crate::simulation::scenario::network::Link;
+    use crate::simulation::scenario::network::{Link, Node};
     use crate::simulation::scenario::population::{InternalPlanElement, InternalRoute};
     use crate::simulation::scenario::vehicles::InternalVehicle;
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
+    use nohash_hasher::IntSet;
     use std::time::Duration;
 
     /// Drives a car leg with a driver and a passenger through the events manager, which covers the
@@ -194,10 +195,35 @@ mod tests {
         let link = |id: &str| Id::<Link>::create(id);
         let time = SimTime::from_secs;
 
+        // The links start, middle and end are 100, 200 and 300 m long.
+        let mut network = Network::new();
+        let nodes: Vec<Id<Node>> = (0..4)
+            .map(|index| Id::create(&format!("node_{index}")))
+            .collect();
+        for node in &nodes {
+            network.add_node(Node::new(node.clone(), Coordinate::default(), 0, 1));
+        }
+        for (index, (id, length)) in [("start", 100.0), ("middle", 200.0), ("end", 300.0)]
+            .into_iter()
+            .enumerate()
+        {
+            network.add_link(Link::new(
+                link(id),
+                nodes[index].clone(),
+                nodes[index + 1].clone(),
+                length,
+                1.0,
+                1.0,
+                1.0,
+                IntSet::default(),
+                0,
+            ));
+        }
+
         let engine = Rc::new(RefCell::new(BackpackingEngine::new(
             vec![driver.clone(), passenger.clone()],
             Arc::default(),
-            Arc::default(),
+            Arc::new(network),
         )));
         let mut events = EventsManager::new();
         BackpackingEngine::register_event_handlers(engine.clone(), &mut events);
@@ -321,6 +347,8 @@ mod tests {
                 &vec![link("start"), link("middle"), link("end")]
             );
             assert_eq!(route.generic_delegate().vehicle(), &Some(vehicle.clone()));
+            // The links after the departure link, including the arrival link.
+            assert_eq!(route.generic_delegate().distance(), Some(200.0 + 300.0));
         }
     }
 }

@@ -19,7 +19,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" vehicleRefId="1_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" distance="25000" vehicleRefId="1_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:02" end_time="08:25:02"/>
             <leg mode="walk" dep_time="08:25:02" trav_time="02:10:00">
@@ -40,7 +40,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="20" trav_time="00:00:00" vehicleRefId="1_car">20</route>
+                <route type="links" start_link="20" end_link="20" trav_time="00:00:00" distance="0" vehicleRefId="1_car">20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="12:55:05" end_time="12:55:05"/>
             <leg mode="walk" dep_time="12:55:05" trav_time="02:10:00">
@@ -61,7 +61,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="1_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="1_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="21:24:08" end_time="21:24:08"/>
             <leg mode="walk" dep_time="21:24:08" trav_time="02:10:00">
@@ -90,7 +90,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:07" vehicleRefId="10_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:07" distance="25000" vehicleRefId="10_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:09" end_time="08:25:09"/>
             <leg mode="walk" dep_time="08:25:09" trav_time="02:10:00">
@@ -111,7 +111,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="10_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="10_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:12" end_time="13:54:12"/>
             <leg mode="walk" dep_time="13:54:12" trav_time="02:10:00">
@@ -140,7 +140,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:14" vehicleRefId="100_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:14" distance="25000" vehicleRefId="100_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:16" end_time="08:25:16"/>
             <leg mode="walk" dep_time="08:25:16" trav_time="02:10:00">
@@ -161,7 +161,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="100_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="100_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:19" end_time="13:54:19"/>
             <leg mode="walk" dep_time="13:54:19" trav_time="02:10:00">
@@ -190,7 +190,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:21" vehicleRefId="11_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:21" distance="25000" vehicleRefId="11_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:23" end_time="08:25:23"/>
             <leg mode="walk" dep_time="08:25:23" trav_time="02:10:00">
@@ -211,7 +211,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="11_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="11_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:26" end_time="13:54:26"/>
             <leg mode="walk" dep_time="13:54:26" trav_time="02:10:00">
@@ -240,7 +240,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:28" vehicleRefId="12_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:28" distance="25000" vehicleRefId="12_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:30" end_time="08:25:30"/>
             <leg mode="walk" dep_time="08:25:30" trav_time="02:10:00">
@@ -261,7 +261,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="12_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="12_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:33" end_time="13:54:33"/>
             <leg mode="walk" dep_time="13:54:33" trav_time="02:10:00">
@@ -290,7 +290,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:36" vehicleRefId="13_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:36" distance="25000" vehicleRefId="13_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:38" end_time="08:25:38"/>
             <leg mode="walk" dep_time="08:25:38" trav_time="02:10:00">
@@ -311,7 +311,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="13_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="13_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:41" end_time="13:54:41"/>
             <leg mode="walk" dep_time="13:54:41" trav_time="02:10:00">
@@ -340,7 +340,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:43" vehicleRefId="14_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:43" distance="25000" vehicleRefId="14_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:45" end_time="08:25:45"/>
             <leg mode="walk" dep_time="08:25:45" trav_time="02:10:00">
@@ -361,7 +361,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="14_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="14_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:48" end_time="13:54:48"/>
             <leg mode="walk" dep_time="13:54:48" trav_time="02:10:00">
@@ -390,7 +390,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:50" vehicleRefId="15_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:50" distance="25000" vehicleRefId="15_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:52" end_time="08:25:52"/>
             <leg mode="walk" dep_time="08:25:52" trav_time="02:10:00">
@@ -411,7 +411,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="15_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="15_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:54:55" end_time="13:54:55"/>
             <leg mode="walk" dep_time="13:54:55" trav_time="02:10:00">
@@ -440,7 +440,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:57" vehicleRefId="16_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:57" distance="25000" vehicleRefId="16_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:25:59" end_time="08:25:59"/>
             <leg mode="walk" dep_time="08:25:59" trav_time="02:10:00">
@@ -461,7 +461,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="16_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="16_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:02" end_time="13:55:02"/>
             <leg mode="walk" dep_time="13:55:02" trav_time="02:10:00">
@@ -490,7 +490,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:04" vehicleRefId="17_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:04" distance="25000" vehicleRefId="17_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:06" end_time="08:26:06"/>
             <leg mode="walk" dep_time="08:26:06" trav_time="02:10:00">
@@ -511,7 +511,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="17_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="17_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:09" end_time="13:55:09"/>
             <leg mode="walk" dep_time="13:55:09" trav_time="02:10:00">
@@ -540,7 +540,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:12" vehicleRefId="18_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:12" distance="25000" vehicleRefId="18_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:14" end_time="08:26:14"/>
             <leg mode="walk" dep_time="08:26:14" trav_time="02:10:00">
@@ -561,7 +561,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="18_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="18_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:17" end_time="13:55:17"/>
             <leg mode="walk" dep_time="13:55:17" trav_time="02:10:00">
@@ -590,7 +590,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:19" vehicleRefId="19_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:19" distance="25000" vehicleRefId="19_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:21" end_time="08:26:21"/>
             <leg mode="walk" dep_time="08:26:21" trav_time="02:10:00">
@@ -611,7 +611,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="19_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="19_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:24" end_time="13:55:24"/>
             <leg mode="walk" dep_time="13:55:24" trav_time="02:10:00">
@@ -640,7 +640,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" vehicleRefId="2_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" distance="25000" vehicleRefId="2_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:24:02" end_time="08:24:02"/>
             <leg mode="walk" dep_time="08:24:02" trav_time="02:10:00">
@@ -661,7 +661,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="2_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="2_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="15:53:05" end_time="15:53:05"/>
             <leg mode="walk" dep_time="15:53:05" trav_time="02:10:00">
@@ -690,7 +690,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:26" vehicleRefId="20_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:26" distance="25000" vehicleRefId="20_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:28" end_time="08:26:28"/>
             <leg mode="walk" dep_time="08:26:28" trav_time="02:10:00">
@@ -711,7 +711,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="20_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="20_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:31" end_time="13:55:31"/>
             <leg mode="walk" dep_time="13:55:31" trav_time="02:10:00">
@@ -740,7 +740,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:33" vehicleRefId="21_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:33" distance="25000" vehicleRefId="21_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:35" end_time="08:26:35"/>
             <leg mode="walk" dep_time="08:26:35" trav_time="02:10:00">
@@ -761,7 +761,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="21_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="21_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:38" end_time="13:55:38"/>
             <leg mode="walk" dep_time="13:55:38" trav_time="02:10:00">
@@ -790,7 +790,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:40" vehicleRefId="22_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:40" distance="25000" vehicleRefId="22_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:42" end_time="08:26:42"/>
             <leg mode="walk" dep_time="08:26:42" trav_time="02:10:00">
@@ -811,7 +811,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="22_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="22_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:45" end_time="13:55:45"/>
             <leg mode="walk" dep_time="13:55:45" trav_time="02:10:00">
@@ -840,7 +840,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:48" vehicleRefId="23_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:48" distance="25000" vehicleRefId="23_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:50" end_time="08:26:50"/>
             <leg mode="walk" dep_time="08:26:50" trav_time="02:10:00">
@@ -861,7 +861,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="23_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="23_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:55:53" end_time="13:55:53"/>
             <leg mode="walk" dep_time="13:55:53" trav_time="02:10:00">
@@ -890,7 +890,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:16:55" vehicleRefId="24_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:16:55" distance="25000" vehicleRefId="24_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:26:57" end_time="08:26:57"/>
             <leg mode="walk" dep_time="08:26:57" trav_time="02:10:00">
@@ -911,7 +911,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="24_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="24_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:00" end_time="13:56:00"/>
             <leg mode="walk" dep_time="13:56:00" trav_time="02:10:00">
@@ -940,7 +940,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:02" vehicleRefId="25_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:02" distance="25000" vehicleRefId="25_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:04" end_time="08:27:04"/>
             <leg mode="walk" dep_time="08:27:04" trav_time="02:10:00">
@@ -961,7 +961,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="25_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="25_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:07" end_time="13:56:07"/>
             <leg mode="walk" dep_time="13:56:07" trav_time="02:10:00">
@@ -990,7 +990,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:09" vehicleRefId="26_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:09" distance="25000" vehicleRefId="26_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:11" end_time="08:27:11"/>
             <leg mode="walk" dep_time="08:27:11" trav_time="02:10:00">
@@ -1011,7 +1011,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="26_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="26_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:14" end_time="13:56:14"/>
             <leg mode="walk" dep_time="13:56:14" trav_time="02:10:00">
@@ -1040,7 +1040,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:16" vehicleRefId="27_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:16" distance="25000" vehicleRefId="27_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:18" end_time="08:27:18"/>
             <leg mode="walk" dep_time="08:27:18" trav_time="02:10:00">
@@ -1061,7 +1061,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="27_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="27_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:21" end_time="13:56:21"/>
             <leg mode="walk" dep_time="13:56:21" trav_time="02:10:00">
@@ -1090,7 +1090,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:24" vehicleRefId="28_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:24" distance="25000" vehicleRefId="28_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:26" end_time="08:27:26"/>
             <leg mode="walk" dep_time="08:27:26" trav_time="02:10:00">
@@ -1111,7 +1111,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="28_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="28_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:29" end_time="13:56:29"/>
             <leg mode="walk" dep_time="13:56:29" trav_time="02:10:00">
@@ -1140,7 +1140,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:31" vehicleRefId="29_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:31" distance="25000" vehicleRefId="29_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:33" end_time="08:27:33"/>
             <leg mode="walk" dep_time="08:27:33" trav_time="02:10:00">
@@ -1161,7 +1161,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="29_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="29_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:36" end_time="13:56:36"/>
             <leg mode="walk" dep_time="13:56:36" trav_time="02:10:00">
@@ -1190,7 +1190,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" vehicleRefId="3_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" distance="25000" vehicleRefId="3_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:23:32" end_time="08:23:32"/>
             <leg mode="walk" dep_time="08:23:32" trav_time="02:10:00">
@@ -1211,7 +1211,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="3_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="3_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:52:35" end_time="14:52:35"/>
             <leg mode="walk" dep_time="14:52:35" trav_time="02:10:00">
@@ -1240,7 +1240,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:38" vehicleRefId="30_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:38" distance="25000" vehicleRefId="30_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:40" end_time="08:27:40"/>
             <leg mode="walk" dep_time="08:27:40" trav_time="02:10:00">
@@ -1261,7 +1261,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="30_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="30_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:43" end_time="13:56:43"/>
             <leg mode="walk" dep_time="13:56:43" trav_time="02:10:00">
@@ -1290,7 +1290,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:45" vehicleRefId="31_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:45" distance="25000" vehicleRefId="31_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:47" end_time="08:27:47"/>
             <leg mode="walk" dep_time="08:27:47" trav_time="02:10:00">
@@ -1311,7 +1311,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="31_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="31_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:50" end_time="13:56:50"/>
             <leg mode="walk" dep_time="13:56:50" trav_time="02:10:00">
@@ -1340,7 +1340,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:17:52" vehicleRefId="32_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:17:52" distance="25000" vehicleRefId="32_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:27:54" end_time="08:27:54"/>
             <leg mode="walk" dep_time="08:27:54" trav_time="02:10:00">
@@ -1361,7 +1361,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="32_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="32_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:56:57" end_time="13:56:57"/>
             <leg mode="walk" dep_time="13:56:57" trav_time="02:10:00">
@@ -1390,7 +1390,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:00" vehicleRefId="33_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:00" distance="25000" vehicleRefId="33_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:02" end_time="08:28:02"/>
             <leg mode="walk" dep_time="08:28:02" trav_time="02:10:00">
@@ -1411,7 +1411,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="33_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="33_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:05" end_time="13:57:05"/>
             <leg mode="walk" dep_time="13:57:05" trav_time="02:10:00">
@@ -1440,7 +1440,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:07" vehicleRefId="34_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:07" distance="25000" vehicleRefId="34_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:09" end_time="08:28:09"/>
             <leg mode="walk" dep_time="08:28:09" trav_time="02:10:00">
@@ -1461,7 +1461,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="34_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="34_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:12" end_time="13:57:12"/>
             <leg mode="walk" dep_time="13:57:12" trav_time="02:10:00">
@@ -1490,7 +1490,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:14" vehicleRefId="35_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:14" distance="25000" vehicleRefId="35_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:16" end_time="08:28:16"/>
             <leg mode="walk" dep_time="08:28:16" trav_time="02:10:00">
@@ -1511,7 +1511,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="35_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="35_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:19" end_time="13:57:19"/>
             <leg mode="walk" dep_time="13:57:19" trav_time="02:10:00">
@@ -1540,7 +1540,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:21" vehicleRefId="36_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:21" distance="25000" vehicleRefId="36_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:23" end_time="08:28:23"/>
             <leg mode="walk" dep_time="08:28:23" trav_time="02:10:00">
@@ -1561,7 +1561,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="36_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="36_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:26" end_time="13:57:26"/>
             <leg mode="walk" dep_time="13:57:26" trav_time="02:10:00">
@@ -1590,7 +1590,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:28" vehicleRefId="37_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:28" distance="25000" vehicleRefId="37_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:30" end_time="08:28:30"/>
             <leg mode="walk" dep_time="08:28:30" trav_time="02:10:00">
@@ -1611,7 +1611,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="37_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="37_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:33" end_time="13:57:33"/>
             <leg mode="walk" dep_time="13:57:33" trav_time="02:10:00">
@@ -1640,7 +1640,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:36" vehicleRefId="38_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:36" distance="25000" vehicleRefId="38_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:38" end_time="08:28:38"/>
             <leg mode="walk" dep_time="08:28:38" trav_time="02:10:00">
@@ -1661,7 +1661,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="38_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="38_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:41" end_time="13:57:41"/>
             <leg mode="walk" dep_time="13:57:41" trav_time="02:10:00">
@@ -1690,7 +1690,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:43" vehicleRefId="39_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:43" distance="25000" vehicleRefId="39_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:45" end_time="08:28:45"/>
             <leg mode="walk" dep_time="08:28:45" trav_time="02:10:00">
@@ -1711,7 +1711,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="39_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="39_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:48" end_time="13:57:48"/>
             <leg mode="walk" dep_time="13:57:48" trav_time="02:10:00">
@@ -1740,7 +1740,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" vehicleRefId="4_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:15:00" distance="25000" vehicleRefId="4_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:24:32" end_time="08:24:32"/>
             <leg mode="walk" dep_time="08:24:32" trav_time="02:10:00">
@@ -1761,7 +1761,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="4_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="4_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="15:53:35" end_time="15:53:35"/>
             <leg mode="walk" dep_time="15:53:35" trav_time="02:10:00">
@@ -1790,7 +1790,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:50" vehicleRefId="40_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:50" distance="25000" vehicleRefId="40_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:52" end_time="08:28:52"/>
             <leg mode="walk" dep_time="08:28:52" trav_time="02:10:00">
@@ -1811,7 +1811,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="40_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="40_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:57:55" end_time="13:57:55"/>
             <leg mode="walk" dep_time="13:57:55" trav_time="02:10:00">
@@ -1840,7 +1840,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:18:57" vehicleRefId="41_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:18:57" distance="25000" vehicleRefId="41_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:28:59" end_time="08:28:59"/>
             <leg mode="walk" dep_time="08:28:59" trav_time="02:10:00">
@@ -1861,7 +1861,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="41_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="41_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:02" end_time="13:58:02"/>
             <leg mode="walk" dep_time="13:58:02" trav_time="02:10:00">
@@ -1890,7 +1890,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:04" vehicleRefId="42_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:04" distance="25000" vehicleRefId="42_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:06" end_time="08:29:06"/>
             <leg mode="walk" dep_time="08:29:06" trav_time="02:10:00">
@@ -1911,7 +1911,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="42_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="42_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:09" end_time="13:58:09"/>
             <leg mode="walk" dep_time="13:58:09" trav_time="02:10:00">
@@ -1940,7 +1940,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:12" vehicleRefId="43_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:12" distance="25000" vehicleRefId="43_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:14" end_time="08:29:14"/>
             <leg mode="walk" dep_time="08:29:14" trav_time="02:10:00">
@@ -1961,7 +1961,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="43_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="43_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:17" end_time="13:58:17"/>
             <leg mode="walk" dep_time="13:58:17" trav_time="02:10:00">
@@ -1990,7 +1990,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:19" vehicleRefId="44_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:19" distance="25000" vehicleRefId="44_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:21" end_time="08:29:21"/>
             <leg mode="walk" dep_time="08:29:21" trav_time="02:10:00">
@@ -2011,7 +2011,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="44_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="44_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:24" end_time="13:58:24"/>
             <leg mode="walk" dep_time="13:58:24" trav_time="02:10:00">
@@ -2040,7 +2040,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:26" vehicleRefId="45_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:26" distance="25000" vehicleRefId="45_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:28" end_time="08:29:28"/>
             <leg mode="walk" dep_time="08:29:28" trav_time="02:10:00">
@@ -2061,7 +2061,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="45_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="45_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:31" end_time="13:58:31"/>
             <leg mode="walk" dep_time="13:58:31" trav_time="02:10:00">
@@ -2090,7 +2090,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:33" vehicleRefId="46_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:33" distance="25000" vehicleRefId="46_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:35" end_time="08:29:35"/>
             <leg mode="walk" dep_time="08:29:35" trav_time="02:10:00">
@@ -2111,7 +2111,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="46_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="46_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:38" end_time="13:58:38"/>
             <leg mode="walk" dep_time="13:58:38" trav_time="02:10:00">
@@ -2140,7 +2140,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:40" vehicleRefId="47_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:40" distance="25000" vehicleRefId="47_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:42" end_time="08:29:42"/>
             <leg mode="walk" dep_time="08:29:42" trav_time="02:10:00">
@@ -2161,7 +2161,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="47_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="47_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:45" end_time="13:58:45"/>
             <leg mode="walk" dep_time="13:58:45" trav_time="02:10:00">
@@ -2190,7 +2190,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:48" vehicleRefId="48_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:48" distance="25000" vehicleRefId="48_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:50" end_time="08:29:50"/>
             <leg mode="walk" dep_time="08:29:50" trav_time="02:10:00">
@@ -2211,7 +2211,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="48_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="48_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:58:53" end_time="13:58:53"/>
             <leg mode="walk" dep_time="13:58:53" trav_time="02:10:00">
@@ -2240,7 +2240,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:19:55" vehicleRefId="49_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:19:55" distance="25000" vehicleRefId="49_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:29:57" end_time="08:29:57"/>
             <leg mode="walk" dep_time="08:29:57" trav_time="02:10:00">
@@ -2261,7 +2261,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="49_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="49_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:00" end_time="13:59:00"/>
             <leg mode="walk" dep_time="13:59:00" trav_time="02:10:00">
@@ -2290,7 +2290,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:02" vehicleRefId="5_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:02" distance="25000" vehicleRefId="5_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:04" end_time="08:30:04"/>
             <leg mode="walk" dep_time="08:30:04" trav_time="02:10:00">
@@ -2311,7 +2311,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="5_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="5_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="19:59:07" end_time="19:59:07"/>
             <leg mode="walk" dep_time="19:59:07" trav_time="02:10:00">
@@ -2340,7 +2340,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:09" vehicleRefId="50_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:09" distance="25000" vehicleRefId="50_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:11" end_time="08:30:11"/>
             <leg mode="walk" dep_time="08:30:11" trav_time="02:10:00">
@@ -2361,7 +2361,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="50_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="50_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:14" end_time="13:59:14"/>
             <leg mode="walk" dep_time="13:59:14" trav_time="02:10:00">
@@ -2390,7 +2390,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:16" vehicleRefId="51_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:16" distance="25000" vehicleRefId="51_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:18" end_time="08:30:18"/>
             <leg mode="walk" dep_time="08:30:18" trav_time="02:10:00">
@@ -2411,7 +2411,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="51_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="51_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:21" end_time="13:59:21"/>
             <leg mode="walk" dep_time="13:59:21" trav_time="02:10:00">
@@ -2440,7 +2440,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:24" vehicleRefId="52_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:24" distance="25000" vehicleRefId="52_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:26" end_time="08:30:26"/>
             <leg mode="walk" dep_time="08:30:26" trav_time="02:10:00">
@@ -2461,7 +2461,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="52_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="52_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:29" end_time="13:59:29"/>
             <leg mode="walk" dep_time="13:59:29" trav_time="02:10:00">
@@ -2490,7 +2490,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:31" vehicleRefId="53_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:31" distance="25000" vehicleRefId="53_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:33" end_time="08:30:33"/>
             <leg mode="walk" dep_time="08:30:33" trav_time="02:10:00">
@@ -2511,7 +2511,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="53_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="53_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:36" end_time="13:59:36"/>
             <leg mode="walk" dep_time="13:59:36" trav_time="02:10:00">
@@ -2540,7 +2540,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:38" vehicleRefId="54_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:38" distance="25000" vehicleRefId="54_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:40" end_time="08:30:40"/>
             <leg mode="walk" dep_time="08:30:40" trav_time="02:10:00">
@@ -2561,7 +2561,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="54_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="54_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:43" end_time="13:59:43"/>
             <leg mode="walk" dep_time="13:59:43" trav_time="02:10:00">
@@ -2590,7 +2590,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:45" vehicleRefId="55_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:45" distance="25000" vehicleRefId="55_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:47" end_time="08:30:47"/>
             <leg mode="walk" dep_time="08:30:47" trav_time="02:10:00">
@@ -2611,7 +2611,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="55_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="55_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:50" end_time="13:59:50"/>
             <leg mode="walk" dep_time="13:59:50" trav_time="02:10:00">
@@ -2640,7 +2640,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:20:52" vehicleRefId="56_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:20:52" distance="25000" vehicleRefId="56_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:30:54" end_time="08:30:54"/>
             <leg mode="walk" dep_time="08:30:54" trav_time="02:10:00">
@@ -2661,7 +2661,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="56_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="56_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="13:59:57" end_time="13:59:57"/>
             <leg mode="walk" dep_time="13:59:57" trav_time="02:10:00">
@@ -2690,7 +2690,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:00" vehicleRefId="57_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:00" distance="25000" vehicleRefId="57_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:02" end_time="08:31:02"/>
             <leg mode="walk" dep_time="08:31:02" trav_time="02:10:00">
@@ -2711,7 +2711,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="57_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="57_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:05" end_time="14:00:05"/>
             <leg mode="walk" dep_time="14:00:05" trav_time="02:10:00">
@@ -2740,7 +2740,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:07" vehicleRefId="58_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:07" distance="25000" vehicleRefId="58_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:09" end_time="08:31:09"/>
             <leg mode="walk" dep_time="08:31:09" trav_time="02:10:00">
@@ -2761,7 +2761,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="58_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="58_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:12" end_time="14:00:12"/>
             <leg mode="walk" dep_time="14:00:12" trav_time="02:10:00">
@@ -2790,7 +2790,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:14" vehicleRefId="59_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:14" distance="25000" vehicleRefId="59_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:16" end_time="08:31:16"/>
             <leg mode="walk" dep_time="08:31:16" trav_time="02:10:00">
@@ -2811,7 +2811,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="59_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="59_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:19" end_time="14:00:19"/>
             <leg mode="walk" dep_time="14:00:19" trav_time="02:10:00">
@@ -2840,7 +2840,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:21" vehicleRefId="6_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:21" distance="25000" vehicleRefId="6_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:23" end_time="08:31:23"/>
             <leg mode="walk" dep_time="08:31:23" trav_time="02:10:00">
@@ -2861,7 +2861,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="6_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="6_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:26" end_time="14:00:26"/>
             <leg mode="walk" dep_time="14:00:26" trav_time="02:10:00">
@@ -2890,7 +2890,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:28" vehicleRefId="60_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:28" distance="25000" vehicleRefId="60_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:30" end_time="08:31:30"/>
             <leg mode="walk" dep_time="08:31:30" trav_time="02:10:00">
@@ -2911,7 +2911,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="60_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="60_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:33" end_time="14:00:33"/>
             <leg mode="walk" dep_time="14:00:33" trav_time="02:10:00">
@@ -2940,7 +2940,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:36" vehicleRefId="61_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:36" distance="25000" vehicleRefId="61_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:38" end_time="08:31:38"/>
             <leg mode="walk" dep_time="08:31:38" trav_time="02:10:00">
@@ -2961,7 +2961,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="61_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="61_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:41" end_time="14:00:41"/>
             <leg mode="walk" dep_time="14:00:41" trav_time="02:10:00">
@@ -2990,7 +2990,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:43" vehicleRefId="62_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:43" distance="25000" vehicleRefId="62_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:45" end_time="08:31:45"/>
             <leg mode="walk" dep_time="08:31:45" trav_time="02:10:00">
@@ -3011,7 +3011,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="62_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="62_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:48" end_time="14:00:48"/>
             <leg mode="walk" dep_time="14:00:48" trav_time="02:10:00">
@@ -3040,7 +3040,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:50" vehicleRefId="63_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:50" distance="25000" vehicleRefId="63_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:52" end_time="08:31:52"/>
             <leg mode="walk" dep_time="08:31:52" trav_time="02:10:00">
@@ -3061,7 +3061,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="63_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="63_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:00:55" end_time="14:00:55"/>
             <leg mode="walk" dep_time="14:00:55" trav_time="02:10:00">
@@ -3090,7 +3090,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:21:57" vehicleRefId="64_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:21:57" distance="25000" vehicleRefId="64_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:31:59" end_time="08:31:59"/>
             <leg mode="walk" dep_time="08:31:59" trav_time="02:10:00">
@@ -3111,7 +3111,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="64_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="64_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:02" end_time="14:01:02"/>
             <leg mode="walk" dep_time="14:01:02" trav_time="02:10:00">
@@ -3140,7 +3140,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:04" vehicleRefId="65_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:04" distance="25000" vehicleRefId="65_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:06" end_time="08:32:06"/>
             <leg mode="walk" dep_time="08:32:06" trav_time="02:10:00">
@@ -3161,7 +3161,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="65_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="65_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:09" end_time="14:01:09"/>
             <leg mode="walk" dep_time="14:01:09" trav_time="02:10:00">
@@ -3190,7 +3190,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:12" vehicleRefId="66_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:12" distance="25000" vehicleRefId="66_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:14" end_time="08:32:14"/>
             <leg mode="walk" dep_time="08:32:14" trav_time="02:10:00">
@@ -3211,7 +3211,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="66_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="66_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:17" end_time="14:01:17"/>
             <leg mode="walk" dep_time="14:01:17" trav_time="02:10:00">
@@ -3240,7 +3240,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:19" vehicleRefId="67_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:19" distance="25000" vehicleRefId="67_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:21" end_time="08:32:21"/>
             <leg mode="walk" dep_time="08:32:21" trav_time="02:10:00">
@@ -3261,7 +3261,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="67_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="67_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:24" end_time="14:01:24"/>
             <leg mode="walk" dep_time="14:01:24" trav_time="02:10:00">
@@ -3290,7 +3290,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:26" vehicleRefId="68_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:26" distance="25000" vehicleRefId="68_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:28" end_time="08:32:28"/>
             <leg mode="walk" dep_time="08:32:28" trav_time="02:10:00">
@@ -3311,7 +3311,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="68_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="68_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:31" end_time="14:01:31"/>
             <leg mode="walk" dep_time="14:01:31" trav_time="02:10:00">
@@ -3340,7 +3340,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:33" vehicleRefId="69_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:33" distance="25000" vehicleRefId="69_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:35" end_time="08:32:35"/>
             <leg mode="walk" dep_time="08:32:35" trav_time="02:10:00">
@@ -3361,7 +3361,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="69_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="69_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:38" end_time="14:01:38"/>
             <leg mode="walk" dep_time="14:01:38" trav_time="02:10:00">
@@ -3390,7 +3390,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:40" vehicleRefId="7_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:40" distance="25000" vehicleRefId="7_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:42" end_time="08:32:42"/>
             <leg mode="walk" dep_time="08:32:42" trav_time="02:10:00">
@@ -3411,7 +3411,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="7_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="7_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:45" end_time="14:01:45"/>
             <leg mode="walk" dep_time="14:01:45" trav_time="02:10:00">
@@ -3440,7 +3440,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:48" vehicleRefId="70_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:48" distance="25000" vehicleRefId="70_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:50" end_time="08:32:50"/>
             <leg mode="walk" dep_time="08:32:50" trav_time="02:10:00">
@@ -3461,7 +3461,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="70_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="70_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:01:53" end_time="14:01:53"/>
             <leg mode="walk" dep_time="14:01:53" trav_time="02:10:00">
@@ -3490,7 +3490,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:22:55" vehicleRefId="71_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:22:55" distance="25000" vehicleRefId="71_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:32:57" end_time="08:32:57"/>
             <leg mode="walk" dep_time="08:32:57" trav_time="02:10:00">
@@ -3511,7 +3511,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="71_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="71_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:00" end_time="14:02:00"/>
             <leg mode="walk" dep_time="14:02:00" trav_time="02:10:00">
@@ -3540,7 +3540,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:02" vehicleRefId="72_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:02" distance="25000" vehicleRefId="72_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:04" end_time="08:33:04"/>
             <leg mode="walk" dep_time="08:33:04" trav_time="02:10:00">
@@ -3561,7 +3561,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="72_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="72_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:07" end_time="14:02:07"/>
             <leg mode="walk" dep_time="14:02:07" trav_time="02:10:00">
@@ -3590,7 +3590,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:09" vehicleRefId="73_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:09" distance="25000" vehicleRefId="73_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:11" end_time="08:33:11"/>
             <leg mode="walk" dep_time="08:33:11" trav_time="02:10:00">
@@ -3611,7 +3611,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="73_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="73_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:14" end_time="14:02:14"/>
             <leg mode="walk" dep_time="14:02:14" trav_time="02:10:00">
@@ -3640,7 +3640,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:16" vehicleRefId="74_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:16" distance="25000" vehicleRefId="74_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:18" end_time="08:33:18"/>
             <leg mode="walk" dep_time="08:33:18" trav_time="02:10:00">
@@ -3661,7 +3661,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="74_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="74_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:21" end_time="14:02:21"/>
             <leg mode="walk" dep_time="14:02:21" trav_time="02:10:00">
@@ -3690,7 +3690,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:24" vehicleRefId="75_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:24" distance="25000" vehicleRefId="75_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:26" end_time="08:33:26"/>
             <leg mode="walk" dep_time="08:33:26" trav_time="02:10:00">
@@ -3711,7 +3711,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="75_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="75_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:29" end_time="14:02:29"/>
             <leg mode="walk" dep_time="14:02:29" trav_time="02:10:00">
@@ -3740,7 +3740,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:31" vehicleRefId="76_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:31" distance="25000" vehicleRefId="76_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:33" end_time="08:33:33"/>
             <leg mode="walk" dep_time="08:33:33" trav_time="02:10:00">
@@ -3761,7 +3761,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="76_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="76_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:36" end_time="14:02:36"/>
             <leg mode="walk" dep_time="14:02:36" trav_time="02:10:00">
@@ -3790,7 +3790,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:38" vehicleRefId="77_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:38" distance="25000" vehicleRefId="77_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:40" end_time="08:33:40"/>
             <leg mode="walk" dep_time="08:33:40" trav_time="02:10:00">
@@ -3811,7 +3811,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="77_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="77_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:43" end_time="14:02:43"/>
             <leg mode="walk" dep_time="14:02:43" trav_time="02:10:00">
@@ -3840,7 +3840,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:45" vehicleRefId="78_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:45" distance="25000" vehicleRefId="78_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:47" end_time="08:33:47"/>
             <leg mode="walk" dep_time="08:33:47" trav_time="02:10:00">
@@ -3861,7 +3861,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="78_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="78_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:50" end_time="14:02:50"/>
             <leg mode="walk" dep_time="14:02:50" trav_time="02:10:00">
@@ -3890,7 +3890,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:23:52" vehicleRefId="79_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:23:52" distance="25000" vehicleRefId="79_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:33:54" end_time="08:33:54"/>
             <leg mode="walk" dep_time="08:33:54" trav_time="02:10:00">
@@ -3911,7 +3911,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="79_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="79_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:02:57" end_time="14:02:57"/>
             <leg mode="walk" dep_time="14:02:57" trav_time="02:10:00">
@@ -3940,7 +3940,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:00" vehicleRefId="8_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:00" distance="25000" vehicleRefId="8_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:02" end_time="08:34:02"/>
             <leg mode="walk" dep_time="08:34:02" trav_time="02:10:00">
@@ -3961,7 +3961,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="8_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="8_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:05" end_time="14:03:05"/>
             <leg mode="walk" dep_time="14:03:05" trav_time="02:10:00">
@@ -3990,7 +3990,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:07" vehicleRefId="80_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:07" distance="25000" vehicleRefId="80_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:09" end_time="08:34:09"/>
             <leg mode="walk" dep_time="08:34:09" trav_time="02:10:00">
@@ -4011,7 +4011,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="80_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="80_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:12" end_time="14:03:12"/>
             <leg mode="walk" dep_time="14:03:12" trav_time="02:10:00">
@@ -4040,7 +4040,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:14" vehicleRefId="81_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:14" distance="25000" vehicleRefId="81_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:16" end_time="08:34:16"/>
             <leg mode="walk" dep_time="08:34:16" trav_time="02:10:00">
@@ -4061,7 +4061,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="81_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="81_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:19" end_time="14:03:19"/>
             <leg mode="walk" dep_time="14:03:19" trav_time="02:10:00">
@@ -4090,7 +4090,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:21" vehicleRefId="82_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:21" distance="25000" vehicleRefId="82_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:23" end_time="08:34:23"/>
             <leg mode="walk" dep_time="08:34:23" trav_time="02:10:00">
@@ -4111,7 +4111,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="82_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="82_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:26" end_time="14:03:26"/>
             <leg mode="walk" dep_time="14:03:26" trav_time="02:10:00">
@@ -4140,7 +4140,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:28" vehicleRefId="83_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:28" distance="25000" vehicleRefId="83_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:30" end_time="08:34:30"/>
             <leg mode="walk" dep_time="08:34:30" trav_time="02:10:00">
@@ -4161,7 +4161,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="83_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="83_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:33" end_time="14:03:33"/>
             <leg mode="walk" dep_time="14:03:33" trav_time="02:10:00">
@@ -4190,7 +4190,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:36" vehicleRefId="84_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:36" distance="25000" vehicleRefId="84_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:38" end_time="08:34:38"/>
             <leg mode="walk" dep_time="08:34:38" trav_time="02:10:00">
@@ -4211,7 +4211,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="84_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="84_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:41" end_time="14:03:41"/>
             <leg mode="walk" dep_time="14:03:41" trav_time="02:10:00">
@@ -4240,7 +4240,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:43" vehicleRefId="85_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:43" distance="25000" vehicleRefId="85_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:45" end_time="08:34:45"/>
             <leg mode="walk" dep_time="08:34:45" trav_time="02:10:00">
@@ -4261,7 +4261,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="85_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="85_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:48" end_time="14:03:48"/>
             <leg mode="walk" dep_time="14:03:48" trav_time="02:10:00">
@@ -4290,7 +4290,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:50" vehicleRefId="86_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:50" distance="25000" vehicleRefId="86_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:52" end_time="08:34:52"/>
             <leg mode="walk" dep_time="08:34:52" trav_time="02:10:00">
@@ -4311,7 +4311,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="86_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="86_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:03:55" end_time="14:03:55"/>
             <leg mode="walk" dep_time="14:03:55" trav_time="02:10:00">
@@ -4340,7 +4340,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:24:57" vehicleRefId="87_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:24:57" distance="25000" vehicleRefId="87_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:34:59" end_time="08:34:59"/>
             <leg mode="walk" dep_time="08:34:59" trav_time="02:10:00">
@@ -4361,7 +4361,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="87_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="87_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:02" end_time="14:04:02"/>
             <leg mode="walk" dep_time="14:04:02" trav_time="02:10:00">
@@ -4390,7 +4390,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:04" vehicleRefId="88_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:04" distance="25000" vehicleRefId="88_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:06" end_time="08:35:06"/>
             <leg mode="walk" dep_time="08:35:06" trav_time="02:10:00">
@@ -4411,7 +4411,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="88_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="88_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:09" end_time="14:04:09"/>
             <leg mode="walk" dep_time="14:04:09" trav_time="02:10:00">
@@ -4440,7 +4440,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:12" vehicleRefId="89_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:12" distance="25000" vehicleRefId="89_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:14" end_time="08:35:14"/>
             <leg mode="walk" dep_time="08:35:14" trav_time="02:10:00">
@@ -4461,7 +4461,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="89_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="89_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:17" end_time="14:04:17"/>
             <leg mode="walk" dep_time="14:04:17" trav_time="02:10:00">
@@ -4490,7 +4490,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:19" vehicleRefId="9_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:19" distance="25000" vehicleRefId="9_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:21" end_time="08:35:21"/>
             <leg mode="walk" dep_time="08:35:21" trav_time="02:10:00">
@@ -4511,7 +4511,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="9_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="9_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:24" end_time="14:04:24"/>
             <leg mode="walk" dep_time="14:04:24" trav_time="02:10:00">
@@ -4540,7 +4540,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:26" vehicleRefId="90_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:26" distance="25000" vehicleRefId="90_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:28" end_time="08:35:28"/>
             <leg mode="walk" dep_time="08:35:28" trav_time="02:10:00">
@@ -4561,7 +4561,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="90_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="90_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:31" end_time="14:04:31"/>
             <leg mode="walk" dep_time="14:04:31" trav_time="02:10:00">
@@ -4590,7 +4590,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:33" vehicleRefId="91_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:33" distance="25000" vehicleRefId="91_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:35" end_time="08:35:35"/>
             <leg mode="walk" dep_time="08:35:35" trav_time="02:10:00">
@@ -4611,7 +4611,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="91_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="91_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:38" end_time="14:04:38"/>
             <leg mode="walk" dep_time="14:04:38" trav_time="02:10:00">
@@ -4640,7 +4640,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:40" vehicleRefId="92_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:40" distance="25000" vehicleRefId="92_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:42" end_time="08:35:42"/>
             <leg mode="walk" dep_time="08:35:42" trav_time="02:10:00">
@@ -4661,7 +4661,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="92_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="92_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:45" end_time="14:04:45"/>
             <leg mode="walk" dep_time="14:04:45" trav_time="02:10:00">
@@ -4690,7 +4690,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:48" vehicleRefId="93_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:48" distance="25000" vehicleRefId="93_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:50" end_time="08:35:50"/>
             <leg mode="walk" dep_time="08:35:50" trav_time="02:10:00">
@@ -4711,7 +4711,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="93_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="93_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:04:53" end_time="14:04:53"/>
             <leg mode="walk" dep_time="14:04:53" trav_time="02:10:00">
@@ -4740,7 +4740,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:25:55" vehicleRefId="94_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:25:55" distance="25000" vehicleRefId="94_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:35:57" end_time="08:35:57"/>
             <leg mode="walk" dep_time="08:35:57" trav_time="02:10:00">
@@ -4761,7 +4761,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="94_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="94_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:05:00" end_time="14:05:00"/>
             <leg mode="walk" dep_time="14:05:00" trav_time="02:10:00">
@@ -4790,7 +4790,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:26:02" vehicleRefId="95_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:26:02" distance="25000" vehicleRefId="95_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:36:04" end_time="08:36:04"/>
             <leg mode="walk" dep_time="08:36:04" trav_time="02:10:00">
@@ -4811,7 +4811,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="95_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="95_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:05:07" end_time="14:05:07"/>
             <leg mode="walk" dep_time="14:05:07" trav_time="02:10:00">
@@ -4840,7 +4840,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:26:09" vehicleRefId="96_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:26:09" distance="25000" vehicleRefId="96_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:36:11" end_time="08:36:11"/>
             <leg mode="walk" dep_time="08:36:11" trav_time="02:10:00">
@@ -4861,7 +4861,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="96_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="96_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:05:14" end_time="14:05:14"/>
             <leg mode="walk" dep_time="14:05:14" trav_time="02:10:00">
@@ -4890,7 +4890,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:26:16" vehicleRefId="97_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:26:16" distance="25000" vehicleRefId="97_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:36:18" end_time="08:36:18"/>
             <leg mode="walk" dep_time="08:36:18" trav_time="02:10:00">
@@ -4911,7 +4911,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="97_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="97_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:05:21" end_time="14:05:21"/>
             <leg mode="walk" dep_time="14:05:21" trav_time="02:10:00">
@@ -4940,7 +4940,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:26:24" vehicleRefId="98_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:26:24" distance="25000" vehicleRefId="98_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:36:26" end_time="08:36:26"/>
             <leg mode="walk" dep_time="08:36:26" trav_time="02:10:00">
@@ -4961,7 +4961,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="98_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="98_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:05:29" end_time="14:05:29"/>
             <leg mode="walk" dep_time="14:05:29" trav_time="02:10:00">
@@ -4990,7 +4990,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="1" end_link="20" trav_time="00:26:31" vehicleRefId="99_car">1 2 11 20</route>
+                <route type="links" start_link="1" end_link="20" trav_time="00:26:31" distance="25000" vehicleRefId="99_car">1 2 11 20</route>
             </leg>
             <activity type="car interaction" link="20" x="5000" y="0" start_time="08:36:33" end_time="08:36:33"/>
             <leg mode="walk" dep_time="08:36:33" trav_time="02:10:00">
@@ -5011,7 +5011,7 @@
                 <attributes>
                     <attribute name="routingMode" class="java.lang.String">car</attribute>
                 </attributes>
-                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" vehicleRefId="99_car">20 21 22 23 1</route>
+                <route type="links" start_link="20" end_link="1" trav_time="00:39:00" distance="65000" vehicleRefId="99_car">20 21 22 23 1</route>
             </leg>
             <activity type="car interaction" link="1" x="-20000" y="0" start_time="14:05:36" end_time="14:05:36"/>
             <leg mode="walk" dep_time="14:05:36" trav_time="02:10:00">

@@ -174,8 +174,13 @@ impl BackpackingDataCollector {
     }
 
     pub(crate) fn person_arrival(&mut self, event: &PersonArrivalEvent) {
-        match self.partial_plan(&event.person) {
-            Some(plan) => plan.person_arrival(event),
+        match Self::partial_plan_of(
+            &mut self.person_id2backpack,
+            &self.known_transit_drivers,
+            &self.transit_schedule,
+            &event.person,
+        ) {
+            Some(plan) => plan.person_arrival(event, &self.network),
             // The leg of a driver ends after its departure.
             None => {
                 self.known_transit_drivers.remove(&event.person);

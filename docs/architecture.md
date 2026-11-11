@@ -110,7 +110,11 @@ it does not inspect or clone their contents.
 Experienced-plan collection uses this migration bus. Each worker creates one `BackpackingEngine` in an
 `Rc<RefCell<_>>`; its backpacks move with vehicles and teleporting agents and keep both their partial plans and any
 future scoring events. The engine subscribes only to the event types that change a partial plan, so that other events,
-e.g. link leave events, don't reach it. At `BeforeCleanup`, every worker converts the backpacks currently on that
+e.g. link leave events, don't reach it. When a network leg ends, its route gets the distance of MATSim's `EventsToLegs`,
+`RouteUtils.calcDistance` with the relative positions of the vehicle's enters/leaves traffic events (`calc_distance`).
+Vehicles enter and leave traffic at the end of a link, so this is the length of the links after the departure link up
+to and including the arrival link, and 0 if both are the same link.
+At `BeforeCleanup`, every worker converts the backpacks currently on that
 partition into one partial population and sends it to the controller over a dedicated backchannel before publishing its
 normal worker result. Consequently, all partial populations are available when the controller emits `AfterMobsim`. The scoring
 module verifies iteration and rank and merges the populations deterministically by person ID. The controller then
