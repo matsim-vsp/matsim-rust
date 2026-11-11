@@ -613,8 +613,9 @@ mod tests {
     use super::PartialPlan;
     use crate::simulation::events::{
         ActivityEndEventBuilder, ActivityStartEventBuilder, LinkEnterEventBuilder,
-        PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder, PersonStuckEventBuilder,
-        PtTeleportationArrivalEventBuilder, TeleportationArrivalEventBuilder,
+        PersonArrivalEventBuilder, PersonDepartureEventBuilder, PersonEntersVehicleEventBuilder,
+        PersonStuckEventBuilder, PtTeleportationArrivalEventBuilder,
+        TeleportationArrivalEventBuilder,
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
