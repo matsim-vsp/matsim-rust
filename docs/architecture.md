@@ -13,8 +13,8 @@ The rules between agents and engines are stated in [agent-contract.md](agent-con
 
 ### General Scenario Handling
 
-Starting the simulation mostly works as in MATSim Java. All XML input files need to be converted into protobuf for
-faster reading. These files need to be referenced in a configuration file. Based on the config, a scenario is built,
+Starting the simulation mostly works as in MATSim Java. Inputs can be loaded from XML or converted into protobuf for
+faster reading. Input files are referenced in a configuration file. Based on the config, a scenario is built,
 based on that the controller -- pretty much like in MATSim Java.
 
 Network links must list their allowed modes explicitly: a link without modes allows no mode. Unlike MATSim, which
@@ -80,10 +80,34 @@ after the conversion and are resolved during preparation; code running afterward
 `InternalActivity::link_id` instead of unwrapping. Preparation is split into two steps in `scenario::prepare`:
 
 - `prepare_for_sim` runs once on the loaded `Scenario`, before the controller shares it, e.g. with the routing modules.
-  It connects the facilities to the network and resolves the activity locations. Both run in parallel.
+  It prepares routing interaction ids and person vehicles sequentially, connects the facilities to the network and
+  resolves activity locations.
+  The latter two steps run in parallel. Vehicle preparation sorts persons by external id and the union of
+  `qsim.main_modes` and `routing.network_modes` by mode name, so generated ids do not depend on map or thread order.
 - `prepare_for_mobsim` runs before every mobsim iteration. It validates and repairs plans, e.g. by routing trips.
-  As in MATSim, trips with a mode of `qsim.main_modes` or `routing.network_modes` are routed with the vehicle
-  `<person>_<mode>`; vehicles referenced by the routes of the old trip are not reused.
+  Missing vehicle references on network routes are resolved from the person's `vehicles` mapping before read-only
+  validation; explicit references take precedence and must resolve. Newly routed trips use the person's assigned
+  vehicle for their routing mode, rather than reusing the old trip's route vehicle.
+
+`qsim.vehicles_source` follows MATSim's `defaultVehicle`, `modeVehicleTypesFromVehiclesData`, and `fromVehiclesData`.
+Rust defaults to the second option and always generates `<person>_<mode>` ids; it has no deprecated option to use the
+person id alone for cars. For the first two options, every configured main or network routing mode gets a generated
+assignment, replacing that mode's input `vehicles` entry. The person's `vehicleTypes` can override the creation type.
+Types are validated before checking for existing vehicles, as in Java; existing vehicles are never replaced.
+New vehicles resolve their speed and PCE from the garage by the fallback type id. Unlike Java's fresh default type
+object, an already registered `defaultVehicleType` supplies its own values when `defaultVehicle` is used.
+`fromVehiclesData` preserves the supplied mappings and catalog and reports missing vehicles or assignments at use.
+Each person's new assignments are collected locally and merged only after all its modes succeed. A missing
+`vehicles` attribute becomes an empty map even with `fromVehiclesData` or no configured network modes, as in Java.
+On an error, that person's assignments remain unchanged; previously created vehicles and completed persons are not
+rolled back. Interaction ids are prepared separately before this step, also with `fromVehiclesData`.
+Pure teleportation modes do not need vehicles. The catalog remains immutable after this preparation.
+
+Population loaders and the config-free XML-to-protobuf converter do not generate vehicles or fill missing route
+references. `vehicles` and `vehicleTypes` are string-map attributes, represented as JSON objects internally, with
+their Java class names restored on XML output. Protobuf adds the string-map oneof field 5 without changing scalar
+field tags. Older files remain readable, but data already lost by an older converter requires reconversion with the
+matching id store. Preparation can change internal ids relative to previous releases; RNG stream encoding is unchanged.
 
 For mobsim, the controller splits the population into `MobsimInput`s. Each input contains a `MobsimPartition` with the
 shared scenario data and a fresh partition network runtime, plus a `PopulationShard`. Persistent QSim workers receive

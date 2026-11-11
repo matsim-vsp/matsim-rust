@@ -1,7 +1,7 @@
 //! Preparation of the scenario for simulation, split into two steps:
 //!
 //! - [`prepare_for_sim::prepare_for_sim`] runs once, before the controller shares the scenario. It
-//!   connects the facilities to the network and resolves the activity locations.
+//!   prepares person vehicles, connects the facilities to the network and resolves activity locations.
 //! - [`prepare_for_mobsim::prepare_for_mobsim`] runs before every mobsim iteration. It validates
 //!   and repairs plans, e.g. by routing trips.
 
@@ -14,9 +14,10 @@ use std::borrow::Cow;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
-#[error("scenario preparation failed")]
+#[error("{message}")]
 pub struct PrepareError {
     issues: Vec<PrepareIssue>,
+    message: String,
 }
 
 impl PrepareError {
@@ -36,7 +37,18 @@ impl PrepareError {
                 b.trip_index,
             ))
         });
-        Self { issues }
+        Self {
+            issues,
+            message: "scenario preparation failed".to_string(),
+        }
+    }
+
+    /// Scenario-wide failures, such as an unknown configured vehicle type, have no plan index.
+    fn for_scenario(message: String) -> Self {
+        Self {
+            issues: Vec::new(),
+            message: format!("scenario preparation failed: {message}"),
+        }
     }
 
     pub fn issues(&self) -> &[PrepareIssue] {

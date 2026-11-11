@@ -1049,8 +1049,20 @@ pub struct QSim {
     pub sample_size: f64,
     pub stuck_threshold: u32,
     pub main_modes: Vec<String>,
+    pub vehicles_source: VehiclesSource,
     pub traffic_dynamics: TrafficDynamics,
     pub link_dynamics: LinkDynamics,
+}
+
+/// How persons receive vehicles for the main and network routing modes. Unlike Java, Rust
+/// defaults to mode-specific types and always uses `<person>_<mode>` for generated vehicle ids.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum VehiclesSource {
+    DefaultVehicle,
+    #[default]
+    ModeVehicleTypesFromVehiclesData,
+    FromVehiclesData,
 }
 
 /// Ordering of vehicles travelling along a link, independently of capacity dynamics.
@@ -1175,6 +1187,7 @@ impl From<&Simulation> for QSim {
             sample_size: value.sample_size,
             stuck_threshold: value.stuck_threshold,
             main_modes: value.main_modes.clone(),
+            vehicles_source: VehiclesSource::default(),
             traffic_dynamics: value.traffic_dynamics,
             link_dynamics: value.link_dynamics,
         }
@@ -1206,6 +1219,11 @@ register_override!("qsim.ticks_per_second", |config, value| {
 
 register_override!("qsim.sample_size", |config, value| {
     config.qsim_mut().sample_size = value.parse().unwrap();
+});
+
+register_override!("qsim.vehicles_source", |config, value| {
+    config.qsim_mut().vehicles_source = serde_yaml::from_str(value)
+        .unwrap_or_else(|_| panic!("Invalid qsim.vehicles_source: {value}"));
 });
 
 register_override!("qsim.link_dynamics", |config, value| {
@@ -1481,6 +1499,7 @@ impl Default for QSim {
             sample_size: 1.0,
             stuck_threshold: 10,
             main_modes: vec![],
+            vehicles_source: VehiclesSource::default(),
             traffic_dynamics: TrafficDynamics::Queue,
             link_dynamics: LinkDynamics::Fifo,
         }
@@ -1775,6 +1794,34 @@ fn default_profiling_level() -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn vehicles_source_defaults_roundtrips_and_overrides() {
+        use super::{Config, QSim, VehiclesSource};
+        assert_eq!(
+            VehiclesSource::ModeVehicleTypesFromVehiclesData,
+            serde_yaml::from_str::<QSim>("{}").unwrap().vehicles_source
+        );
+        for (value, expected) in [
+            ("defaultVehicle", VehiclesSource::DefaultVehicle),
+            (
+                "modeVehicleTypesFromVehiclesData",
+                VehiclesSource::ModeVehicleTypesFromVehiclesData,
+            ),
+            ("fromVehiclesData", VehiclesSource::FromVehiclesData),
+        ] {
+            let parsed: QSim = serde_yaml::from_str(&format!("vehicles_source: {value}")).unwrap();
+            assert_eq!(expected, parsed.vehicles_source);
+            assert_eq!(
+                parsed,
+                serde_yaml::from_str::<QSim>(&serde_yaml::to_string(&parsed).unwrap()).unwrap()
+            );
+            let mut config = Config::default();
+            config.apply_overrides(&[("qsim.vehicles_source".into(), value.into())]);
+            assert_eq!(expected, config.qsim().vehicles_source);
+        }
+        assert!(serde_yaml::from_str::<QSim>("vehicles_source: unsupported").is_err());
+    }
+
+    #[test]
     fn traffic_dynamics_defaults_round_trips_and_overrides() {
         use super::{Config, QSim, TrafficDynamics};
         let defaults: QSim = serde_yaml::from_str("{}").unwrap();
@@ -1859,6 +1906,7 @@ mod tests {
             sample_size: 0.1,
             stuck_threshold: 1,
             main_modes: vec!["bike".to_string()],
+            vehicles_source: config::VehiclesSource::default(),
             traffic_dynamics: config::TrafficDynamics::Queue,
             link_dynamics: config::LinkDynamics::Fifo,
         };

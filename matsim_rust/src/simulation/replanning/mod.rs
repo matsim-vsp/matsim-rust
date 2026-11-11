@@ -682,6 +682,9 @@ mod tests {
             Id::create("person-1"),
             routed_plan("car", &["home", "work", "shop"], &["a", "b", "c"]),
         );
+        person
+            .attributes_mut()
+            .insert_string_map_entry("vehicles", "car", "person-1_car");
         let original = person.plans()[0].clone();
 
         strategy.handle(&mut person, &context());
@@ -761,6 +764,9 @@ mod tests {
             Id::create("person-1"),
             routed_plan("car", &["home", "work"], &["a", "b"]),
         );
+        person
+            .attributes_mut()
+            .insert_string_map_entry("vehicles", "car", "person-1_car");
 
         let message = panic_message(|| strategy.handle(&mut person, &context()));
 

@@ -614,7 +614,7 @@ impl Controller {
         self.scenario.core.facilities.to_file(&path);
     }
 
-    /// Writes the vehicles of the persons, also those created while loading the population.
+    /// Writes the vehicles of the persons, also those created during scenario preparation.
     fn write_output_vehicles(&self, output_path: impl AsRef<Path>) {
         let path = output_path
             .as_ref()

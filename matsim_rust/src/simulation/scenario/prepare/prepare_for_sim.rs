@@ -1,17 +1,22 @@
 use super::{PlanPreparationFailure, PrepareError, owned_plan, prepare_person};
-use crate::simulation::config::ModalLinkSelection;
+use crate::simulation::config::{Config, ModalLinkSelection, VehiclesSource};
 use crate::simulation::id::Id;
 use crate::simulation::pt::schedule::give_each_departure_its_own_vehicle;
 use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
 use crate::simulation::scenario::network::{Link, Network};
-use crate::simulation::scenario::population::{InternalActivity, InternalPlan};
+use crate::simulation::scenario::population::{InternalActivity, InternalPlan, VEHICLES};
+use crate::simulation::scenario::vehicles::{Garage, InternalVehicleType};
 use crate::simulation::scenario::{Coordinate, Scenario};
 use rayon::prelude::*;
 use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 /// Prepares the loaded scenario for simulation. This runs once, before the controller shares the
 /// scenario, e.g. with the routing modules:
+///
+/// Person vehicles and routing interaction ids are prepared sequentially first, so that their
+/// ids are independent of parallel plan preparation.
 ///
 /// 1. The facilities are connected to the network, see [`prepare_facilities`].
 /// 2. Every activity gets a link and a coordinate, see [`resolve_activity_locations`].
@@ -19,6 +24,8 @@ use thiserror::Error;
 ///
 /// The first two steps process facilities and persons in parallel.
 pub(crate) fn prepare_for_sim(scenario: &mut Scenario) -> Result<(), PrepareError> {
+    prepare_interaction_activity_ids(&scenario.config);
+    prepare_vehicles(scenario).map_err(PrepareError::for_scenario)?;
     let selection = scenario.config.facilities().modal_link_selection;
     prepare_facilities(&mut scenario.facilities, &scenario.network, selection);
 
@@ -198,6 +205,104 @@ fn resolve_activity_location(
     Ok((!unchanged).then_some((link_id, coord)))
 }
 
+fn prepare_vehicles(scenario: &mut Scenario) -> Result<(), String> {
+    let mode_types = vehicle_types_for_network_modes(&scenario.config, &mut scenario.garage)?;
+
+    let garage = &mut scenario.garage;
+
+    let mut persons: Vec<_> = scenario.population.persons.values_mut().collect();
+    persons.sort_by(|a, b| a.id().external().cmp(b.id().external()));
+
+    for person in persons {
+        let mut assignments = BTreeMap::new();
+        for (mode, fallback_type_id) in &mode_types {
+            let override_type_id = if let Some(external) = person.vehicle_type_for_mode(mode) {
+                let vehicle_type_id = Id::try_get_from_ext(external)
+                    .filter(|id| garage.vehicle_types.contains_key(id))
+                    .ok_or_else(|| {
+                        format!(
+                            "Invalid vehicle type for mode {}: {}",
+                            mode,
+                            person.id().external()
+                        )
+                    })?;
+                Some(vehicle_type_id)
+            } else {
+                None
+            };
+
+            let external = format!("{}_{mode}", person.id().external());
+            let id = Id::create(&external);
+            garage.ensure_vehicle(id, override_type_id.as_ref().unwrap_or(fallback_type_id));
+            assignments.insert(mode.clone(), external);
+        }
+        // Generated assignments replace the same mode's input entry; other entries survive.
+        // Commit once per person, including an empty map, only after all its modes succeeded.
+        person
+            .attributes_mut()
+            .merge_string_map_entries(VEHICLES, assignments);
+    }
+    Ok(())
+}
+
+fn network_modes(config: &Config) -> BTreeSet<String> {
+    config
+        .qsim()
+        .main_modes
+        .iter()
+        .chain(&config.routing().network_modes)
+        .cloned()
+        .collect()
+}
+
+fn prepare_interaction_activity_ids(config: &Config) {
+    // Routers may create these activities concurrently, including in fromVehiclesData mode.
+    for mode in network_modes(config) {
+        Id::<String>::create(&mode);
+        Id::<String>::create(&format!("{mode} interaction"));
+    }
+}
+
+fn vehicle_types_for_network_modes(
+    config: &Config,
+    garage: &mut Garage,
+) -> Result<Vec<(String, Id<InternalVehicleType>)>, String> {
+    match config.qsim().vehicles_source {
+        VehiclesSource::FromVehiclesData => {
+            // Nothing to create if we load vehicles from data. Persons still receive an empty merge.
+            Ok(Vec::new())
+        }
+        VehiclesSource::DefaultVehicle => {
+            let modes = network_modes(config);
+            if modes.is_empty() {
+                return Ok(Vec::new());
+            }
+            // add default vehicle type to garage if it doesn't exist yet, so that the vehicles can be created
+            let default_type = InternalVehicleType::default();
+            let default_type_id = default_type.id.clone();
+            if !garage.vehicle_types.contains_key(&default_type_id) {
+                garage.add_veh_type(default_type);
+            }
+            Ok(modes
+                .into_iter()
+                .map(|mode| (mode, default_type_id.clone()))
+                .collect())
+        }
+        VehiclesSource::ModeVehicleTypesFromVehiclesData => {
+            // Java requires the base type for every mode even if all persons have supplied vehicles
+            // or person-specific overrides. Keep only their ids; the garage resolves vehicle properties.
+            network_modes(config).into_iter().map(|mode| {
+                let vehicle_type_id = Id::try_get_from_ext(&mode)
+                    .filter(|id| garage.vehicle_types.contains_key(id))
+                    .ok_or_else(|| format!(
+                        "Missing vehicle type {mode} for qsim.vehicles_source=modeVehicleTypesFromVehiclesData"
+                    ))?;
+                Ok((mode, vehicle_type_id))
+            }).collect()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{prepare_facilities, prepare_for_sim};
@@ -217,7 +322,9 @@ mod tests {
     use nohash_hasher::IntMap;
     use std::sync::Arc;
 
-    // Before: facilities with and without input links; after: base links and modal links are set.
+    // Facilities with and without supplied links receive base and modal links according to
+    // BaseLinkFirst selection. Modes without a stored modal link fall back to the base link.
+    // Preparing the facilities again must leave these assignments unchanged.
     #[deterministic_id_test]
     fn prepare_facilities_assigns_base_and_modal_links() {
         let network = layered_network();
@@ -275,6 +382,8 @@ mod tests {
         assert_eq!(prepared, facilities);
     }
 
+    // A facility references a link whose id exists in the ID store but not in the network.
+    // Preparation must reject that reference rather than assigning a nearby replacement link.
     #[deterministic_id_test]
     #[should_panic(expected = "which is not part of the network")]
     fn prepare_facilities_rejects_unknown_input_link() {
@@ -285,7 +394,9 @@ mod tests {
         prepare_facilities(&mut facilities, &network, ModalLinkSelection::BaseLinkFirst);
     }
 
-    // Before: a facility without link in the loaded scenario; after: the facility is prepared.
+    // The loaded scenario contains a facility with coordinates but no base link.
+    // Calling prepare_for_sim must connect it to the nearest link, verifying that the scenario
+    // entry point invokes facility preparation even when the population is empty.
     #[deterministic_id_test]
     fn prepare_for_sim_prepares_scenario_facilities() {
         let mut scenario = scenario(
@@ -300,7 +411,9 @@ mod tests {
         assert_eq!(Some(Id::get_from_ext("bike-10")), facility.base_link);
     }
 
-    // Before: activities with partial locations; after: every activity has a link and a coordinate.
+    // Activities specify a facility, coordinates, or a link, including conflicting location data.
+    // Preparation fills in each activity's link and coordinates, giving the facility precedence
+    // and preserving its reference. A second preparation must leave the resolved plan unchanged.
     #[deterministic_id_test]
     fn prepare_for_sim_resolves_all_location_variants() {
         let network = layered_network();
@@ -362,7 +475,9 @@ mod tests {
         );
     }
 
-    // Before: activities without any location or with an unknown facility; after: plan-level issues.
+    // Two persons have activities with no location or with a reference to an unknown facility.
+    // Preparation reports both problems as plan-level issues without a trip index, since location
+    // resolution happens before trip preparation.
     #[deterministic_id_test]
     fn unresolvable_activity_locations_are_reported_without_trip_index() {
         Id::<ActivityFacility>::create("missing");

@@ -148,7 +148,7 @@ was available at build time.
 
 ## Create input files
 
-You need to create protobuf files from the xml files. This can be done with the following command:
+Inputs can be loaded from XML or converted to protobuf for faster reading. To create protobuf files, run:
 
 ```shell
 cargo run --bin convert_to_binary --release -- --network network.xml --population population.xml --vehicles vehicles.xml --output-dir output --run-id run
@@ -156,6 +156,22 @@ cargo run --bin convert_to_binary --release -- --network network.xml --populatio
 
 Optionally, `--transit-schedule` and `--facilities` convert a transit schedule and an activity facilities file as
 well. Facilities are referenced in the config via `facilities.path`.
+
+Conversion preserves the input vehicles, person attributes `vehicles` and `vehicleTypes`, and missing route vehicle
+references. It does not generate vehicles. Both XML and protobuf inputs receive their vehicles during scenario
+preparation, according to `qsim.vehicles_source` in the config:
+
+- `modeVehicleTypesFromVehiclesData` (Rust default): each main or network routing mode requires a vehicle type with
+  that mode's name. A person's `vehicleTypes` mapping may select a more specific type.
+- `defaultVehicle`: use MATSim's `defaultVehicleType`, unless the person specifies a type for the mode.
+- `fromVehiclesData`: use the supplied vehicles and person-to-vehicle assignments; generate none.
+
+The first two strategies assign `<person>_<mode>` to each main or network routing mode, replacing that mode's entry
+in the person's `vehicles` mapping. An existing vehicle with that id retains its actual type and properties.
+The strategies follow MATSim Java; intentional differences are Rust's default source (Java uses `defaultVehicle`)
+and generated car ids (Rust always uses `<person>_car` and does not implement the deprecated person-id option).
+For an already registered `defaultVehicleType`, Rust also uses its registered speed and PCE, whereas Java uses a
+fresh standard type object for newly created vehicles.
 
 The scoring parameters of a MATSim run, including the activity parameters that scenarios such as Berlin create in
 code, can be taken from its output config. The resulting file is referenced in the config via

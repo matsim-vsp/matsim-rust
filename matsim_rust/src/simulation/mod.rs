@@ -73,6 +73,42 @@ impl InternalAttributes {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
+    /// Borrows one entry of a string-map attribute without cloning the map.
+    pub fn string_map_entry(&self, key: &str, entry: &str) -> Option<&str> {
+        self.attributes.get(key)?.as_object()?.get(entry)?.as_str()
+    }
+
+    pub(crate) fn insert_string_map_entry(
+        &mut self,
+        key: &str,
+        entry: impl Into<String>,
+        value: impl Into<String>,
+    ) {
+        let map = self
+            .attributes
+            .entry(key.to_string())
+            .or_insert_with(|| json!({}));
+        map.as_object_mut()
+            .unwrap_or_else(|| panic!("Attribute {key} must be a string map"))
+            .insert(entry.into(), Value::String(value.into()));
+    }
+
+    /// Merges assignments in place, creating a missing map even when `entries` is empty.
+    pub(crate) fn merge_string_map_entries(
+        &mut self,
+        key: &str,
+        entries: impl IntoIterator<Item = (String, String)>,
+    ) {
+        let map = self
+            .attributes
+            .entry(key.to_string())
+            .or_insert_with(|| json!({}));
+        assert!(map.is_object(), "Attribute {key} must be a string map");
+        for (entry, value) in entries {
+            self.insert_string_map_entry(key, entry, value);
+        }
+    }
+
     pub fn iter(&self) -> std::collections::hash_map::Iter<'_, String, Value> {
         self.attributes.iter()
     }
@@ -93,6 +129,18 @@ impl InternalAttributes {
                     }
                 }
                 Value::String(s) => AttributeValue::new_string(s.clone()),
+                Value::Object(map) if map.values().all(Value::is_string) => {
+                    let entries = map
+                        .iter()
+                        .map(|(entry, value)| {
+                            (
+                                entry.clone(),
+                                value.as_str().expect("validated string").to_string(),
+                            )
+                        })
+                        .collect();
+                    AttributeValue::new_string_map(entries)
+                }
                 _ => {
                     warn!("Unsupported attribute type for key '{}': {:?}", key, value);
                     continue;
@@ -119,6 +167,16 @@ impl From<IOAttributes> for InternalAttributes {
                 "java.lang.Double" => res.insert(attr.name, attr.value.parse::<f64>().unwrap()),
                 "java.lang.String" => res.insert(attr.name, attr.value),
                 "java.lang.Boolean" => res.insert(attr.name, attr.value.parse::<bool>().unwrap()),
+                "org.matsim.vehicles.PersonVehicles" | "org.matsim.vehicles.PersonVehicleTypes" => {
+                    let map: std::collections::BTreeMap<String, String> =
+                        serde_json::from_str(&attr.value).unwrap_or_else(|err| {
+                            panic!(
+                                "Invalid string map in attribute {} ({}): {err}",
+                                attr.name, attr.class
+                            )
+                        });
+                    res.insert(attr.name, map);
+                }
                 _ => {} //warn!("Unknown attribute class {:?}. Skipping...", attr.class),
             };
         }
@@ -152,6 +210,9 @@ impl From<&HashMap<String, AttributeValue>> for InternalAttributes {
                 }
                 Type::BoolValue(b) => {
                     res.insert(key, b);
+                }
+                Type::StringMapValue(map) => {
+                    res.insert(key, &map.entries);
                 }
             };
         }
