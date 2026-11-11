@@ -306,20 +306,24 @@ fn vehicle_types_for_network_modes(
 #[cfg(test)]
 mod tests {
     use super::{prepare_facilities, prepare_for_sim};
-    use crate::simulation::config::{Config, ModalLinkSelection};
+    use crate::simulation::config::{Config, ModalLinkSelection, VehiclesSource};
     use crate::simulation::id::Id;
     use crate::simulation::replanning::routing::Facility;
     use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::network::{Link, Network};
-    use crate::simulation::scenario::population::{InternalPerson, InternalPlan, Population};
+    use crate::simulation::scenario::population::{
+        InternalPerson, InternalPlan, Population, VEHICLE_TYPES, VEHICLES,
+    };
     use crate::simulation::scenario::prepare::test_utils::{
         activity_facility, facilities, layered_network, located_activity,
     };
     use crate::simulation::scenario::transit::TransitSchedule;
-    use crate::simulation::scenario::vehicles::Garage;
+    use crate::simulation::scenario::vehicles::{Garage, InternalVehicle};
     use crate::simulation::scenario::{Coordinate, Scenario};
+    use crate::test_utils::create_vehicle_type;
     use macros::deterministic_id_test;
     use nohash_hasher::IntMap;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     // Facilities with and without supplied links receive base and modal links according to
@@ -508,6 +512,195 @@ mod tests {
                 .contains("neither a facility, a link nor a coordinate")
         );
         assert!(issues[1].message.contains("unknown facility missing"));
+    }
+
+    // modeVehicleTypesFromVehiclesData: person "b" has no vehicle attributes, person "a" selects
+    // a more specific car type and already maps car and truck to vehicles of its own; "a_bike"
+    // already exists in the garage. Every person gets `<person>_<mode>` for car and bike. Only the
+    // car entry of "a" is replaced, and the existing vehicle keeps its type.
+    #[deterministic_id_test]
+    fn mode_vehicle_types_assign_one_vehicle_per_person_and_mode() {
+        let mut garage = vehicle_types(&["car", "bike", "sportscar"]);
+        garage.add_veh(vehicle("a_bike", "sportscar"));
+        // "b" is created first, so its internal id is smaller than the one of "a".
+        let b = person("b");
+        let mut a = person("a");
+        a.attributes_mut()
+            .insert_string_map_entry(VEHICLE_TYPES, "car", "sportscar");
+        a.attributes_mut()
+            .insert_string_map_entry(VEHICLES, "car", "own-car");
+        a.attributes_mut()
+            .insert_string_map_entry(VEHICLES, "truck", "fleet-1");
+        let mut scenario = vehicle_scenario(
+            VehiclesSource::ModeVehicleTypesFromVehiclesData,
+            garage,
+            vec![b, a],
+        );
+
+        prepare_for_sim(&mut scenario).unwrap();
+
+        assert_eq!(
+            string_map(&[("bike", "a_bike"), ("car", "a_car"), ("truck", "fleet-1")]),
+            person_vehicles(&scenario, "a")
+        );
+        assert_eq!(
+            string_map(&[("bike", "b_bike"), ("car", "b_car")]),
+            person_vehicles(&scenario, "b")
+        );
+        assert_eq!(4, scenario.garage.vehicles.len());
+        assert_eq!("sportscar", vehicle_type_of(&scenario, "a_car"));
+        assert_eq!("sportscar", vehicle_type_of(&scenario, "a_bike"));
+        assert_eq!("car", vehicle_type_of(&scenario, "b_car"));
+        assert_eq!("bike", vehicle_type_of(&scenario, "b_bike"));
+        // Vehicle ids are created in the order of the external person ids, not of the map.
+        assert!(
+            Id::<InternalVehicle>::get_from_ext("a_car").internal()
+                < Id::<InternalVehicle>::get_from_ext("b_car").internal()
+        );
+    }
+
+    // modeVehicleTypesFromVehiclesData needs a vehicle type for every main and network mode, and a
+    // type selected by a person must exist. In both cases preparation fails and the person
+    // receives no vehicle assignment.
+    #[deterministic_id_test]
+    fn mode_vehicle_types_reject_missing_vehicle_types() {
+        let source = VehiclesSource::ModeVehicleTypesFromVehiclesData;
+        // No type for the network mode bike.
+        let mut scenario = vehicle_scenario(source, vehicle_types(&["car"]), vec![person("p")]);
+        let error = prepare_for_sim(&mut scenario).unwrap_err();
+        assert!(error.to_string().contains("Missing vehicle type bike"));
+        assert!(error.issues().is_empty());
+        assert!(scenario.garage.vehicles.is_empty());
+
+        // The person selects an unknown car type.
+        let mut p = person("p");
+        p.attributes_mut()
+            .insert_string_map_entry(VEHICLE_TYPES, "car", "unknown");
+        let mut scenario = vehicle_scenario(source, vehicle_types(&["car", "bike"]), vec![p]);
+        let error = prepare_for_sim(&mut scenario).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid vehicle type for mode car")
+        );
+        let p = &scenario.population.persons[&Id::get_from_ext("p")];
+        assert_eq!(
+            None,
+            p.attributes().get::<BTreeMap<String, String>>(VEHICLES)
+        );
+    }
+
+    // defaultVehicle: without any vehicle types, MATSim's defaultVehicleType is registered and
+    // used for the vehicles of all main and network modes.
+    #[deterministic_id_test]
+    fn default_vehicle_registers_default_vehicle_type() {
+        let mut scenario = vehicle_scenario(
+            VehiclesSource::DefaultVehicle,
+            Garage::new(),
+            vec![person("p")],
+        );
+
+        prepare_for_sim(&mut scenario).unwrap();
+
+        assert_eq!(1, scenario.garage.vehicle_types.len());
+        assert_eq!(
+            string_map(&[("bike", "p_bike"), ("car", "p_car")]),
+            person_vehicles(&scenario, "p")
+        );
+        assert_eq!("defaultVehicleType", vehicle_type_of(&scenario, "p_car"));
+        assert_eq!("defaultVehicleType", vehicle_type_of(&scenario, "p_bike"));
+    }
+
+    // fromVehiclesData: no vehicles are generated and supplied assignments stay as they are.
+    // A person without assignments gets an empty map, and the interaction activity types of the
+    // network modes still exist for routing.
+    #[deterministic_id_test]
+    fn from_vehicles_data_keeps_supplied_vehicles() {
+        let mut garage = vehicle_types(&["car"]);
+        garage.add_veh(vehicle("fleet-1", "car"));
+        let mut a = person("a");
+        a.attributes_mut()
+            .insert_string_map_entry(VEHICLES, "car", "fleet-1");
+        let mut scenario = vehicle_scenario(
+            VehiclesSource::FromVehiclesData,
+            garage,
+            vec![a, person("b")],
+        );
+
+        prepare_for_sim(&mut scenario).unwrap();
+
+        assert_eq!(1, scenario.garage.vehicles.len());
+        assert_eq!(
+            string_map(&[("car", "fleet-1")]),
+            person_vehicles(&scenario, "a")
+        );
+        assert_eq!(BTreeMap::new(), person_vehicles(&scenario, "b"));
+        assert!(Id::<String>::try_get_from_ext("car interaction").is_some());
+        assert!(Id::<String>::try_get_from_ext("bike interaction").is_some());
+    }
+
+    /// A scenario with main mode car, network routing mode bike and the given vehicle source.
+    fn vehicle_scenario(
+        source: VehiclesSource,
+        garage: Garage,
+        persons: Vec<InternalPerson>,
+    ) -> Scenario {
+        let mut config = Config::default();
+        config.qsim_mut().main_modes = vec!["car".to_string()];
+        config.qsim_mut().vehicles_source = source;
+        config.routing_mut().network_modes = vec!["bike".to_string()];
+        let persons = persons.into_iter().map(|p| (p.id().clone(), p)).collect();
+        let mut scenario = scenario(
+            layered_network(),
+            ActivityFacilities::default(),
+            Population { persons },
+        );
+        scenario.garage = garage;
+        scenario.config = Arc::new(config);
+        scenario
+    }
+
+    fn person(id: &str) -> InternalPerson {
+        InternalPerson::new(Id::create(id), InternalPlan::default())
+    }
+
+    fn vehicle_types(ids: &[&str]) -> Garage {
+        let mut garage = Garage::new();
+        for id in ids {
+            garage.add_veh_type(create_vehicle_type(&Id::create(id), Id::create(id)));
+        }
+        garage
+    }
+
+    fn vehicle(id: &str, vehicle_type: &str) -> InternalVehicle {
+        InternalVehicle {
+            id: Id::create(id),
+            max_v: 10.0,
+            pce: 1.0,
+            vehicle_type: Id::get_from_ext(vehicle_type),
+            attributes: Default::default(),
+        }
+    }
+
+    fn string_map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    fn person_vehicles(scenario: &Scenario, person: &str) -> BTreeMap<String, String> {
+        scenario.population.persons[&Id::get_from_ext(person)]
+            .attributes()
+            .get(VEHICLES)
+            .expect("person has a vehicles attribute")
+    }
+
+    fn vehicle_type_of(scenario: &Scenario, vehicle: &str) -> String {
+        scenario.garage.vehicles[&Id::get_from_ext(vehicle)]
+            .vehicle_type
+            .external()
+            .to_string()
     }
 
     fn scenario(
