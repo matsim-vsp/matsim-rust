@@ -312,7 +312,7 @@ mod tests {
     use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
-        InternalPerson, InternalPlan, Population, VEHICLES, VEHICLE_TYPES,
+        InternalPerson, InternalPlan, Population, VEHICLE_TYPES, VEHICLES,
     };
     use crate::simulation::scenario::prepare::test_utils::{
         activity_facility, facilities, layered_network, located_activity,
