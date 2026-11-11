@@ -4,6 +4,7 @@
 <population>
     <person id="1">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"1_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-93.27607106006262">
@@ -75,6 +76,7 @@
     </person>
     <person id="10">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"10_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.520311009516924">
@@ -125,6 +127,7 @@
     </person>
     <person id="100">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"100_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.542028829390247">
@@ -175,6 +178,7 @@
     </person>
     <person id="11">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"11_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.563748052593944">
@@ -225,6 +229,7 @@
     </person>
     <person id="12">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"12_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.585468679519913">
@@ -275,6 +280,7 @@
     </person>
     <person id="13">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"13_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.610293972496187">
@@ -325,6 +331,7 @@
     </person>
     <person id="14">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"14_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.63201760871894">
@@ -375,6 +382,7 @@
     </person>
     <person id="15">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"15_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.653742649896813">
@@ -425,6 +433,7 @@
     </person>
     <person id="16">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"16_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.67546909642234">
@@ -475,6 +484,7 @@
     </person>
     <person id="17">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"17_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.697196948688351">
@@ -525,6 +535,7 @@
     </person>
     <person id="18">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"18_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.722030501668378">
@@ -575,6 +586,7 @@
     </person>
     <person id="19">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"19_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.743761367558676">
@@ -625,6 +637,7 @@
     </person>
     <person id="2">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"2_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="6.963055615112431">
@@ -675,6 +688,7 @@
     </person>
     <person id="20">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"20_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.7654936404249">
@@ -725,6 +739,7 @@
     </person>
     <person id="21">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"21_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.787227320660499">
@@ -775,6 +790,7 @@
     </person>
     <person id="22">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"22_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.808962408659042">
@@ -825,6 +841,7 @@
     </person>
     <person id="23">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"23_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.83380423352537">
@@ -875,6 +892,7 @@
     </person>
     <person id="24">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"24_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.855542339485076">
@@ -925,6 +943,7 @@
     </person>
     <person id="25">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"25_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.877281854445904">
@@ -975,6 +994,7 @@
     </person>
     <person id="26">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"26_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.899022778802127">
@@ -1025,6 +1045,7 @@
     </person>
     <person id="27">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"27_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.920765112948217">
@@ -1075,6 +1096,7 @@
     </person>
     <person id="28">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"28_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.945615221609017">
@@ -1125,6 +1147,7 @@
     </person>
     <person id="29">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"29_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.967360578062475">
@@ -1175,6 +1198,7 @@
     </person>
     <person id="3">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"3_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-3.5518483038028066">
@@ -1225,6 +1249,7 @@
     </person>
     <person id="30">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"30_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-14.989107345546621">
@@ -1275,6 +1300,7 @@
     </person>
     <person id="31">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"31_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.010855524456602">
@@ -1325,6 +1351,7 @@
     </person>
     <person id="32">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"32_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.032605115187721">
@@ -1375,6 +1402,7 @@
     </person>
     <person id="33">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"33_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.057463519576906">
@@ -1425,6 +1453,7 @@
     </person>
     <person id="34">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"34_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.079216136970992">
@@ -1475,6 +1504,7 @@
     </person>
     <person id="35">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"35_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.100970167429715">
@@ -1525,6 +1555,7 @@
     </person>
     <person id="36">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"36_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.122725611349082">
@@ -1575,6 +1606,7 @@
     </person>
     <person id="37">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"37_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.144482469125258">
@@ -1625,6 +1657,7 @@
     </person>
     <person id="38">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"38_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.16934918120257">
@@ -1675,6 +1708,7 @@
     </person>
     <person id="39">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"39_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.191109070006739">
@@ -1725,6 +1759,7 @@
     </person>
     <person id="4">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"4_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="6.963055615112431">
@@ -1775,6 +1810,7 @@
     </person>
     <person id="40">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"40_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.212870373913916">
@@ -1825,6 +1861,7 @@
     </person>
     <person id="41">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"41_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.234633093320944">
@@ -1875,6 +1912,7 @@
     </person>
     <person id="42">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"42_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.256397228624898">
@@ -1925,6 +1963,7 @@
     </person>
     <person id="43">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"43_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.281272260375921">
@@ -1975,6 +2014,7 @@
     </person>
     <person id="44">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"44_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.303039431082311">
@@ -2025,6 +2065,7 @@
     </person>
     <person id="45">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"45_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.324808018934505">
@@ -2075,6 +2116,7 @@
     </person>
     <person id="46">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"46_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.346578024330164">
@@ -2125,6 +2167,7 @@
     </person>
     <person id="47">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"47_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.36834944766722">
@@ -2175,6 +2218,7 @@
     </person>
     <person id="48">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"48_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.393232811103523">
@@ -2225,6 +2269,7 @@
     </person>
     <person id="49">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"49_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.415007274227008">
@@ -2275,6 +2320,7 @@
     </person>
     <person id="5">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"5_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="21.553287610666935">
@@ -2325,6 +2371,7 @@
     </person>
     <person id="50">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"50_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.458560458451466">
@@ -2375,6 +2422,7 @@
     </person>
     <person id="51">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"51_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.480339180349795">
@@ -2425,6 +2473,7 @@
     </person>
     <person id="52">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"52_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.505230887508958">
@@ -2475,6 +2524,7 @@
     </person>
     <person id="53">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"53_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.527012653587171">
@@ -2525,6 +2575,7 @@
     </person>
     <person id="54">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"54_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.548795840909982">
@@ -2575,6 +2626,7 @@
     </person>
     <person id="55">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"55_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.570580449876879">
@@ -2625,6 +2677,7 @@
     </person>
     <person id="56">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"56_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.59236648088742">
@@ -2675,6 +2728,7 @@
     </person>
     <person id="57">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"57_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.617266543833168">
@@ -2725,6 +2779,7 @@
     </person>
     <person id="58">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"58_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.639055623426607">
@@ -2775,6 +2830,7 @@
     </person>
     <person id="59">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"59_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.660846126320742">
@@ -2825,6 +2881,7 @@
     </person>
     <person id="6">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"6_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.682638052915905">
@@ -2875,6 +2932,7 @@
     </person>
     <person id="60">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"60_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.70443140361256">
@@ -2925,6 +2983,7 @@
     </person>
     <person id="61">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"61_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.72933983443476">
@@ -2975,6 +3034,7 @@
     </person>
     <person id="62">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"62_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.75113623812684">
@@ -3025,6 +3085,7 @@
     </person>
     <person id="63">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"63_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.772934067180195">
@@ -3075,6 +3136,7 @@
     </person>
     <person id="64">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"64_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.794733321996006">
@@ -3125,6 +3187,7 @@
     </person>
     <person id="65">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"65_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.81653400297558">
@@ -3175,6 +3238,7 @@
     </person>
     <person id="66">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"66_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.841450813790352">
@@ -3225,6 +3289,7 @@
     </person>
     <person id="67">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"67_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.863254552187534">
@@ -3275,6 +3340,7 @@
     </person>
     <person id="68">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"68_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.885059718010993">
@@ -3325,6 +3391,7 @@
     </person>
     <person id="69">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"69_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.906866311662796">
@@ -3375,6 +3442,7 @@
     </person>
     <person id="7">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"7_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.928674333545182">
@@ -3425,6 +3493,7 @@
     </person>
     <person id="70">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"70_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.953599536495027">
@@ -3475,6 +3544,7 @@
     </person>
     <person id="71">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"71_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.975410620226718">
@@ -3525,6 +3595,7 @@
     </person>
     <person id="72">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"72_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-15.997223133454256">
@@ -3575,6 +3646,7 @@
     </person>
     <person id="73">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"73_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.019037076580524">
@@ -3625,6 +3697,7 @@
     </person>
     <person id="74">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"74_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.040852450008664">
@@ -3675,6 +3748,7 @@
     </person>
     <person id="75">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"75_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.065786057262436">
@@ -3725,6 +3799,7 @@
     </person>
     <person id="76">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"76_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.087604496981285">
@@ -3775,6 +3850,7 @@
     </person>
     <person id="77">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"77_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.109424368269977">
@@ -3825,6 +3901,7 @@
     </person>
     <person id="78">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"78_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.131245671532334">
@@ -3875,6 +3952,7 @@
     </person>
     <person id="79">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"79_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.153068407172334">
@@ -3925,6 +4003,7 @@
     </person>
     <person id="8">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"8_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.178010430925426">
@@ -3975,6 +4054,7 @@
     </person>
     <person id="80">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"80_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.199836237307196">
@@ -4025,6 +4105,7 @@
     </person>
     <person id="81">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"81_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.221663477337366">
@@ -4075,6 +4156,7 @@
     </person>
     <person id="82">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"82_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.243492151420604">
@@ -4125,6 +4207,7 @@
     </person>
     <person id="83">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"83_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.265322259961792">
@@ -4175,6 +4258,7 @@
     </person>
     <person id="84">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"84_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.29027271243615">
@@ -4225,6 +4309,7 @@
     </person>
     <person id="85">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"85_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.31210589617988">
@@ -4275,6 +4360,7 @@
     </person>
     <person id="86">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"86_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.333940515655094">
@@ -4325,6 +4411,7 @@
     </person>
     <person id="87">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"87_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.355776571267363">
@@ -4375,6 +4462,7 @@
     </person>
     <person id="88">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"88_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.3776140634224">
@@ -4425,6 +4513,7 @@
     </person>
     <person id="89">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"89_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.402572956866557">
@@ -4475,6 +4564,7 @@
     </person>
     <person id="9">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"9_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.42441352869465">
@@ -4525,6 +4615,7 @@
     </person>
     <person id="90">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"90_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.446255538341823">
@@ -4575,6 +4666,7 @@
     </person>
     <person id="91">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"91_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.468098986214528">
@@ -4625,6 +4717,7 @@
     </person>
     <person id="92">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"92_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.48994387271943">
@@ -4675,6 +4768,7 @@
     </person>
     <person id="93">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"93_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.51491121940871">
@@ -4725,6 +4819,7 @@
     </person>
     <person id="94">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"94_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.536759190066896">
@@ -4775,6 +4870,7 @@
     </person>
     <person id="95">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"95_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.558608600636347">
@@ -4825,6 +4921,7 @@
     </person>
     <person id="96">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"96_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.58045945152439">
@@ -4875,6 +4972,7 @@
     </person>
     <person id="97">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"97_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.60231174313858">
@@ -4925,6 +5023,7 @@
     </person>
     <person id="98">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"98_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.62728755537507">
@@ -4975,6 +5074,7 @@
     </person>
     <person id="99">
         <attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"99_car"}</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
         </attributes>
         <plan selected="yes" score="-16.649142935632575">

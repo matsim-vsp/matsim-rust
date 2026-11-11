@@ -25,6 +25,8 @@ use std::time::Duration;
 
 pub const PREPLANNING_HORIZON: &str = "preplanningHorizon";
 pub const SUBPOPULATION: &str = "subpopulation";
+pub const VEHICLES: &str = "vehicles";
+pub const VEHICLE_TYPES: &str = "vehicleTypes";
 pub const DEFAULT_SUBPOPULATION: &str = "person";
 
 trait FromIOPerson<T> {
@@ -292,11 +294,26 @@ pub struct InternalPopulation {
 }
 
 impl InternalPerson {
+    /// Create a new person with the default subpopulation.
     pub fn new(id: Id<InternalPerson>, plan: InternalPlan) -> Self {
         InternalPerson {
             id,
             plans: vec![plan],
             subpopulation: Id::create(DEFAULT_SUBPOPULATION),
+            attributes: InternalAttributes::default(),
+        }
+    }
+
+    /// Create a new person with a specific subpopulation.
+    pub fn new_with_subpopulation(
+        id: Id<InternalPerson>,
+        plan: InternalPlan,
+        subpopulation: Id<String>,
+    ) -> Self {
+        InternalPerson {
+            id,
+            plans: vec![plan],
+            subpopulation,
             attributes: InternalAttributes::default(),
         }
     }
@@ -337,6 +354,15 @@ impl InternalPerson {
         &mut self.attributes
     }
 
+    /// The assigned external vehicle id, borrowed without cloning the person's mapping.
+    pub fn vehicle_id_for_mode(&self, mode: &str) -> Option<&str> {
+        self.attributes.string_map_entry(VEHICLES, mode)
+    }
+
+    pub fn vehicle_type_for_mode(&self, mode: &str) -> Option<&str> {
+        self.attributes.string_map_entry(VEHICLE_TYPES, mode)
+    }
+
     pub(crate) fn copy_metadata_from(&mut self, original: &Self) {
         self.subpopulation = original.subpopulation.clone();
         self.attributes = original.attributes.clone();
@@ -375,6 +401,10 @@ impl InternalPerson {
         for (i, p) in self.plans.iter_mut().enumerate() {
             p.selected = i == plan_index;
         }
+    }
+
+    pub fn set_subpopulation(&mut self, subpopulation: Id<String>) {
+        self.subpopulation = subpopulation;
     }
 }
 
@@ -554,15 +584,13 @@ impl InternalRoute {
         &self.as_generic().end_link
     }
 
-    fn from_io(io: IORoute, id: Id<InternalPerson>, mode: Id<String>) -> Self {
-        let external =
-            route_vehicle_external(io.vehicle.as_deref(), id.external(), mode.external());
+    fn from_io(io: IORoute) -> Self {
         let generic = InternalGenericRoute::new(
             Id::create(io.start_link.expect("Route must have start link").as_str()),
             Id::create(io.end_link.expect("Route must have end link").as_str()),
             parse_duration_opt(&io.trav_time),
             Option::from(io.distance),
-            Some(Id::create(&external)),
+            route_vehicle_external(io.vehicle.as_deref()).map(Id::create),
         );
 
         match io.r#type.expect("Route must have type").as_str() {
@@ -714,6 +742,10 @@ impl InternalGenericRoute {
         &self.vehicle
     }
 
+    pub fn set_vehicle(&mut self, vehicle: Option<Id<InternalVehicle>>) {
+        self.vehicle = vehicle;
+    }
+
     pub fn trav_time(&self) -> Option<Duration> {
         self.trav_time
     }
@@ -806,7 +838,7 @@ impl InternalLeg {
 }
 
 impl FromIOPerson<IOLeg> for InternalLeg {
-    fn from_io(io: IOLeg, id: Id<InternalPerson>) -> Self {
+    fn from_io(io: IOLeg, _id: Id<InternalPerson>) -> Self {
         let routing_mode = io
             .attributes
             .as_ref()
@@ -822,7 +854,7 @@ impl FromIOPerson<IOLeg> for InternalLeg {
                 &io.trav_time,
                 &io.route.as_ref().and_then(|r| r.trav_time.clone()),
             ),
-            route: io.route.map(|r| InternalRoute::from_io(r, id, mode)),
+            route: io.route.map(InternalRoute::from_io),
             attributes: io
                 .attributes
                 .map(InternalAttributes::from)
@@ -922,13 +954,10 @@ fn parse_duration(value: &str) -> Option<Duration> {
     parse_time(value).map(SimTime::as_duration)
 }
 
-/// Returns the external id of the vehicle of a route read from XML. Routes without a vehicle use
-/// the vehicle `<person>_<mode>`.
-fn route_vehicle_external<'a>(vehicle: Option<&'a str>, person: &str, mode: &str) -> Cow<'a, str> {
-    match vehicle {
-        Some(v) if v != "null" && !v.is_empty() => Cow::Borrowed(v),
-        _ => Cow::Owned(format!("{}_{}", person, mode)),
-    }
+/// Returns an explicit vehicle reference from XML. Missing vehicles stay absent until
+/// preparation resolves them from the person's mode-to-vehicle assignment.
+fn route_vehicle_external(vehicle: Option<&str>) -> Option<&str> {
+    vehicle.filter(|v| *v != "null" && !v.is_empty())
 }
 
 fn subpopulation_of(attributes: &InternalAttributes) -> String {
@@ -1051,11 +1080,9 @@ pub(crate) fn for_each_id_of_io_person<'a>(io: &'a IOPerson, mut f: impl FnMut(I
                 };
                 f(IOPersonId::Link(start_link));
                 f(IOPersonId::Link(end_link));
-                f(IOPersonId::Vehicle(route_vehicle_external(
-                    route.vehicle.as_deref(),
-                    &io.id,
-                    &leg.mode,
-                )));
+                if let Some(vehicle) = route_vehicle_external(route.vehicle.as_deref()) {
+                    f(IOPersonId::Vehicle(Cow::Borrowed(vehicle)));
+                }
                 if route.r#type.as_deref() == Some("links") {
                     for link in route
                         .route
@@ -1393,19 +1420,15 @@ mod tests {
 
     #[deterministic_id_test]
     fn network_route_ignores_xml_text_whitespace() {
-        let route = InternalRoute::from_io(
-            IORoute {
-                r#type: Some("links".to_string()),
-                start_link: Some("1".to_string()),
-                end_link: Some("20".to_string()),
-                trav_time: None,
-                distance: None,
-                vehicle: Some("1_car".to_string()),
-                route: Some("1 6 15 20\n                ".to_string()),
-            },
-            Id::create("1"),
-            Id::create("car"),
-        );
+        let route = InternalRoute::from_io(IORoute {
+            r#type: Some("links".to_string()),
+            start_link: Some("1".to_string()),
+            end_link: Some("20".to_string()),
+            trav_time: None,
+            distance: None,
+            vehicle: Some("1_car".to_string()),
+            route: Some("1 6 15 20\n                ".to_string()),
+        });
 
         assert_eq!(
             vec![
@@ -1505,23 +1528,17 @@ mod tests {
                 .all(|type_id| expected_veh_types.contains(type_id.external()))
         );
 
-        // check that we have a vehicle for each mode and for each person
-        assert_eq!(9, garage.vehicles.len());
+        // Loading preserves the garage. Vehicles are assigned during scenario preparation.
+        assert!(garage.vehicles.is_empty());
 
         // check population
         // activity types should be done as id. If id is not present this will crash
         assert_eq!("home", Id::<String>::get_from_ext("home").external());
         assert_eq!("errands", Id::<String>::get_from_ext("errands").external());
 
-        // each of the network mode should also have an interaction activity type
-        assert_eq!(
-            "car interaction",
-            Id::<String>::get_from_ext("car interaction").external()
-        );
-        assert_eq!(
-            "bike interaction",
-            Id::<String>::get_from_ext("bike interaction").external()
-        );
+        // Interaction activity types for network modes are created during preparation.
+        assert!(Id::<String>::try_get_from_ext("car interaction").is_none());
+        assert!(Id::<String>::try_get_from_ext("bike interaction").is_none());
 
         // agents should also have ids
         assert_eq!("100", Id::<InternalPerson>::get_from_ext("100").external());
@@ -1619,10 +1636,7 @@ mod tests {
             Some(Duration::from_secs(1200))
         );
         assert_eq!(route.as_generic().distance, Some(42.0));
-        assert_eq!(
-            route.as_generic().vehicle.as_ref().unwrap().external(),
-            "person_car"
-        );
+        assert_eq!(None, route.as_generic().vehicle);
     }
 
     #[deterministic_id_test]

@@ -8,8 +8,14 @@ message AttributeValue {
     string string_value = 2;
     double double_value = 3;
     bool bool_value = 4;
+    StringMap string_map_value = 5;
     // to be expanded
   }
+}
+
+// Used by MATSim's PersonVehicles and PersonVehicleTypes attributes. Values are external ids.
+message StringMap {
+  map<string, string> entries = 1;
 }
 
 message Coordinate {

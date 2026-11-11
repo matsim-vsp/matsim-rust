@@ -70,13 +70,13 @@ pub(crate) enum TripPreparationError {
     AmbiguousMainMode,
     #[error("Could not derive the trip departure time from the plan")]
     MissingDepartureTime,
-    #[error(
-        "No vehicle found for network mode {mode} (expected default vehicle {default_vehicle})"
-    )]
+    #[error("No vehicle found for network mode {mode} (vehicle {default_vehicle})")]
     MissingVehicle {
         mode: String,
         default_vehicle: String,
     },
+    #[error("Person has no vehicles assignment for network mode {mode}")]
+    MissingVehicleAssignment { mode: String },
     #[error("Activity references unknown facility {facility}")]
     UnknownFacility { facility: String },
     #[error(transparent)]
@@ -96,6 +96,13 @@ fn prepare_plan<'a>(
 ) -> Result<Option<InternalPlan>, PlanPreparationFailure> {
     // `Cow` works as follows: borrow the plan and if it needs to be mutated, clone it.
     let mut working_plan = Cow::Borrowed(plan);
+
+    resolve_plan_vehicles(context, person, &mut working_plan).map_err(|source| {
+        PlanPreparationFailure {
+            trip_index: None,
+            message: source.to_string(),
+        }
+    })?;
 
     let trip_count = get_trip_spans_default(&working_plan.elements).len();
     for trip_index in 0..trip_count {
@@ -424,8 +431,7 @@ fn is_transit_passenger_mode(context: &PrepareForMobsimContext<'_>, mode: &Id<St
             .any(|candidate| candidate == mode.external())
 }
 
-/// Returns the vehicle a trip with routing `mode` is routed with: the vehicle `<person>_<mode>`
-/// for modes that have vehicles, see [`mode_has_vehicle`], and none for all other modes.
+/// Returns the person's assigned vehicle for routing `mode`, see [`mode_has_vehicle`].
 fn vehicle_for_trip<'a>(
     context: &'a PrepareForMobsimContext<'_>,
     person: &InternalPerson,
@@ -435,14 +441,63 @@ fn vehicle_for_trip<'a>(
         return Ok(None);
     }
 
-    let default_id = format!("{}_{}", person.id().external(), mode.external());
-    Id::<InternalVehicle>::try_get_from_ext(&default_id)
+    let external = person.vehicle_id_for_mode(mode.external()).ok_or_else(|| {
+        TripPreparationError::MissingVehicleAssignment {
+            mode: mode.external().to_string(),
+        }
+    })?;
+    ensure_vehicle_in_garage(context, mode, external).map(Some)
+}
+
+fn ensure_vehicle_in_garage<'a>(
+    context: &'a PrepareForMobsimContext<'_>,
+    mode: &Id<String>,
+    external: &str,
+) -> Result<&'a InternalVehicle, TripPreparationError> {
+    Id::<InternalVehicle>::try_get_from_ext(external)
         .and_then(|id| context.garage.vehicles.get(&id))
-        .map(Some)
         .ok_or_else(|| TripPreparationError::MissingVehicle {
             mode: mode.external().to_string(),
-            default_vehicle: default_id,
+            default_vehicle: external.to_string(),
         })
+}
+
+/// Adapt missing references before read-only route validation. Existing route references take
+/// precedence over the person's assignment and must resolve, rather than silently being repaired.
+fn resolve_plan_vehicles(
+    context: &PrepareForMobsimContext<'_>,
+    person: &InternalPerson,
+    plan: &mut Cow<'_, InternalPlan>,
+) -> Result<(), TripPreparationError> {
+    for index in 0..plan.elements.len() {
+        let Some(leg) = plan.elements[index].as_leg() else {
+            continue;
+        };
+        let Some(InternalRoute::Network(route)) = &leg.route else {
+            continue;
+        };
+        if !mode_has_vehicle(context, &leg.mode) {
+            continue;
+        }
+        if let Some(id) = route.generic_delegate().vehicle() {
+            ensure_vehicle_in_garage(context, &leg.mode, id.external())?;
+        } else {
+            // Set vehicle id in route
+            let id = vehicle_for_trip(context, person, &leg.mode)?
+                .expect("mode has a vehicle")
+                .id
+                .clone();
+            plan.to_mut().elements[index]
+                .as_leg_mut()
+                .expect("element is a leg")
+                .route
+                .as_mut()
+                .expect("leg has a route")
+                .as_generic_mut()
+                .set_vehicle(Some(id));
+        }
+    }
+    Ok(())
 }
 
 fn is_network_mode(context: &PrepareForMobsimContext<'_>, mode: &Id<String>) -> bool {
@@ -497,6 +552,118 @@ mod tests {
     use std::borrow::Cow;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    #[deterministic_id_test]
+    fn resolves_network_vehicle_assignments_and_preserves_explicit_references() {
+        let mut config = Config::default();
+        config.qsim_mut().main_modes = vec!["car".into()];
+        config.qsim_mut().vehicles_source =
+            crate::simulation::config::VehiclesSource::FromVehiclesData;
+        let network = sequential_network(2, Some("car"));
+        let mut garage = Garage::new();
+        garage.add_veh(test_vehicle("fleet-17"));
+        garage.add_veh(test_vehicle("explicit"));
+        let facilities = ActivityFacilities::default();
+        let schedule = TransitSchedule::default();
+        let context = super::PrepareForMobsimContext {
+            network: &network,
+            garage: &garage,
+            facilities: &facilities,
+            transit_schedule: &schedule,
+            config: &config,
+        };
+        let mut plan = routed_plan("car", None, None);
+        let generic = plan.elements[1]
+            .as_leg()
+            .unwrap()
+            .route
+            .as_ref()
+            .unwrap()
+            .as_generic()
+            .clone();
+        plan.elements[1].as_leg_mut().unwrap().route =
+            Some(InternalRoute::Network(InternalNetworkRoute::new(
+                generic,
+                vec![Id::get_from_ext("link-1"), Id::get_from_ext("link-2")],
+            )));
+        let mut person = InternalPerson::new(Id::create("p1"), plan.clone());
+        person
+            .attributes_mut()
+            .insert_string_map_entry("vehicles", "car", "fleet-17");
+        let mut working = Cow::Borrowed(&plan);
+        let ids = crate::simulation::id::snapshot_store();
+        super::resolve_plan_vehicles(&context, &person, &mut working).unwrap();
+        assert_eq!(
+            "fleet-17",
+            working.legs()[0]
+                .route
+                .as_ref()
+                .unwrap()
+                .as_generic()
+                .vehicle()
+                .as_ref()
+                .unwrap()
+                .external()
+        );
+        assert_eq!(ids, crate::simulation::id::snapshot_store());
+        assert_eq!(
+            "fleet-17",
+            super::vehicle_for_trip(&context, &person, &Id::get_from_ext("car"))
+                .unwrap()
+                .unwrap()
+                .id
+                .external()
+        );
+
+        plan.elements[1]
+            .as_leg_mut()
+            .unwrap()
+            .route
+            .as_mut()
+            .unwrap()
+            .as_generic_mut()
+            .set_vehicle(Some(Id::get_from_ext("explicit")));
+        let mut working = Cow::Borrowed(&plan);
+        super::resolve_plan_vehicles(&context, &person, &mut working).unwrap();
+        assert!(
+            matches!(working, Cow::Borrowed(_)),
+            "an explicit valid reference is unchanged"
+        );
+
+        plan.elements[1]
+            .as_leg_mut()
+            .unwrap()
+            .route
+            .as_mut()
+            .unwrap()
+            .as_generic_mut()
+            .set_vehicle(Some(Id::create("unknown")));
+        let mut working = Cow::Borrowed(&plan);
+        assert!(
+            super::resolve_plan_vehicles(&context, &person, &mut working)
+                .unwrap_err()
+                .to_string()
+                .contains("vehicle unknown")
+        );
+
+        person.attributes_mut().insert(
+            "vehicles",
+            std::collections::BTreeMap::<String, String>::new(),
+        );
+        assert!(matches!(
+            super::vehicle_for_trip(&context, &person, &Id::get_from_ext("car")),
+            Err(super::TripPreparationError::MissingVehicleAssignment { .. })
+        ));
+        person
+            .attributes_mut()
+            .insert_string_map_entry("vehicles", "car", "missing-fleet");
+        assert!(
+            super::vehicle_for_trip(&context, &person, &Id::get_from_ext("car"))
+                .unwrap_err()
+                .to_string()
+                .contains("missing-fleet")
+        );
+    }
 
     // Before: no persons or plans; after: the population is still empty.
     #[deterministic_id_test]
@@ -1117,6 +1284,10 @@ mod tests {
         config.qsim_mut().main_modes = vec!["car".to_string()];
         let mut garage = Garage::default();
         garage.add_veh(test_vehicle("person-1_car"));
+        garage.add_veh_type(crate::test_utils::create_vehicle_type(
+            &Id::create("car"),
+            Id::create("car"),
+        ));
         let network = layered_network();
         let facilities = facilities(vec![
             activity_facility("home", 50.0, 19.0, Some("bike-10")),
@@ -1191,9 +1362,24 @@ mod tests {
     fn scenario_with_parts(
         network: Network,
         garage: Garage,
-        population: Population,
+        mut population: Population,
         config: Config,
     ) -> ControllerScenario {
+        // This fixture represents the output of prepare_for_sim. The vehicle-source policy is
+        // covered separately; these tests exercise the subsequent plan preparation only.
+        for person in population.persons.values_mut() {
+            for mode in config
+                .qsim()
+                .main_modes
+                .iter()
+                .chain(&config.routing().network_modes)
+            {
+                let external = format!("{}_{mode}", person.id().external());
+                person
+                    .attributes_mut()
+                    .insert_string_map_entry("vehicles", mode, &external);
+            }
+        }
         Scenario {
             network,
             garage,

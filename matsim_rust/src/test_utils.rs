@@ -145,6 +145,7 @@ pub fn qsim_config() -> config::QSim {
         sample_size: 1.0,
         stuck_threshold: u32::MAX,
         main_modes: vec![String::from("car")],
+        vehicles_source: config::VehiclesSource::default(),
         traffic_dynamics: config::TrafficDynamics::Queue,
         link_dynamics: config::LinkDynamics::Fifo,
     }

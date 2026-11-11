@@ -54,6 +54,21 @@ pub struct InternalVehicleType {
     pub attributes: InternalAttributes,
 }
 
+impl Default for InternalVehicleType {
+    fn default() -> Self {
+        InternalVehicleType {
+            id: Id::create("defaultVehicleType"),
+            length: 7.5,
+            width: 1.0,
+            max_v: f64::MAX,
+            pce: 1.0,
+            fef: 1.0,
+            net_mode: Id::create("car"),
+            attributes: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalVehicle {
     pub id: Id<InternalVehicle>,
@@ -252,6 +267,27 @@ impl Garage {
     pub fn add_veh(&mut self, veh: InternalVehicle) {
         let id = veh.id.clone();
         self.vehicles.insert(id, veh);
+    }
+
+    /// Checks if a vehicle with the given id exists in the garage.
+    /// If not, it creates a new vehicle with the given fallback type id and adds it to the garage.
+    pub fn ensure_vehicle(
+        &mut self,
+        id: Id<InternalVehicle>,
+        fallback_type_id: &Id<InternalVehicleType>,
+    ) -> &InternalVehicle {
+        self.vehicles.entry(id.clone()).or_insert_with(|| {
+            let fallback_type = self.vehicle_types.get(fallback_type_id).unwrap_or_else(|| {
+                panic!("Vehicle type with id {fallback_type_id} not found in this garage")
+            });
+            InternalVehicle {
+                id,
+                vehicle_type: fallback_type.id.clone(),
+                max_v: fallback_type.max_v,
+                pce: fallback_type.pce,
+                attributes: Default::default(),
+            }
+        })
     }
 
     pub fn veh_id(

@@ -6,6 +6,7 @@
         <attributes>
             <attribute name="employed" class="java.lang.Boolean">false</attribute>
             <attribute name="subpopulation" class="java.lang.String">person</attribute>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"102"}</attribute>
         </attributes>
         <plan selected="yes" score="75.69855811200546">
             <activity type="h" link="1112" x="938" y="642" end_time="07:32:06"/>

@@ -162,6 +162,12 @@ impl AttributeValue {
         }
     }
 
+    pub(crate) fn new_string_map(entries: std::collections::HashMap<String, String>) -> Self {
+        Self {
+            r#type: Some(Type::StringMapValue(general::StringMap { entries })),
+        }
+    }
+
     pub(crate) fn new_double(value: f64) -> Self {
         AttributeValue {
             r#type: Some(Type::DoubleValue(value)),
@@ -236,6 +242,16 @@ impl AttributeValue {
             "java.lang.Double" => AttributeValue::new_double(attr.value.parse().unwrap()),
             "java.lang.Integer" => AttributeValue::new_int(attr.value.parse().unwrap()),
             "java.lang.Boolean" => AttributeValue::new_bool(attr.value.parse().unwrap()),
+            "org.matsim.vehicles.PersonVehicles" | "org.matsim.vehicles.PersonVehicleTypes" => {
+                AttributeValue::new_string_map(serde_json::from_str(&attr.value).unwrap_or_else(
+                    |err| {
+                        panic!(
+                            "Invalid string map in attribute {} ({}): {err}",
+                            attr.name, attr.class
+                        )
+                    },
+                ))
+            }
             _ => panic!("Unsupported attribute class: {}", attr.class),
         }
     }
@@ -277,6 +293,7 @@ impl Serialize for AttributeValue {
             Type::StringValue(s) => serializer.serialize_str(s),
             Type::DoubleValue(d) => serializer.serialize_f64(*d),
             Type::BoolValue(b) => serializer.serialize_bool(*b),
+            Type::StringMapValue(map) => map.entries.serialize(serializer),
             _ => Err(S::Error::custom("Unsupported type")),
         }
     }

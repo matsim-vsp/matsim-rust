@@ -113,6 +113,25 @@ impl From<&InternalAttributes> for IOAttributes {
                     ))
                 }
 
+                serde_json::value::Value::Object(map)
+                    if key == "vehicles" || key == "vehicleTypes" =>
+                {
+                    let class = if key == "vehicles" {
+                        "org.matsim.vehicles.PersonVehicles"
+                    } else {
+                        "org.matsim.vehicles.PersonVehicleTypes"
+                    };
+                    assert!(
+                        map.values().all(|value| value.is_string()),
+                        "Attribute {key} must contain only string values"
+                    );
+                    res.attributes.push(IOAttribute::new_with_class(
+                        key.clone(),
+                        class.to_string(),
+                        serde_json::to_string(map).unwrap(),
+                    ));
+                }
+
                 _ => {
                     warn!(
                         "Unknown attribute class of attribute with name '{}' and value {:?}. \
@@ -123,5 +142,108 @@ impl From<&InternalAttributes> for IOAttributes {
             }
         }
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IOAttribute, IOAttributes};
+    use crate::generated::general::AttributeValue;
+    use crate::simulation::InternalAttributes;
+    use prost::Message;
+
+    #[test]
+    fn person_vehicle_maps_survive_xml_and_protobuf() {
+        let xml = r#"<attributes>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"truck":"fleet-17","car":"p1_car"}</attribute>
+            <attribute name="vehicleTypes" class="org.matsim.vehicles.PersonVehicleTypes">{"truck":"light8t"}</attribute>
+            <attribute name="label" class="java.lang.String">unchanged</attribute>
+        </attributes>"#;
+        let input: IOAttributes = quick_xml::de::from_str(xml).unwrap();
+        let attributes = InternalAttributes::from(input.clone());
+        assert_eq!(
+            Some("fleet-17"),
+            attributes.string_map_entry("vehicles", "truck")
+        );
+        assert_eq!(
+            Some("light8t"),
+            attributes.string_map_entry("vehicleTypes", "truck")
+        );
+        let wire = attributes
+            .as_cloned_map()
+            .into_iter()
+            .map(|(key, value)| {
+                (
+                    key,
+                    AttributeValue::decode(value.encode_to_vec().as_slice()).unwrap(),
+                )
+            })
+            .collect();
+        let restored = InternalAttributes::from(&wire);
+        assert_eq!(attributes, restored);
+        let output = IOAttributes::from(&restored);
+        let written = quick_xml::se::to_string(&output).unwrap();
+        let parsed: IOAttributes = quick_xml::de::from_str(&written).unwrap();
+        assert_eq!(attributes, InternalAttributes::from(parsed));
+        assert_eq!(
+            "org.matsim.vehicles.PersonVehicles",
+            output
+                .attributes
+                .iter()
+                .find(|a| a.name == "vehicles")
+                .unwrap()
+                .class
+        );
+        // A scalar encoded with the old wire format is still understood.
+        let scalar = AttributeValue::decode([0x12, 0x03, b'o', b'l', b'd'].as_slice()).unwrap();
+        assert_eq!("old", scalar.as_string());
+    }
+
+    #[test]
+    fn empty_vehicle_map_remains_present() {
+        let input = IOAttributes {
+            attributes: vec![IOAttribute::new_with_class(
+                "vehicles".into(),
+                "org.matsim.vehicles.PersonVehicles".into(),
+                "{}".into(),
+            )],
+        };
+        let attributes = InternalAttributes::from(input);
+        assert_eq!(
+            Some(std::collections::BTreeMap::<String, String>::new()),
+            attributes.get("vehicles")
+        );
+        assert_eq!(
+            "{}",
+            IOAttributes::from(&attributes).find("vehicles").unwrap()
+        );
+        assert_eq!(
+            attributes,
+            InternalAttributes::from(&attributes.as_cloned_map())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid string map in attribute vehicleTypes")]
+    fn rejects_non_string_vehicle_type() {
+        let _ = InternalAttributes::from(IOAttributes {
+            attributes: vec![IOAttribute::new_with_class(
+                "vehicleTypes".into(),
+                "org.matsim.vehicles.PersonVehicleTypes".into(),
+                r#"{"truck":17}"#.into(),
+            )],
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid string map in attribute vehicles")]
+    fn rejects_malformed_vehicle_json() {
+        let _ = InternalAttributes::from(IOAttributes {
+            attributes: vec![IOAttribute::new_with_class(
+                "vehicles".into(),
+                "org.matsim.vehicles.PersonVehicles".into(),
+                "{".into(),
+            )],
+        });
     }
 }

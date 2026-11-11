@@ -63,30 +63,12 @@ pub(crate) fn write_to_xml(population: &Population, path: impl AsRef<Path>) {
     io_population.to_file(path);
 }
 
-fn create_ids(io_pop: &IOPopulation, garage: &mut Garage) {
+fn create_ids(io_pop: &IOPopulation, _garage: &mut Garage) {
     info!("Creating person ids.");
-    // create person ids and collect strings for vehicle ids
-    let raw_veh: Vec<_> = io_pop
-        .persons
-        .iter()
-        .map(|p| Id::<InternalPerson>::create(p.id.as_str()))
-        .flat_map(|p_id| {
-            garage
-                .vehicle_types
-                .keys()
-                .map(move |type_id| (p_id.clone(), type_id.clone()))
-        })
-        .collect();
-
-    info!("Creating interaction activity types");
-    // add interaction activity type for each vehicle type
-    for (_, id) in raw_veh.iter() {
-        Id::<String>::create(&format!("{} interaction", id.external()));
-    }
-
-    info!("Creating vehicle ids");
-    for (person_id, type_id) in raw_veh {
-        garage.add_veh_by_type(&person_id, &type_id);
+    // Create person ids first. Vehicles and interaction activity types are prepared from the
+    // simulation config, not from the types present in the input garage.
+    for person in &io_pop.persons {
+        Id::<InternalPerson>::create(&person.id);
     }
 
     info!("Creating activity types");
@@ -931,6 +913,12 @@ mod tests {
                     if attr.class == "java.lang.Integer" {
                         attr.class = "java.lang.Long".to_string();
                     }
+                    if attr.class == "org.matsim.vehicles.PersonVehicles"
+                        || attr.class == "org.matsim.vehicles.PersonVehicleTypes"
+                    {
+                        let map: serde_json::Value = serde_json::from_str(&attr.value).unwrap();
+                        attr.value = serde_json::to_string(&map).unwrap();
+                    }
                 }
             }
             None => {} // if no attributes present, do nothing
@@ -940,22 +928,23 @@ mod tests {
     }
 
     /// goes through all plans of the given person and looks for legs containing routes with
-    /// vehicle=None.
-    /// For those, generates a vehicle id based on the person id and the mode of transport of the
-    /// leg, and sets that as the vehicle of the route.
-    /// This matches the approach done when creating (internal) populations.
-    fn replace_none_vehicles_with_default(person: &mut IOPerson) -> &mut IOPerson {
+    /// missing vehicles. Empty and "null" references are normalized to None; assigning a vehicle
+    /// belongs to scenario preparation, so the IO roundtrip preserves missing references.
+    fn normalize_missing_vehicles(person: &mut IOPerson) -> &mut IOPerson {
         for plan in person.plans.iter_mut() {
             for element in plan.elements.iter_mut() {
                 // if plan element is a leg
                 if let IOPlanElement::Leg(leg) = element {
                     // and it has a route
                     if let Some(ref mut route) = leg.route {
-                        // which has vehicle=None
-                        if route.vehicle.is_none() {
-                            // generate vehicle id based on person id and mode of transport
-                            let generated_vehicle_id = format!("{}_{}", person.id, leg.mode);
-                            route.vehicle = Some(generated_vehicle_id);
+                        // which has an empty or "null" reference
+                        if route
+                            .vehicle
+                            .as_deref()
+                            .is_some_and(|v| v.is_empty() || v == "null")
+                        {
+                            // keep the absence until configuration-aware preparation
+                            route.vehicle = None;
                         }
                     }
                 }
@@ -1004,10 +993,9 @@ mod tests {
             // canonicalize attributes if present
             canonicalize_attributes(&mut person.attributes);
 
-            // when vehicle is None in an IORoute, generate a vehicle id based on the person id and
-            // the mode of transport, as is done when generating (internal) Routes from IORoutes with
-            // vehicle=None.
-            replace_none_vehicles_with_default(person);
+            // Missing, empty and "null" vehicle references have the same meaning on input.
+            // No vehicle is generated during conversion to internal routes.
+            normalize_missing_vehicles(person);
         }
         assert_eq!(io_pop, io_pop_from_written_output);
     }
@@ -1022,6 +1010,8 @@ mod tests {
     <person id="b">
         <attributes>
             <attribute name="subpopulation" class="java.lang.String">freight</attribute>
+            <attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"truck":"fleet-17","car":"custom-car"}</attribute>
+            <attribute name="vehicleTypes" class="org.matsim.vehicles.PersonVehicleTypes">{"truck":"light8t"}</attribute>
         </attributes>
         <plan selected="yes" score="1.5">
             <activity type="home" link="l1" x="0.0" y="0.0" end_time="08:00:00"/>
@@ -1133,15 +1123,13 @@ mod tests {
 
         // Check the interleaving explicitly for the ids which are created by the conversion.
         let (ids, persons) = load_in_parallel(&path, &setup, 8);
-        // The garage creates the modes of the vehicle types and `create_ids` the interaction and
-        // activity types. Afterwards, the ids of each person are created in the order of the
+        // The garage creates the modes of the vehicle types and `create_ids` the activity types.
+        // Interaction types are not generated by loading. Other ids follow the order of the
         // sorted persons, with the subpopulation after all plans.
         assert_eq!(
             vec![
                 "car",
                 "walk",
-                "car interaction",
-                "walk interaction",
                 "shop",
                 "home",
                 "work",
@@ -1166,6 +1154,8 @@ mod tests {
         assert_eq!(3, persons.len());
         let b = &persons[&Id::get_from_ext("b")];
         assert_eq!("freight", b.subpopulation().external());
+        assert_eq!(Some("fleet-17"), b.vehicle_id_for_mode("truck"));
+        assert_eq!(Some("light8t"), b.vehicle_type_for_mode("truck"));
         assert_eq!(
             "person",
             persons[&Id::get_from_ext("a")].subpopulation().external()
@@ -1176,15 +1166,7 @@ mod tests {
             pt_route.as_generic().vehicle().as_ref().unwrap().external()
         );
         let drt_route = b.plans()[0].legs()[0].route.as_ref().unwrap();
-        assert_eq!(
-            "b_drt",
-            drt_route
-                .as_generic()
-                .vehicle()
-                .as_ref()
-                .unwrap()
-                .external()
-        );
+        assert_eq!(&None, drt_route.as_generic().vehicle());
     }
 
     #[deterministic_id_test]
