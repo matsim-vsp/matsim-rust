@@ -294,11 +294,26 @@ pub struct InternalPopulation {
 }
 
 impl InternalPerson {
+    /// Create a new person with the default subpopulation.
     pub fn new(id: Id<InternalPerson>, plan: InternalPlan) -> Self {
         InternalPerson {
             id,
             plans: vec![plan],
             subpopulation: Id::create(DEFAULT_SUBPOPULATION),
+            attributes: InternalAttributes::default(),
+        }
+    }
+
+    /// Create a new person with a specific subpopulation.
+    pub fn new_with_subpopulation(
+        id: Id<InternalPerson>,
+        plan: InternalPlan,
+        subpopulation: Id<String>,
+    ) -> Self {
+        InternalPerson {
+            id,
+            plans: vec![plan],
+            subpopulation,
             attributes: InternalAttributes::default(),
         }
     }
@@ -386,6 +401,10 @@ impl InternalPerson {
         for (i, p) in self.plans.iter_mut().enumerate() {
             p.selected = i == plan_index;
         }
+    }
+
+    pub fn set_subpopulation(&mut self, subpopulation: Id<String>) {
+        self.subpopulation = subpopulation;
     }
 }
 
