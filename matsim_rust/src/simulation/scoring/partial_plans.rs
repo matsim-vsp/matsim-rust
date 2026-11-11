@@ -5,8 +5,9 @@ use crate::simulation::events::{
     VehicleLeavesTrafficEvent,
 };
 use crate::simulation::id::Id;
+use crate::simulation::replanning::routing::utils::calc_distance;
 use crate::simulation::scenario::Coordinate;
-use crate::simulation::scenario::network::Link;
+use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::InternalPlanElement::{Activity, Leg};
 use crate::simulation::scenario::population::{
     InternalActivity, InternalGenericRoute, InternalLeg, InternalNetworkRoute, InternalPlan,
@@ -54,13 +55,13 @@ impl PartialPlan {
         self.current_leg = Some(PartialLeg::default());
     }
 
-    fn handle_person_arrival(&mut self) {
+    fn handle_person_arrival(&mut self, network: &Network) {
         if self.current_leg.is_none() {
             panic!("Illegal state: Person arrives while having no active leg!");
         }
 
         self.elements
-            .push(Leg(self.current_leg.take().unwrap().finish()));
+            .push(Leg(self.current_leg.take().unwrap().finish(network)));
     }
 
     fn handle_activity_start(&mut self) {
@@ -137,12 +138,14 @@ impl PartialPlan {
         });
     }
 
-    pub(crate) fn person_arrival(&mut self, event: &PersonArrivalEvent) {
+    /// The person arrives and its leg ends. `network` provides the link lengths for the distance of
+    /// a network route.
+    pub(crate) fn person_arrival(&mut self, event: &PersonArrivalEvent, network: &Network) {
         self.with_current_leg(PersonArrivalEvent::TYPE, |leg| {
             leg.handle_person_arrival(event);
             leg.partial_route.handle_person_arrival(event);
         });
-        self.handle_person_arrival();
+        self.handle_person_arrival(network);
     }
 
     pub(crate) fn activity_start(&mut self, event: &ActivityStartEvent) {
@@ -338,11 +341,11 @@ impl PartialLeg {
     }
 
     /// Consuming function turning PartialLeg into an InternalLeg
-    fn finish(self) -> InternalLeg {
+    fn finish(self, network: &Network) -> InternalLeg {
         // Same as `InternalLeg::new`, but it keeps the mode ids instead of looking them up again by
         // their external ids in the global id store.
         InternalLeg {
-            route: Some(self.partial_route.finish()),
+            route: Some(self.partial_route.finish(network)),
             mode: self
                 .mode
                 .unwrap_or_else(|| panic!("Tried to finish PartialLeg without mode!")),
@@ -397,7 +400,8 @@ struct PartialRoute {
     // PT Route Type, while the passenger rides a transit vehicle
     transit_boarding: Option<TransitBoarding>,
 
-    //TODO These values are currently unused
+    // Network Route Type: where the vehicle entered traffic on the departure link and left traffic
+    // on the arrival link. They determine the distance of the route.
     relative_position_on_departure_link: Option<f64>,
     relative_position_on_arrival_link: Option<f64>,
 
@@ -507,8 +511,9 @@ impl PartialRoute {
         });
     }
 
-    /// Consuming function turning PartialRoute into an InternalRoute
-    fn finish(self) -> InternalRoute {
+    /// Consuming function turning PartialRoute into an InternalRoute. `network` provides the link
+    /// lengths for the distance of a network route.
+    fn finish(self, network: &Network) -> InternalRoute {
         if matches!(
             self.route_type,
             Some(PartialRouteTypes::Generic | PartialRouteTypes::Pt)
@@ -551,7 +556,26 @@ impl PartialRoute {
                 }
                 let route = InternalNetworkRoute::new(route_delegate, links);
 
-                InternalRoute::Network(route)
+                // Like MATSim's `EventsToLegs`, the route runs from where the vehicle entered
+                // traffic on the departure link to where it left traffic on the arrival link. The
+                // network engine lets vehicles enter and leave traffic at the end of a link
+                // (relative position 1.0), so the distance is the length of the links after the
+                // departure link up to and including the arrival link, and 0 if both are the same.
+                // Without the distance, MATSim's population reader would derive one that lacks the
+                // arrival link.
+                let distance = calc_distance(
+                    &route,
+                    self.relative_position_on_departure_link.unwrap_or_else(|| {
+                        panic!("Tried to finish NetworkPartialRoute without entering traffic!")
+                    }),
+                    self.relative_position_on_arrival_link.unwrap_or_else(|| {
+                        panic!("Tried to finish NetworkPartialRoute without leaving traffic!")
+                    }),
+                    network,
+                );
+                let mut route = InternalRoute::Network(route);
+                route.as_generic_mut().set_distance(Some(distance));
+                route
             }
             Some(PartialRouteTypes::Pt) => InternalRoute::Pt(InternalPtRoute {
                 generic_delegate: route_delegate,
@@ -595,6 +619,7 @@ mod tests {
     };
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
+    use crate::simulation::scenario::network::Network;
     use crate::simulation::scenario::population::{
         InternalPlan, InternalPlanElement, InternalRoute,
     };
@@ -645,6 +670,7 @@ mod tests {
                 .leg_mode(Id::create("walk"))
                 .build()
                 .unwrap(),
+            &Network::default(),
         );
     }
 
@@ -816,6 +842,7 @@ mod tests {
                 .leg_mode(Id::create("pt"))
                 .build()
                 .unwrap(),
+            &Network::default(),
         );
 
         let plan = partial.finish();

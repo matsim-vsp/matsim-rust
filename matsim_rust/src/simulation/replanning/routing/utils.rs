@@ -2,6 +2,7 @@ use crate::simulation::id::Id;
 use crate::simulation::scenario::network::{Link, Network};
 use crate::simulation::scenario::population::InternalNetworkRoute;
 
+/// This function sums up the lengths of links; thus it is expected to be relatively fast.
 pub fn calc_distance(
     route: &InternalNetworkRoute,
     relative_position_start: f64,
