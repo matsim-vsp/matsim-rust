@@ -25,17 +25,54 @@ impl OutputFile {
     /// Returns the file name. Files with a fixed format, the config and the scoring parameters as YAML and the IDs as
     /// protobuf, ignore `compression`.
     pub fn file_name(self, compression: CompressionType) -> String {
+        self.output_file_name(compression, None)
+    }
+
+    /// Returns the main output file name with an optional run-ID prefix.
+    pub fn output_file_name(self, compression: CompressionType, run_id: Option<&str>) -> String {
+        let prefix = run_id.map_or_else(String::new, |id| format!("{id}."));
+        format!(
+            "{prefix}output_{}.{}",
+            self.stem(),
+            self.extension(compression)
+        )
+    }
+
+    /// Returns the iteration file name, without the main output's `output_` prefix.
+    pub fn iteration_file_name(
+        self,
+        compression: CompressionType,
+        run_id: Option<&str>,
+        iteration: u32,
+    ) -> String {
+        let prefix = run_id.map_or_else(String::new, |id| format!("{id}."));
+        format!(
+            "{prefix}{iteration}.{}.{}",
+            self.stem(),
+            self.extension(compression)
+        )
+    }
+
+    fn stem(self) -> &'static str {
         match self {
-            Self::Config => "output_config.yml".to_string(),
-            Self::ScoringParameters => "output_scoring_parameters.yml".to_string(),
-            Self::Ids => "output_ids.binpb".to_string(),
-            Self::Network => compression.with_extension("output_network"),
-            Self::Facilities => compression.with_extension("output_facilities"),
-            Self::Vehicles => compression.with_extension("output_vehicles"),
-            Self::TransitSchedule => compression.with_extension("output_transitSchedule"),
-            Self::TransitVehicles => compression.with_extension("output_transitVehicles"),
-            Self::Plans => compression.with_extension("output_plans"),
-            Self::ExperiencedPlans => compression.with_extension("output_experienced_plans"),
+            Self::Config => "config",
+            Self::ScoringParameters => "scoring_parameters",
+            Self::Network => "network",
+            Self::Facilities => "facilities",
+            Self::Vehicles => "vehicles",
+            Self::TransitSchedule => "transitSchedule",
+            Self::TransitVehicles => "transitVehicles",
+            Self::Plans => "plans",
+            Self::ExperiencedPlans => "experienced_plans",
+            Self::Ids => "ids",
+        }
+    }
+
+    fn extension(self, compression: CompressionType) -> &'static str {
+        match self {
+            Self::Config | Self::ScoringParameters => "yml",
+            Self::Ids => "binpb",
+            _ => compression.extension(),
         }
     }
 }
