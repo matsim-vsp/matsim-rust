@@ -368,7 +368,7 @@ impl Controller {
         info!("Writing output files:");
         if self.config.output().compression_type.is_protobuf() {
             info!("    ... ID store ...");
-            Self::write_output_id_store(&output_path);
+            self.write_output_id_store(&output_path);
         }
         info!("    ... Config ...");
         self.write_output_config(output_path.clone());
@@ -583,13 +583,18 @@ impl Controller {
     fn write_output_scoring_parameters(&self, output_path: impl AsRef<Path>) {
         let path = output_path
             .as_ref()
-            .join(OutputFile::ScoringParameters.file_name(self.config.output().compression_type));
+            .join(OutputFile::ScoringParameters.output_file_name(
+                self.config.output().compression_type,
+                self.config.output().run_id.as_deref(),
+            ));
         write_scoring_parameter_sets(&self.scenario.core.scoring_parameters, &path);
     }
 
     fn write_output_network(&mut self, output_path: PathBuf) {
-        let net_out_path =
-            output_path.join(OutputFile::Network.file_name(self.config.output().compression_type));
+        let net_out_path = output_path.join(OutputFile::Network.output_file_name(
+            self.config.output().compression_type,
+            self.config.output().run_id.as_deref(),
+        ));
 
         let attribute_overrides = self.link_storage_capacities.attribute_overrides();
         self.scenario
@@ -602,7 +607,10 @@ impl Controller {
     fn write_output_facilities(&self, output_path: impl AsRef<Path>) {
         let path = output_path
             .as_ref()
-            .join(OutputFile::Facilities.file_name(self.config.output().compression_type));
+            .join(OutputFile::Facilities.output_file_name(
+                self.config.output().compression_type,
+                self.config.output().run_id.as_deref(),
+            ));
         self.scenario.core.facilities.to_file(&path);
     }
 
@@ -610,26 +618,33 @@ impl Controller {
     fn write_output_vehicles(&self, output_path: impl AsRef<Path>) {
         let path = output_path
             .as_ref()
-            .join(OutputFile::Vehicles.file_name(self.config.output().compression_type));
+            .join(OutputFile::Vehicles.output_file_name(
+                self.config.output().compression_type,
+                self.config.output().run_id.as_deref(),
+            ));
         vehicles::to_file(&self.scenario.core.garage, &path);
     }
 
     fn write_output_transit(&self, output_path: impl AsRef<Path>) {
         let compression_type = self.config.output().compression_type;
+        let run_id = self.config.output().run_id.as_deref();
         let schedule_path = output_path
             .as_ref()
-            .join(OutputFile::TransitSchedule.file_name(compression_type));
+            .join(OutputFile::TransitSchedule.output_file_name(compression_type, run_id));
         self.scenario.core.transit_schedule.to_file(&schedule_path);
         let vehicles_path = output_path
             .as_ref()
-            .join(OutputFile::TransitVehicles.file_name(compression_type));
+            .join(OutputFile::TransitVehicles.output_file_name(compression_type, run_id));
         vehicles::to_file(&self.scenario.core.transit_garage, &vehicles_path);
     }
 
     fn write_output_population(&mut self, output_path: impl AsRef<Path>) {
         let pop_out_path = output_path
             .as_ref()
-            .join(OutputFile::Plans.file_name(self.config.output().compression_type));
+            .join(OutputFile::Plans.output_file_name(
+                self.config.output().compression_type,
+                self.config.output().run_id.as_deref(),
+            ));
 
         self.scenario.population.to_file(&pop_out_path);
     }
@@ -653,12 +668,11 @@ impl Controller {
         );
     }
 
-    fn write_output_id_store(output_path: impl AsRef<Path>) {
-        id::store_to_file(
-            &output_path
-                .as_ref()
-                .join(OutputFile::Ids.file_name(CompressionType::Proto)),
-        );
+    fn write_output_id_store(&self, output_path: impl AsRef<Path>) {
+        id::store_to_file(&output_path.as_ref().join(OutputFile::Ids.output_file_name(
+            CompressionType::Proto,
+            self.config.output().run_id.as_deref(),
+        )));
     }
 
     fn write_iteration_files(
@@ -668,9 +682,11 @@ impl Controller {
         population: &Population,
     ) {
         let iter_path = iters_path.as_ref().join(format!("it.{}", iteration));
-        population.to_file(
-            &iter_path.join(OutputFile::Plans.file_name(self.config.output().compression_type)),
-        );
+        population.to_file(&iter_path.join(OutputFile::Plans.iteration_file_name(
+            self.config.output().compression_type,
+            self.config.output().run_id.as_deref(),
+            iteration,
+        )));
     }
 }
 
@@ -735,17 +751,19 @@ pub(crate) fn write_experienced_population(
         })
         .sorted_by(|a, b| a.id().cmp(&b.id()))
         .collect();
-    let filename = OutputFile::ExperiencedPlans.file_name(config.output().compression_type);
+    let compression = config.output().compression_type;
+    let run_id = config.output().run_id.as_deref();
     let iteration_path = output_path
         .join("ITERS")
         .join(format!("it.{iteration}"))
-        .join(&filename);
+        .join(OutputFile::ExperiencedPlans.iteration_file_name(compression, run_id, iteration));
     info!("Writing experienced plans to {}", iteration_path.display());
     let population = Population::from_persons(persons);
     population.to_file(&iteration_path);
 
     if is_last_iteration {
-        let root_path = output_path.join(filename);
+        let root_path =
+            output_path.join(OutputFile::ExperiencedPlans.output_file_name(compression, run_id));
         info!("Writing experienced plans to {}", root_path.display());
         population.to_file(&root_path);
     }

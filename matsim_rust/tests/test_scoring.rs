@@ -121,7 +121,7 @@ fn disabled_scoring_skips_backpacking_and_clears_scores() {
         output_dir
             .join("ITERS")
             .join("it.1")
-            .join("output_experienced_plans.xml.zst"),
+            .join("1.experienced_plans.xml.zst"),
     ] {
         assert!(!file.exists(), "Unexpected {}", file.display());
     }
@@ -210,7 +210,7 @@ fn run_scenario_and_load(scenario: Scenario, output_dir: PathBuf) -> Population 
     let iteration_file = output_dir
         .join("ITERS")
         .join("it.1")
-        .join("output_experienced_plans.xml.zst");
+        .join("1.experienced_plans.xml.zst");
     assert!(root_file.exists(), "Missing {}", root_file.display());
     assert!(
         iteration_file.exists(),

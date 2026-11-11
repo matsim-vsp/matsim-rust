@@ -528,8 +528,10 @@ impl Config {
 }
 
 pub fn write_config(config: &Config, output_path: PathBuf) {
-    let output_config =
-        output_path.join(OutputFile::Config.file_name(config.output().compression_type));
+    let output_config = output_path.join(OutputFile::Config.output_file_name(
+        config.output().compression_type,
+        config.output().run_id.as_deref(),
+    ));
     let file = File::create(&output_config).expect("Failed to create output config file");
     let writer = BufWriter::new(file);
     serde_yaml::to_writer(writer, config).expect("Failed to write output config file");
@@ -725,6 +727,8 @@ register_override!("partitioning.method", |config, value| {
 pub struct Output {
     pub output_dir: PathBuf,
     #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
     pub overwrite_files: OverwriteFiles,
     #[serde(default)]
     pub profiling: Profiling,
@@ -740,6 +744,7 @@ impl Default for Output {
     fn default() -> Self {
         Self {
             output_dir: "./output".parse().unwrap(),
+            run_id: None,
             overwrite_files: OverwriteFiles::FailIfDirectoryExists,
             profiling: Profiling::None,
             logging: Logging::Info,
@@ -751,6 +756,10 @@ impl Default for Output {
 
 register_override!("output.output_dir", |config, value| {
     config.output_mut().output_dir = PathBuf::from(value);
+});
+
+register_override!("output.run_id", |config, value| {
+    config.output_mut().run_id = Some(value.to_string());
 });
 
 register_override!("output.overwrite_files", |config, value| {
@@ -2555,6 +2564,51 @@ modules:
     }
 
     #[test]
+    fn output_run_id_defaults_and_parses_from_yaml() {
+        assert_eq!(None, Output::default().run_id);
+        assert_eq!(None, Config::default().output().run_id);
+        for (setting, expected) in [
+            ("", None),
+            ("    run_id: null\n", None),
+            ("    run_id: demo.v1\n", Some("demo.v1")),
+        ] {
+            let yaml =
+                format!("modules:\n  output:\n    type: Output\n    output_dir: out\n{setting}");
+            let config: Config = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(expected, config.output().run_id.as_deref());
+        }
+    }
+
+    #[test]
+    fn output_run_id_round_trips_through_output_config() {
+        for run_id in [None, Some("demo.v1")] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut config = Config::default();
+            config.output_mut().run_id = run_id.map(str::to_string);
+            super::write_config(&config, dir.path().to_path_buf());
+
+            let name = match run_id {
+                None => "output_config.yml",
+                Some(_) => "demo.v1.output_config.yml",
+            };
+            let restored = Config::from_path(dir.path().join(name));
+            assert_eq!(run_id, restored.output().run_id.as_deref());
+        }
+    }
+
+    #[test]
+    fn test_override_output_run_id() {
+        let file = write_temp_config(
+            "modules:\n  output:\n    type: Output\n    output_dir: out\n    run_id: original\n",
+        );
+        let config = Config::from_args(CommandLineArgs {
+            config: file.path().to_str().unwrap().to_string(),
+            overrides: vec![("output.run_id".to_string(), "demo".to_string())],
+        });
+        assert_eq!(Some("demo"), config.output().run_id.as_deref());
+    }
+
+    #[test]
     fn test_override_output_dir() {
         let yaml = r#"
 modules:
@@ -2675,6 +2729,7 @@ modules:
 
         config.set_output(Output {
             output_dir: "out".into(),
+            run_id: None,
             overwrite_files: OverwriteFiles::OverwriteExistingFiles,
             profiling: Profiling::None,
             logging: Logging::Info,
