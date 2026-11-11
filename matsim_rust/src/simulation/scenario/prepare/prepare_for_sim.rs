@@ -221,8 +221,8 @@ fn prepare_vehicles(scenario: &mut Scenario) -> Result<(), String> {
                     .filter(|id| garage.vehicle_types.contains_key(id))
                     .ok_or_else(|| {
                         format!(
-                            "Invalid vehicle type for mode {}: {}",
-                            mode,
+                            "Vehicle type {external} specified for person {} and mode {mode} \
+                             not found in vehicle types",
                             person.id().external()
                         )
                     })?;
@@ -578,11 +578,9 @@ mod tests {
             .insert_string_map_entry(VEHICLE_TYPES, "car", "unknown");
         let mut scenario = vehicle_scenario(source, vehicle_types(&["car", "bike"]), vec![p]);
         let error = prepare_for_sim(&mut scenario).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("Invalid vehicle type for mode car")
-        );
+        assert!(error.to_string().contains(
+            "Vehicle type unknown specified for person p and mode car not found in vehicle types"
+        ));
         let p = &scenario.population.persons[&Id::get_from_ext("p")];
         assert_eq!(
             None,

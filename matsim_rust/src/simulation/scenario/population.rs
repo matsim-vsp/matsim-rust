@@ -282,10 +282,10 @@ pub struct InternalPlan {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct InternalPerson {
-    pub id: Id<InternalPerson>,
-    pub plans: Vec<InternalPlan>,
-    pub subpopulation: Id<String>,
-    pub attributes: InternalAttributes,
+    id: Id<InternalPerson>,
+    plans: Vec<InternalPlan>,
+    subpopulation: Id<String>,
+    attributes: InternalAttributes,
 }
 
 #[derive(Debug, PartialEq)]
@@ -348,7 +348,7 @@ impl InternalPerson {
         self.attributes.string_map_entry(VEHICLE_TYPES, mode)
     }
 
-    pub fn copy_metadata_from(&mut self, original: &Self) {
+    pub(crate) fn copy_metadata_from(&mut self, original: &Self) {
         self.subpopulation = original.subpopulation.clone();
         self.attributes = original.attributes.clone();
     }
