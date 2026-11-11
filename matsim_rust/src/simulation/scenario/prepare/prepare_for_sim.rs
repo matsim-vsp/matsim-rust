@@ -312,7 +312,7 @@ mod tests {
     use crate::simulation::scenario::facilities::{ActivityFacilities, ActivityFacility};
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{
-        InternalPerson, InternalPlan, Population, VEHICLE_TYPES, VEHICLES,
+        InternalPerson, InternalPlan, Population, VEHICLES, VEHICLE_TYPES,
     };
     use crate::simulation::scenario::prepare::test_utils::{
         activity_facility, facilities, layered_network, located_activity,
@@ -539,6 +539,9 @@ mod tests {
 
         prepare_for_sim(&mut scenario).unwrap();
 
+        // This might seem odd, but this is how ModeVehicleTypesFromVehiclesData works in Java:
+        // it creates a vehicle for every person and every mode, even if the person already has a vehicle for that mode.
+        // The existing vehicle is kept in the routes, but the new vehicle is created anyway.
         assert_eq!(
             string_map(&[("bike", "a_bike"), ("car", "a_car"), ("truck", "fleet-1")]),
             person_vehicles(&scenario, "a")
