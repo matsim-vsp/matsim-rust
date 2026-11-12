@@ -52,10 +52,10 @@ fn start_link<'a>(schedule: &'a TransitSchedule, route: &'a TransitRoute) -> &'a
         .expect("TransitSimSchedule::build checks that every stop has a link.")
 }
 
-/// The single place where the times of a vehicle at a stop are computed from the scheduled ones.
+/// Applies the arrival constraint and the scheduled departure to a vehicle at a stop.
 /// Like SBB, a vehicle never arrives before `earliest_arrival` and never departs before its arrival
-/// or its scheduled departure. Delays will hook in here.
-fn stop_times(scheduled: StopTimes, earliest_arrival: SimTime) -> StopTimes {
+/// or its scheduled departure. A shorter halt can therefore absorb arrival delays.
+fn apply_stop_time_constraints(scheduled: StopTimes, earliest_arrival: SimTime) -> StopTimes {
     let arrival = scheduled.arrival.max(earliest_arrival);
     StopTimes {
         arrival,
@@ -148,7 +148,8 @@ impl ActivityLogic for WaitingDriver {
 
 /// A driver with a plan of its own, which it copies from the schedule when its departure starts.
 /// Afterwards, it does not depend on the schedule. Like the drivers of SBB's deterministic transit
-/// engine, it follows the scheduled times.
+/// engine, it follows the scheduled times, but intentionally carries departure delays to the next
+/// arrival instead of shortening the travel time to catch up.
 pub struct PlannedDriver {
     plan: DriverPlan,
     /// Index of the stop at which the vehicle halts or which it approaches.
@@ -211,7 +212,7 @@ impl PlannedDriver {
                 .map(|stop| scheduled_times(departure, stop))
                 .collect(),
         };
-        let next_time = stop_times(plan.scheduled[0], now).arrival;
+        let next_time = apply_stop_time_constraints(plan.scheduled[0], now).arrival;
         Self {
             plan,
             stop: 0,
@@ -302,17 +303,21 @@ impl TransitDriverLogic for PlannedDriver {
     }
 
     fn notify_stop_arrived(&mut self, now: SimTime) {
-        self.next_time = stop_times(self.plan.scheduled[self.stop], now).departure;
+        self.next_time = apply_stop_time_constraints(self.plan.scheduled[self.stop], now).departure;
     }
 
-    fn notify_stop_departed(&mut self, earliest_arrival: SimTime, _now: SimTime) {
+    fn notify_stop_departed(&mut self, earliest_arrival: SimTime, now: SimTime) {
         assert!(
             !self.upcoming_stops().is_empty(),
             "Transit driver {} cannot depart from its last stop to another stop.",
             self.id()
         );
+        let delay = now.duration_since(self.plan.scheduled[self.stop].departure);
         self.stop += 1;
-        self.next_time = stop_times(self.plan.scheduled[self.stop], earliest_arrival).arrival;
+        // Unlike SBB, preserve the travel time after a late departure. Recompute the delay at
+        // every departure, so that time recovered during a halt is not carried forward again.
+        self.next_time = (self.plan.scheduled[self.stop].arrival + SimTime::from_duration(delay))
+            .max(earliest_arrival);
     }
 }
 
@@ -379,8 +384,8 @@ impl ActivityLogic for FinishedDriver {
 
 #[cfg(test)]
 mod tests {
-    use super::{PlannedDriver, WaitingDriver};
-    use crate::simulation::agents::TransitDriverAgent;
+    use super::{PlannedDriver, StopTimes, WaitingDriver};
+    use crate::simulation::agents::{TransitDriverAgent, TransitDriverLogic};
     use crate::simulation::config::TransitSimulation;
     use crate::simulation::pt::schedule::{
         TransitSimSchedule, give_each_departure_its_own_vehicle,
@@ -469,21 +474,67 @@ mod tests {
     }
 
     #[deterministic_id_test]
-    fn late_driver_arrives_after_earliest_arrival_and_departs_on_arrival() {
+    fn late_driver_preserves_travel_time_and_departs_on_arrival() {
         let driver = &mut driver(SIX);
         arrived(driver, SIX);
         // Leaves stop 1 late, so that the next arrival comes later than scheduled.
         departed(driver, SIX + 300);
-        assert_eq!(("2a", SIX + 301), state(driver));
+        assert_eq!(("2a", SIX + 500), state(driver));
 
-        arrived(driver, SIX + 301);
+        arrived(driver, SIX + 500);
         // The scheduled departure at 06:04:00 has passed, so the vehicle departs right away.
-        assert_eq!(("2a", SIX + 301), state(driver));
+        assert_eq!(("2a", SIX + 500), state(driver));
+        departed(driver, SIX + 500);
+        // Only the remaining 260 s of departure delay carry over, without double counting.
+        assert_eq!(("3", SIX + 800), state(driver));
+    }
+
+    #[deterministic_id_test]
+    fn departure_delay_shifts_the_next_arrival_by_two_minutes() {
+        let (schedule, index) = tutorial_departure();
+        let ten = 10 * 3600;
+        let mut driver = PlannedDriver::new(&schedule, index, SimTime::from_secs(ten));
+        driver.plan.scheduled[0] = StopTimes {
+            arrival: SimTime::from_secs(ten),
+            departure: SimTime::from_secs(ten + 60),
+        };
+        driver.plan.scheduled[1] = StopTimes {
+            arrival: SimTime::from_secs(ten + 240),
+            departure: SimTime::from_secs(ten + 300),
+        };
+        driver.notify_stop_arrived(SimTime::from_secs(ten));
+        assert_eq!(driver.next_time(), SimTime::from_secs(ten + 60));
+        driver.notify_stop_departed(SimTime::from_secs(ten + 181), SimTime::from_secs(ten + 180));
+        assert_eq!(driver.next_time(), SimTime::from_secs(ten + 360));
+    }
+
+    #[deterministic_id_test]
+    fn halt_can_fully_absorb_departure_delay() {
+        let driver = &mut driver(SIX);
+        arrived(driver, SIX);
+        departed(driver, SIX + 20);
+        assert_eq!(("2a", SIX + 220), state(driver));
+        arrived(driver, SIX + 220);
+        assert_eq!(("2a", SIX + 240), state(driver));
+        departed(driver, SIX + 240);
+        assert_eq!(("3", SIX + 540), state(driver));
+    }
+
+    #[deterministic_id_test]
+    fn earliest_arrival_still_bounds_the_shifted_arrival() {
+        let driver = &mut driver(SIX);
+        arrived(driver, SIX);
+        driver.notify_stop_departed(SimTime::from_secs(SIX + 250), SimTime::from_secs(SIX + 20));
+        assert_eq!(("2a", SIX + 250), state(driver));
     }
 
     #[deterministic_id_test]
     fn driver_started_late_arrives_at_first_stop_right_away() {
-        assert_eq!(("1", SIX + 10), state(&driver(SIX + 10)));
+        let driver = &mut driver(SIX + 10);
+        assert_eq!(("1", SIX + 10), state(driver));
+        arrived(driver, SIX + 10);
+        departed(driver, SIX + 10);
+        assert_eq!(("2a", SIX + 210), state(driver));
     }
 
     /// Like MATSim's drivers, a driver waits in an activity until its departure, drives it as its

@@ -643,14 +643,22 @@ mod tests {
 
     /// The tutorial schedule. With two partitions, stops 2b and 3 are on partition 1.
     fn tutorial_schedule(parts: u32) -> Arc<TransitSimSchedule> {
+        tutorial_schedule_with_transit(parts, || {
+            TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"))
+        })
+    }
+
+    fn tutorial_schedule_with_transit(
+        parts: u32,
+        load_transit: impl FnOnce() -> TransitSchedule,
+    ) -> Arc<TransitSimSchedule> {
         let mut network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
         if parts == 2 {
             for link in ["32", "33"] {
                 network.get_link_mut(&Id::get_from_ext(link)).partition = 1;
             }
         }
-        let mut schedule =
-            TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
+        let mut schedule = load_transit();
         let mut garage =
             Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
         give_each_departure_its_own_vehicle(&mut schedule, &mut garage);
@@ -814,13 +822,26 @@ mod tests {
         engines[1].receive_remote_vehicle(Tick::new(SIX + 540), vehicle, 0);
     }
 
+    #[deterministic_id_test]
+    fn a_late_vehicle_preserves_travel_time_to_the_next_stop() {
+        assert_late_vehicle_arrival(tutorial_schedule(1), 200);
+    }
+
     /// With six ticks per second, a tick does not last a whole number of nanoseconds. A vehicle
     /// still reaches the next stop in the following tick when only the minimum time between stops
-    /// holds it back.
+    /// holds it back, even after a late departure.
     #[deterministic_id_test]
-    fn a_late_vehicle_reaches_the_next_stop_in_the_following_tick() {
+    fn a_zero_travel_time_vehicle_reaches_the_next_stop_in_the_following_tick() {
+        let xml = std::fs::read_to_string("./assets/pt_tutorial/transitschedule.xml")
+            .unwrap()
+            .replace("arrivalOffset=\"00:03:20\"", "arrivalOffset=\"00:00:00\"");
+        let transit: crate::simulation::io::xml::transit::IOTransitSchedule =
+            quick_xml::de::from_str(&xml).unwrap();
+        assert_late_vehicle_arrival(tutorial_schedule_with_transit(1, || transit.into()), 0);
+    }
+
+    fn assert_late_vehicle_arrival(schedule: Arc<TransitSimSchedule>, travel_secs: u64) {
         let clock = SimClock::new(6);
-        let schedule = tutorial_schedule(1);
         let arrivals = Rc::new(RefCell::new(Vec::new()));
         let mut comp_env = ThreadLocalComputationalEnvironment::default();
         let recorded = arrivals.clone();
@@ -834,7 +855,7 @@ mod tests {
         let mut engine = TransitEngine::new(schedule.clone(), 0, comp_env, clock);
 
         // The 06:00 departure starts at 06:10 instead. It leaves stop 1 right away, so its
-        // scheduled arrival at stop 2a at 06:03:20 has passed.
+        // scheduled arrival at stop 2a has passed. Its travel time still applies.
         let (index, _) = schedule
             .schedule()
             .indexed_departures()
@@ -844,13 +865,18 @@ mod tests {
         let driver = PlannedDriver::new(&schedule, index, clock.tick_to_time(start));
         engine.receive_driver(start, Box::new(driver));
         engine.do_step(start);
-        engine.do_step(start.next());
+        let arrival = clock
+            .secs_to_tick(SIX + 600 + travel_secs)
+            .max(start.next());
+        for tick in start.next().value()..=arrival.value() {
+            engine.do_step(Tick::new(tick));
+        }
 
         assert_eq!(
             *arrivals.borrow(),
             [
                 (clock.tick_to_time(start), "1".to_owned()),
-                (clock.tick_to_time(start.next()), "2a".to_owned()),
+                (clock.tick_to_time(arrival), "2a".to_owned()),
             ]
         );
     }
