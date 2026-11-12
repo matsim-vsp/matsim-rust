@@ -124,6 +124,16 @@ pub struct TransitStopFacility {
 /// and route, so that the layout depends neither on the input format nor on hashing. The routes of
 /// a line and the departures of a route are contiguous. Facilities and lines are kept by their
 /// ids, in no particular order.
+///
+/// The `_mut` methods allow changing the schedule after it was loaded, e.g. its offsets or
+/// departure times, while the scenario is still a [`Scenario`](super::Scenario). They hand out
+/// slices and single elements, so that the number and the order of lines, routes, departures and
+/// stops stay fixed. Three things the types do not enforce:
+/// - Do not change ids. Lines and facilities are kept by their ids, [`Self::find_route`] compares
+///   route ids, and the drivers of the transit simulation are named after the ids of line, route
+///   and departure.
+/// - Keep `stops` and `stop_facilities` of a route the same length ([`Self::stops_mut`] and
+///   [`Self::route_stops_mut`] cannot change it).
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct TransitSchedule {
     facilities: IntMap<Id<TransitStopFacility>, TransitStopFacility>,
@@ -273,6 +283,17 @@ impl TransitSchedule {
         self.facilities.get(id)
     }
 
+    pub fn facilities_mut(&mut self) -> impl Iterator<Item = &mut TransitStopFacility> {
+        self.facilities.values_mut()
+    }
+
+    pub fn facility_mut(
+        &mut self,
+        id: &Id<TransitStopFacility>,
+    ) -> Option<&mut TransitStopFacility> {
+        self.facilities.get_mut(id)
+    }
+
     /// The link of a stop facility.
     pub fn stop_link(&self, facility: &Id<TransitStopFacility>) -> Option<&Id<Link>> {
         self.facility(facility)?.link_ref_id.as_ref()
@@ -285,6 +306,12 @@ impl TransitSchedule {
 
     pub fn line(&self, id: &Id<TransitLine>) -> Option<&TransitLine> {
         self.lines.get(id)
+    }
+
+    /// The line, e.g. to change its name or attributes. Its routes stay as they are. See the type's
+    /// documentation for what must not change.
+    pub fn line_mut(&mut self, id: &Id<TransitLine>) -> Option<&mut TransitLine> {
+        self.lines.get_mut(id)
     }
 
     pub fn num_lines(&self) -> usize {
@@ -301,6 +328,32 @@ impl TransitSchedule {
 
     pub fn route(&self, index: RouteIndex) -> &TransitRoute {
         &self.routes[index.0 as usize]
+    }
+
+    /// The routes, in the order of [`Self::routes`], e.g. to change their network routes. See the
+    /// type's documentation for what must not change; to change only the stops, use [`Self::route_stops_mut`].
+    pub fn routes_mut(&mut self) -> &mut [TransitRoute] {
+        &mut self.routes
+    }
+
+    /// The route, e.g. to change its network route. See the type's documentation for what must not
+    /// change; to change only the stops, use [`Self::stops_mut`].
+    pub fn route_mut(&mut self, index: RouteIndex) -> &mut TransitRoute {
+        &mut self.routes[index.0 as usize]
+    }
+
+    /// The stops of the route, e.g. to change their offsets. Their number cannot change, so they
+    /// stay in line with the route's `stop_facilities`.
+    pub fn stops_mut(&mut self, index: RouteIndex) -> &mut [TransitRouteStop] {
+        &mut self.routes[index.0 as usize].stops
+    }
+
+    /// The stops of every route, in the order of [`Self::routes`], e.g. to change their offsets.
+    /// Their number cannot change, so they stay in line with the routes' `stop_facilities`.
+    pub fn route_stops_mut(&mut self) -> impl Iterator<Item = &mut [TransitRouteStop]> {
+        self.routes
+            .iter_mut()
+            .map(|route| route.stops.as_mut_slice())
     }
 
     /// Finds a route by the ids of its line and route.
@@ -346,8 +399,15 @@ impl TransitSchedule {
         &self.departures[index.0 as usize]
     }
 
-    /// The departure, e.g. to give it another vehicle while the scenario is prepared.
-    pub(crate) fn departure_mut(&mut self, index: DepartureIndex) -> &mut TransitDeparture {
+    /// The departures, in the order of [`Self::departures`], e.g. to change their times or
+    /// vehicles. See the type's documentation for what must not change.
+    pub fn departures_mut(&mut self) -> &mut [TransitDeparture] {
+        &mut self.departures
+    }
+
+    /// The departure, e.g. to give it another vehicle while the scenario is prepared. See the
+    /// type's documentation for what must not change.
+    pub fn departure_mut(&mut self, index: DepartureIndex) -> &mut TransitDeparture {
         &mut self.departures[index.0 as usize]
     }
 
@@ -368,8 +428,17 @@ impl TransitSchedule {
         &self.minimal_transfer_times
     }
 
+    /// The minimal transfer times, to add, remove or change them. Nothing else depends on them.
+    pub fn minimal_transfer_times_mut(&mut self) -> &mut Vec<MinimalTransferTime> {
+        &mut self.minimal_transfer_times
+    }
+
     pub fn attributes(&self) -> &InternalAttributes {
         &self.attributes
+    }
+
+    pub fn attributes_mut(&mut self) -> &mut InternalAttributes {
+        &mut self.attributes
     }
 
     pub fn num_routes(&self) -> usize {
@@ -850,9 +919,9 @@ mod tests {
     use crate::simulation::io::xml::transit::IORouteStop;
     use crate::simulation::scenario::network::Link;
     use crate::simulation::scenario::transit::{
-        TransitDeparture, TransitLine, TransitRoute, TransitRouteStop, TransitSchedule,
-        TransitStopFacility, format_duration, format_time, io_route_stop, parse_duration,
-        parse_time, route_stop_from_io,
+        MinimalTransferTime, TransitDeparture, TransitLine, TransitRoute, TransitRouteStop,
+        TransitSchedule, TransitStopFacility, format_duration, format_time, io_route_stop,
+        parse_duration, parse_time, route_stop_from_io,
     };
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
@@ -974,6 +1043,162 @@ mod tests {
             Some(Id::<String>::get_from_ext("pt_long_EC 12---27_0_0")),
             departures[0].vehicle_ref_id.clone()
         );
+    }
+
+    #[deterministic_id_test]
+    fn stops_can_be_changed_and_are_written() {
+        let mut schedule =
+            TransitSchedule::from_file("./assets/pt_tutorial/transitschedule.xml".as_ref());
+        let original = schedule.clone();
+
+        // as berlin_iterations_v7 of parallel-qsim-berlin: arrivals 30 s earlier, but not at the first stop
+        for stops in schedule.route_stops_mut() {
+            for stop in stops.iter_mut().skip(1) {
+                stop.arrival_offset = stop
+                    .arrival_offset
+                    .map(|arrival| arrival - Duration::from_secs(30));
+            }
+        }
+        let line_id: Id<TransitLine> = Id::get_from_ext("Blue Line");
+        let route_index = schedule
+            .find_route(&line_id, &Id::get_from_ext("1to3"))
+            .unwrap();
+        schedule.stops_mut(route_index)[1].minimum_stop_duration = Duration::from_secs(10);
+
+        let route = schedule.route(route_index);
+        let arrivals: Vec<_> = route.stops.iter().map(|stop| stop.arrival_offset).collect();
+        assert_eq!(
+            vec![
+                None,
+                Some(Duration::from_secs(170)),
+                Some(Duration::from_secs(510))
+            ],
+            arrivals
+        );
+        let departures: Vec<_> = route
+            .stops
+            .iter()
+            .map(|stop| stop.departure_offset)
+            .collect();
+        assert_eq!(
+            vec![Some(Duration::ZERO), Some(Duration::from_secs(240)), None],
+            departures
+        );
+        assert_eq!(
+            Duration::from_secs(10),
+            route.stops[1].minimum_stop_duration
+        );
+        let other = schedule.route(
+            schedule
+                .find_route(&line_id, &Id::get_from_ext("3to1"))
+                .unwrap(),
+        );
+        assert_eq!(
+            Some(Duration::from_secs(270)),
+            other.stops[1].arrival_offset
+        );
+
+        // nothing else changed
+        assert_eq!(original.departures(), schedule.departures());
+        assert_eq!(
+            original.minimal_transfer_times(),
+            schedule.minimal_transfer_times()
+        );
+        assert_eq!(original.facilities().count(), schedule.facilities().count());
+        for (before, after) in original.routes().iter().zip(schedule.routes()) {
+            assert_eq!(before.stop_facilities, after.stop_facilities);
+            assert_eq!(before.network_route, after.network_route);
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("schedule.xml.gz");
+        schedule.to_file(&path);
+        assert_eq!(schedule, TransitSchedule::from_file(&path));
+    }
+
+    #[deterministic_id_test]
+    fn lines_routes_departures_and_facilities_can_be_changed_without_changing_the_layout() {
+        let mut schedule =
+            TransitSchedule::from_file("./assets/pt_tutorial/transitschedule.xml".as_ref());
+        let original = schedule.clone();
+        let line_id: Id<TransitLine> = Id::get_from_ext("Blue Line");
+        let route_index = schedule
+            .find_route(&line_id, &Id::get_from_ext("1to3"))
+            .unwrap();
+        let (first, _) = schedule.indexed_departures().next().unwrap();
+
+        schedule.departure_mut(first).departure_time = SimTime::from_secs(1);
+        let vehicle = Id::<String>::create("other vehicle");
+        schedule.departures_mut()[1].vehicle_ref_id = Some(vehicle.clone());
+        let stop_2a = Id::<TransitStopFacility>::get_from_ext("2a");
+        let link_21 = Id::<Link>::get_from_ext("21");
+        schedule.facility_mut(&stop_2a).unwrap().link_ref_id = Some(link_21.clone());
+        for facility in schedule.facilities_mut() {
+            facility.coord.x += 1.0;
+        }
+        schedule.line_mut(&line_id).unwrap().name = String::from("Blue");
+        schedule.route_mut(route_index).description = Some(String::from("east"));
+        for route in schedule.routes_mut() {
+            route.attributes.insert("changed", "yes");
+        }
+        schedule
+            .minimal_transfer_times_mut()
+            .push(MinimalTransferTime {
+                from_stop: stop_2a.clone(),
+                to_stop: Id::get_from_ext("2b"),
+                transfer_time: 120.0,
+            });
+        schedule.attributes_mut().insert("source", "test");
+
+        assert_eq!(
+            SimTime::from_secs(1),
+            schedule.departure(first).departure_time
+        );
+        assert_eq!(Some(vehicle), schedule.departures()[1].vehicle_ref_id);
+        assert_eq!(Some(&link_21), schedule.stop_link(&stop_2a));
+        assert_eq!(
+            1051.0,
+            schedule.facility(&Id::get_from_ext("1")).unwrap().coord.x
+        );
+        assert_eq!("Blue", schedule.line(&line_id).unwrap().name);
+        assert_eq!(
+            Some(String::from("east")),
+            schedule.route(route_index).description
+        );
+        assert!(
+            schedule.routes().iter().all(|route| route
+                .attributes
+                .get::<String>("changed")
+                .as_deref()
+                == Some("yes"))
+        );
+        assert_eq!(1, schedule.minimal_transfer_times().len());
+        assert_eq!(
+            Some(String::from("test")),
+            schedule.attributes().get("source")
+        );
+
+        // the layout is the same
+        assert_eq!(original.num_lines(), schedule.num_lines());
+        assert_eq!(original.num_routes(), schedule.num_routes());
+        assert_eq!(original.departures().len(), schedule.departures().len());
+        for (index, _) in original.indexed_departures() {
+            assert_eq!(
+                original.departure_route(index),
+                schedule.departure_route(index)
+            );
+        }
+        let line = schedule.line(&line_id).unwrap();
+        assert_eq!(2, schedule.routes_of(line).len());
+        assert_eq!(
+            50,
+            schedule.departures_of(schedule.route(route_index)).len()
+        );
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("schedule.xml.gz");
+        schedule.to_file(&path);
+        assert_eq!(schedule, TransitSchedule::from_file(&path));
     }
 
     #[test]
