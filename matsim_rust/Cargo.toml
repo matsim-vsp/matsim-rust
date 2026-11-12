@@ -81,6 +81,6 @@ matsim-rust = { path = ".", features = ["test_util"] }
 [build-dependencies]
 # generates types based on .proto files
 prost-build = "0.13.5"
-# provides the protoc compiler - this makes the build slow but one doesn't need to install the protoc compiler as prerequisite.
-protobuf-src = "2.1.1"
+# provides a prebuilt protoc compiler, so no system protoc or protobuf C++ build is needed.
+protoc-bin-vendored = "=3.3.0"
 tonic-build = "0.13.1"

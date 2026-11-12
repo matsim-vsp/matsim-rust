@@ -1,7 +1,8 @@
 extern crate prost_build;
-extern crate protobuf_src;
+extern crate protoc_bin_vendored;
 
 use prost_build::Config;
+use std::path::Path;
 
 fn main() {
     let proto_files = [
@@ -23,12 +24,17 @@ fn main() {
 
     // Compiling the protobuf files
     let mut config = Config::new();
-    // we use the protobuf-src which provides the protoc compiler. This line makes it available
-    // to prost-build
-    config.protoc_executable(protobuf_src::protoc());
+    // We use a prebuilt protoc compiler. This line makes it available to prost-build
+    // without requiring a system installation or compiling protobuf's C++ sources.
+    config.protoc_executable(
+        protoc_bin_vendored::protoc_bin_path()
+            .expect("No bundled protoc compiler is available for this build platform"),
+    );
+    let protoc_include = protoc_bin_vendored::include_path()
+        .expect("The bundled protoc compiler's standard .proto include directory is unavailable");
 
     tonic_build::configure()
         .build_client(true)
-        .compile_protos_with_config(config, &proto_files, &["src/"])
+        .compile_protos_with_config(config, &proto_files, &[Path::new("src/"), &protoc_include])
         .unwrap();
 }
