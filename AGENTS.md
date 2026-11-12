@@ -56,16 +56,17 @@ avoid solving borrowing problems by cloning an entire scenario or population.
 ## Toolchain and native dependencies
 
 - Use the Rust version pinned in `rust-toolchain.toml` and Rust 2024 idioms.
-- The build compiles METIS (via `metis-sys`, patched in the workspace
-  `Cargo.toml`) and protobuf (via `protobuf-src`) from bundled sources, so it
-  requires a C and C++ compiler and CMake, but no installed METIS library or
+- The build compiles native dependencies including METIS (via `metis-sys`,
+  patched in the workspace `Cargo.toml`) from bundled sources, so it requires
+  a C and C++ compiler and CMake, but no installed METIS library or
   libclang. A compile or link failure in these crates may be an environment
   problem, not a source-code regression.
 - `.cargo/config.toml` contains Apple Silicon Homebrew search paths. Do not
   generalize or replace them incidentally while working on unrelated code.
-- `matsim_rust/build.rs` compiles the `.proto` sources with the bundled
-  `protobuf-src` compiler. Edit the `.proto` definitions or handwritten adapter
-  code, never generated files in Cargo's `OUT_DIR`.
+- `matsim_rust/build.rs` compiles the `.proto` sources with the prebuilt
+  `protoc-bin-vendored` compiler and its bundled standard includes; no system
+  `protoc` or protobuf C++ build is needed. Edit the `.proto` definitions or
+  handwritten adapter code, never generated files in Cargo's `OUT_DIR`.
 - The optional `http` feature pulls in remote-download support and may require
   additional TLS/OpenSSL support on some systems.
 

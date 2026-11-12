@@ -37,6 +37,10 @@ Some dependencies are compiled from bundled C and C++ sources. Building the proj
 compiler and CMake. On Linux, OpenSSL is required as well, because the remote download support (feature `http`) and the
 tests use `reqwest`.
 
+Protobuf types are generated using the prebuilt `protoc` compiler and standard `.proto` includes supplied by
+`protoc-bin-vendored`. No system `protoc` installation or protobuf C++ build is needed. Builds require a host platform
+supported by that crate; unsupported platforms fail explicitly rather than falling back to a system compiler.
+
 MPI has not been supported for a long time; the last version supporting it was 0.2.0. Only Rust's multithreading
 capabilities are used for parallelism.
 
@@ -66,7 +70,7 @@ The C and C++ compilers are part of the Xcode Command Line Tools. CMake is avail
 brew install cmake
 ```
 
-The `CXX` variable may also need to be set for compiling some included dependencies like `protobuf-src`.
+The `CXX` variable may also need to be set for compiling included native dependencies.
 
 ```shell
 export CXX=clang++
@@ -102,6 +106,26 @@ The project is built using cargo.
 ```shell
 cargo build --release
 ```
+
+### GitHub Actions build times
+
+The PR and `main` workflows cache compiled Cargo dependencies with `Swatinem/rust-cache`. Both the release build
+without `http` and the release tests with `http` still run on every invocation. Cargo timing reports are uploaded as
+the `cargo-timings` artifact, including on failures when reports are available, and retained for ten days.
+
+Before caching and prebuilt `protoc` were introduced, three successful PR runs on November 12, 2026 had these timings:
+
+| PR | Release build | Additional test compilation | Tests, including doc-tests |
+| --- | --- | --- | --- |
+| [#347](https://github.com/matsim-vsp/matsim-rust/actions/runs/43217684853) | 7m 16s | 4m 06s | about 1m 10s |
+| [#348](https://github.com/matsim-vsp/matsim-rust/actions/runs/43226037259) | 9m 06s | 5m 13s | about 1m 20s |
+| [#349](https://github.com/matsim-vsp/matsim-rust/actions/runs/43238685057) | 6m 36s | 4m 01s | about 1m 01s |
+
+These are historical observations on different commits and runners, not a controlled benchmark. To assess the change,
+compare a first run with no matching cache to a subsequent run of the same revision with a cache hit. Include cache
+restore/save and timing artifact uploads in the total job duration. Confirm that dependencies are reused and that
+`protobuf-src` is no longer compiled. The existing checks, including the Berlin release tests, must pass in both runs;
+GitHub measurements after this change are still pending.
 
 ## Test
 

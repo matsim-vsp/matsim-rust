@@ -12,6 +12,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,12 +23,19 @@ jobs:
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
       - name: Build
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo build --release
+        run: cargo build --release --locked --timings
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
-          RUSTFLAGS: -D warnings
-        run: cargo test --release --verbose --features http -- --test-threads=1
+        run: cargo test --release --locked --timings --verbose --features http -- --test-threads=1
+      - name: Upload Cargo timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/*.html
+          retention-days: 10
+          if-no-files-found: warn
