@@ -293,8 +293,9 @@ the legs of passenger modes that offer the role of a passenger (`PassengerLogic`
 engine creates a `TransitVehicle` for it. Each driver serves one departure; drivers that serve the departures of a
 vehicle block one after the other could come with a simulation on the network. When its activity ends, the driver copies
 its departure from the schedule into a plan of its own and no longer depends on the schedule. It knows its stops and
-tells the engine when the vehicle arrives and departs: at the departure time plus the arrival offset, but not before the
-earliest arrival the engine allows, and at the departure time plus the departure offset, but not before the arrival. At
+tells the engine when the vehicle arrives and departs: at the departure time plus the arrival offset plus the previous
+stop's nonnegative departure delay, but not before the earliest arrival the engine allows. It departs at the departure
+time plus the departure offset, but not before the arrival, so a shorter halt can absorb arrival delays. At
 the last stop, the driver leaves the vehicle and ends its leg; drivers that are still in a vehicle when the mobsim ends
 are dropped, as in SBB's engine.
 
@@ -329,6 +330,8 @@ in the schedule.
 
 Deviations from SBB's engine:
 
+- A late departure shifts the next arrival by the departure delay, preserving the scheduled travel time between
+  stops. SBB can shorten that travel time to catch up with the schedule. Halts can still absorb arrival delays.
 - A vehicle needs at least one tick from one stop to the next, so that the result does not depend on whether the next
   stop is on another partition. SBB allows zero seconds.
 - Boarding and alighting take no time. With MATSim's default `ComplexTransitStopHandler`, SBB boards and alights one
