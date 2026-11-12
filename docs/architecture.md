@@ -189,6 +189,10 @@ sets to `output_scoring_parameters.yml`, while the output config keeps the input
 Deviating from MATSim's
 `RandomizingTimeDistanceTravelDisutility`, which uses the default set for everyone, `ScoringBasedTravelTimeAndDisutility`
 routes with the person's set; routing without a person and the ALT lower bound use the smallest cost factors of all sets.
+Its travel times are those observed in the mobsim for its own mode. `ControllerBuilder::travel_time_mode(mode, other)`
+lets the router of a network mode use the travel times observed for another mode instead, like MATSim's
+`addTravelTimeBinding`, e.g. ride (teleported along its network route) those of car; the cost factors stay those of
+`mode`.
 
 ### Link Dynamics
 

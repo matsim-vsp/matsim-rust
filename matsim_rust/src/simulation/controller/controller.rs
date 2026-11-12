@@ -44,7 +44,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Barrier};
 use std::time::Duration;
 use std::{fs, mem};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug)]
 pub struct Controller {
@@ -75,6 +75,9 @@ pub struct ControllerBuilder {
     global_barrier: Option<Arc<Barrier>>,
     adapter_handles: Vec<AdapterHandle>,
     scoring_function: Option<Box<dyn PlanScorer>>,
+    /// Network mode -> mode whose observed travel times its router uses, see
+    /// [`ControllerBuilder::travel_time_mode`].
+    travel_time_modes: HashMap<String, String>,
 }
 
 impl ControllerBuilder {
@@ -88,6 +91,7 @@ impl ControllerBuilder {
             global_barrier: None,
             adapter_handles: Vec::new(),
             scoring_function: None,
+            travel_time_modes: HashMap::new(),
         }
     }
 
@@ -145,7 +149,12 @@ impl ControllerBuilder {
             bin_size,
             Duration::from_secs(u64::from(config.qsim().end_time)),
         ));
-        let router = Self::create_trip_router(config.as_ref(), &scenario, global_ttc.clone())?;
+        let router = Self::create_trip_router(
+            config.as_ref(),
+            &scenario,
+            global_ttc.clone(),
+            &self.travel_time_modes,
+        )?;
 
         for i in 0..num_parts {
             let net = scenario.core.network.clone();
@@ -228,6 +237,19 @@ impl ControllerBuilder {
         self
     }
 
+    /// Lets the router of the network mode `mode` use the observed travel times of
+    /// `travel_time_mode`, like MATSim's `addTravelTimeBinding(mode).to(...)`. This is meant for
+    /// modes that the mobsim does not move on the network, so that no travel times are observed for
+    /// them, e.g. ride teleported along its network route, which should see the travel times of car.
+    /// The cost factors stay those of `mode`. The mapping is not chained: if `travel_time_mode` is
+    /// mapped itself, `mode` still uses the travel times observed for `travel_time_mode`. A later
+    /// call for the same `mode` replaces the earlier one.
+    pub fn travel_time_mode(mut self, mode: &str, travel_time_mode: &str) -> Self {
+        self.travel_time_modes
+            .insert(mode.to_string(), travel_time_mode.to_string());
+        self
+    }
+
     pub fn adapter_handles(mut self, v: Vec<AdapterHandle>) -> Self {
         self.adapter_handles = v;
         self
@@ -245,7 +267,10 @@ impl ControllerBuilder {
         config: &Config,
         controller_scenario: &ControllerScenario,
         global_ttc: Arc<GlobalTravelTimeCalculator>,
+        travel_time_modes: &HashMap<String, String>,
     ) -> Result<TripRouter, String> {
+        check_travel_time_modes(config, travel_time_modes)?;
+
         let mut routers: IntMap<Id<String>, Arc<dyn RoutingModule>> = IntMap::default();
 
         // for every teleported mode, create the corresponding router.
@@ -272,11 +297,18 @@ impl ControllerBuilder {
                     id.external(),
                 ));
             };
-            let time_utility = Arc::new(ScoringBasedTravelTimeAndDisutility::new(
+            let mut time_utility = ScoringBasedTravelTimeAndDisutility::new(
                 &controller_scenario.core.scoring_parameters,
                 id.clone(),
                 global_ttc.clone(),
-            ));
+            );
+            if let Some(travel_time_mode) = travel_time_modes.get(mode) {
+                info!(
+                    "The router of mode {mode} uses the observed travel times of mode {travel_time_mode}."
+                );
+                time_utility = time_utility.with_travel_time_mode(Id::create(travel_time_mode));
+            }
+            let time_utility = Arc::new(time_utility);
             let astar = AStar::<AltHeuristic>::new(
                 controller_scenario.core.network.clone(),
                 Some(id.clone()),
@@ -769,8 +801,32 @@ pub(crate) fn write_experienced_population(
     }
 }
 
+/// Checks the mapping of [`ControllerBuilder::travel_time_mode`]: every mapped mode must be a
+/// network mode. Warns about target modes that the mobsim does not move on the network, because no
+/// travel times are observed for them, so their routers would only see free speed travel times.
+fn check_travel_time_modes(
+    config: &Config,
+    travel_time_modes: &HashMap<String, String>,
+) -> Result<(), String> {
+    // sorted, so that errors and warnings do not depend on the iteration order of the map
+    for (mode, travel_time_mode) in travel_time_modes.iter().sorted() {
+        if !config.routing().network_modes.contains(mode) {
+            return Err(format!(
+                "Travel times of mode {travel_time_mode} are mapped to mode {mode}, which is not a network mode (routing.network_modes)."
+            ));
+        }
+        if !config.qsim().main_modes.contains(travel_time_mode) {
+            warn!(
+                "The router of mode {mode} uses the travel times of mode {travel_time_mode}, which is not a main mode of the mobsim (qsim.main_modes), so no travel times are observed for it."
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::check_travel_time_modes;
     use super::prepare_output_directory;
     use crate::simulation::config::OverwriteFiles;
     use std::fs;
@@ -813,5 +869,21 @@ mod tests {
 
         assert!(output_dir.exists());
         assert!(existing_file.exists());
+    }
+
+    #[test]
+    fn travel_time_modes_must_map_network_modes() {
+        let mut config = crate::simulation::config::Config::default();
+        config.routing_mut().network_modes = vec!["car".to_string(), "ride".to_string()];
+        config.qsim_mut().main_modes = vec!["car".to_string()];
+
+        let mapping = |mode: &str, travel_time_mode: &str| {
+            std::collections::HashMap::from([(mode.to_string(), travel_time_mode.to_string())])
+        };
+        assert!(check_travel_time_modes(&config, &mapping("ride", "car")).is_ok());
+        // a target without observed travel times only warns
+        assert!(check_travel_time_modes(&config, &mapping("ride", "bike")).is_ok());
+        let error = check_travel_time_modes(&config, &mapping("bike", "car")).unwrap_err();
+        assert!(error.contains("bike"), "{error}");
     }
 }

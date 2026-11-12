@@ -86,6 +86,9 @@ impl CostFactors {
 #[derive(Clone, Debug)]
 pub struct ScoringBasedTravelTimeAndDisutility {
     mode: Id<String>,
+    /// The mode whose observed travel times are used, `mode` unless set by
+    /// [`Self::with_travel_time_mode`].
+    travel_time_mode: Id<String>,
     /// `None` for the sets without parameters for the mode.
     factors_per_subpopulation: IntMap<Id<String>, Option<CostFactors>>,
     default_factors: Option<Option<CostFactors>>,
@@ -136,12 +139,24 @@ impl ScoringBasedTravelTimeAndDisutility {
         };
 
         ScoringBasedTravelTimeAndDisutility {
+            travel_time_mode: mode.clone(),
             mode,
             factors_per_subpopulation,
             default_factors,
             min_factors,
             travel_time,
         }
+    }
+
+    /// Uses the observed travel times of `travel_time_mode` instead of those of the router mode,
+    /// like MATSim's `addTravelTimeBinding(mode).to(...)`. This is meant for modes that the mobsim
+    /// does not move on the network, so that no travel times are observed for them, e.g. ride
+    /// teleported along its network route, which should see the travel times of car. The cost
+    /// factors stay those of the router mode, and the maximum speed of the vehicle still bounds the
+    /// travel time.
+    pub fn with_travel_time_mode(mut self, travel_time_mode: Id<String>) -> Self {
+        self.travel_time_mode = travel_time_mode;
+        self
     }
 
     fn disutility(
@@ -187,7 +202,7 @@ impl TravelTime for ScoringBasedTravelTimeAndDisutility {
         vehicle: Option<&InternalVehicle>,
     ) -> Duration {
         self.travel_time.get_link_travel_time(
-            &self.mode,
+            &self.travel_time_mode,
             link,
             departure_time,
             vehicle,
@@ -515,6 +530,43 @@ mod tests {
         assert_close(
             30.0 * 9.0 / 3600.0,
             walk.travel_disutility(&link, SimTime::from_secs(0), Some(&person), None),
+        );
+    }
+
+    // a router mode without observations, e.g. teleported ride, can use the travel times of another
+    // mode, while its cost factors stay those of the router mode
+    #[deterministic_id_test]
+    fn scoring_costs_use_travel_times_of_travel_time_mode() {
+        let sets = scoring_sets();
+        let mut partition =
+            PartitionTravelTimeCollector::new(Duration::from_secs(10), Duration::from_secs(100));
+        let link = link("travel-time-mode", 100.0, 10.0);
+        observe_travel_time(&mut partition, "car", &link.id, "car-vehicle", 20);
+        let travel_time = global_travel_time(vec![partition], &[link.clone()]);
+
+        let own = ScoringBasedTravelTimeAndDisutility::new(
+            &sets,
+            Id::create("walk"),
+            travel_time.clone(),
+        );
+        let car_times =
+            ScoringBasedTravelTimeAndDisutility::new(&sets, Id::create("walk"), travel_time)
+                .with_travel_time_mode(Id::create("car"));
+        let person = person("default-person", "person");
+
+        // no observations for walk: free speed travel time
+        assert_eq!(
+            Duration::from_secs(10),
+            own.travel_time(&link, SimTime::from_secs(0), None, None)
+        );
+        assert_eq!(
+            Duration::from_secs(20),
+            car_times.travel_time(&link, SimTime::from_secs(0), None, None)
+        );
+        // the cost factors of walk (9 per hour, no distance costs), not those of car
+        assert_close(
+            20.0 * 9.0 / 3600.0,
+            car_times.travel_disutility(&link, SimTime::from_secs(0), Some(&person), None),
         );
     }
 
