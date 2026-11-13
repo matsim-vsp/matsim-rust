@@ -789,14 +789,21 @@ mod tests {
             .unwrap();
 
         let with_optional_proto = event_to_proto(&with_optional_attributes);
-        assert_eq!("link-1", with_optional_proto.attributes["link"].as_string());
+        assert_eq!(
+            "link-1",
+            with_optional_proto.attributes["link"].as_string().unwrap()
+        );
         assert_eq!(
             "car",
-            with_optional_proto.attributes["leg_mode"].as_string()
+            with_optional_proto.attributes["leg_mode"]
+                .as_string()
+                .unwrap()
         );
         assert_eq!(
             "mobsim end",
-            with_optional_proto.attributes["reason"].as_string()
+            with_optional_proto.attributes["reason"]
+                .as_string()
+                .unwrap()
         );
 
         let without_optional_proto = event_to_proto(&without_optional_attributes);
@@ -1033,30 +1040,30 @@ mod tests {
                 let typed_event = event.as_any().downcast_ref::<ActivityStartEvent>().unwrap();
                 assert_eq!(
                     typed_event.person.external(),
-                    other.attributes["person"].as_string()
+                    other.attributes["person"].as_string().unwrap()
                 );
                 assert_eq!(
                     typed_event.link.external(),
-                    other.attributes["link"].as_string()
+                    other.attributes["link"].as_string().unwrap()
                 );
                 assert_eq!(
                     typed_event.act_type.external(),
-                    other.attributes["act_type"].as_string()
+                    other.attributes["act_type"].as_string().unwrap()
                 );
             }
             ActivityEndEvent::TYPE => {
                 let typed_event = event.as_any().downcast_ref::<ActivityEndEvent>().unwrap();
                 assert_eq!(
                     typed_event.person.external(),
-                    other.attributes["person"].as_string()
+                    other.attributes["person"].as_string().unwrap()
                 );
                 assert_eq!(
                     typed_event.link.external(),
-                    other.attributes["link"].as_string()
+                    other.attributes["link"].as_string().unwrap()
                 );
                 assert_eq!(
                     typed_event.act_type.external(),
-                    other.attributes["act_type"].as_string()
+                    other.attributes["act_type"].as_string().unwrap()
                 );
             }
             _ => panic!("wrong type"),

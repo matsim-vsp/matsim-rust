@@ -27,7 +27,9 @@ zstd = "0.13.3"
 metis = "0.2.2"
 clap = { version = "4.0.29", features = ["derive"] }
 # dependencies for serialization with protobuf
-prost = "0.13.3"
+prost = "0.14"
+# message types shared across MATSim projects (population, network, events, ...)
+matsim-schemas = { git = "https://github.com/matsim-org/matsim-schemas", tag = "v0.2.0", features = ["serde"] }
 # bytes replaces the signature of std::io::Cursor to implemnt Buf somehow...
 bytes = "1.3.0"
 serial_test = "3.2.0"
@@ -43,7 +45,9 @@ xml = "1.4.0"
 lz4_flex = "0.14.0"
 typetag = "0.2.18"
 serde_yaml = "0.9.34"
-tonic = "0.13.1"
+tonic = "0.14"
+# prost codec of the generated gRPC client
+tonic-prost = "0.14"
 tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros"] }
 lz4 = "1.28.1"
 derive_builder = "0.20.2"
@@ -80,7 +84,9 @@ matsim-rust = { path = ".", features = ["test_util"] }
 
 [build-dependencies]
 # generates types based on .proto files
-prost-build = "0.13.5"
+prost-build = "0.14"
 # provides a prebuilt protoc compiler, so no system protoc or protobuf C++ build is needed.
 protoc-bin-vendored = "=3.3.0"
-tonic-build = "0.13.1"
+tonic-prost-build = "0.14"
+# .proto files and the Rust type paths of the shared message types, for routing.proto
+matsim-schemas = { git = "https://github.com/matsim-org/matsim-schemas", tag = "v0.2.0", features = ["build"] }

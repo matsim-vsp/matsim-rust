@@ -1,6 +1,7 @@
 mod comparison;
 pub mod utils;
 
+use crate::generated::general::AttributeValue;
 use crate::simulation::InternalAttributes;
 use crate::simulation::id::{CreateMissingIds, Id, IdResolver};
 use crate::simulation::scenario::Coordinate;
@@ -16,6 +17,26 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
+
+/// The string value of an attribute of a proto event. Panics if it is not a string.
+fn as_str(value: &AttributeValue) -> &str {
+    value
+        .as_string()
+        .unwrap_or_else(|| panic!("Expected string, got {value:?}"))
+}
+
+/// The string value of the attribute `key` of a proto event. Panics if it is missing or not a string.
+fn str_attr<'a>(event: &'a crate::generated::events::GenericEvent, key: &str) -> &'a str {
+    as_str(&event.attributes[key])
+}
+
+/// The double value of the attribute `key` of a proto event. Panics if it is missing or not a double.
+fn f64_attr(event: &crate::generated::events::GenericEvent, key: &str) -> f64 {
+    let value = &event.attributes[key];
+    value
+        .as_double()
+        .unwrap_or_else(|| panic!("Expected double for {key}, got {value:?}"))
+}
 
 pub trait DynEq: Any {
     fn as_any(&self) -> &dyn Any;
@@ -266,13 +287,13 @@ impl ActivityStartEvent {
         Some(
             ActivityStartEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .act_type(ids.resolve(&event.attributes["act_type"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .act_type(ids.resolve(str_attr(event, "act_type"))?)
                 .coordinate(Coordinate::new_3d(
-                    event.attributes["x"].as_double(),
-                    event.attributes["y"].as_double(),
-                    event.attributes["z"].as_double_opt().unwrap_or_default(),
+                    f64_attr(event, "x"),
+                    f64_attr(event, "y"),
+                    event.attributes["z"].as_double().unwrap_or_default(),
                 ))
                 .attributes(attrs)
                 .build()
@@ -310,13 +331,13 @@ impl ActivityEndEvent {
         Some(
             ActivityEndEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .act_type(ids.resolve(&event.attributes["act_type"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .act_type(ids.resolve(str_attr(event, "act_type"))?)
                 .coordinate(Coordinate::new_3d(
-                    event.attributes["x"].as_double(),
-                    event.attributes["y"].as_double(),
-                    event.attributes["z"].as_double_opt().unwrap_or_default(),
+                    f64_attr(event, "x"),
+                    f64_attr(event, "y"),
+                    event.attributes["z"].as_double().unwrap_or_default(),
                 ))
                 .attributes(attrs)
                 .build()
@@ -352,8 +373,8 @@ impl LinkEnterEvent {
         Some(
             LinkEnterEventBuilder::default()
                 .time(time)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -388,8 +409,8 @@ impl LinkLeaveEvent {
         Some(
             LinkLeaveEventBuilder::default()
                 .time(time)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -428,11 +449,11 @@ impl VehicleEntersTrafficEvent {
         Some(
             VehicleEntersTrafficEventBuilder::default()
                 .time(time)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .network_mode(ids.resolve(&event.attributes["network_mode"].as_string())?)
-                .relative_position(event.attributes["relative_position"].as_double())
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .network_mode(ids.resolve(str_attr(event, "network_mode"))?)
+                .relative_position(f64_attr(event, "relative_position"))
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -471,11 +492,11 @@ impl VehicleLeavesTrafficEvent {
         Some(
             VehicleLeavesTrafficEventBuilder::default()
                 .time(time)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .network_mode(ids.resolve(&event.attributes["network_mode"].as_string())?)
-                .relative_position(event.attributes["relative_position"].as_double())
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .network_mode(ids.resolve(str_attr(event, "network_mode"))?)
+                .relative_position(f64_attr(event, "relative_position"))
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -510,8 +531,8 @@ impl PersonEntersVehicleEvent {
         Some(
             PersonEntersVehicleEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -546,8 +567,8 @@ impl PersonLeavesVehicleEvent {
         Some(
             PersonLeavesVehicleEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -586,11 +607,11 @@ impl PersonDepartureEvent {
         Some(
             PersonDepartureEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .leg_mode(ids.resolve(&event.attributes["mode"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .leg_mode(ids.resolve(str_attr(event, "mode"))?)
                 .routing_mode(match event.attributes.get("routing_mode") {
-                    Some(value) => Some(ids.resolve(&value.as_string())?),
+                    Some(value) => Some(ids.resolve(as_str(value))?),
                     None => None,
                 })
                 .attributes(attrs)
@@ -628,9 +649,9 @@ impl PersonArrivalEvent {
         Some(
             PersonArrivalEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .link(ids.resolve(&event.attributes["link"].as_string())?)
-                .leg_mode(ids.resolve(&event.attributes["mode"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .link(ids.resolve(str_attr(event, "link"))?)
+                .leg_mode(ids.resolve(str_attr(event, "mode"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -666,9 +687,9 @@ impl TeleportationArrivalEvent {
         Some(
             TeleportationArrivalEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .mode(ids.resolve(&event.attributes["mode"].as_string())?)
-                .distance(event.attributes["distance"].as_string().parse().unwrap())
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .mode(ids.resolve(str_attr(event, "mode"))?)
+                .distance(str_attr(event, "distance").parse().unwrap())
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -709,19 +730,16 @@ impl PtTeleportationArrivalEvent {
         Some(
             PtTeleportationArrivalEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
-                .distance(event.attributes["distance"].as_string().parse().unwrap())
-                .mode(ids.resolve(&event.attributes["mode"].as_string())?)
-                .route(ids.resolve(&event.attributes["route"].as_string())?)
-                .line(ids.resolve(&event.attributes["line"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
+                .distance(str_attr(event, "distance").parse().unwrap())
+                .mode(ids.resolve(str_attr(event, "mode"))?)
+                .route(ids.resolve(str_attr(event, "route"))?)
+                .line(ids.resolve(str_attr(event, "line"))?)
                 .boarding_time(SimTime::from_nanos(
-                    event.attributes["boardingTimeNs"]
-                        .as_string()
-                        .parse()
-                        .unwrap(),
+                    str_attr(event, "boardingTimeNs").parse().unwrap(),
                 ))
-                .access_facility(ids.resolve(&event.attributes["accessFacility"].as_string())?)
-                .egress_facility(ids.resolve(&event.attributes["egressFacility"].as_string())?)
+                .access_facility(ids.resolve(str_attr(event, "accessFacility"))?)
+                .egress_facility(ids.resolve(str_attr(event, "egressFacility"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -760,11 +778,11 @@ impl TransitDriverStartsEvent {
         Some(
             TransitDriverStartsEventBuilder::default()
                 .time(time)
-                .driver(ids.resolve(&event.attributes["driverId"].as_string())?)
-                .vehicle(ids.resolve(&event.attributes["vehicleId"].as_string())?)
-                .transit_line(ids.resolve(&event.attributes["transitLineId"].as_string())?)
-                .transit_route(ids.resolve(&event.attributes["transitRouteId"].as_string())?)
-                .departure(ids.resolve(&event.attributes["departureId"].as_string())?)
+                .driver(ids.resolve(str_attr(event, "driverId"))?)
+                .vehicle(ids.resolve(str_attr(event, "vehicleId"))?)
+                .transit_line(ids.resolve(str_attr(event, "transitLineId"))?)
+                .transit_route(ids.resolve(str_attr(event, "transitRouteId"))?)
+                .departure(ids.resolve(str_attr(event, "departureId"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -803,9 +821,9 @@ impl VehicleArrivesAtFacilityEvent {
         Some(
             VehicleArrivesAtFacilityEventBuilder::default()
                 .time(time)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
-                .facility(ids.resolve(&event.attributes["facility"].as_string())?)
-                .delay(event.attributes["delay"].as_double())
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
+                .facility(ids.resolve(str_attr(event, "facility"))?)
+                .delay(f64_attr(event, "delay"))
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -844,9 +862,9 @@ impl VehicleDepartsAtFacilityEvent {
         Some(
             VehicleDepartsAtFacilityEventBuilder::default()
                 .time(time)
-                .vehicle(ids.resolve(&event.attributes["vehicle"].as_string())?)
-                .facility(ids.resolve(&event.attributes["facility"].as_string())?)
-                .delay(event.attributes["delay"].as_double())
+                .vehicle(ids.resolve(str_attr(event, "vehicle"))?)
+                .facility(ids.resolve(str_attr(event, "facility"))?)
+                .delay(f64_attr(event, "delay"))
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -883,9 +901,9 @@ impl AgentWaitingForPtEvent {
         Some(
             AgentWaitingForPtEventBuilder::default()
                 .time(time)
-                .agent(ids.resolve(&event.attributes["agent"].as_string())?)
-                .at_stop(ids.resolve(&event.attributes["atStop"].as_string())?)
-                .destination_stop(ids.resolve(&event.attributes["destinationStop"].as_string())?)
+                .agent(ids.resolve(str_attr(event, "agent"))?)
+                .at_stop(ids.resolve(str_attr(event, "atStop"))?)
+                .destination_stop(ids.resolve(str_attr(event, "destinationStop"))?)
                 .attributes(attrs)
                 .build()
                 .unwrap(),
@@ -925,20 +943,20 @@ impl PersonStuckEvent {
         Some(
             PersonStuckEventBuilder::default()
                 .time(time)
-                .person(ids.resolve(&event.attributes["person"].as_string())?)
+                .person(ids.resolve(str_attr(event, "person"))?)
                 .leg_mode(match event.attributes.get("leg_mode") {
-                    Some(value) => Some(ids.resolve(&value.as_string())?),
+                    Some(value) => Some(ids.resolve(as_str(value))?),
                     None => None,
                 })
                 .link(match event.attributes.get("link") {
-                    Some(value) => Some(ids.resolve(&value.as_string())?),
+                    Some(value) => Some(ids.resolve(as_str(value))?),
                     None => None,
                 })
                 .reason(
                     event
                         .attributes
                         .get("reason")
-                        .map(|value| value.as_string()),
+                        .map(|value| as_str(value).to_string()),
                 )
                 .attributes(attrs)
                 .build()

@@ -42,8 +42,8 @@ pub(crate) fn load_from_proto(path: &Path) -> Garage {
     }
 }
 
-impl Vehicle {
-    pub fn from(vehicle: &InternalVehicle) -> Self {
+impl From<&InternalVehicle> for Vehicle {
+    fn from(vehicle: &InternalVehicle) -> Self {
         Self {
             id: vehicle.id().internal(),
             r#type: vehicle.vehicle_type.internal(),
@@ -54,8 +54,8 @@ impl Vehicle {
     }
 }
 
-impl VehicleType {
-    pub fn from(vehicle: &InternalVehicleType) -> Self {
+impl From<&InternalVehicleType> for VehicleType {
+    fn from(vehicle: &InternalVehicleType) -> Self {
         Self {
             id: vehicle.id.internal(),
             length: vehicle.length,

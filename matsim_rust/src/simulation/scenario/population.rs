@@ -1,4 +1,4 @@
-use crate::generated::population::leg::Route;
+use crate::generated::population::Route;
 use crate::generated::population::{Activity, GenericRoute, Leg, Person, Plan, PtRouteDescription};
 use crate::simulation::InternalAttributes;
 use crate::simulation::agents::agent::SimulationAgent;

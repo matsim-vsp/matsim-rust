@@ -24,66 +24,66 @@ pub(crate) fn write_to_proto_with_link_attribute_overrides(
     overrides: &LinkAttributeOverrides,
 ) {
     info!("Start writing proto network to path: {path:?}");
-    let wire_network =
-        crate::generated::network::Network::from_with_link_attribute_overrides(network, overrides);
+    let wire_network = to_wire_with_link_attribute_overrides(network, overrides);
     crate::generated::write_to_file(wire_network, path);
     info!("Finished writing proto network to path: {path:?}");
 }
 
-impl crate::generated::network::Network {
-    pub fn from(network: &Network) -> Self {
-        Self::from_with_link_attribute_overrides(network, &LinkAttributeOverrides::default())
+impl From<&Network> for crate::generated::network::Network {
+    fn from(network: &Network) -> Self {
+        to_wire_with_link_attribute_overrides(network, &LinkAttributeOverrides::default())
     }
+}
 
-    pub(crate) fn from_with_link_attribute_overrides(
-        network: &Network,
-        overrides: &LinkAttributeOverrides,
-    ) -> Self {
-        info!("Converting Network into wire format");
-        let nodes: Vec<_> = network
-            .nodes()
-            .iter()
-            .map(|n| Node {
-                id: n.id.external().to_string(),
-                coordinate: Some(Coordinate {
-                    x: n.coord.x,
-                    y: n.coord.y,
-                    z: n.coord.z,
-                }),
-                partition: n.partition,
-                cmp_weight: n.cmp_weight,
-            })
-            .collect();
-        let links: Vec<_> = network
-            .links()
-            .iter()
-            .map(|l| {
-                let attributes = merged_link_attributes(l, overrides).as_cloned_map();
-                Link {
-                    id: l.id.external().to_string(),
-                    from: l.from.external().to_string(),
-                    to: l.to.external().to_string(),
-                    length: l.length,
-                    capacity: l.capacity,
-                    freespeed: l.freespeed,
-                    permlanes: l.permlanes,
-                    modes: l.modes.iter().map(|id| id.external().to_string()).collect(),
-                    partition: l.partition,
-                    attributes,
-                }
-            })
-            .collect();
+pub(crate) fn to_wire_with_link_attribute_overrides(
+    network: &Network,
+    overrides: &LinkAttributeOverrides,
+) -> crate::generated::network::Network {
+    info!("Converting Network into wire format");
+    let nodes: Vec<_> = network
+        .nodes()
+        .iter()
+        .map(|n| Node {
+            id: n.id.external().to_string(),
+            coordinate: Some(Coordinate {
+                x: n.coord.x,
+                y: n.coord.y,
+                z: n.coord.z,
+            }),
+            partition: n.partition,
+            cmp_weight: n.cmp_weight,
+        })
+        .collect();
+    let links: Vec<_> = network
+        .links()
+        .iter()
+        .map(|l| {
+            let attributes = merged_link_attributes(l, overrides).as_cloned_map();
+            Link {
+                id: l.id.external().to_string(),
+                from: l.from.external().to_string(),
+                to: l.to.external().to_string(),
+                length: l.length,
+                capacity: l.capacity,
+                freespeed: l.freespeed,
+                permlanes: l.permlanes,
+                modes: l.modes.iter().map(|id| id.external().to_string()).collect(),
+                partition: l.partition,
+                attributes,
+            }
+        })
+        .collect();
 
-        crate::generated::network::Network {
-            nodes,
-            links,
-            effective_cell_size: network.effective_cell_size(),
-        }
+    crate::generated::network::Network {
+        nodes,
+        links,
+        effective_cell_size: network.effective_cell_size(),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::to_wire_with_link_attribute_overrides;
     use crate::simulation::InternalAttributes;
     use crate::simulation::id::Id;
     use crate::simulation::network::STORAGE_CAPACITY_USED_IN_QSIM;
@@ -126,12 +126,10 @@ mod tests {
         let mut overrides = LinkAttributeOverrides::default();
         overrides.insert(link_id.clone(), link_attributes);
 
-        let wire = crate::generated::network::Network::from_with_link_attribute_overrides(
-            &network, &overrides,
-        );
+        let wire = to_wire_with_link_attribute_overrides(&network, &overrides);
         assert_eq!(
             Some(200.),
-            wire.links[0].attributes[STORAGE_CAPACITY_USED_IN_QSIM].as_double_opt()
+            wire.links[0].attributes[STORAGE_CAPACITY_USED_IN_QSIM].as_double()
         );
 
         let round_trip = Network::from(wire);

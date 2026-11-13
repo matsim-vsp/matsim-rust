@@ -1,8 +1,8 @@
 syntax = "proto3";
 package routing;
 
-import "simulation/io/proto/types/population.proto";
-import "simulation/io/proto/types/general.proto";
+import "matsim/io/types/population.proto";
+import "matsim/io/types/general.proto";
 import "google/protobuf/empty.proto";
 
 service RoutingService {
@@ -13,8 +13,8 @@ service RoutingService {
 message Request {
   string person_id = 1;
   string from_link_id = 2;
-  general.Coordinate from = 3;
-  general.Coordinate to = 5;
+  matsim.io.types.Coordinate from = 3;
+  matsim.io.types.Coordinate to = 5;
   string to_link_id = 7;
   string mode = 8;
   // Simulation clock instant in nanoseconds since simulation start.
@@ -25,7 +25,7 @@ message Request {
 }
 
 message Response {
-  repeated population.Leg legs = 1;
-  repeated population.Activity activities = 2;
+  repeated matsim.io.types.Leg legs = 1;
+  repeated matsim.io.types.Activity activities = 2;
   bytes request_id = 3;
 }
