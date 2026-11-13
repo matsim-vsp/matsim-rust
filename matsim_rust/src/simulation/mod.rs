@@ -1,10 +1,10 @@
 use crate::generated::general::AttributeValue;
-use crate::generated::general::attribute_value::Type;
 use crate::simulation::id::Id;
 use crate::simulation::id::serializable_type::StableTypeId;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use io::xml::attributes::IOAttributes;
+use matsim_schemas::matsim::io::types::attribute_value::Type;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

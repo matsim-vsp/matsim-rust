@@ -1,5 +1,5 @@
 use crate::generated::general::Coordinate;
-use crate::generated::population::leg::Route;
+use crate::generated::population::Route;
 use crate::generated::population::{
     Activity, GenericRoute, Header, Leg, NetworkRoute, Person, Plan, PtRoute, PtRouteDescription,
 };
@@ -121,8 +121,8 @@ pub fn write_to_proto(population: &Population, path: &Path) {
     writer.flush().expect("Failed to flush buffer");
 }
 
-impl Person {
-    pub fn from(value: &InternalPerson) -> Self {
+impl From<&InternalPerson> for Person {
+    fn from(value: &InternalPerson) -> Self {
         Self {
             id: value.id().external().to_string(),
             plan: value.plans().iter().map(Plan::from).collect(),
@@ -132,19 +132,19 @@ impl Person {
     }
 }
 
-impl Plan {
+impl From<&InternalPlan> for Plan {
     fn from(value: &InternalPlan) -> Self {
         Self {
             attributes: value.attributes.as_cloned_map(),
             selected: value.selected,
-            legs: value.legs().iter().map(|p| Leg::from(p)).collect(),
-            acts: value.acts().iter().map(|l| Activity::from(l)).collect(),
+            legs: value.legs().iter().map(|&p| Leg::from(p)).collect(),
+            acts: value.acts().iter().map(|&l| Activity::from(l)).collect(),
             score: value.score,
         }
     }
 }
 
-impl Activity {
+impl From<&InternalActivity> for Activity {
     fn from(value: &InternalActivity) -> Self {
         Self {
             act_type: value.act_type.external().to_string(),
@@ -166,7 +166,7 @@ impl Activity {
     }
 }
 
-impl Leg {
+impl From<&InternalLeg> for Leg {
     fn from(value: &InternalLeg) -> Self {
         Self {
             mode: value.mode.external().to_string(),
@@ -182,7 +182,7 @@ impl Leg {
     }
 }
 
-impl Route {
+impl From<&InternalRoute> for Route {
     fn from(value: &InternalRoute) -> Self {
         match value {
             InternalRoute::Generic(g) => Route::GenericRoute(GenericRoute::from(g)),
@@ -192,7 +192,7 @@ impl Route {
     }
 }
 
-impl GenericRoute {
+impl From<&InternalGenericRoute> for GenericRoute {
     fn from(value: &InternalGenericRoute) -> Self {
         Self {
             start_link: value.start_link().external().to_string(),
@@ -204,7 +204,7 @@ impl GenericRoute {
     }
 }
 
-impl NetworkRoute {
+impl From<&InternalNetworkRoute> for NetworkRoute {
     fn from(value: &InternalNetworkRoute) -> Self {
         Self {
             delegate: Some(GenericRoute::from(value.generic_delegate())),
@@ -217,7 +217,7 @@ impl NetworkRoute {
     }
 }
 
-impl PtRoute {
+impl From<&InternalPtRoute> for PtRoute {
     fn from(value: &InternalPtRoute) -> Self {
         Self {
             delegate: Some(GenericRoute::from(value.generic_delegate())),
@@ -226,7 +226,7 @@ impl PtRoute {
     }
 }
 
-impl PtRouteDescription {
+impl From<&InternalPtRouteDescription> for PtRouteDescription {
     fn from(value: &InternalPtRouteDescription) -> Self {
         Self {
             transit_route_id: value.transit_route_id.external().to_string(),

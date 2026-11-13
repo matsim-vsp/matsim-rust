@@ -196,7 +196,7 @@ mod tests {
         );
         // A scalar encoded with the old wire format is still understood.
         let scalar = AttributeValue::decode([0x12, 0x03, b'o', b'l', b'd'].as_slice()).unwrap();
-        assert_eq!("old", scalar.as_string());
+        assert_eq!(Some("old"), scalar.as_string());
     }
 
     #[test]

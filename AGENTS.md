@@ -63,10 +63,16 @@ avoid solving borrowing problems by cloning an entire scenario or population.
   problem, not a source-code regression.
 - `.cargo/config.toml` contains Apple Silicon Homebrew search paths. Do not
   generalize or replace them incidentally while working on unrelated code.
-- `matsim_rust/build.rs` compiles the `.proto` sources with the prebuilt
-  `protoc-bin-vendored` compiler and its bundled standard includes; no system
-  `protoc` or protobuf C++ build is needed. Edit the `.proto` definitions or
-  handwritten adapter code, never generated files in Cargo's `OUT_DIR`.
+- The message types shared across MATSim projects (population, network,
+  events, vehicles, facilities, transit) come from the `matsim-schemas` crate
+  (github.com/matsim-org/matsim-schemas, pinned by tag) and are re-exported in
+  `matsim_rust/src/generated`. Change them there, not here.
+- `matsim_rust/build.rs` compiles the remaining `.proto` sources of this crate
+  (`ids.proto`, `routing.proto`) with the prebuilt `protoc-bin-vendored`
+  compiler and its bundled standard includes; no system `protoc` or protobuf
+  C++ build is needed. `routing.proto` imports the shared types from
+  matsim-schemas. Edit the `.proto` definitions or handwritten adapter code,
+  never generated files in Cargo's `OUT_DIR`.
 - The optional `http` feature pulls in remote-download support and may require
   additional TLS/OpenSSL support on some systems.
 

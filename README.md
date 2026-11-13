@@ -37,7 +37,9 @@ Some dependencies are compiled from bundled C and C++ sources. Building the proj
 compiler and CMake. On Linux, OpenSSL is required as well, because the remote download support (feature `http`) and the
 tests use `reqwest`.
 
-Protobuf types are generated using the prebuilt `protoc` compiler and standard `.proto` includes supplied by
+The protobuf message types shared with other MATSim projects (population, network, events, vehicles, facilities,
+transit) come from [matsim-schemas](https://github.com/matsim-org/matsim-schemas). The remaining protobuf types are
+generated using the prebuilt `protoc` compiler and standard `.proto` includes supplied by
 `protoc-bin-vendored`. No system `protoc` installation or protobuf C++ build is needed. Builds require a host platform
 supported by that crate; unsupported platforms fail explicitly rather than falling back to a system compiler.
 
