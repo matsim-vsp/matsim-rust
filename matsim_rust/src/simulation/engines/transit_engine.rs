@@ -140,7 +140,8 @@ impl TransitEngine {
             now < due_tick,
             "Transit vehicle {} from partition {from} to partition {} was received in tick {}, but it \
              is due at stop {} in tick {}. This might happen if the partitions share no link. To \
-             mitigate this problem, you might enable the global sync.",
+             mitigate this problem, you might enable the global sync. With global sync, this is a \
+             bug.",
             vehicle.id(),
             self.rank,
             now.value(),
@@ -399,8 +400,11 @@ impl TransitEngine {
             return;
         }
 
-        // As for "normal teleportation: Min time for teleportation is one tick,
-        // so that the result does not depend on whether that stop is on another partition.
+        // A vehicle that is sent to another partition in this tick is received there after that
+        // partition's transit step (see `LegEngine::do_step`), so it can arrive in the next tick at
+        // the earliest. Locally, it arrives in the next tick at the earliest too, so that the result
+        // does not depend on whether the next stop is on another partition. Unlike transit,
+        // teleportation has no minimum duration, since teleported agents arrive after `send_recv`.
         let earliest_arrival = next;
         vehicle
             .driver_mut()

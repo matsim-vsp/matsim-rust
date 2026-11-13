@@ -30,16 +30,7 @@ pub struct ChannelSimCommunicator {
 }
 
 impl SimCommunicator for ChannelSimCommunicator {
-    fn send_receive_vehicles<F>(
-        &self,
-        vehicles: IntMap<u32, InternalSyncMessage>,
-        expected_vehicle_messages: &mut IntSet<u32>,
-        now: Tick,
-        mut on_msg: F,
-    ) where
-        F: FnMut(InternalSyncMessage),
-    {
-        // send messages to everyone
+    fn send_vehicles(&self, vehicles: IntMap<u32, InternalSyncMessage>) {
         for (target, msg) in vehicles {
             let sender = self.senders.get(target as usize).unwrap();
             sender
@@ -51,21 +42,28 @@ impl SimCommunicator for ChannelSimCommunicator {
                     )
                 });
         }
+    }
 
-        // receive messages from everyone
+    fn receive_vehicles<F>(
+        &self,
+        expected_vehicle_messages: &mut IntSet<u32>,
+        now: Tick,
+        mut on_msg: F,
+    ) where
+        F: FnMut(InternalSyncMessage),
+    {
         while !expected_vehicle_messages.is_empty() {
             let received_msg = self.recv().sync_message();
-            let from_rank = received_msg.from_process();
-
-            // If a message was received from a neighbor partition for this very time step, remove
-            // that partition from expected messages which indicates which partitions we are waiting
-            // for
+            // A neighbor sends exactly one message per time step. Once its message of this step
+            // has arrived, it is not waited for anymore.
             if received_msg.time() == now {
-                expected_vehicle_messages.remove(&from_rank);
+                expected_vehicle_messages.remove(&received_msg.from_process());
             }
-
-            // publish the received message to the message broker
             on_msg(received_msg);
+        }
+        // Also read what has arrived in the meantime, e.g. from partitions that are no neighbors.
+        for msg in self.receive_pending() {
+            on_msg(msg);
         }
     }
 
@@ -163,8 +161,33 @@ mod tests {
     use crate::simulation::time::Tick;
     use nohash_hasher::{IntMap, IntSet};
 
-    /// Rank 1 does not expect messages from rank 0, so it does not read the message while
-    /// sending and receiving. Only `receive_pending` returns it.
+    /// Rank 1 does not expect messages from rank 0, so it does not wait for the message, but reads
+    /// it, because it has arrived before rank 1 receives.
+    #[test]
+    fn receive_vehicles_reads_arrived_messages_of_non_neighbors() {
+        let mut comms = ChannelSimCommunicator::create_n_2_n(2);
+        let comm_1 = comms.pop().unwrap();
+        let comm_0 = comms.pop().unwrap();
+
+        let message = InternalSyncMessage::new(Tick::new(7), 0, 1);
+        comm_0.send_vehicles(IntMap::from_iter([(1, message)]));
+        comm_0.receive_vehicles(&mut IntSet::default(), Tick::new(7), |_| {
+            panic!("Rank 0 expects no messages")
+        });
+        let mut received = vec![];
+        comm_1.send_vehicles(IntMap::default());
+        comm_1.receive_vehicles(&mut IntSet::default(), Tick::new(7), |msg| {
+            received.push(msg)
+        });
+        assert_eq!(1, received.len());
+        assert_eq!(0, received[0].from_process());
+        assert_eq!(Tick::new(7), received[0].time());
+
+        assert!(comm_1.receive_pending().is_empty());
+        assert!(comm_0.receive_pending().is_empty());
+    }
+
+    /// Messages that have not been read are returned by `receive_pending`.
     #[test]
     fn receive_pending_returns_unread_messages() {
         let mut comms = ChannelSimCommunicator::create_n_2_n(2);
@@ -172,20 +195,7 @@ mod tests {
         let comm_0 = comms.pop().unwrap();
 
         let message = InternalSyncMessage::new(Tick::new(7), 0, 1);
-        comm_0.send_receive_vehicles(
-            IntMap::from_iter([(1, message)]),
-            &mut IntSet::default(),
-            Tick::new(7),
-            |_| panic!("Rank 0 expects no messages"),
-        );
-        let mut received = vec![];
-        comm_1.send_receive_vehicles(
-            IntMap::default(),
-            &mut IntSet::default(),
-            Tick::new(7),
-            |msg| received.push(msg),
-        );
-        assert!(received.is_empty());
+        comm_0.send_vehicles(IntMap::from_iter([(1, message)]));
 
         let pending = comm_1.receive_pending();
         assert_eq!(1, pending.len());

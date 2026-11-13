@@ -124,8 +124,8 @@ impl TeleportationEngine {
             .time_to_tick(teleported_agent.end_time(self.clock.tick_to_time(now)));
         assert!(
             now <= due_tick,
-            "Remote teleportation for agent {} from partition {} to partition {} arrived at tick {} after its queue-processing deadline: end time {}, due tick {}. This might happen\
-            if teleportation messages are received one time step later than expected. To mitigate this problem, you might enable the global sync.",
+            "Remote teleportation for agent {} from partition {} to partition {} arrived at tick {} after its queue-processing deadline: end time {}, due tick {}. This might happen \
+            if teleportation messages are received one time step later than expected. To mitigate this problem, you might enable the global sync. With global sync, this is a bug.",
             teleported_agent.agent().id().external(),
             from,
             to,

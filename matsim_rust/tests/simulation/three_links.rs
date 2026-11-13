@@ -129,23 +129,6 @@ fn three_links_two_parts_match_expected_events() {
     .unwrap();
 }
 
-/// The agent walks from link1 in partition 0 to link3 in partition 1. Without link2, no link
-/// connects both partitions, so partition 1 never reads the message with the teleported agent.
-#[deterministic_id_test(matsim_rust)]
-#[should_panic(
-    expected = "1 unprocessed messages between partitions (from, to) {(0, 1)}. 1 teleported agents or transit passengers are lost"
-)]
-fn teleportation_between_disconnected_partitions_panics() {
-    let config_args = CommandLineArgs::new_with_path(
-        "./tests/resources/3-links/3-links-config-2-teleport-disconnected.yml",
-    );
-    let scenario = Scenario::load(Config::from_args(config_args));
-    let controller = ControllerBuilder::default_with_scenario(scenario)
-        .build()
-        .unwrap();
-    controller.run();
-}
-
 /// Only the road links allow the main mode `car`. The stops are not connected to the road, so
 /// they are assigned to the partition of the nearest road node. The agent walks from link1 to the
 /// stop next to node4, i.e. from one partition to the other.

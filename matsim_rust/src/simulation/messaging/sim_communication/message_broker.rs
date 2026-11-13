@@ -135,14 +135,20 @@ where
         let comm_ref = &self.communicator;
         let in_msgs_ref = &mut self.in_messages;
 
-        // If enabled, wait for all processes to send their messages at the same time step.
-        // With external functionality like a DRT service, this makes it much easier to produce deterministic results.
-        // However, it also means that the simulation will be slower.
+        comm_ref.send_vehicles(vehicles);
+
+        // A partition only waits for the messages of its neighbors, and then reads everything that
+        // has arrived so far. Without global sync, a message from another partition, e.g. a
+        // teleported agent or a transit vehicle, may not have arrived by then, so it may be read
+        // one or more time steps late. With global sync, all partitions wait for each other after
+        // sending. Then the messages of this time step of all partitions are in the channel, so
+        // every message is read in the time step in which it was sent. This makes it much easier
+        // to produce deterministic results, but the simulation is slower.
         if self.global_sync {
             comm_ref.barrier();
         }
 
-        comm_ref.send_receive_vehicles(vehicles, &mut expected_vehicle_messages, now, |msg| {
+        comm_ref.receive_vehicles(&mut expected_vehicle_messages, now, |msg| {
             Self::handle_incoming_msg(msg, &mut result, in_msgs_ref, now)
         });
 
@@ -153,9 +159,9 @@ where
     /// by all partitions after their last step.
     ///
     /// A partition only waits for messages from its neighbors, i.e. the partitions it shares a link
-    /// with. Messages from other partitions, e.g. teleported agents, are only read if they arrive
-    /// while the partition is waiting for its neighbors, and never if it has no neighbors at all.
-    /// The agents in such messages are lost.
+    /// with. Without global sync, messages from other partitions, e.g. teleported agents, that
+    /// arrive after the last step of a partition are only returned here. The agents in such
+    /// messages are lost.
     pub fn take_unprocessed_messages(&mut self) -> Vec<InternalSyncMessage> {
         // Wait until all partitions have finished their last step, so that no message is still
         // being sent.
@@ -402,8 +408,43 @@ mod tests {
         });
     }
 
+    /// With global sync, a message to a partition that is not a neighbor is read in the time step
+    /// in which it is sent. 0 and 3 are no neighbors: 3 only waits for 2. Without global sync, 3
+    /// often reads the message of 0 only in a later step.
+    #[deterministic_id_test]
+    fn global_sync_receives_messages_of_non_neighbors_in_the_same_step() {
+        execute_test_with(true, |broker| {
+            // Checked after all steps, so that a failure does not leave the others waiting.
+            let mut late = Vec::new();
+            for now in 0..200 {
+                if broker.rank() == 0 {
+                    let agent = create_agent(now, vec!["6"]);
+                    let vehicle = SimulationVehicle::from_parts(now, 0, 0., 0., agent);
+                    broker.add_veh(vehicle_message(vehicle), now);
+                }
+
+                let result = broker.send_recv(now);
+
+                let received = result
+                    .iter()
+                    .filter(|msg| msg.from_process() == 0 && msg.vehicles().len() == 1)
+                    .map(|msg| msg.time().value())
+                    .collect::<Vec<_>>();
+                if broker.rank() == 3 && received != [now] {
+                    late.push((now, received));
+                }
+            }
+            assert!(
+                late.is_empty(),
+                "Partition 3 did not receive the message of 0 in the step it was sent (step, \
+                 received): {late:?}"
+            );
+        });
+    }
+
     fn create_net_message_broker(
         communicator: ChannelSimCommunicator,
+        global_sync: bool,
     ) -> NetMessageBroker<ChannelSimCommunicator> {
         let rank = communicator.rank();
         let mut config = config::Config::default();
@@ -428,7 +469,12 @@ mod tests {
             assert_eq!(partition.get_link_ids().len(), 1);
         }
 
-        NetMessageBroker::new(Rc::new(communicator), &create_network(), &partition, false)
+        NetMessageBroker::new(
+            Rc::new(communicator),
+            &create_network(),
+            &partition,
+            global_sync,
+        )
     }
 
     fn vehicle_message(vehicle: SimulationVehicle) -> VehicleMessage {
@@ -513,6 +559,14 @@ mod tests {
     where
         F: Fn(&mut NetMessageBroker<ChannelSimCommunicator>) + Send + Sync + 'static,
     {
+        execute_test_with(false, test);
+    }
+
+    /// Like [`execute_test`], with or without global sync.
+    fn execute_test_with<F>(global_sync: bool, test: F)
+    where
+        F: Fn(&mut NetMessageBroker<ChannelSimCommunicator>) + Send + Sync + 'static,
+    {
         let network = create_network();
         let communicators = ChannelSimCommunicator::create_n_2_n(network.nodes().len() as u32);
 
@@ -523,7 +577,7 @@ mod tests {
         for c in communicators {
             let cloned_test_ref = test_ref.clone();
             let handle = thread::spawn(move || {
-                let mut broker = create_net_message_broker(c);
+                let mut broker = create_net_message_broker(c, global_sync);
                 let result = panic::catch_unwind(AssertUnwindSafe(|| cloned_test_ref(&mut broker)));
                 // a failing partition still waits, so that the others do not wait forever
                 broker.take_unprocessed_messages();

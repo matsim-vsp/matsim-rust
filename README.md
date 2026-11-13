@@ -107,26 +107,6 @@ The project is built using cargo.
 cargo build --release
 ```
 
-### GitHub Actions build times
-
-The PR and `main` workflows cache compiled Cargo dependencies with `Swatinem/rust-cache`. Both the release build
-without `http` and the release tests with `http` still run on every invocation. Cargo timing reports are uploaded as
-the `cargo-timings` artifact, including on failures when reports are available, and retained for ten days.
-
-Before caching and prebuilt `protoc` were introduced, three successful PR runs on November 12, 2026 had these timings:
-
-| PR | Release build | Additional test compilation | Tests, including doc-tests |
-| --- | --- | --- | --- |
-| [#347](https://github.com/matsim-vsp/matsim-rust/actions/runs/43217684853) | 7m 16s | 4m 06s | about 1m 10s |
-| [#348](https://github.com/matsim-vsp/matsim-rust/actions/runs/43226037259) | 9m 06s | 5m 13s | about 1m 20s |
-| [#349](https://github.com/matsim-vsp/matsim-rust/actions/runs/43238685057) | 6m 36s | 4m 01s | about 1m 01s |
-
-These are historical observations on different commits and runners, not a controlled benchmark. To assess the change,
-compare a first run with no matching cache to a subsequent run of the same revision with a cache hit. Include cache
-restore/save and timing artifact uploads in the total job duration. Confirm that dependencies are reused and that
-`protobuf-src` is no longer compiled. The existing checks, including the Berlin release tests, must pass in both runs;
-GitHub measurements after this change are still pending.
-
 ## Test
 
 To execute all tests run:

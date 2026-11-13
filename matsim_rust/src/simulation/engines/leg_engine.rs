@@ -166,6 +166,8 @@ impl<C: SimCommunicator> LegEngine<C> {
     #[hotpath::measure]
     #[instrument(level = "trace", skip(self, agents), fields(rank=self.net_message_broker.rank()))]
     pub(crate) fn do_step(&mut self, now: Tick, agents: Vec<LegAgent>) -> Vec<LegAgent> {
+        // In case of teleportation: An agent that changes the partition is received here and put into the send buffer.
+        // The agent is sent in `send_recv` and can be received on another partition in the same tick (see step 4 and 5).
         self.receive_agents(now, agents);
 
         // 1: move nodes
