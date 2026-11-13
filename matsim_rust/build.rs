@@ -7,10 +7,13 @@ use std::path::PathBuf;
 /// Compiles the .proto files of this crate. The shared message types (population, network, events,
 /// ...) come from matsim-schemas: routing.proto imports them from there, and the generated code
 /// refers to the Rust types of matsim-schemas instead of generating them again.
+///
+/// routing.proto lies in `proto/` at the repository root because the Java router (`java/`) is
+/// generated from the same file.
 fn main() {
     let proto_files = [
         PathBuf::from("src/simulation/io/proto/types/ids.proto"),
-        PathBuf::from("src/external_services/routing/routing.proto"),
+        PathBuf::from("../proto/routing.proto"),
     ];
 
     // tell cargo to rerun this build script if any of the proto files change
@@ -32,6 +35,7 @@ fn main() {
         .expect("The bundled protoc compiler's standard .proto include directory is unavailable");
     let include_dirs = [
         PathBuf::from("src/"),
+        PathBuf::from("../proto/"),
         matsim_schemas::proto_dir(),
         protoc_include,
     ];

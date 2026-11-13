@@ -1,0 +1,41 @@
+name: Java
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "java/**", "proto/**", ".github/workflows/java.yml" ]
+  pull_request:
+    branches: [ "main" ]
+    paths: [ "java/**", "proto/**", ".github/workflows/java.yml" ]
+
+permissions:
+  contents: read
+
+jobs:
+  router:
+    name: Java router
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # TODO: remove once org.matsim:matsim-schemas-java is published on repo.matsim.org
+      # (release workflow of matsim-org/matsim-schemas). Until then, build it from its tag.
+      - name: Install matsim-schemas-java from its tag
+        run: |
+          version=$(mvn -B -q -f java/pom.xml help:evaluate -Dexpression=matsim-schemas.version -DforceStdout)
+          git clone --depth 1 --branch "v$version" https://github.com/matsim-org/matsim-schemas.git "$RUNNER_TEMP/matsim-schemas"
+          cd "$RUNNER_TEMP/matsim-schemas/java"
+          mvn -B versions:set -DnewVersion="$version" -DgenerateBackupPoms=false
+          mvn -B install
+
+      - name: Build and test
+        working-directory: java
+        run: mvn -B verify

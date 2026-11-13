@@ -16,6 +16,13 @@ The Cargo workspace has two members:
 - `matsim-rust` (directory `matsim_rust`): the simulation library, command-line tools, and almost all tests.
 - `macros`: procedural macros used by the simulation and its tests.
 
+Outside the workspace:
+
+- `proto/routing.proto`: the gRPC contract between the simulation and the router. Both the Rust client
+  (`matsim_rust/build.rs`) and the Java router are generated from it; change it for both sides at once.
+- `java/`: the routing server (Maven module, Java 25, `mvn verify`), a gRPC wrapper around MATSim's pt
+  router. Its message types come from `org.matsim:matsim-schemas-java`.
+
 Read these files before making broad changes:
 
 - `README.md` for dependencies, build commands, and runnable examples.
@@ -68,7 +75,7 @@ avoid solving borrowing problems by cloning an entire scenario or population.
   (github.com/matsim-org/matsim-schemas, pinned by tag) and are re-exported in
   `matsim_rust/src/generated`. Change them there, not here.
 - `matsim_rust/build.rs` compiles the remaining `.proto` sources of this crate
-  (`ids.proto`, `routing.proto`) with the prebuilt `protoc-bin-vendored`
+  (`ids.proto`, `../proto/routing.proto`) with the prebuilt `protoc-bin-vendored`
   compiler and its bundled standard includes; no system `protoc` or protobuf
   C++ build is needed. `routing.proto` imports the shared types from
   matsim-schemas. Edit the `.proto` definitions or handwritten adapter code,
