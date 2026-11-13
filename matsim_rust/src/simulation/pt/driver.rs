@@ -1,18 +1,18 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{
+use crate::simulation::agents::SimulationAgentLogic;
+use crate::simulation::agents::agent::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NextPhase,
-    PassengerAgent, SimulationAgentLogic, TeleportationAgent, TransitDriverAgent,
-    TransitDriverLogic,
+    PassengerAgent, TeleportationAgent, TransitDriverAgent, TransitDriverLogic,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;
-use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::pt::schedule::{DepartureSequenceInRoute, TransitSimSchedule};
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::transit::{
-    DepartureIndex, TransitDeparture, TransitLine, TransitRoute, TransitRouteStop, TransitSchedule,
-    TransitStopFacility,
+    DepartureIndex, RouteIndex, StopIndexInRoute, TransitDeparture, TransitLine, TransitRoute,
+    TransitRouteStop, TransitSchedule, TransitStopFacility,
 };
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
@@ -153,7 +153,7 @@ impl ActivityLogic for WaitingDriver {
 pub struct PlannedDriver {
     plan: DriverPlan,
     /// Index of the stop at which the vehicle halts or which it approaches.
-    stop: usize,
+    stop: StopIndexInRoute,
     /// The arrival at the current stop while approaching it, the departure while halting there.
     next_time: SimTime,
 }
@@ -167,6 +167,8 @@ struct DriverPlan {
     line: Id<TransitLine>,
     route: Id<TransitRoute>,
     departure: Id<TransitDeparture>,
+    route_index: RouteIndex,
+    sequence: DepartureSequenceInRoute,
     start_link: Id<Link>,
     destination_link: Id<Link>,
     /// The type of the activity after the departure.
@@ -181,7 +183,8 @@ impl PlannedDriver {
     pub fn new(schedule: &TransitSimSchedule, index: DepartureIndex, now: SimTime) -> Self {
         let transit = schedule.schedule();
         let departure = transit.departure(index);
-        let route = transit.route(transit.departure_route(index));
+        let route_index = transit.departure_route(index);
+        let route = transit.route(route_index);
         let plan = DriverPlan {
             id: schedule.driver(index).clone(),
             mode: route.transport_mode.clone(),
@@ -189,6 +192,8 @@ impl PlannedDriver {
             line: route.line.clone(),
             route: route.id.clone(),
             departure: departure.id.clone(),
+            route_index,
+            sequence: schedule.sequence(index),
             start_link: start_link(transit, route).clone(),
             destination_link: transit
                 .end_link(route)
@@ -215,7 +220,7 @@ impl PlannedDriver {
         let next_time = apply_stop_time_constraints(plan.scheduled[0], now).arrival;
         Self {
             plan,
-            stop: 0,
+            stop: StopIndexInRoute::FIRST,
             next_time,
         }
     }
@@ -249,7 +254,7 @@ impl LegLogic for PlannedDriver {
         if self.upcoming_stops().is_empty() {
             Some(&self.plan.destination_link)
         } else {
-            Some(&self.plan.stop_links[self.stop])
+            Some(&self.plan.stop_links[self.stop.index()])
         }
     }
     fn try_into_network(self: Box<Self>) -> Result<NetworkDriverAgent, LegAgent> {
@@ -291,11 +296,19 @@ impl TransitDriverLogic for PlannedDriver {
     }
 
     fn stop(&self) -> &Id<TransitStopFacility> {
-        &self.plan.stops[self.stop]
+        &self.plan.stops[self.stop.index()]
+    }
+
+    fn route_stop(&self) -> (RouteIndex, StopIndexInRoute) {
+        (self.plan.route_index, self.stop)
+    }
+
+    fn sequence(&self) -> DepartureSequenceInRoute {
+        self.plan.sequence
     }
 
     fn upcoming_stops(&self) -> &[Id<TransitStopFacility>] {
-        &self.plan.stops[self.stop + 1..]
+        &self.plan.stops[self.stop.next().index()..]
     }
 
     fn next_time(&self) -> SimTime {
@@ -303,7 +316,8 @@ impl TransitDriverLogic for PlannedDriver {
     }
 
     fn notify_stop_arrived(&mut self, now: SimTime) {
-        self.next_time = apply_stop_time_constraints(self.plan.scheduled[self.stop], now).departure;
+        self.next_time =
+            apply_stop_time_constraints(self.plan.scheduled[self.stop.index()], now).departure;
     }
 
     fn notify_stop_departed(&mut self, earliest_arrival: SimTime, now: SimTime) {
@@ -312,12 +326,13 @@ impl TransitDriverLogic for PlannedDriver {
             "Transit driver {} cannot depart from its last stop to another stop.",
             self.id()
         );
-        let delay = now.duration_since(self.plan.scheduled[self.stop].departure);
-        self.stop += 1;
+        let delay = now.duration_since(self.plan.scheduled[self.stop.index()].departure);
+        self.stop = self.stop.next();
         // Unlike SBB, preserve the travel time after a late departure. Recompute the delay at
         // every departure, so that time recovered during a halt is not carried forward again.
-        self.next_time = (self.plan.scheduled[self.stop].arrival + SimTime::from_duration(delay))
-            .max(earliest_arrival);
+        self.next_time = (self.plan.scheduled[self.stop.index()].arrival
+            + SimTime::from_duration(delay))
+        .max(earliest_arrival);
     }
 }
 
@@ -385,7 +400,7 @@ impl ActivityLogic for FinishedDriver {
 #[cfg(test)]
 mod tests {
     use super::{PlannedDriver, StopTimes, WaitingDriver};
-    use crate::simulation::agents::{TransitDriverAgent, TransitDriverLogic};
+    use crate::simulation::agents::agent::{TransitDriverAgent, TransitDriverLogic};
     use crate::simulation::config::TransitSimulation;
     use crate::simulation::pt::schedule::{
         TransitSimSchedule, give_each_departure_its_own_vehicle,

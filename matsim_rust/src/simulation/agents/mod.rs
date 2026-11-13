@@ -1,10 +1,11 @@
 pub mod agent;
 pub mod agent_logic;
-mod phases;
-
-pub use phases::*;
 
 use crate::simulation::Identifiable;
+use crate::simulation::agents::agent::{
+    ActivityLogic, LegLogic, NetworkDriverLogic, PassengerLogic, StuckLogic, TeleportationLogic,
+    TransitDriverLogic,
+};
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::time::SimTime;
 use std::fmt::Debug;

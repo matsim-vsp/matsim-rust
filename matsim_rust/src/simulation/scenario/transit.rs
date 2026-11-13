@@ -27,9 +27,35 @@ pub struct RouteIndex(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DepartureIndex(u32);
 
+/// Position of a stop in [`TransitRoute::stops`] and [`TransitRoute::stop_facilities`]: the
+/// first stop that a departure of the route serves has [`Self::FIRST`], the next one
+/// [`Self::next`], and so on. A facility may occur at several positions of a route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StopIndexInRoute(u32);
+
+impl StopIndexInRoute {
+    /// The first stop of a route.
+    pub const FIRST: Self = Self(0);
+
+    /// The stop after this one.
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// The position in [`TransitRoute::stops`].
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 impl RouteIndex {
     fn new(index: usize) -> Self {
         Self(u32::try_from(index).expect("A transit schedule has at most u32::MAX routes."))
+    }
+
+    /// The position in [`TransitSchedule::routes`], e.g. to build a key from it.
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
     }
 }
 

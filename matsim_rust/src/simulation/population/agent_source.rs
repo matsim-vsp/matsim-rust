@@ -1,4 +1,4 @@
-use crate::simulation::agents::ActivityAgent;
+use crate::simulation::agents::agent::ActivityAgent;
 use crate::simulation::agents::agent_logic::{
     AdaptivePlanBasedSimulationLogic, PlanBasedSimulationLogic,
 };

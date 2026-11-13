@@ -1,4 +1,5 @@
-use crate::simulation::agents::{EndTime, LegAgent, PassengerAgent, TransitDriverAgent};
+use crate::simulation::agents::EndTime;
+use crate::simulation::agents::agent::{LegAgent, PassengerAgent, TransitDriverAgent};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::{
     emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
@@ -13,14 +14,15 @@ use crate::simulation::messaging::messages::TransitVehicleMessage;
 use crate::simulation::messaging::partition_change::{
     PartitionChangeContext, PartitionChangeEntity,
 };
-use crate::simulation::pt::schedule::TransitSimSchedule;
+use crate::simulation::pt::schedule::{DepartureSequenceInRoute, TransitSimSchedule};
 use crate::simulation::queue::TimeQueue;
-use crate::simulation::scenario::transit::TransitStopFacility;
+use crate::simulation::scenario::transit::{RouteIndex, StopIndexInRoute, TransitStopFacility};
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::{SimClock, SimTime, Tick};
 use crate::simulation::vehicles::TransitVehicle;
 use itertools::Itertools;
 use nohash_hasher::IntMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,6 +35,12 @@ const BOARDING_TIME: Duration = Duration::ZERO;
 /// deterministic transit engine in MATSim. Drivers decide when their vehicles arrive and depart,
 /// passengers decide whether they board and alight. The engine carries that out and emits the
 /// events.
+///
+/// Unlike in SBB's engine, the vehicles of a route do not overtake each other: they arrive at and
+/// depart from each stop in the order of their [sequence](TransitSimSchedule::sequence). A vehicle
+/// that reaches a stop before its predecessor waits in front of it, and a vehicle that is ready to
+/// depart before its predecessor waits at the stop with its doors open. Both happen at the stop,
+/// so on its partition. Vehicles of different routes may overtake each other.
 pub(crate) struct TransitEngine {
     schedule: Arc<TransitSimSchedule>,
     rank: u32,
@@ -44,7 +52,39 @@ pub(crate) struct TransitEngine {
     stops: IntMap<Id<TransitStopFacility>, StopState>,
     /// The stops to process in this tick: alighting and boarding ongoing.
     stops_to_be_processed: Vec<Id<TransitStopFacility>>,
+    /// For each stop of a route on this partition, the vehicle of the route that arrives there
+    /// next. Without an entry, it is the first, or all have arrived, so routes with one departure
+    /// need none.
+    arrivals: IntMap<RouteStop, DepartureSequenceInRoute>,
+    /// The vehicles that reached a stop of their route before their predecessor, by sequence. They
+    /// wait in front of the stop. Overtaking is rare, so this is usually empty.
+    blocked: IntMap<RouteStop, Vec<TransitVehicle>>,
 }
+
+/// A stop of a route, by its position in the route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct RouteStop {
+    route: RouteIndex,
+    stop: StopIndexInRoute,
+}
+
+impl RouteStop {
+    /// The stop that `vehicle` approaches or at which it halts.
+    fn of(vehicle: &TransitVehicle) -> Self {
+        let (route, stop) = vehicle.driver().route_stop();
+        Self { route, stop }
+    }
+}
+
+// `IntMap` hashes exactly one integer, so both fields are written as one. Both indices have 32
+// bits, so different keys write different values, as `Eq` requires.
+impl Hash for RouteStop {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(((self.route.index() as u64) << 32) | self.stop.index() as u64);
+    }
+}
+
+impl nohash_hasher::IsEnabled for RouteStop {}
 
 /// What leaves the transit engine in a step.
 #[derive(Default)]
@@ -123,6 +163,8 @@ impl TransitEngine {
             stops,
             new_passengers: Vec::new(),
             stops_to_be_processed: Vec::new(),
+            arrivals: IntMap::default(),
+            blocked: IntMap::default(),
         }
     }
 
@@ -193,6 +235,16 @@ impl TransitEngine {
         for mut vehicle in self.approaching.drain() {
             agents.extend(vehicle.take_passengers());
         }
+        for (_, vehicles) in self
+            .blocked
+            .drain()
+            .sorted_unstable_by_key(|(stop, _)| *stop)
+        {
+            for mut vehicle in vehicles {
+                agents.extend(vehicle.take_passengers());
+            }
+        }
+        self.arrivals.clear();
         self.departing.drain();
         agents.into_iter().map(|agent| agent as LegAgent).collect()
     }
@@ -238,37 +290,92 @@ impl TransitEngine {
         self.approaching.add_with_order(vehicle, now, order);
     }
 
-    /// Vehicles reach their stops. Their passengers alight when the stop is processed.
+    /// Vehicles reach their stops. Their passengers alight when the stop is processed. A vehicle
+    /// whose predecessor has not arrived yet waits in front of the stop and arrives right after it.
     fn arrive(&mut self, now: SimTime) {
-        for mut vehicle in self.approaching.pop(now) {
-            let stop = vehicle.driver().stop().clone();
-            self.comp_env.events_manager_borrow_mut().process_event(
-                &VehicleArrivesAtFacilityEventBuilder::default()
-                    .time(now)
-                    .vehicle(vehicle.id().clone())
-                    .facility(stop.clone())
-                    .build()
-                    .unwrap(),
-            );
-            vehicle.driver_mut().notify_stop_arrived(now);
-
-            let due = DepartureTracker {
-                stop: stop.clone(),
-                vehicle: vehicle.id().clone(),
-                time: vehicle.driver().next_time(),
-            };
-            self.departing.add_with_order(due, now, order(&vehicle));
-            self.stops
-                .get_mut(&stop)
-                .expect("Vehicles only halt at stops that a route serves.")
-                .halting_vehicles
-                .push(HaltingVehicle {
-                    vehicle,
-                    doors: Doors::Alighting,
-                    doors_used_until: now,
-                });
-            self.stops_to_be_processed.push(stop);
+        for vehicle in self.approaching.pop(now) {
+            let route_stop = RouteStop::of(&vehicle);
+            let sequence = vehicle.driver().sequence();
+            if sequence != self.next_to_arrive(route_stop) {
+                // Vehicle is not the next to arrive. This can only happen if there are delays.
+                let blocked = self.blocked.entry(route_stop).or_default();
+                let position =
+                    blocked.partition_point(|other| other.driver().sequence() < sequence);
+                blocked.insert(position, vehicle);
+                continue;
+            }
+            self.arrive_at_stop(vehicle, route_stop, now);
+            while let Some(successor) = self.take_unblocked(route_stop) {
+                self.arrive_at_stop(successor, route_stop, now);
+            }
         }
+    }
+
+    /// The vehicle of the route that may arrive at the stop next, unless all have arrived.
+    fn next_to_arrive(&self, route_stop: RouteStop) -> DepartureSequenceInRoute {
+        self.arrivals
+            .get(&route_stop)
+            .copied()
+            .unwrap_or(DepartureSequenceInRoute::FIRST)
+    }
+
+    /// The vehicle that waits in front of the stop and may arrive now, since its predecessor has.
+    fn take_unblocked(&mut self, route_stop: RouteStop) -> Option<TransitVehicle> {
+        let next = self.next_to_arrive(route_stop);
+        let blocked = self.blocked.get_mut(&route_stop)?;
+        if blocked[0].driver().sequence() != next {
+            return None;
+        }
+        let vehicle = blocked.remove(0);
+        if blocked.is_empty() {
+            self.blocked.remove(&route_stop);
+        }
+        Some(vehicle)
+    }
+
+    /// The vehicle, whose predecessors have all arrived, reaches its stop.
+    fn arrive_at_stop(&mut self, mut vehicle: TransitVehicle, route_stop: RouteStop, now: SimTime) {
+        let schedule = self.schedule.schedule();
+        let departures = schedule
+            .departures_of(schedule.route(route_stop.route))
+            .len();
+
+        // Increment next stop counter.
+        let next = self.next_to_arrive(route_stop).next();
+        // Once all vehicles of the route have arrived, none follows, so the entry is not needed.
+        if next.index() == departures {
+            self.arrivals.remove(&route_stop);
+        } else {
+            self.arrivals.insert(route_stop, next);
+        }
+
+        let stop = vehicle.driver().stop().clone();
+        self.comp_env.events_manager_borrow_mut().process_event(
+            &VehicleArrivesAtFacilityEventBuilder::default()
+                .time(now)
+                .vehicle(vehicle.id().clone())
+                .facility(stop.clone())
+                .build()
+                .unwrap(),
+        );
+        vehicle.driver_mut().notify_stop_arrived(now);
+
+        let due = DepartureTracker {
+            stop: stop.clone(),
+            vehicle: vehicle.id().clone(),
+            time: vehicle.driver().next_time(),
+        };
+        self.departing.add_with_order(due, now, order(&vehicle));
+        self.stops
+            .get_mut(&stop)
+            .expect("Vehicles only halt at stops that a route serves.")
+            .halting_vehicles
+            .push(HaltingVehicle {
+                vehicle,
+                doors: Doors::Alighting,
+                doors_used_until: now,
+            });
+        self.stops_to_be_processed.push(stop);
     }
 
     /// Processes the stops where a vehicle arrived or passengers started to wait, in the order of
@@ -351,32 +458,54 @@ impl TransitEngine {
     /// time has come. Otherwise, it tries again in the next tick, or once its doors are free.
     fn depart(&mut self, now: SimTime, next: SimTime, result: &mut TransitStepResult) {
         for due in self.departing.pop(now) {
-            let halting_vehicle = &mut self
+            let halting_vehicles = &mut self
                 .stops
                 .get_mut(&due.stop)
                 .expect("A vehicle that is due to depart halts at its stop.")
                 .halting_vehicles;
-            let position = halting_vehicle
+            let position = halting_vehicles
                 .iter()
                 .position(|halting_vehicle| halting_vehicle.vehicle.id() == &due.vehicle)
                 .expect("A vehicle that is due to depart halts at its stop.");
-            let candidate = &halting_vehicle[position];
+            let candidate = &halting_vehicles[position];
             let ready = candidate.doors == Doors::Boarding { complete: true }
                 && candidate.doors_used_until <= now;
-            if !ready {
+            // A vehicle that is ready waits for its predecessors at the stop, until they are due.
+            // If they leave later in this tick, it leaves in the next one.
+            let later = if ready {
+                Self::predecessor_departure(halting_vehicles, &candidate.vehicle)
+                    .map(|time| time.max(next))
+            } else {
+                Some(candidate.doors_used_until.max(next))
+            };
+            if let Some(later) = later {
                 let later_order = order(&candidate.vehicle);
-                let later_departure = DepartureTracker {
-                    time: candidate.doors_used_until.max(next),
-                    ..due
-                };
+                let later_departure = DepartureTracker { time: later, ..due };
                 self.departing
                     .add_with_order(later_departure, now, later_order);
                 continue;
             }
             // `remove` keeps the order in which the other vehicles arrived.
-            let vehicle = halting_vehicle.remove(position).vehicle;
+            let vehicle = halting_vehicles.remove(position).vehicle;
             self.leave_stop(vehicle, now, next, result);
         }
+    }
+
+    /// The latest departure time of the vehicles of the same route that halt at the stop and
+    /// depart before `vehicle`, if any halts there. Since a vehicle arrives only after its
+    /// predecessors, any predecessor that does not halt there anymore has left.
+    fn predecessor_departure(
+        halting_vehicles: &[HaltingVehicle],
+        vehicle: &TransitVehicle,
+    ) -> Option<SimTime> {
+        let (route, _) = vehicle.driver().route_stop();
+        let sequence = vehicle.driver().sequence();
+        halting_vehicles
+            .iter()
+            .map(|halting| halting.vehicle.driver())
+            .filter(|driver| driver.route_stop().0 == route && driver.sequence() < sequence)
+            .map(|driver| driver.next_time())
+            .max()
     }
 
     fn leave_stop(
@@ -563,7 +692,7 @@ impl TransitEngine {
 #[cfg(test)]
 mod tests {
     use super::TransitEngine;
-    use crate::simulation::agents::{LegAgent, PassengerAgent};
+    use crate::simulation::agents::agent::{LegAgent, PassengerAgent};
     use crate::simulation::config::TransitSimulation;
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;
     use crate::simulation::events::{
@@ -590,7 +719,7 @@ mod tests {
     /// from 3:20 to 4:00 minutes later and reaches stop 3 after 9 minutes.
     const SIX: u64 = 6 * 3600;
     /// The vehicle of the 06:15 departure of route 1to3, a copy of the shared vehicle `tr_2`.
-    const DEPARTURE_0615: &str = "tr_2_Blue Line_1to3_02";
+    const DEPARTURE_0615_VEHICLE: &str = "tr_2_Blue Line_1to3_02";
 
     type Exchange = (u64, &'static str, String, String);
     type Exchanges = Rc<RefCell<Vec<Exchange>>>;
@@ -730,8 +859,8 @@ mod tests {
             assert_eq!(
                 *exchanges.borrow(),
                 [
-                    exchange(SIX + 900, "enters", "1", DEPARTURE_0615),
-                    exchange(SIX + 1440, "leaves", "1", DEPARTURE_0615),
+                    exchange(SIX + 900, "enters", "1", DEPARTURE_0615_VEHICLE),
+                    exchange(SIX + 1440, "leaves", "1", DEPARTURE_0615_VEHICLE),
                 ]
             );
             let [(tick, passenger)] = alighted.as_slice() else {
@@ -779,9 +908,9 @@ mod tests {
         assert_eq!(
             boardings,
             [
-                exchange(SIX + 900, "enters", "1", DEPARTURE_0615),
-                exchange(SIX + 900, "enters", "2", DEPARTURE_0615),
-                exchange(SIX + 1110, "enters", "4", DEPARTURE_0615),
+                exchange(SIX + 900, "enters", "1", DEPARTURE_0615_VEHICLE),
+                exchange(SIX + 900, "enters", "2", DEPARTURE_0615_VEHICLE),
+                exchange(SIX + 1110, "enters", "4", DEPARTURE_0615_VEHICLE),
                 exchange(SIX + 1800, "enters", "3", "tr_1_Blue Line_1to3_03"),
             ]
         );
@@ -883,5 +1012,59 @@ mod tests {
                 (clock.tick_to_time(arrival), "2a".to_owned()),
             ]
         );
+    }
+    /// The 06:00 departure starts late at 06:16, after the 06:15 departure of the same route. The
+    /// 06:15 departure waits in front of stop 1 until the 06:00 departure arrives there, and then
+    /// follows it to each stop instead of overtaking it.
+    #[deterministic_id_test]
+    fn a_vehicle_does_not_overtake_its_late_predecessor_on_the_same_route() {
+        let schedule = tutorial_schedule(1);
+        let arrivals = Rc::new(RefCell::new(Vec::new()));
+        let mut comp_env = ThreadLocalComputationalEnvironment::default();
+        let recorded = arrivals.clone();
+        comp_env
+            .events_manager_borrow_mut()
+            .on::<VehicleArrivesAtFacilityEvent, _>(move |e| {
+                recorded.borrow_mut().push((
+                    e.time.as_secs() - SIX,
+                    e.vehicle.external().to_owned(),
+                    e.facility.external().to_owned(),
+                ))
+            });
+        let mut engine = TransitEngine::new(schedule.clone(), 0, comp_env, SimClock::new(1));
+
+        let late_vehicle = "tr_1_Blue Line_1to3_01";
+
+        let starts = [
+            // "normal" departure at 6:15
+            ("pt_Blue Line_1to3_02", SIX + 900),
+            // delay start 01 by 16 minutes so that it arrives after 02 0> departure at 6:16
+            ("pt_Blue Line_1to3_01", SIX + 960),
+        ];
+        for tick in SIX..=SIX + 1500 {
+            for (driver, _) in starts.iter().filter(|(_, start)| *start == tick) {
+                let (index, _) = schedule
+                    .schedule()
+                    .indexed_departures()
+                    .find(|(index, _)| schedule.driver(*index).external() == *driver)
+                    .unwrap();
+                let driver = PlannedDriver::new(&schedule, index, SimTime::from_secs(tick));
+                engine.receive_driver(Tick::new(tick), Box::new(driver));
+            }
+            engine.do_step(Tick::new(tick));
+        }
+
+        let expected = [
+            // late vehicle arrives at 6:16
+            (960, late_vehicle, "1"),
+            // vehicle right after the delayed vehicle
+            (960, DEPARTURE_0615_VEHICLE, "1"),
+            (1160, late_vehicle, "2a"),
+            (1160, DEPARTURE_0615_VEHICLE, "2a"),
+            (1460, late_vehicle, "3"),
+            (1460, DEPARTURE_0615_VEHICLE, "3"),
+        ]
+        .map(|(time, vehicle, stop)| (time, vehicle.to_owned(), stop.to_owned()));
+        assert_eq!(*arrivals.borrow(), expected);
     }
 }

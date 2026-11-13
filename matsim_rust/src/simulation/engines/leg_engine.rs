@@ -1,4 +1,4 @@
-use crate::simulation::agents::{
+use crate::simulation::agents::agent::{
     LegAgent, LegLogic, NetworkDriverAgent, PassengerAgent, TeleportationAgent, TransitDriverAgent,
 };
 use crate::simulation::config::{self, QSim, TransitSimulation};
@@ -435,8 +435,9 @@ impl<C: SimCommunicator> LegEngine<C> {
 mod tests {
     use super::*;
     use crate::simulation::Identifiable;
+    use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::agent::{NextPhase, PassengerAgent};
     use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
-    use crate::simulation::agents::{NextPhase, PassengerAgent, SimulationAgentLogic};
     use crate::simulation::scenario::population::{
         InternalGenericRoute, InternalPerson, InternalRoute,
     };

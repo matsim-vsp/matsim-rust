@@ -1,7 +1,6 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::agent::SimulationAgent;
-use crate::simulation::agents::{
-    ActivityAgent, LegAgent, NextPhase, StuckAgent, TeleportationLogic,
+use crate::simulation::agents::agent::{
+    ActivityAgent, LegAgent, NextPhase, SimulationAgent, StuckAgent, TeleportationLogic,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::activity_engine::{ActivityEngine, ActivityEngineBuilder};

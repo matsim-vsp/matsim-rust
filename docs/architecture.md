@@ -290,6 +290,15 @@ on the links of the network, can let vehicles serve several departures. The cont
 transit vehicles with the copies to `output_transitSchedule` and `output_transitVehicles`, so that the output matches
 the events and can be used as input again. With teleported transit, it writes both unchanged if a schedule was read.
 
+Unlike in SBB's engine, the vehicles of a transit route do not overtake each other, whereas vehicles of different routes
+may. `TransitSimSchedule::sequence` orders the departures of each route by departure time and, for equal times, by
+their index, which follows the external ids. The transit engine lets a vehicle arrive at a stop of its route only after
+all its predecessors have; until then, it waits in front of the stop, without events and without passengers alighting
+or boarding. A vehicle that is ready to depart waits at the stop with open doors while a predecessor still halts there.
+Both checks happen at the stop, so on its partition, and need no messages. The engine counts the arrivals per stop of a
+route only while some but not all vehicles of the route have passed it. Delays that this order causes carry on to the
+next stops as other delays do.
+
 Each departure has a driver, an agent without a person. Like the drivers of MATSim's transit engines, it passes through
 three phases: it waits in a `pt interaction` activity at the start link of its route until the departure time, drives
 the departure as its leg and then stays in an activity without end until the mobsim drops it. Its activities emit no

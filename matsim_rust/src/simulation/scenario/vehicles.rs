@@ -1,6 +1,6 @@
 use crate::generated::vehicles::{Vehicle, VehicleType};
 use crate::simulation::InternalAttributes;
-use crate::simulation::agents::{LegAgent, NetworkDriverAgent};
+use crate::simulation::agents::agent::{LegAgent, NetworkDriverAgent};
 use crate::simulation::id::Id;
 use crate::simulation::io::proto::proto_vehicles::{load_from_proto, write_to_proto};
 use crate::simulation::io::xml::vehicles::{
