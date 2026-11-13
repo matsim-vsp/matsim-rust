@@ -24,6 +24,11 @@ The project is organized as a cargo workspace with multiple crates. The main cra
 - `matsim-rust` (directory `matsim_rust`): The core library containing the simulation logic
 - `macros`: The crate containing (test) macros used in the project
 
+Next to the workspace:
+
+- `java`: the routing server (Maven module), see [Java router](#java-router)
+- `proto`: `routing.proto`, the gRPC contract between the Rust simulation and the router, used by both
+
 Work with the `matsim-rust` crate for the simulation. The other crates are only for development purposes. In Rust
 code, the crate is imported as `matsim_rust`.
 
@@ -151,6 +156,28 @@ It is printed by `local_qsim --version` and logged as the first message whenever
 per-process log files in the output directory.
 The suffix `-dirty` means the binary was built with uncommitted changes to tracked files; `-nogit` means no git metadata
 was available at build time.
+
+## Java router
+
+The simulation can ask an external routing server for pt routes over gRPC (`proto/routing.proto`). The server in `java/`
+answers them with MATSim's pt router (SwissRailRaptor). Its messages use the shared types of matsim-schemas
+(`org.matsim:matsim-schemas-java`). It needs Java 25 and Maven; build it with
+
+```shell
+cd java
+mvn package
+```
+
+and start it with a MATSim config that contains the network, transit schedule and routing parameters (plans and
+counts are not read):
+
+```shell
+java -jar java/target/matsim-rust-router-*.jar --config /path/to/config.xml --threads 4 --port 50051
+```
+
+The server opens its port only after the scenario is loaded and all routing threads are ready, and then reports
+`SERVING` on the standard gRPC health service. It stops on the `Shutdown` call of the simulation or on SIGTERM.
+`local_qsim_routing --router-ip http://localhost:50051 ...` runs a simulation against it.
 
 ## Create input files
 
