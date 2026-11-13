@@ -54,12 +54,14 @@ In every step, a partition waits for messages from its neighbors, i.e. the parti
 carry vehicles. Links that allow modes, but none of the `qsim.main_modes`, e.g. the links of a transit network whose
 vehicles are teleported, do not make partitions neighbors, unless a partition has no other links to other partitions
 (`SimNetworkPartition::find_neighbors`). Since every partition exchanges a message with each neighbor in every step,
-the partition with the most neighbors tends to set the pace of all. Messages
-from other partitions, e.g. teleported agents whose destination link lies in a partition that is not a neighbor, are
-only read if they arrive while the partition is waiting, and never if the partition has no neighbors at all. This
-happens if the network consists of components that are not connected by links and a component forms a partition of
-its own. After each mobsim run, all workers wait for each other once more and return the messages they never
-processed. If there are any, the controller panics, because the agents in them are lost.
+the partition with the most neighbors tends to set the pace of all. After
+the messages of its neighbors, a partition reads all messages that have arrived so far, including those from other
+partitions, e.g. teleported agents whose destination link lies in a partition that is not a neighbor. Without
+`global_sync`, such a message may not have arrived yet and is then read in a later step, which may be too late for its
+agent or transit vehicle. With `global_sync`, all partitions send their messages of a step and then wait for each other,
+so every message is read in the step in which it was sent. After each mobsim run, all workers wait for each other once
+more and return the messages they never processed. If there are any, the controller panics, because the agents in them
+are lost.
 
 If a worker panics, its neighbors, the other workers at a barrier, and the controller would wait for it forever, since
 the other workers keep their senders alive. Instead, the worker sends the panic message to the controller in place of
