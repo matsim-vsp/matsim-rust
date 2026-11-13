@@ -33,13 +33,14 @@ use std::cell::{RefCell, RefMut};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::mem;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::{error, info};
 
 // This is a wrapper around a Sender that can be used to send requests to an external service.
 // The value is of type Arc as this is the adapter running in another thread.
@@ -183,7 +184,7 @@ impl ThreadLocalComputationalEnvironment {
 
 pub(crate) struct MobsimWorkerPool {
     command_senders: IntMap<u32, StdSender<MobsimWorkerCommand>>,
-    result_receiver: StdReceiver<MobsimWorkerResult>,
+    result_receiver: StdReceiver<MobsimWorkerOutcome>,
     handles: IntMap<u32, JoinHandle<()>>,
     num_parts: u32,
 }
@@ -200,6 +201,14 @@ pub(crate) struct MobsimWorkerResult {
     /// Messages the worker received but never processed. The agents in them are lost.
     pub unprocessed_messages: Vec<InternalSyncMessage>,
 }
+
+/// Reports that a mobsim worker panicked. See `run_mobsim_worker`.
+pub(crate) struct MobsimWorkerPanic {
+    pub rank: u32,
+    pub message: String,
+}
+
+pub(crate) type MobsimWorkerOutcome = Result<MobsimWorkerResult, MobsimWorkerPanic>;
 
 pub(crate) struct MobsimWorkerRun {
     iteration: u32,
@@ -249,7 +258,7 @@ impl MobsimWorkerPool {
         let num_parts = args.scenario_core.config.partitioning().num_parts;
         let comms = ChannelSimCommunicator::create_n_2_n(num_parts);
         let (result_sender, result_receiver) = hotpath::channel!(
-            mpsc::channel::<MobsimWorkerResult>(),
+            mpsc::channel::<MobsimWorkerOutcome>(),
             label = "mobsim-worker-results"
         );
         let mut command_senders = IntMap::default();
@@ -329,7 +338,10 @@ impl MobsimWorkerPool {
             let result = self
                 .result_receiver
                 .recv()
-                .unwrap_or_else(|err| panic!("Failed to receive mobsim worker result: {err}"));
+                .unwrap_or_else(|err| panic!("Failed to receive mobsim worker result: {err}"))
+                .unwrap_or_else(|MobsimWorkerPanic { rank, message }| {
+                    panic!("Mobsim worker rank {rank} panicked in iteration {iteration}: {message}")
+                });
             assert_eq!(
                 result.iteration, iteration,
                 "Received mobsim result for iteration {}, expected {}.",
@@ -413,17 +425,55 @@ fn describe_unprocessed_messages(iteration: u32, messages: &[InternalSyncMessage
     )
 }
 
+/// Runs a mobsim worker until it is shut down. A panic of the worker would otherwise go unnoticed:
+/// the other workers keep their senders to the controller and to each other, so the controller and
+/// the neighbors would wait for this worker forever. Thus, the worker reports its panic to the
+/// controller, which panics in turn and thereby ends the process. The other workers stay blocked.
 fn run_mobsim_worker(
     args: MobsimWorkerArguments,
     command_receiver: StdReceiver<MobsimWorkerCommand>,
-    result_sender: StdSender<MobsimWorkerResult>,
+    result_sender: StdSender<MobsimWorkerOutcome>,
 ) {
-    let mut worker = MobsimWorker::new(args);
-    let _guards = logging::init_logging(&worker.scenario_core.config, worker.rank);
+    let rank = args.rank;
+    let panic_sender = result_sender.clone();
+    // The outer `catch_unwind` catches panics while logging is set up. The inner one catches the
+    // panics of the worker while the logging guards are still alive, so that the panic is logged
+    // to the partition's log file, too.
+    let outcome = panic::catch_unwind(AssertUnwindSafe(move || {
+        let _guards = logging::init_logging(&args.scenario_core.config, rank);
+        let outcome = panic::catch_unwind(AssertUnwindSafe(move || {
+            let mut worker = MobsimWorker::new(args);
+            worker.run_loop(command_receiver, result_sender);
+        }));
+        if let Err(payload) = &outcome {
+            error!(
+                "Mobsim worker #{rank} panicked: {}",
+                panic_message(payload.as_ref())
+            );
+        }
+        outcome
+    }))
+    .and_then(|outcome| outcome);
 
-    worker.run_loop(command_receiver, result_sender);
+    if let Err(payload) = outcome {
+        // The controller may have stopped listening already. There is nobody else to tell then.
+        let _ = panic_sender.send(Err(MobsimWorkerPanic {
+            rank,
+            message: panic_message(payload.as_ref()),
+        }));
+        // Keep the thread panicking, so that joining it still reports the panic.
+        panic::resume_unwind(payload);
+    }
+}
 
-    drop(_guards);
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message.to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "<non-string panic payload>".to_string()
+    }
 }
 
 impl MobsimWorker {
@@ -495,7 +545,7 @@ impl MobsimWorker {
     fn run_loop(
         &mut self,
         command_receiver: StdReceiver<MobsimWorkerCommand>,
-        result_sender: StdSender<MobsimWorkerResult>,
+        result_sender: StdSender<MobsimWorkerOutcome>,
     ) {
         while let Ok(command) = command_receiver.recv() {
             match command {
@@ -513,12 +563,12 @@ impl MobsimWorker {
                         .mobsim_events_manager_borrow_mut()
                         .process_event(MobsimEvent::BeforeCleanup);
                     result_sender
-                        .send(MobsimWorkerResult {
+                        .send(Ok(MobsimWorkerResult {
                             rank: self.rank,
                             iteration,
                             agents,
                             unprocessed_messages,
-                        })
+                        }))
                         .unwrap_or_else(|err| {
                             panic!(
                                 "Mobsim worker rank {} failed to send result for iteration {}: {}",
@@ -951,11 +1001,11 @@ mod tests {
             .unwrap();
         let mut pool = MobsimWorkerPool::spawn(args);
 
-        let agents = pool.run_mobsim(0, false, vec![empty_mobsim_input(&scenario_core)]);
+        let agents = pool.run_mobsim(0, false, vec![empty_mobsim_input(&scenario_core, 0)]);
         assert!(agents.is_empty());
         assert_eq!(&[0], completed_iterations.lock().unwrap().as_slice());
 
-        let agents = pool.run_mobsim(1, true, vec![empty_mobsim_input(&scenario_core)]);
+        let agents = pool.run_mobsim(1, true, vec![empty_mobsim_input(&scenario_core, 0)]);
         assert!(agents.is_empty());
         assert_eq!(&[0, 1], completed_iterations.lock().unwrap().as_slice());
 
@@ -999,13 +1049,13 @@ mod tests {
         InternalPerson::new(Id::create(id), InternalPlan::default())
     }
 
-    fn empty_mobsim_input(scenario: &ScenarioCore) -> MobsimInput {
+    fn empty_mobsim_input(scenario: &ScenarioCore, rank: u32) -> MobsimInput {
         let network_partition =
-            SimNetworkPartition::from_network_for_test(&scenario.network, 0, &scenario.config);
+            SimNetworkPartition::from_network_for_test(&scenario.network, rank, &scenario.config);
 
         MobsimInput {
             partition: MobsimScenarioPartition {
-                rank: 0,
+                rank,
                 scenario: scenario.clone(),
                 network_partition,
                 transit_sim_schedule: Arc::default(),

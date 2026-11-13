@@ -61,6 +61,11 @@ happens if the network consists of components that are not connected by links an
 its own. After each mobsim run, all workers wait for each other once more and return the messages they never
 processed. If there are any, the controller panics, because the agents in them are lost.
 
+If a worker panics, its neighbors, the other workers at a barrier, and the controller would wait for it forever, since
+the other workers keep their senders alive. Instead, the worker sends the panic message to the controller in place of
+its result, and the controller panics with the worker's rank and message (`run_mobsim_worker`). The other workers are
+not woken up; they stay blocked until the process ends with the controller.
+
 Populations are read in parallel, both from XML and from protobuf. A reader thread splits the input into persons,
 which are parsed and converted by the rayon thread pool. The id store must stay independent of the number of threads:
 for protobuf, all ids except missing subpopulations are only looked up, and these are created in file order afterwards.
