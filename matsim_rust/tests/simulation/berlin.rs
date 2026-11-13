@@ -20,6 +20,10 @@ fn test_berlin_2() {
     test_berlin(2);
 }
 
+/// Runs the 0.1pct sample of Berlin v6.4 with schedule-based transit (see `config.yml`) and compares
+/// the events with the expected ones.
+/// Runs only 0-10h because otherwise the events file would be too large (45MB instead of 12MB).
+/// Thus, it produces stuckEvents at the end.
 fn test_berlin(parts: u32) {
     let mut config = Config::from_path("./assets/berlin-v6.4/config.yml");
     config.partitioning_mut().num_parts = parts;
