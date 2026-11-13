@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::simulation::agents::agent::{NetworkDriverAgent, PassengerAgent};
 use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
-use crate::simulation::agents::{NetworkDriverAgent, PassengerAgent};
 use crate::simulation::id::Id;
 use crate::simulation::scenario::Coordinate;
 use crate::simulation::scenario::population::{

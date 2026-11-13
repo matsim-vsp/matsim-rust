@@ -1,5 +1,5 @@
 use super::link::{LocalLink, SimLink, SplitInLink, SplitOutLink};
-use crate::simulation::agents::LegAgent;
+use crate::simulation::agents::agent::LegAgent;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{EventsManager, LinkEnterEventBuilder, LinkLeaveEventBuilder};
 use crate::simulation::id::Id;
@@ -833,9 +833,10 @@ struct MoveSingleLinkResult {
 mod tests {
     use super::{Candidate, SimNetworkPartition};
     use crate::simulation::Identifiable;
-    use crate::simulation::agents::{
+    use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::agent::{
         LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic, NextPhase, PassengerAgent,
-        SimulationAgentLogic, TeleportationAgent, TransitDriverAgent,
+        TeleportationAgent, TransitDriverAgent,
     };
     use crate::simulation::config::{MetisOptions, PartitionMethod};
     use crate::simulation::controller::ThreadLocalComputationalEnvironment;

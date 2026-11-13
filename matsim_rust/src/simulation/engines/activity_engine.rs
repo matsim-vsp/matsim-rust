@@ -1,5 +1,5 @@
-use crate::simulation::agents::ActivityAgent;
 use crate::simulation::agents::EndTime;
+use crate::simulation::agents::agent::ActivityAgent;
 use crate::simulation::config::Config;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::events::{ActivityEndEventBuilder, ActivityStartEventBuilder};
@@ -207,11 +207,10 @@ mod tests {
         InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
     };
     use crate::simulation::Identifiable;
+    use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::agent::{ActivityAgent, ActivityLogic, NextPhase};
     use crate::simulation::agents::agent_logic::{
         AdaptivePlanBasedSimulationLogic, PlanBasedSimulationLogic,
-    };
-    use crate::simulation::agents::{
-        ActivityAgent, ActivityLogic, NextPhase, SimulationAgentLogic,
     };
     use crate::simulation::config::Config;
     use crate::simulation::controller::{

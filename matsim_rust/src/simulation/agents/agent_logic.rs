@@ -3,11 +3,11 @@ use crate::external_services::routing::{
     InternalRoutingRequest, InternalRoutingRequestPayloadBuilder, InternalRoutingResponse,
 };
 use crate::simulation::Identifiable;
-use crate::simulation::agents::agent::ReadOnlyPerson;
-use crate::simulation::agents::{
+use crate::simulation::agents::SimulationAgentLogic;
+use crate::simulation::agents::agent::{
     ActivityAgent, ActivityLogic, LegAgent, LegLogic, NetworkDriverAgent, NetworkDriverLogic,
-    NextPhase, PassengerAgent, PassengerLogic, SimulationAgentLogic, StuckLogic,
-    TeleportationAgent, TeleportationLogic, TransitDriverAgent, TransitTeleportation,
+    NextPhase, PassengerAgent, PassengerLogic, ReadOnlyPerson, StuckLogic, TeleportationAgent,
+    TeleportationLogic, TransitDriverAgent, TransitTeleportation,
 };
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::id::Id;

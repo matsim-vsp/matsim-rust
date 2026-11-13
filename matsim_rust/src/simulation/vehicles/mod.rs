@@ -1,5 +1,5 @@
 use crate::simulation::Identifiable;
-use crate::simulation::agents::{
+use crate::simulation::agents::agent::{
     LegAgent, NetworkDriverAgent, NetworkDriverLogic, PassengerAgent, TransitDriverAgent,
     TransitDriverLogic,
 };

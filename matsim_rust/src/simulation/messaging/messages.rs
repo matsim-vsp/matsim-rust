@@ -1,6 +1,6 @@
 use crate::simulation::Identifiable;
 use crate::simulation::agents::EndTime;
-use crate::simulation::agents::{TeleportationAgent, TeleportationLogic};
+use crate::simulation::agents::agent::{TeleportationAgent, TeleportationLogic};
 use crate::simulation::engines::teleportation_engine::TeleportationAgentWithFixedEnd;
 use crate::simulation::id::Id;
 use crate::simulation::messaging::partition_change::PartitionChangeAttachments;

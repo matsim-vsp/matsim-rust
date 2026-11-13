@@ -1,4 +1,4 @@
-use crate::simulation::agents::LegAgent;
+use crate::simulation::agents::agent::LegAgent;
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::emit_partition_leave_events_for_vehicle;
 use crate::simulation::messaging::messages::VehicleMessage;

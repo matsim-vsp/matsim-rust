@@ -459,7 +459,7 @@ impl BackpackingDataCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::agents::TransitDriverLogic;
+    use crate::simulation::agents::agent::TransitDriverLogic;
     use crate::simulation::config::TransitSimulation;
     use crate::simulation::events::{
         ActivityEndEventBuilder, ActivityStartEventBuilder, PersonArrivalEventBuilder,

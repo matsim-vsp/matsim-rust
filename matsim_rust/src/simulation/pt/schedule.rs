@@ -13,6 +13,27 @@ use tracing::info;
 /// MATSim's `PtConstants.TRANSIT_ACTIVITY_TYPE`, which MATSim's transit drivers use as well.
 const DRIVER_ACTIVITY_TYPE: &str = "pt interaction";
 
+/// The position of a departure among the departures of its route, by departure time, see
+/// [`TransitSimSchedule::sequence`]. The vehicles of a route arrive at and depart from each stop
+/// in this order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DepartureSequenceInRoute(u32);
+
+impl DepartureSequenceInRoute {
+    /// The sequence of the first departure of a route.
+    pub const FIRST: Self = Self(0);
+
+    /// The sequence of the departure after this one.
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// The number of departures before this one in its route.
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// The [`TransitSchedule`] with what the mobsim adds to it: the driver and the vehicle of each
 /// departure and the partition of each stop. It is built once, before the first iteration, and
 /// shared by all partitions, like [`SimNetworkPartition`](crate::simulation::network::sim_network::SimNetworkPartition)
@@ -26,6 +47,13 @@ const DRIVER_ACTIVITY_TYPE: &str = "pt interaction";
 /// Offsets are kept as given in the schedule. Like SBB's transit engine, transit drivers clamp
 /// the resulting times: a vehicle never arrives before it left the previous stop and never
 /// departs before its scheduled departure.
+///
+/// Unlike SBB's transit engine, the vehicles of a route do not overtake each other. The
+/// [sequence](Self::sequence) of a departure is the order in which the vehicles of its route
+/// arrive at and depart from each stop. Vehicles of different routes may overtake each other.
+///
+/// Note: This struct is not meant to be mutated after it is built. Its use case is to provide a read-only view of the transit schedule
+/// for the simulation. If you want to modify the schedule, you should modify the [`TransitSchedule`] directly in the scenario.
 #[derive(Debug, Default)]
 pub struct TransitSimSchedule {
     schedule: Arc<TransitSchedule>,
@@ -33,6 +61,8 @@ pub struct TransitSimSchedule {
     drivers: Vec<Id<InternalPerson>>,
     /// The vehicle of each departure, by [`DepartureIndex`].
     vehicles: Vec<Id<InternalVehicle>>,
+    /// The sequence of each departure within its route, by [`DepartureIndex`].
+    sequences: Vec<DepartureSequenceInRoute>,
     /// The partition of each stop facility. Facilities that no route serves have no entry.
     stop_partitions: IntMap<Id<TransitStopFacility>, u32>,
     /// See [`Self::driver_activity_type`]. `None` for the empty schedule.
@@ -102,10 +132,12 @@ impl TransitSimSchedule {
             vehicles[index.index()] = Some(vehicle);
         }
 
+        let sequences = sequences(&schedule);
         let result = Self {
             schedule,
             drivers: drivers.into_iter().map(Option::unwrap).collect(),
             vehicles: vehicles.into_iter().map(Option::unwrap).collect(),
+            sequences,
             stop_partitions,
             // Created here, so that the id does not depend on which partition creates its drivers
             // first.
@@ -140,6 +172,13 @@ impl TransitSimSchedule {
 
     pub fn vehicle(&self, departure: DepartureIndex) -> &Id<InternalVehicle> {
         &self.vehicles[departure.index()]
+    }
+
+    /// The position of the departure among the departures of its route, ordered by departure
+    /// time and, for equal times, by [`DepartureIndex`]. The vehicles of a route arrive at and
+    /// depart from each stop in this order.
+    pub fn sequence(&self, departure: DepartureIndex) -> DepartureSequenceInRoute {
+        self.sequences[departure.index()]
     }
 
     /// The departures whose first stop is on `partition`. Their drivers start there.
@@ -198,6 +237,36 @@ impl TransitSimSchedule {
             }
         }
     }
+}
+
+/// The sequence of each departure within its route, by [`DepartureIndex`], see
+/// [`TransitSimSchedule::sequence`]. Departure indices follow the external ids, so equal departure
+/// times are ordered independently of the input format.
+fn sequences(schedule: &TransitSchedule) -> Vec<DepartureSequenceInRoute> {
+    let mut departures: Vec<_> = schedule
+        .indexed_departures()
+        .map(|(index, departure)| {
+            (
+                schedule.departure_route(index),
+                departure.departure_time,
+                index,
+            )
+        })
+        .collect();
+    departures.sort_unstable();
+
+    let mut sequences = vec![DepartureSequenceInRoute::FIRST; departures.len()];
+    let mut previous_route = None;
+    let mut sequence = DepartureSequenceInRoute::FIRST;
+    for (route, _, index) in departures {
+        if previous_route != Some(route) {
+            previous_route = Some(route);
+            sequence = DepartureSequenceInRoute::FIRST;
+        }
+        sequences[index.index()] = sequence;
+        sequence = sequence.next();
+    }
+    sequences
 }
 
 /// Gives each departure a vehicle of its own, for transit simulations without vehicle blocks
@@ -354,6 +423,7 @@ mod tests {
     use super::{TransitSimSchedule, give_each_departure_its_own_vehicle};
     use crate::simulation::config::{Config, Transit, TransitSimulation};
     use crate::simulation::id::Id;
+    use crate::simulation::io::xml::transit::IOTransitSchedule;
     use crate::simulation::scenario::network::{Link, Network};
     use crate::simulation::scenario::population::{InternalPerson, InternalPlan, Population};
     use crate::simulation::scenario::prepare::prepare_for_sim::prepare_for_sim;
@@ -362,6 +432,7 @@ mod tests {
     use crate::simulation::scenario::{ControllerScenario, Scenario};
     use crate::simulation::time::SimTime;
     use macros::deterministic_id_test;
+    use quick_xml::de::from_str;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::Duration;
@@ -371,8 +442,12 @@ mod tests {
     const VEHICLES: &str = "./assets/pt_tutorial/transitVehicles.xml";
 
     fn tutorial_schedule() -> TransitSimSchedule {
+        build_on_tutorial_network(TransitSchedule::from_file(Path::new(SCHEDULE)))
+    }
+
+    /// Builds `schedule` on the tutorial network with copies of the tutorial vehicles.
+    fn build_on_tutorial_network(mut schedule: TransitSchedule) -> TransitSimSchedule {
         let network = Network::from_file(NETWORK);
-        let mut schedule = TransitSchedule::from_file(Path::new(SCHEDULE));
         let mut garage = Garage::from_file(&PathBuf::from(VEHICLES));
         give_each_departure_its_own_vehicle(&mut schedule, &mut garage);
         TransitSimSchedule::build(
@@ -471,6 +546,54 @@ mod tests {
         );
     }
 
+    /// The sequence of a departure is its rank by departure time within its route, whatever the
+    /// order of the departure ids. Equal times keep the order of the ids. Each route counts on its
+    /// own.
+    #[deterministic_id_test]
+    fn departures_are_sequenced_by_time_within_their_route() {
+        let routes = &format!(
+            "{}{}",
+            route(
+                "R1",
+                r#"<departure id="a" departureTime="08:00:00" vehicleRefId="tr_1"/>
+                   <departure id="b" departureTime="07:00:00" vehicleRefId="tr_1"/>
+                   <departure id="c" departureTime="08:00:00" vehicleRefId="tr_1"/>"#
+            ),
+            route(
+                "R2",
+                r#"<departure id="a" departureTime="06:00:00" vehicleRefId="tr_2"/>"#
+            ),
+        );
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v1.dtd">
+<transitSchedule>
+    <transitStops>{FACILITIES}</transitStops>
+    <transitLine id="L">{routes}</transitLine>
+</transitSchedule>"#
+        );
+        let transit: IOTransitSchedule = from_str(&xml).unwrap();
+        let schedule = build_on_tutorial_network(transit.into());
+
+        let sequences: Vec<_> = schedule
+            .schedule()
+            .indexed_departures()
+            .map(|(index, _)| {
+                let driver = schedule.driver(index).external();
+                (driver, schedule.sequence(index).index())
+            })
+            .collect();
+        assert_eq!(
+            sequences,
+            [
+                ("pt_L_R1_a", 1),
+                ("pt_L_R1_b", 0),
+                ("pt_L_R1_c", 2),
+                ("pt_L_R2_a", 0),
+            ]
+        );
+    }
+
     #[deterministic_id_test]
     fn teleported_transit_builds_no_schedule_and_no_driver_ids() {
         let mut config = Config::default();
@@ -516,6 +639,18 @@ mod tests {
 
     /// Builds a schedule with one line `L` and one route `R` on the tutorial network. Stop `s1`
     /// is on link 11 and `s2` on link 12.
+    /// A route of line `L` from `s1` to `s2` of [`FACILITIES`], with [`STOPS`].
+    fn route(id: &str, departures: &str) -> String {
+        format!(
+            r#"<transitRoute id="{id}">
+                <transportMode>train</transportMode>
+                <routeProfile>{STOPS}</routeProfile>
+                <route><link refId="11"/><link refId="12"/></route>
+                <departures>{departures}</departures>
+            </transitRoute>"#
+        )
+    }
+
     fn build_small(facilities: &str, stops: &str, departures: &str, population: &Population) {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>

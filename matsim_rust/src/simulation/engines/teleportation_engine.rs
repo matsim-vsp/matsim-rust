@@ -1,5 +1,7 @@
-use crate::simulation::agents::{EndTime, TransitTeleportation};
-use crate::simulation::agents::{LegAgent, TeleportationAgent, TeleportationLogic};
+use crate::simulation::agents::EndTime;
+use crate::simulation::agents::agent::{
+    LegAgent, TeleportationAgent, TeleportationLogic, TransitTeleportation,
+};
 use crate::simulation::controller::ThreadLocalComputationalEnvironment;
 use crate::simulation::engines::{
     emit_partition_enter_events_for_agent, emit_partition_leave_events_for_agent,
@@ -214,11 +216,12 @@ impl TeleportationEngine {
 mod tests {
     use super::{TeleportationAgentWithFixedEnd, TeleportationEngine};
     use crate::simulation::Identifiable;
-    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
-    use crate::simulation::agents::{
-        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, PassengerAgent, SimulationAgentLogic,
-        TeleportationAgent, TeleportationLogic, TransitDriverAgent, TransitTeleportation,
+    use crate::simulation::agents::SimulationAgentLogic;
+    use crate::simulation::agents::agent::{
+        LegAgent, LegLogic, NetworkDriverAgent, NextPhase, PassengerAgent, TeleportationAgent,
+        TeleportationLogic, TransitDriverAgent, TransitTeleportation,
     };
+    use crate::simulation::agents::agent_logic::PlanBasedSimulationLogic;
     use crate::simulation::id::Id;
     use crate::simulation::scenario::Coordinate;
     use crate::simulation::scenario::network::Link;
