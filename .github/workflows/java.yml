@@ -26,16 +26,6 @@ jobs:
           java-version: '25'
           cache: maven
 
-      # TODO: remove once org.matsim:matsim-schemas-java is published on repo.matsim.org
-      # (release workflow of matsim-org/matsim-schemas). Until then, build it from its tag.
-      - name: Install matsim-schemas-java from its tag
-        run: |
-          version=$(mvn -B -q -f java/pom.xml help:evaluate -Dexpression=matsim-schemas.version -DforceStdout)
-          git clone --depth 1 --branch "v$version" https://github.com/matsim-org/matsim-schemas.git "$RUNNER_TEMP/matsim-schemas"
-          cd "$RUNNER_TEMP/matsim-schemas/java"
-          mvn -B versions:set -DnewVersion="$version" -DgenerateBackupPoms=false
-          mvn -B install
-
       - name: Build and test
         working-directory: java
         run: mvn -B verify
