@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Aggregates the Maven modules of this repository, so that IDEs such as IntelliJ IDEA load them together
+    with the Cargo workspace (Cargo.toml) when the repository root is opened, and `mvn verify` works from
+    here. It only lists modules: java/pom.xml has no parent and also builds on its own.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.matsim</groupId>
+    <artifactId>matsim-rust-build</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>matsim-rust (Maven modules)</name>
+
+    <modules>
+        <module>java</module>
+    </modules>
+</project>
