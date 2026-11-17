@@ -7,4 +7,3 @@ matsim_rust/test_output/
 /assets/routing_tests/*
 
 .DS_Store
-java/target/

@@ -1565,8 +1565,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
- "tonic-prost",
- "tonic-prost-build",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -1578,13 +1576,16 @@ dependencies = [
 
 [[package]]
 name = "matsim-schemas"
-version = "0.2.0"
-source = "git+https://github.com/matsim-org/matsim-schemas?tag=v0.2.0#9f3044f50037f927b4102ac550195c3c6119d090"
+version = "0.3.0"
+source = "git+https://github.com/matsim-org/matsim-schemas?tag=v0.3.0#fcd84024cf4ec54eba590335bc20b84808796ca0"
 dependencies = [
  "prost",
  "prost-build",
  "protoc-bin-vendored",
  "serde",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
