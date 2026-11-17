@@ -16,15 +16,6 @@ The Cargo workspace has two members:
 - `matsim-rust` (directory `matsim_rust`): the simulation library, command-line tools, and almost all tests.
 - `macros`: procedural macros used by the simulation and its tests.
 
-Outside the workspace:
-
-- `proto/routing.proto`: the gRPC contract between the simulation and the router. Both the Rust client
-  (`matsim_rust/build.rs`) and the Java router are generated from it; change it for both sides at once.
-- `java/`: the routing server (Maven module, Java 25, `mvn verify`), a gRPC wrapper around MATSim's pt
-  router. Its message types come from `org.matsim:matsim-schemas-java`.
-- `pom.xml` (root): aggregates the Maven modules for IDEs and `mvn verify` from the root. It has no
-  settings of its own; `java/pom.xml` has no parent and builds on its own.
-
 Read these files before making broad changes:
 
 - `README.md` for dependencies, build commands, and runnable examples.
@@ -76,12 +67,14 @@ avoid solving borrowing problems by cloning an entire scenario or population.
   events, vehicles, facilities, transit) come from the `matsim-schemas` crate
   (github.com/matsim-org/matsim-schemas, pinned by tag) and are re-exported in
   `matsim_rust/src/generated`. Change them there, not here.
-- `matsim_rust/build.rs` compiles the remaining `.proto` sources of this crate
-  (`ids.proto`, `../proto/routing.proto`) with the prebuilt `protoc-bin-vendored`
-  compiler and its bundled standard includes; no system `protoc` or protobuf
-  C++ build is needed. `routing.proto` imports the shared types from
-  matsim-schemas. Edit the `.proto` definitions or handwritten adapter code,
-  never generated files in Cargo's `OUT_DIR`.
+- The routing service API (`matsim/services/routing/v1/routing.proto`, the
+  contract with the external Java router) also comes from matsim-schemas,
+  including its generated gRPC client (crate feature `routing`), re-exported as
+  `generated::routing`. Change the API there.
+- `matsim_rust/build.rs` compiles only `ids.proto`, with the prebuilt
+  `protoc-bin-vendored` compiler; no system `protoc` or protobuf C++ build is
+  needed. Edit the `.proto` definitions or handwritten adapter code, never
+  generated files in Cargo's `OUT_DIR`.
 - The optional `http` feature pulls in remote-download support and may require
   additional TLS/OpenSSL support on some systems.
 

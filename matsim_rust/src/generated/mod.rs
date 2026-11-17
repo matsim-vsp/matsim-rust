@@ -6,16 +6,14 @@ use std::marker::PhantomData;
 use std::path::Path;
 use tracing::info;
 
-// The message types shared across MATSim projects come from matsim-schemas.
+// The message types shared across MATSim projects and the routing service API (messages and gRPC
+// client, feature `routing`) come from matsim-schemas.
+pub use matsim_schemas::matsim::services::routing::v1 as routing;
 pub use matsim_schemas::{events, facilities, general, network, population, transit, vehicles};
 
 // Generated from the .proto files of this crate, see build.rs.
 pub mod ids {
     include!(concat!(env!("OUT_DIR"), "/ids.rs"));
-}
-
-pub mod routing {
-    include!(concat!(env!("OUT_DIR"), "/routing.rs"));
 }
 
 pub fn read_from_file<T: Message + Default>(path: &Path) -> T {
