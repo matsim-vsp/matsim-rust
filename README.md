@@ -28,6 +28,8 @@ Next to the workspace:
 
 - `java`: the routing server (Maven module), see [Java router](#java-router)
 - `proto`: `routing.proto`, the gRPC contract between the Rust simulation and the router, used by both
+- `pom.xml`: only lists the Maven modules (`java`), so that IntelliJ IDEA loads them together with the Cargo workspace
+  when you open the repository root, and `mvn verify` works from there
 
 Work with the `matsim-rust` crate for the simulation. The other crates are only for development purposes. In Rust
 code, the crate is imported as `matsim_rust`.

@@ -22,6 +22,8 @@ Outside the workspace:
   (`matsim_rust/build.rs`) and the Java router are generated from it; change it for both sides at once.
 - `java/`: the routing server (Maven module, Java 25, `mvn verify`), a gRPC wrapper around MATSim's pt
   router. Its message types come from `org.matsim:matsim-schemas-java`.
+- `pom.xml` (root): aggregates the Maven modules for IDEs and `mvn verify` from the root. It has no
+  settings of its own; `java/pom.xml` has no parent and builds on its own.
 
 Read these files before making broad changes:
 
