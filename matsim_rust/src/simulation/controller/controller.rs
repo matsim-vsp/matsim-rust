@@ -395,7 +395,6 @@ impl Controller {
         }
 
         mobsim_workers.shutdown();
-        self.shutdown_adapters();
 
         info!("Writing output files:");
         if self.config.output().compression_type.is_protobuf() {
@@ -432,6 +431,10 @@ impl Controller {
 
         self.controller_events_manager
             .process_event(ControllerEvent::shutdown(true));
+
+        // Last, so that external services such as routers, which end on Shutdown, end together with the simulation
+        // and not while it still writes its output. This waits until the adapters have sent Shutdown.
+        self.shutdown_adapters();
     }
 
     fn run_iteration(

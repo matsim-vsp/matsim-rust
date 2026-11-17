@@ -58,6 +58,18 @@ pub trait RequestAdapter<T: RequestToAdapter> {
     }
 }
 
+/// Runs the [`RequestAdapter`] of an external service (e.g. the client of external routers) on a thread of its own,
+/// with its own tokio runtime, so that the synchronous mobsim workers can use an async client.
+///
+/// On its thread, the executor
+/// 1. builds the adapter with the [`RequestAdapterFactory`],
+/// 2. waits at `barrier`, the global barrier of the controller. The mobsim workers wait there once before their first
+///    iteration, so the mobsim starts only when the adapter is ready, and the time measured for the mobsim does not
+///    include waiting for the external service.
+/// 3. hands every request to [`RequestAdapter::on_request`] until the shutdown signal arrives. The adapter answers
+///    them in async tasks on the runtime, which has `worker_threads` threads.
+/// 4. on the shutdown signal calls [`RequestAdapter::on_shutdown`], waits for the tasks that it put into
+///    `shutdown_handles`.
 #[derive(Debug)]
 pub struct AsyncExecutor {
     worker_threads: u32,
