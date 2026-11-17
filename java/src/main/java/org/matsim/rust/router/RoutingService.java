@@ -39,6 +39,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.matsim.rust.router.RoutingUtils.ROUTING_MODE;
+import static org.matsim.rust.router.RoutingUtils.SECONDS_PER_HOUR;
+import static org.matsim.rust.router.RoutingUtils.nsToS;
+import static org.matsim.rust.router.RoutingUtils.sToNs;
+
 /**
  * Answers the routing requests of the Rust simulation with MATSim's pt router (SwissRailRaptor). Each
  * worker thread has its own router, created by {@link #init()}.
@@ -48,9 +53,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 final class RoutingService extends RoutingServiceGrpc.RoutingServiceImplBase {
 	private static final Logger log = LogManager.getLogger(RoutingService.class);
-	private static final int NANOS_PER_SECOND = 1_000_000_000;
-	/** The routing mode the responses carry; the raptor does not set it. */
-	private static final String ROUTING_MODE = "pt";
 
 	private final ThreadLocal<RoutingModule> router;
 	private final Runnable onShutdown;
@@ -97,7 +99,7 @@ final class RoutingService extends RoutingServiceGrpc.RoutingServiceImplBase {
 	}
 
 	private void logSimulationHour(int now) {
-		int hour = now / 3600;
+		int hour = now / SECONDS_PER_HOUR;
 		int last = lastLoggedHour.get();
 		if (hour > last && lastLoggedHour.compareAndSet(last, hour)) {
 			log.info("Received route request for simulation hour {}:00", String.format("%02d", hour));
@@ -215,13 +217,5 @@ final class RoutingService extends RoutingServiceGrpc.RoutingServiceImplBase {
 		activity.getEndTime().ifDefined(t -> builder.setEndTimeNs(sToNs(t)));
 		activity.getMaximumDuration().ifDefined(d -> builder.setMaxDurNs(sToNs(d)));
 		return builder.build();
-	}
-
-	static int nsToS(long ns) {
-		return (int) (ns / NANOS_PER_SECOND);
-	}
-
-	static long sToNs(double s) {
-		return (long) s * NANOS_PER_SECOND;
 	}
 }

@@ -45,13 +45,13 @@ public final class RoutingServer implements MATSimAppCommand {
 		description = "MATSim config with network, transit schedule and routing parameters. Plans and counts are not read.")
 	private String config;
 
-	@Option(names = "--output", defaultValue = "output/router", description = "Output directory (default: ${DEFAULT-VALUE}).")
+	@Option(names = "--output", defaultValue = RoutingUtils.DEFAULT_OUTPUT, description = "Output directory (default: ${DEFAULT-VALUE}).")
 	private Path output;
 
-	@Option(names = "--threads", defaultValue = "1", description = "Number of routing threads (default: ${DEFAULT-VALUE}).")
+	@Option(names = "--threads", defaultValue = "" + RoutingUtils.DEFAULT_THREADS, description = "Number of routing threads (default: ${DEFAULT-VALUE}).")
 	private int threads;
 
-	@Option(names = "--port", defaultValue = "50051", description = "Port to listen on, 0 for any free port (default: ${DEFAULT-VALUE}).")
+	@Option(names = "--port", defaultValue = "" + RoutingUtils.DEFAULT_PORT, description = "Port to listen on, 0 for any free port (default: ${DEFAULT-VALUE}).")
 	private int port;
 
 	public static void main(String[] args) {
@@ -145,7 +145,7 @@ public final class RoutingServer implements MATSimAppCommand {
 			return server.getPort();
 		}
 
-		/** Stops accepting requests, lets running ones finish for up to 10 s and stops the worker threads. */
+		/** Stops accepting requests, lets running ones finish for up to {@link RoutingUtils#STOP_TIMEOUT_SECONDS} s and stops the worker threads. */
 		synchronized void stop() {
 			if (server.isShutdown()) {
 				return;
@@ -154,7 +154,7 @@ public final class RoutingServer implements MATSimAppCommand {
 			health.enterTerminalState();
 			server.shutdown();
 			try {
-				if (!server.awaitTermination(10, TimeUnit.SECONDS)) {
+				if (!server.awaitTermination(RoutingUtils.STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
 					server.shutdownNow();
 				}
 			} catch (InterruptedException e) {
@@ -167,7 +167,7 @@ public final class RoutingServer implements MATSimAppCommand {
 		void awaitTermination() throws InterruptedException {
 			server.awaitTermination();
 			executor.shutdown();
-			executor.awaitTermination(10, TimeUnit.SECONDS);
+			executor.awaitTermination(RoutingUtils.STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 		}
 	}
 }

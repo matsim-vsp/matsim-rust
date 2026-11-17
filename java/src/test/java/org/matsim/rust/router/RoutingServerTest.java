@@ -26,8 +26,6 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoutingServerTest {
-	private static final long NANOS_PER_SECOND = 1_000_000_000L;
-
 	@TempDir
 	Path output;
 
@@ -60,9 +58,9 @@ class RoutingServerTest {
 			.setFrom(Coordinate.newBuilder().setX(1000).setY(1500))
 			.setToLinkId("4142")
 			.setTo(Coordinate.newBuilder().setX(4000).setY(1500))
-			.setMode("pt")
-			.setDepartureTimeNs(27126 * NANOS_PER_SECOND)
-			.setNowNs(27000 * NANOS_PER_SECOND)
+			.setMode(RoutingUtils.ROUTING_MODE)
+			.setDepartureTimeNs(27126 * RoutingUtils.NANOS_PER_SECOND)
+			.setNowNs(27000 * RoutingUtils.NANOS_PER_SECOND)
 			.build();
 
 		Routing.Response response = RoutingServiceGrpc.newBlockingStub(channel).getRoute(request);
@@ -72,7 +70,7 @@ class RoutingServerTest {
 		assertEquals("pt", response.getLegs(1).getMode());
 		assertEquals("walk", response.getLegs(2).getMode());
 		assertTrue(response.getLegs(1).hasPtRoute(), "the pt leg has a pt route");
-		response.getLegsList().forEach(leg -> assertEquals("pt", leg.getRoutingMode()));
+		response.getLegsList().forEach(leg -> assertEquals(RoutingUtils.ROUTING_MODE, leg.getRoutingMode()));
 
 		assertEquals(2, response.getActivitiesCount());
 		assertEquals("pt interaction", response.getActivities(0).getActType());
