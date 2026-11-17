@@ -255,9 +255,28 @@ fn network_modes(config: &Config) -> BTreeSet<String> {
         .collect()
 }
 
+/// All modes the config names: network and qsim main modes, the access/egress mode, the teleported
+/// modes and the transit passenger modes.
+fn all_modes(config: &Config) -> BTreeSet<String> {
+    let routing = config.routing();
+    network_modes(config)
+        .into_iter()
+        .chain(std::iter::once(routing.access_egress_mode.clone()))
+        .chain(
+            routing
+                .teleported_mode_params
+                .iter()
+                .map(|p| p.mode.clone()),
+        )
+        .chain(config.transit().passenger_modes.iter().cloned())
+        .collect()
+}
+
 fn prepare_interaction_activity_ids(config: &Config) {
-    // Routers may create these activities concurrently, including in fromVehiclesData mode.
-    for mode in network_modes(config) {
+    // Routers create these activities, possibly concurrently, and the responses of external routers
+    // (e.g. "pt interaction" of the pt router) are only looked up. So the ids of all modes of the
+    // config are created here, in a fixed order, also in fromVehiclesData mode.
+    for mode in all_modes(config) {
         Id::<String>::create(&mode);
         Id::<String>::create(&format!("{mode} interaction"));
     }
@@ -638,6 +657,29 @@ mod tests {
         assert_eq!(BTreeMap::new(), person_vehicles(&scenario, "b"));
         assert!(Id::<String>::try_get_from_ext("car interaction").is_some());
         assert!(Id::<String>::try_get_from_ext("bike interaction").is_some());
+    }
+
+    // Not only network modes: the access/egress and teleported mode (walk by default) and the transit
+    // passenger modes (pt by default) get their interaction activity types too, e.g. for the
+    // responses of an external pt router.
+    #[deterministic_id_test]
+    fn interaction_activity_ids_of_all_config_modes() {
+        let mut scenario = vehicle_scenario(
+            VehiclesSource::FromVehiclesData,
+            vehicle_types(&["car"]),
+            vec![person("a")],
+        );
+        assert!(Id::<String>::try_get_from_ext("pt interaction").is_none());
+
+        prepare_for_sim(&mut scenario).unwrap();
+
+        for mode in ["car", "bike", "walk", "pt"] {
+            assert!(Id::<String>::try_get_from_ext(mode).is_some(), "{mode}");
+            assert!(
+                Id::<String>::try_get_from_ext(&format!("{mode} interaction")).is_some(),
+                "{mode} interaction"
+            );
+        }
     }
 
     /// A scenario with main mode car, network routing mode bike and the given vehicle source.
