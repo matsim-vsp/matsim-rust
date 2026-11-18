@@ -780,7 +780,6 @@ register_override!("output.compression_type", |config, value| {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Routing {
-    pub mode: RoutingMode,
     #[serde(default)]
     pub network_modes: Vec<String>,
     #[serde(default = "default_access_egress_mode")]
@@ -839,18 +838,9 @@ where
     Ok(params)
 }
 
-register_override!("routing.mode", |config, value| {
-    config.routing_mut().mode = match value.to_lowercase().as_str() {
-        "ad-hoc" | "adhoc" => RoutingMode::AdHoc,
-        "use-plans" | "useplans" => RoutingMode::UsePlans,
-        _ => panic!("Invalid routing mode: {}", value),
-    };
-});
-
 impl Default for Routing {
     fn default() -> Self {
         Routing {
-            mode: RoutingMode::UsePlans,
             network_modes: Vec::new(),
             access_egress_mode: default_access_egress_mode(),
             teleported_mode_params: default_teleported_mode_params(),
@@ -864,6 +854,8 @@ pub struct Replanning {
     pub fraction_of_iterations_to_disable_innovation: f64,
     pub max_agent_plan_memory: u32,
     pub plan_selector_for_removal: String,
+    /// Trip routing modes for which the ReRouteIgnore strategy keeps the existing trip.
+    pub reroute_ignore_modes: Vec<String>,
     pub strategy_settings: Vec<StrategySetting>,
 }
 
@@ -907,6 +899,7 @@ impl Default for Replanning {
             fraction_of_iterations_to_disable_innovation: 1.0,
             max_agent_plan_memory: 5,
             plan_selector_for_removal: WORST_SCORE_STRATEGY_NAME.to_string(),
+            reroute_ignore_modes: Vec::new(),
             strategy_settings: vec![StrategySetting {
                 name: KEEP_LAST_SELECTED_STRATEGY_NAME.to_string(),
                 weight: 1.0,
@@ -1148,6 +1141,8 @@ register_override!("travel_time_calculator.bin_size", |config, value| {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Controller {
+    /// Skip route validation and routing of trips with these routing modes before each mobsim.
+    pub ignore_routing_mode_during_preparation: Vec<String>,
     pub first_iteration: u32,
     pub last_iteration: u32,
     pub write_events_interval: u32,
@@ -1197,6 +1192,7 @@ impl From<&Simulation> for QSim {
 impl From<&Simulation> for Controller {
     fn from(value: &Simulation) -> Self {
         Self {
+            ignore_routing_mode_during_preparation: Vec::new(),
             first_iteration: value.first_iteration,
             last_iteration: value.last_iteration,
             write_events_interval: value.write_events_interval,
@@ -1509,6 +1505,7 @@ impl Default for QSim {
 impl Default for Controller {
     fn default() -> Self {
         Self {
+            ignore_routing_mode_during_preparation: Vec::new(),
             first_iteration: 0,
             last_iteration: 1000,
             write_events_interval: 50,
@@ -1536,12 +1533,6 @@ impl Default for Simulation {
             link_dynamics: qsim.link_dynamics,
         }
     }
-}
-
-#[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize)]
-pub enum RoutingMode {
-    AdHoc,
-    UsePlans,
 }
 
 #[derive(PartialEq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize, Default)]
@@ -1867,7 +1858,7 @@ mod tests {
     use crate::simulation::config::{
         Ids, Network, Population, Transit, TransitSimulation, Vehicles,
     };
-    use crate::simulation::config::{Logging, ModalLinkSelection, RoutingMode};
+    use crate::simulation::config::{Logging, ModalLinkSelection};
     use crate::simulation::replanning::{
         KEEP_LAST_SELECTED_STRATEGY_NAME, WORST_SCORE_STRATEGY_NAME,
     };
@@ -1911,6 +1902,7 @@ mod tests {
             link_dynamics: config::LinkDynamics::Fifo,
         };
         let controller = Controller {
+            ignore_routing_mode_during_preparation: Vec::new(),
             first_iteration: 2,
             last_iteration: 4,
             write_events_interval: 3,
@@ -1978,6 +1970,12 @@ mod tests {
         assert_eq!(config.controller().first_iteration, 0);
         assert_eq!(config.controller().last_iteration, 1000);
         assert_eq!(config.controller().write_events_interval, 50);
+        assert!(
+            config
+                .controller()
+                .ignore_routing_mode_during_preparation
+                .is_empty()
+        );
         assert_eq!(config.controller().write_plans_interval, 50);
     }
 
@@ -2003,6 +2001,12 @@ mod tests {
         assert_eq!(parsed_config.controller().first_iteration, 2);
         assert_eq!(parsed_config.controller().last_iteration, 4);
         assert_eq!(parsed_config.controller().write_events_interval, 3);
+        assert!(
+            parsed_config
+                .controller()
+                .ignore_routing_mode_during_preparation
+                .is_empty()
+        );
         assert_eq!(parsed_config.controller().write_plans_interval, 5);
         assert_eq!(parsed_config.qsim().start_time, 1);
         assert_eq!(parsed_config.qsim().end_time, 42);
@@ -2094,7 +2098,6 @@ mod tests {
         modules:
           routing:
             type: Routing
-            mode: UsePlans
             network_modes:
               - car
               - bike
@@ -2109,7 +2112,6 @@ mod tests {
 
         let parsed_config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
 
-        assert_eq!(parsed_config.routing().mode, RoutingMode::UsePlans);
         assert_eq!(parsed_config.routing().network_modes, vec!["car", "bike"]);
         assert_eq!(parsed_config.routing().access_egress_mode, "walk");
         assert_eq!(
@@ -2157,12 +2159,10 @@ mod tests {
         modules:
           routing:
             type: Routing
-            mode: UsePlans
         "#;
 
         let parsed_config: Config = serde_yaml::from_str(yaml).expect("failed to parse config");
 
-        assert_eq!(parsed_config.routing().mode, RoutingMode::UsePlans);
         assert!(parsed_config.routing().network_modes.is_empty());
         assert_eq!(parsed_config.routing().access_egress_mode, "walk");
         assert_eq!(
@@ -2201,6 +2201,7 @@ mod tests {
                 fraction_of_iterations_to_disable_innovation: 0.8,
                 max_agent_plan_memory: 7,
                 plan_selector_for_removal: "BestScore".to_string(),
+                reroute_ignore_modes: Vec::new(),
                 strategy_settings: vec![
                     StrategySetting {
                         name: "ReRoute".to_string(),
@@ -2227,6 +2228,7 @@ mod tests {
                 fraction_of_iterations_to_disable_innovation: 1.0,
                 max_agent_plan_memory: 5,
                 plan_selector_for_removal: WORST_SCORE_STRATEGY_NAME.to_string(),
+                reroute_ignore_modes: Vec::new(),
                 strategy_settings: vec![StrategySetting {
                     name: KEEP_LAST_SELECTED_STRATEGY_NAME.to_string(),
                     weight: 1.0,
@@ -2269,7 +2271,6 @@ mod tests {
         modules:
           routing:
             type: Routing
-            mode: UsePlans
             teleported_mode_params: []
         "#;
 
@@ -2291,7 +2292,6 @@ mod tests {
         modules:
           routing:
             type: Routing
-            mode: UsePlans
             teleported_mode_params:
               - mode: pt
                 beeline_distance_factor: 1.1
@@ -2323,7 +2323,6 @@ mod tests {
         modules:
           routing:
             type: Routing
-            mode: UsePlans
             teleported_mode_params:
               - mode: walk
                 beeline_distance_factor: 1.1
@@ -2790,7 +2789,6 @@ modules:
             non_main_mode_links: NonMainModeLinks::default(),
         });
         config.set_routing(Routing {
-            mode: RoutingMode::UsePlans,
             network_modes: Vec::new(),
             access_egress_mode: "walk".to_string(),
             teleported_mode_params: vec![TeleportedParams {
@@ -2929,20 +2927,6 @@ modules:
         config.apply_overrides(&[("partitioning.method".to_string(), "none".to_string())]);
 
         assert_eq!(config.partitioning().method, PartitionMethod::None);
-    }
-
-    #[test]
-    fn override_routing_mode() {
-        let mut config = base_config();
-        config.apply_overrides(&[("routing.mode".to_string(), "ad-hoc".to_string())]);
-        assert_eq!(config.routing().mode, RoutingMode::AdHoc);
-    }
-
-    #[test]
-    #[should_panic]
-    fn override_routing_mode_invalid() {
-        let mut config = base_config();
-        config.apply_overrides(&[("routing.mode".to_string(), "InvalidMode".to_string())]);
     }
 
     #[test]

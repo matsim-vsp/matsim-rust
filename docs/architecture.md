@@ -96,6 +96,12 @@ after the conversion and are resolved during preparation; code running afterward
   validation; explicit references take precedence and must resolve. Newly routed trips use the person's assigned
   vehicle for their routing mode, rather than reusing the old trip's route vehicle.
 
+`controller.ignore_routing_mode_during_preparation` skips route validation and routing after vehicle, distance and
+travel-time preparation. `ReRouteIgnore` applies its own list, `replanning.reroute_ignore_modes`, when replanning a
+copy of a plan. Both filters use the routing mode of the complete trip. When either phase routes a later trip,
+the most recent fixed activity end time through the trip origin anchors its departure time calculation. This allows
+routing to resume after a trip of unknown duration.
+
 `qsim.vehicles_source` follows MATSim's `defaultVehicle`, `modeVehicleTypesFromVehiclesData`, and `fromVehiclesData`.
 Rust defaults to the second option and always generates `<person>_<mode>` ids; it has no deprecated option to use the
 person id alone for cars. For the first two options, every configured main or network routing mode gets a generated

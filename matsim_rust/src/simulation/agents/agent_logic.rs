@@ -14,8 +14,8 @@ use crate::simulation::id::Id;
 use crate::simulation::replanning::routing::Facility;
 use crate::simulation::scenario::network::Link;
 use crate::simulation::scenario::population::{
-    InternalActivity, InternalLeg, InternalPerson, InternalPlanElement, InternalPtRouteDescription,
-    InternalRoute,
+    InternalActivity, InternalLeg, InternalPerson, InternalPlan, InternalPlanElement,
+    InternalPtRouteDescription, InternalRoute, PREPLANNING_HORIZON,
 };
 use crate::simulation::scenario::transit::{TransitLine, TransitStopFacility};
 use crate::simulation::scenario::trip_structure_utils::{
@@ -431,6 +431,19 @@ impl StuckLogic for PlanBasedSimulationLogic {
 }
 
 impl AdaptivePlanBasedSimulationLogic {
+    /// Checks whether any activity in the selected plan requests rolling-horizon routing.
+    pub(crate) fn applies_to(plan: &InternalPlan) -> bool {
+        plan.elements
+            .iter()
+            .filter_map(InternalPlanElement::as_activity)
+            .any(|activity| {
+                activity
+                    .attributes
+                    .attributes
+                    .contains_key(PREPLANNING_HORIZON)
+            })
+    }
+
     /// Creates an agent that starts with the first activity of the person's selected plan.
     pub fn new_agent(person: InternalPerson) -> ActivityAgent {
         Box::new(Self::new(person))
@@ -449,10 +462,7 @@ impl AdaptivePlanBasedSimulationLogic {
     fn preplanning_horizon(&self) -> Option<u32> {
         // no need to wake up if there is no other leg.
         self.delegate.next_leg()?;
-        self.delegate
-            .curr_act()
-            .attributes
-            .get(crate::simulation::scenario::population::PREPLANNING_HORIZON)
+        self.delegate.curr_act().attributes.get(PREPLANNING_HORIZON)
     }
 
     fn react_to_woke_up(
