@@ -24,7 +24,8 @@ use std::borrow::Cow;
 use thiserror::Error;
 
 /// Prepares the population before every mobsim iteration: plans are validated and repaired, e.g.
-/// trips without valid routes are routed with the current travel times.
+/// trips without valid routes are routed with the current travel times unless the controller
+/// excludes their routing mode from preparation.
 #[hotpath::measure]
 pub(crate) fn prepare_for_mobsim(
     scenario: &mut ControllerScenario,
@@ -83,11 +84,6 @@ pub(crate) enum TripPreparationError {
     Routing(#[from] RoutingError),
 }
 
-enum TripAssessment {
-    Valid,
-    NeedsRouting(Id<String>),
-}
-
 fn prepare_plan<'a>(
     context: &PrepareForMobsimContext<'_>,
     person: &InternalPerson,
@@ -128,12 +124,27 @@ fn check_and_adapt_trip(
         .get(trip_index)
         .copied()
         .expect("routing modules must preserve the number of trips");
-    let TripAssessment::NeedsRouting(mode) = assess_trip(context, span, working_plan)? else {
+    let mode = trip_routing_mode(span.trip_elements(&working_plan.elements))?;
+    add_travel_distance(context.network, span, working_plan);
+    synchronize_missing_travel_times(span, working_plan);
+
+    if context
+        .config
+        .controller()
+        .ignore_routing_mode_during_preparation
+        .iter()
+        .any(|ignored| ignored == mode.external())
+    {
         return Ok(());
-    };
+    }
 
-    let new_elements = route_trip(context, person, &working_plan, span, &mode, trip_router)?;
+    let elements = &working_plan.elements;
+    let legs: Vec<_> = span.legs(elements).collect();
+    if trip_is_valid(context, span, elements, &mode, &legs) {
+        return Ok(());
+    }
 
+    let new_elements = route_trip(context, person, working_plan, span, &mode, trip_router)?;
     span.replace_trip_elements(&mut working_plan.to_mut().elements, new_elements);
     Ok(())
 }
@@ -146,11 +157,22 @@ pub(crate) fn route_trip(
     mode: &Id<String>,
     trip_router: &TripRouter,
 ) -> Result<Vec<InternalPlanElement>, TripPreparationError> {
-    let departure_time = TimeInterpretation::decide_on_elements_end_time(
-        &plan.elements[..=span.origin_index()],
-        &SimTime::default(),
-    )
-    .ok_or(TripPreparationError::MissingDepartureTime)?;
+    // Find a fixed activity end time even after a trip of unknown duration.
+    let preceding = &plan.elements[..=span.origin_index()];
+    let (start_index, start_time) = preceding
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, element)| {
+            let end_time = element.as_activity()?.end_time?;
+            Some((index + 1, end_time))
+        })
+        .unwrap_or((0, SimTime::default()));
+
+    // If departure time cannot be constructed based on the elements, we get an error.
+    let departure_time =
+        TimeInterpretation::decide_on_elements_end_time(&preceding[start_index..], &start_time)
+            .ok_or(TripPreparationError::MissingDepartureTime)?;
 
     let origin = span.origin(&plan.elements);
     let dest = span.destination(&plan.elements);
@@ -195,33 +217,18 @@ fn facility_for_activity<'a>(
     }
 }
 
-fn assess_trip(
-    context: &PrepareForMobsimContext<'_>,
-    span: TripSpan,
-    working_plan: &mut Cow<'_, InternalPlan>,
-) -> Result<TripAssessment, TripPreparationError> {
-    let trip_elements = span.trip_elements(&working_plan.elements);
+pub(crate) fn trip_routing_mode(
+    trip_elements: &[InternalPlanElement],
+) -> Result<Id<String>, TripPreparationError> {
     if !trip_elements
         .iter()
         .any(|element| element.as_leg().is_some())
     {
         return Err(TripPreparationError::NoLegs);
     }
-    let mode = identify_main_mode(trip_elements)
+    identify_main_mode(trip_elements)
         .map(|mode| Id::get_from_ext(&mode))
-        .ok_or(TripPreparationError::AmbiguousMainMode)?;
-
-    add_travel_distance(context.network, span, working_plan);
-    synchronize_missing_travel_times(span, working_plan);
-
-    let elements = &working_plan.elements;
-    let legs: Vec<_> = span.legs(elements).collect();
-
-    if trip_is_valid(context, span, elements, &mode, &legs) {
-        Ok(TripAssessment::Valid)
-    } else {
-        Ok(TripAssessment::NeedsRouting(mode))
-    }
+        .ok_or(TripPreparationError::AmbiguousMainMode)
 }
 
 fn add_travel_distance(
@@ -462,7 +469,7 @@ fn ensure_vehicle_in_garage<'a>(
         })
 }
 
-/// Adapt missing references before read-only route validation. Existing route references take
+/// Adapt missing references of vehicles before read-only route validation. Existing route references take
 /// precedence over the person's assignment and must resolve, rather than silently being repaired.
 fn resolve_plan_vehicles(
     context: &PrepareForMobsimContext<'_>,
@@ -744,6 +751,49 @@ mod tests {
             &first_plan,
             &scenario.population.persons.get(&person_id).unwrap().plans()[0]
         );
+    }
+
+    #[deterministic_id_test]
+    fn skipped_pt_trip_allows_later_routing_when_departure_time_is_known() {
+        let router = teleportation_router("walk");
+        for end_time in [Some(SimTime::from_secs(100)), None] {
+            let mut plan = unrouted_plan("pt", "link-1", "link-2", 10);
+            plan.acts_mut()[1].end_time = end_time;
+            plan.acts_mut()[1].max_dur = Some(Duration::from_secs(20));
+            plan.add_leg(unrouted_leg("walk"));
+            plan.add_act(plan.acts()[0].clone());
+            let person_id = Id::create("person-1");
+            let population =
+                Population::from_persons(vec![InternalPerson::new(person_id.clone(), plan)]);
+            let mut config = Config::default();
+            config
+                .controller_mut()
+                .ignore_routing_mode_during_preparation = vec!["pt".into()];
+            // The replanning list has no effect on preparation of the walk trip.
+            config.replanning_mut().reroute_ignore_modes = vec!["walk".into()];
+            let mut scenario = scenario_with_parts(
+                sequential_network(2, None),
+                Garage::default(),
+                population,
+                config,
+            );
+
+            let result = prepare_for_mobsim(&mut scenario, &router);
+            let plan = scenario.population.persons[&person_id]
+                .selected_plan()
+                .unwrap();
+            assert!(plan.legs()[0].route.is_none());
+            if let Some(departure) = end_time {
+                result.unwrap();
+                let walk = plan.legs()[1];
+                assert!(matches!(walk.route, Some(InternalRoute::Generic(_))));
+                assert_eq!(walk.dep_time, Some(departure));
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.issues()[0].trip_index, Some(1));
+                assert!(error.issues()[0].message.contains("departure time"));
+            }
+        }
     }
 
     #[deterministic_id_test]

@@ -6,11 +6,9 @@ use crate::simulation::replanning::selectors::RandomSelector;
 use crate::simulation::scenario::ScenarioCore;
 use crate::simulation::scenario::population::{DEFAULT_SUBPOPULATION, InternalPerson, Population};
 use crate::simulation::scenario::prepare::prepare_for_mobsim::{
-    PrepareForMobsimContext, TripPreparationError, route_trip,
+    PrepareForMobsimContext, TripPreparationError, route_trip, trip_routing_mode,
 };
-use crate::simulation::scenario::trip_structure_utils::{
-    get_trip_spans_default, identify_main_mode,
-};
+use crate::simulation::scenario::trip_structure_utils::get_trip_spans_default;
 use derive_builder::Builder;
 use nohash_hasher::IntMap;
 use rand::RngExt;
@@ -28,17 +26,17 @@ pub const KEEP_LAST_SELECTED_STRATEGY_NAME: &str = "KeepLastSelected";
 pub const BEST_SCORE_STRATEGY_NAME: &str = "BestScore";
 pub const SELECT_RANDOM_STRATEGY_NAME: &str = "SelectRandom";
 pub const WORST_SCORE_STRATEGY_NAME: &str = "WorstScore";
+pub const RE_ROUTE_IGNORE_STRATEGY_NAME: &str = "ReRouteIgnore";
 pub const RE_ROUTE_STRATEGY_NAME: &str = "ReRoute";
 pub const SELECT_EXP_BETA_STRATEGY_NAME: &str = "SelectExpBeta";
 
-#[allow(dead_code)]
 /// This is responsible for picking a plan, copying it, and replanning it.
 trait PlanStrategy: Send + Sync {
+    #[allow(dead_code)]
     fn name(&self) -> &Id<String>;
     fn handle(&self, person: &mut InternalPerson, context: &ReplanningContext);
 }
 
-#[allow(dead_code)]
 /// This is the smallest replanning unit (e.g., routes a plan).
 trait PlanStrategyModule: Send + Sync {
     fn handle(&self, person: &mut InternalPerson, plan_index: usize);
@@ -52,12 +50,14 @@ trait PlanSelector: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DefaultStrategy {
     ReRoute,
+    ReRouteIgnore,
 }
 
 impl DefaultStrategy {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ReRoute => RE_ROUTE_STRATEGY_NAME,
+            Self::ReRouteIgnore => RE_ROUTE_IGNORE_STRATEGY_NAME,
         }
     }
 
@@ -66,13 +66,23 @@ impl DefaultStrategy {
         trip_router: TripRouter,
         scenario_core: ScenarioCore,
     ) -> Box<dyn PlanStrategy> {
-        match self {
-            Self::ReRoute => Box::new(GenericPlanStrategy {
-                name: Id::create(self.as_str()),
-                selector: Box::new(RandomSelector),
-                modules: vec![Box::new(ReRouteModule::new(trip_router, scenario_core))],
-            }),
-        }
+        let ignored_modes = match self {
+            Self::ReRoute => Vec::new(),
+            Self::ReRouteIgnore => scenario_core
+                .config
+                .replanning()
+                .reroute_ignore_modes
+                .clone(),
+        };
+        Box::new(GenericPlanStrategy {
+            name: Id::create(self.as_str()),
+            selector: Box::new(RandomSelector),
+            modules: vec![Box::new(ReRouteModule {
+                router: trip_router,
+                scenario_core,
+                ignored_modes,
+            })],
+        })
     }
 }
 
@@ -88,6 +98,7 @@ impl FromStr for DefaultStrategy {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             RE_ROUTE_STRATEGY_NAME => Ok(Self::ReRoute),
+            RE_ROUTE_IGNORE_STRATEGY_NAME => Ok(Self::ReRouteIgnore),
             _ => Err(format!("Unknown DefaultStrategy: {value}")),
         }
     }
@@ -266,7 +277,7 @@ fn default_strategies(
             selector.as_generic_plan_strategy(),
         );
     }
-    for strategy in [DefaultStrategy::ReRoute] {
+    for strategy in [DefaultStrategy::ReRoute, DefaultStrategy::ReRouteIgnore] {
         strategies.insert(
             Id::create(strategy.as_str()),
             strategy.as_generic_plan_strategy(trip_router.clone(), scenario_core.clone()),
@@ -336,6 +347,7 @@ impl StrategyWeight {
 
 // Different modules can be combined to create a strategy.
 struct GenericPlanStrategy {
+    #[allow(dead_code)]
     name: Id<String>,
     selector: Box<dyn PlanSelector + Send + Sync>,
     modules: Vec<Box<dyn PlanStrategyModule + Send + Sync>>,
@@ -367,18 +379,33 @@ impl PlanStrategy for GenericPlanStrategy {
     }
 }
 
-#[allow(dead_code)]
 struct ReRouteModule {
     router: TripRouter,
     scenario_core: ScenarioCore,
+    ignored_modes: Vec<String>,
 }
 
 impl ReRouteModule {
-    fn new(router: TripRouter, scenario_core: ScenarioCore) -> Self {
-        Self {
-            router,
-            scenario_core,
+    fn reroute_trip(
+        &self,
+        context: &PrepareForMobsimContext<'_>,
+        person: &mut InternalPerson,
+        plan_index: usize,
+        trip_index: usize,
+    ) -> Result<(), TripPreparationError> {
+        let plan = &person.plans()[plan_index];
+        let span = get_trip_spans_default(&plan.elements)[trip_index];
+        let mode = trip_routing_mode(span.trip_elements(&plan.elements))?;
+        if self
+            .ignored_modes
+            .iter()
+            .any(|ignored| ignored == mode.external())
+        {
+            return Ok(());
         }
+        let new_elements = route_trip(context, person, plan, span, &mode, &self.router)?;
+        span.replace_trip_elements(&mut person.plans_mut()[plan_index].elements, new_elements);
+        Ok(())
     }
 }
 
@@ -396,32 +423,12 @@ impl PlanStrategyModule for ReRouteModule {
         // Route complete trips so access/egress legs and stage activities change together.
         // Recompute spans after each replacement because routing can change their lengths.
         for trip_index in 0..trip_count {
-            let (span, new_elements) = {
-                let plan = &person.plans()[plan_index];
-                let span = get_trip_spans_default(&plan.elements)[trip_index];
-                let trip_elements = span.trip_elements(&plan.elements);
-                let result = if !trip_elements
-                    .iter()
-                    .any(|element| element.as_leg().is_some())
-                {
-                    Err(TripPreparationError::NoLegs)
-                } else {
-                    identify_main_mode(trip_elements)
-                        .map(|mode| Id::get_from_ext(&mode))
-                        .ok_or(TripPreparationError::AmbiguousMainMode)
-                        .and_then(|mode| {
-                            route_trip(&context, person, plan, span, &mode, &self.router)
-                        })
-                };
-                let new_elements = result.unwrap_or_else(|error| {
-                    panic!(
-                        "ReRoute failed for person {}, plan {plan_index}, trip {trip_index}: {error}",
-                        person.id().external()
-                    )
-                });
-                (span, new_elements)
-            };
-            span.replace_trip_elements(&mut person.plans_mut()[plan_index].elements, new_elements);
+            self.reroute_trip(&context, person, plan_index, trip_index).unwrap_or_else(|error| {
+                panic!(
+                    "ReRoute failed for person {}, plan {plan_index}, trip {trip_index}: {error}",
+                    person.id().external()
+                )
+            });
         }
 
         person.plans_mut()[plan_index].score = None;

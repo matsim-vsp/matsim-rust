@@ -27,7 +27,6 @@ modules:
     write_events: File
   routing:
     type: Routing
-    mode: AdHoc
     network_modes: [ "car" ]
   simulation:
     type: Simulation

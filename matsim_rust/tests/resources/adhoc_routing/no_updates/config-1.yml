@@ -21,4 +21,3 @@ modules:
     logging: Info
   routing:
     type: Routing
-    mode: AdHoc

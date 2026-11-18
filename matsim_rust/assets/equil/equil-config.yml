@@ -15,7 +15,6 @@ modules:
     write_events: Proto
   routing:
     type: Routing
-    mode: UsePlans
   simulation:
     type: Simulation
     start_time: 0

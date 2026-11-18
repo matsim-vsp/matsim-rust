@@ -2,7 +2,6 @@ use crate::simulation::agents::agent::ActivityAgent;
 use crate::simulation::agents::agent_logic::{
     AdaptivePlanBasedSimulationLogic, PlanBasedSimulationLogic,
 };
-use crate::simulation::config::{Config, RoutingMode};
 use crate::simulation::id::Id;
 use crate::simulation::pt::driver::WaitingDriver;
 use crate::simulation::scenario::population::InternalPerson;
@@ -83,13 +82,22 @@ impl AgentSource for PreplanningHorizonAgentSource {
     fn create_agents(
         &self,
         population: &mut PopulationShard,
-        partition: &MobsimScenarioPartition,
+        _partition: &MobsimScenarioPartition,
     ) -> AgentSet {
         let persons = std::mem::take(&mut population.population.persons);
         let mut agents = IntMap::with_capacity(persons.len());
 
         for (id, person) in persons {
-            identify_logic_and_insert(&mut agents, id, person, &partition.scenario.config);
+            let plan = person.selected_plan().unwrap_or_else(|| {
+                panic!("Plan does not exist for person with id: {}", id.external())
+            });
+            let agent = if AdaptivePlanBasedSimulationLogic::applies_to(plan) {
+                AdaptivePlanBasedSimulationLogic::new_agent(person)
+            } else {
+                // Persons without a rolling horizon follow their selected plan.
+                PlanBasedSimulationLogic::new_agent(person)
+            };
+            agents.insert(id, agent);
         }
         agents
     }
@@ -116,39 +124,6 @@ impl AgentSource for TransitDriverAgentSource {
                 )
             })
             .collect()
-    }
-}
-
-fn identify_logic_and_insert(
-    agents: &mut IntMap<Id<InternalPerson>, ActivityAgent>,
-    id: Id<InternalPerson>,
-    person: InternalPerson,
-    config: &Config,
-) {
-    if config.routing().mode == RoutingMode::UsePlans {
-        agents.insert(id, PlanBasedSimulationLogic::new_agent(person));
-        return;
-    }
-
-    // go through all attributes of person's legs and check whether there is some marked as rolling horizon logic
-    let has_at_least_one_preplanning_horizon = person
-        .selected_plan()
-        .as_ref()
-        .unwrap_or_else(|| panic!("Plan does not exist for person with id: {}", id.external()))
-        .acts()
-        .iter()
-        .any(|l| {
-            l.attributes
-                .attributes
-                .contains_key(crate::simulation::scenario::population::PREPLANNING_HORIZON)
-        });
-
-    if has_at_least_one_preplanning_horizon {
-        agents.insert(id, AdaptivePlanBasedSimulationLogic::new_agent(person));
-    } else {
-        // if there is no rolling horizon logic, we assume that the person has a plan logic
-        // and we create a InternalSimulationAgent with plan logic
-        agents.insert(id, PlanBasedSimulationLogic::new_agent(person));
     }
 }
 

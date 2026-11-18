@@ -16,7 +16,6 @@ modules:
       level: INFO
   routing:
     type: Routing
-    mode: UsePlans
   simulation:
     type: Simulation
     start_time: 0
