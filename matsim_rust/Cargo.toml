@@ -16,62 +16,62 @@ hotpath-alloc = ["hotpath/hotpath-alloc"]
 hotpath-prometheus = ["hotpath/hotpath-prometheus"]
 
 [dependencies]
-serde = { version = "1.0.137", features = ["derive"] }
-serde_json = "1.0.93"
-quick-xml = { version = "0.41.0", features = ["serialize"] }
-flate2 = { version = "1.0.24", features = ["zlib-rs"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+quick-xml = { version = "0.42.0", features = ["serialize"] }
+flate2 = { version = "1.1.11", features = ["zlib-rs"] }
 fnv = "1.0.7"
-rand = "0.10.2"
-rand_xoshiro = "0.8.1"
-zstd = "0.13.3"
+rand = "0.10.4"
+rand_xoshiro = "0.8.2"
+zstd = "0.14.4"
 metis = "0.2.2"
-clap = { version = "4.0.29", features = ["derive"] }
+clap = { version = "4.6.8", features = ["derive"] }
 # dependencies for serialization with protobuf
-prost = "0.14"
+prost = "0.14.6"
 # message types shared across MATSim projects (population, network, events, ...) and the gRPC client
 # of the routing service API
 matsim-schemas = { git = "https://github.com/matsim-org/matsim-schemas", tag = "v0.3.0", features = ["serde", "routing"] }
 # bytes replaces the signature of std::io::Cursor to implemnt Buf somehow...
-bytes = "1.3.0"
-serial_test = "3.2.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3.0", features = ["json", "fmt", "std", "registry", "env-filter"] }
-tracing-appender = "0.2"
+bytes = "1.12.2"
+serial_test = "4.0.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "fmt", "std", "registry", "env-filter"] }
+tracing-appender = "0.2.5"
 itertools = "0.15.0"
 assert_approx_eq = "1.1.0"
 nohash-hasher = "0.2.0"
-serde_path_to_error = "0.1.14"
-ahash = "0.8.11"
+serde_path_to_error = "0.1.20"
+ahash = "0.8.12"
 xml = "1.4.0"
-lz4_flex = "0.14.0"
-typetag = "0.2.18"
+lz4_flex = "0.14.2"
+typetag = "0.2.23"
 serde_yaml = "0.9.34"
-tonic = "0.14"
-tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros"] }
+tonic = "0.14.9"
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros"] }
 lz4 = "1.28.1"
 derive_builder = "0.20.2"
-tempfile = "3.20.0"
-dyn-clone = "1.0.19"
+tempfile = "3.27.0"
+dyn-clone = "1.0.20"
 enum_dispatch = "0.3.13"
-thiserror = "2.0.16"
-dashmap = "6.1.0"
-once_cell = "1.20.2"
+thiserror = "2.0.21"
+dashmap = "6.2.1"
+once_cell = "1.21.4"
 macros = { path = "../macros" }
-reqwest = { version = "0.12.23", features = ["blocking"], optional = true }
-derive_more = { version = "2.0.1", features = ["debug"] }
-futures = "0.3.31"
-uuid = { version = "1.18.1", features = ["v7"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "native-tls-no-alpn", "charset", "http2", "system-proxy"], optional = true }
+derive_more = { version = "2.1.1", features = ["debug"] }
+futures = "0.3.34"
+uuid = { version = "1.29.3", features = ["v7"] }
 csv = "1.4.0"
-inventory = "0.3.21"
+inventory = "0.3.25"
 arrow2 = { version = "0.18.0", features = ["io_parquet", "io_parquet_compression"] }
-ordered-float = "5.3.0"
+ordered-float = "5.5.1"
 rayon = "1.12.0"
 fs_extra = "1.3.0"
-arc-swap = "1.9.2"
-rstar = "0.13"
+arc-swap = "1.9.5"
+rstar = "0.14.0"
 # wait and wake on an AtomicU32 (futex on Linux) for simulation::messaging::sim_communication::barrier
-atomic-wait = "1.1"
-hotpath = "0.28"
+atomic-wait = "1.1.0"
+hotpath = "0.32.1"
 # embeds the git state of the source tree at compile time, see simulation::build_info
 git-version = "0.3.9"
 
@@ -83,6 +83,6 @@ matsim-rust = { path = ".", features = ["test_util"] }
 
 [build-dependencies]
 # generates types based on .proto files
-prost-build = "0.14"
+prost-build = "0.14.6"
 # provides a prebuilt protoc compiler, so no system protoc or protobuf C++ build is needed.
 protoc-bin-vendored = "=3.3.0"
