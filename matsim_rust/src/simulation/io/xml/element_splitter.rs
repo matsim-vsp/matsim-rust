@@ -244,17 +244,14 @@ fn namespace_declarations(tag: &[u8], name_len: usize) -> Vec<u8> {
     for attribute in BytesStart::from_content(content, name_len).attributes() {
         let attribute = attribute.expect("Invalid attribute of the root element.");
         let key = attribute.key.as_ref();
-        if key == b"xmlns" || key.starts_with(b"xmlns:") {
+        if key == "xmlns" || key.starts_with("xmlns:") {
             // The value is still escaped, so it may only contain the quote, which wasn't used.
-            let quote = if attribute.value.contains(&b'"') {
-                b'\''
-            } else {
-                b'"'
-            };
+            let value = attribute.value.as_bytes();
+            let quote = if value.contains(&b'"') { b'\'' } else { b'"' };
             result.push(b' ');
-            result.extend_from_slice(key);
+            result.extend_from_slice(key.as_bytes());
             result.extend_from_slice(&[b'=', quote]);
-            result.extend_from_slice(&attribute.value);
+            result.extend_from_slice(value);
             result.push(quote);
         }
     }
