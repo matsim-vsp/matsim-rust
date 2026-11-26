@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+
+<!--
+Each person is named after what it does in the base case, i.e. without delays. Its plan is the
+earliest arrival on the schedule; the times in the legs are the planned ones. Activities are on the
+stop links, so access, egress and transfer walks take 0 s.
+-->
+<population>
+
+	<!-- Lets local_0800 (center 08:20) go and takes express_0805, which departs later and arrives earlier (08:15). -->
+	<person id="takes_later_but_faster_express">
+		<plan selected="yes">
+			<activity type="home" link="suburb_stop" x="0" y="0" end_time="07:58:00"/>
+			<leg mode="walk" dep_time="07:58:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="suburb_stop" end_link="suburb_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="pt interaction" link="suburb_stop" x="0" y="0" max_dur="00:00:00"/>
+			<leg mode="pt" dep_time="07:58:00" trav_time="00:17:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="default_pt" start_link="suburb_stop" end_link="center_stop" trav_time="00:17:00" distance="20000.0">{"transitRouteId":"express_suburb_center","boardingTime":"08:05:00","transitLineId":"express","accessFacilityId":"suburb","egressFacilityId":"center"}</route>
+			</leg>
+			<activity type="pt interaction" link="center_stop" x="20000" y="0" max_dur="00:00:00"/>
+			<leg mode="walk" dep_time="08:15:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="center_stop" end_link="center_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="work" link="center_stop" x="20000" y="0"/>
+		</plan>
+	</person>
+
+	<!-- feeder_0800 to hub (08:06), then trunk_0808 two minutes later, center 08:14. -->
+	<person id="transfers_with_two_minutes_at_hub">
+		<plan selected="yes">
+			<activity type="home" link="village_stop" x="10000" y="6000" end_time="07:58:00"/>
+			<leg mode="walk" dep_time="07:58:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="village_stop" end_link="village_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="pt interaction" link="village_stop" x="10000" y="6000" max_dur="00:00:00"/>
+			<leg mode="pt" dep_time="07:58:00" trav_time="00:08:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="default_pt" start_link="village_stop" end_link="hub_stop" trav_time="00:08:00" distance="6000.0">{"transitRouteId":"feeder_village_hub","boardingTime":"08:00:00","transitLineId":"feeder","accessFacilityId":"village","egressFacilityId":"hub"}</route>
+			</leg>
+			<activity type="pt interaction" link="hub_stop" x="10000" y="0" max_dur="00:00:00"/>
+			<leg mode="walk" dep_time="08:06:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="hub_stop" end_link="hub_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="pt interaction" link="hub_stop" x="10000" y="0" max_dur="00:00:00"/>
+			<leg mode="pt" dep_time="08:06:00" trav_time="00:08:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="default_pt" start_link="hub_stop" end_link="center_stop" trav_time="00:08:00" distance="10000.0">{"transitRouteId":"trunk_hub_center","boardingTime":"08:08:00","transitLineId":"trunk","accessFacilityId":"hub","egressFacilityId":"center"}</route>
+			</leg>
+			<activity type="pt interaction" link="center_stop" x="20000" y="0" max_dur="00:00:00"/>
+			<leg mode="walk" dep_time="08:14:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="center_stop" end_link="center_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="work" link="center_stop" x="20000" y="0"/>
+		</plan>
+	</person>
+
+	<!-- feeder_0810 reaches hub at 08:16, one minute after trunk_0815 left; waits for trunk_0822, center 08:28. -->
+	<person id="waits_at_hub_after_just_missing_trunk">
+		<plan selected="yes">
+			<activity type="home" link="village_stop" x="10000" y="6000" end_time="08:08:00"/>
+			<leg mode="walk" dep_time="08:08:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="village_stop" end_link="village_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="pt interaction" link="village_stop" x="10000" y="6000" max_dur="00:00:00"/>
+			<leg mode="pt" dep_time="08:08:00" trav_time="00:08:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="default_pt" start_link="village_stop" end_link="hub_stop" trav_time="00:08:00" distance="6000.0">{"transitRouteId":"feeder_village_hub","boardingTime":"08:10:00","transitLineId":"feeder","accessFacilityId":"village","egressFacilityId":"hub"}</route>
+			</leg>
+			<activity type="pt interaction" link="hub_stop" x="10000" y="0" max_dur="00:00:00"/>
+			<leg mode="walk" dep_time="08:16:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="hub_stop" end_link="hub_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="pt interaction" link="hub_stop" x="10000" y="0" max_dur="00:00:00"/>
+			<leg mode="pt" dep_time="08:16:00" trav_time="00:12:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="default_pt" start_link="hub_stop" end_link="center_stop" trav_time="00:12:00" distance="10000.0">{"transitRouteId":"trunk_hub_center","boardingTime":"08:22:00","transitLineId":"trunk","accessFacilityId":"hub","egressFacilityId":"center"}</route>
+			</leg>
+			<activity type="pt interaction" link="center_stop" x="20000" y="0" max_dur="00:00:00"/>
+			<leg mode="walk" dep_time="08:28:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="center_stop" end_link="center_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="work" link="center_stop" x="20000" y="0"/>
+		</plan>
+	</person>
+
+	<!-- Leaves home at hub at 08:18, after trunk_0815 left on time; takes trunk_0822, center 08:28. -->
+	<person id="starts_at_hub_after_trunk_departed">
+		<plan selected="yes">
+			<activity type="home" link="hub_stop" x="10000" y="0" end_time="08:18:00"/>
+			<leg mode="walk" dep_time="08:18:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="hub_stop" end_link="hub_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="pt interaction" link="hub_stop" x="10000" y="0" max_dur="00:00:00"/>
+			<leg mode="pt" dep_time="08:18:00" trav_time="00:10:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="default_pt" start_link="hub_stop" end_link="center_stop" trav_time="00:10:00" distance="10000.0">{"transitRouteId":"trunk_hub_center","boardingTime":"08:22:00","transitLineId":"trunk","accessFacilityId":"hub","egressFacilityId":"center"}</route>
+			</leg>
+			<activity type="pt interaction" link="center_stop" x="20000" y="0" max_dur="00:00:00"/>
+			<leg mode="walk" dep_time="08:28:00" trav_time="00:00:00">
+				<attributes><attribute name="routingMode" class="java.lang.String">pt</attribute></attributes>
+				<route type="generic" start_link="center_stop" end_link="center_stop" trav_time="00:00:00" distance="0.0"></route>
+			</leg>
+			<activity type="work" link="center_stop" x="20000" y="0"/>
+		</plan>
+	</person>
+
+</population>

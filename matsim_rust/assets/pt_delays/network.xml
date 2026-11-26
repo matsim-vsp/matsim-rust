@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
+
+<network name="pt_delays">
+<!--
+                              village
+                                 |
+                                 | village_hub
+                                 |
+  suburb ===== midtown ======== hub ==================== center
+     \   suburb_midtown   midtown_hub      hub_center      /
+      \______________________________________________________/
+                           suburb_center (express)
+
+Each stop has a loop link `<stop>_stop` at its node, on which its stop facility and the activities
+of the persons there are. Only transit runs on this network.
+-->
+	<nodes>
+		<node id="suburb" x="0" y="0"/>
+		<node id="midtown" x="5000" y="0"/>
+		<node id="hub" x="10000" y="0"/>
+		<node id="center" x="20000" y="0"/>
+		<node id="village" x="10000" y="6000"/>
+	</nodes>
+	<links capperiod="01:00:00">
+		<link id="suburb_stop" from="suburb" to="suburb" length="10.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="midtown_stop" from="midtown" to="midtown" length="10.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="hub_stop" from="hub" to="hub" length="10.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="center_stop" from="center" to="center" length="10.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="village_stop" from="village" to="village" length="10.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+
+		<link id="suburb_midtown" from="suburb" to="midtown" length="5000.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="midtown_hub" from="midtown" to="hub" length="5000.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="hub_center" from="hub" to="center" length="10000.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+		<link id="suburb_center" from="suburb" to="center" length="20000.0" capacity="10000" freespeed="40" permlanes="1" modes="pt"/>
+		<link id="village_hub" from="village" to="hub" length="6000.0" capacity="10000" freespeed="20" permlanes="1" modes="pt"/>
+	</links>
+</network>

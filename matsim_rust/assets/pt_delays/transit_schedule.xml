@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v2.dtd">
+
+<!--
+Departure ids are <line>_<HHMM> of the departure at the first stop. Each departure has a vehicle of
+its own with the same id, so the events name the departure. Vehicles do not dwell at stops.
+
+  local    suburb 0, midtown 5, hub 10, center 20 min   08:00, 08:02, 08:10
+  express  suburb 0, center 10 min                       08:05
+  feeder   village 0, hub 6 min                          08:00, 08:10
+  trunk    hub 0, center 6 min                           08:08, 08:15, 08:22
+-->
+<transitSchedule>
+	<transitStops>
+		<stopFacility id="suburb" x="0" y="0" linkRefId="suburb_stop" stopAreaId="suburb"/>
+		<stopFacility id="midtown" x="5000" y="0" linkRefId="midtown_stop" stopAreaId="midtown"/>
+		<stopFacility id="hub" x="10000" y="0" linkRefId="hub_stop" stopAreaId="hub"/>
+		<stopFacility id="center" x="20000" y="0" linkRefId="center_stop" stopAreaId="center"/>
+		<stopFacility id="village" x="10000" y="6000" linkRefId="village_stop" stopAreaId="village"/>
+	</transitStops>
+
+	<transitLine id="local">
+		<transitRoute id="local_suburb_center">
+			<transportMode>pt</transportMode>
+			<routeProfile>
+				<stop refId="suburb" departureOffset="00:00:00" awaitDeparture="true"/>
+				<stop refId="midtown" arrivalOffset="00:05:00" departureOffset="00:05:00" awaitDeparture="true"/>
+				<stop refId="hub" arrivalOffset="00:10:00" departureOffset="00:10:00" awaitDeparture="true"/>
+				<stop refId="center" arrivalOffset="00:20:00" awaitDeparture="true"/>
+			</routeProfile>
+			<route>
+				<link refId="suburb_stop"/>
+				<link refId="suburb_midtown"/>
+				<link refId="midtown_stop"/>
+				<link refId="midtown_hub"/>
+				<link refId="hub_stop"/>
+				<link refId="hub_center"/>
+				<link refId="center_stop"/>
+			</route>
+			<departures>
+				<departure id="local_0800" departureTime="08:00:00" vehicleRefId="local_0800"/>
+				<departure id="local_0802" departureTime="08:02:00" vehicleRefId="local_0802"/>
+				<departure id="local_0810" departureTime="08:10:00" vehicleRefId="local_0810"/>
+			</departures>
+		</transitRoute>
+	</transitLine>
+
+	<transitLine id="express">
+		<transitRoute id="express_suburb_center">
+			<transportMode>pt</transportMode>
+			<routeProfile>
+				<stop refId="suburb" departureOffset="00:00:00" awaitDeparture="true"/>
+				<stop refId="center" arrivalOffset="00:10:00" awaitDeparture="true"/>
+			</routeProfile>
+			<route>
+				<link refId="suburb_stop"/>
+				<link refId="suburb_center"/>
+				<link refId="center_stop"/>
+			</route>
+			<departures>
+				<departure id="express_0805" departureTime="08:05:00" vehicleRefId="express_0805"/>
+			</departures>
+		</transitRoute>
+	</transitLine>
+
+	<transitLine id="feeder">
+		<transitRoute id="feeder_village_hub">
+			<transportMode>pt</transportMode>
+			<routeProfile>
+				<stop refId="village" departureOffset="00:00:00" awaitDeparture="true"/>
+				<stop refId="hub" arrivalOffset="00:06:00" awaitDeparture="true"/>
+			</routeProfile>
+			<route>
+				<link refId="village_stop"/>
+				<link refId="village_hub"/>
+				<link refId="hub_stop"/>
+			</route>
+			<departures>
+				<departure id="feeder_0800" departureTime="08:00:00" vehicleRefId="feeder_0800"/>
+				<departure id="feeder_0810" departureTime="08:10:00" vehicleRefId="feeder_0810"/>
+			</departures>
+		</transitRoute>
+	</transitLine>
+
+	<transitLine id="trunk">
+		<transitRoute id="trunk_hub_center">
+			<transportMode>pt</transportMode>
+			<routeProfile>
+				<stop refId="hub" departureOffset="00:00:00" awaitDeparture="true"/>
+				<stop refId="center" arrivalOffset="00:06:00" awaitDeparture="true"/>
+			</routeProfile>
+			<route>
+				<link refId="hub_stop"/>
+				<link refId="hub_center"/>
+				<link refId="center_stop"/>
+			</route>
+			<departures>
+				<departure id="trunk_0808" departureTime="08:08:00" vehicleRefId="trunk_0808"/>
+				<departure id="trunk_0815" departureTime="08:15:00" vehicleRefId="trunk_0815"/>
+				<departure id="trunk_0822" departureTime="08:22:00" vehicleRefId="trunk_0822"/>
+			</departures>
+		</transitRoute>
+	</transitLine>
+</transitSchedule>

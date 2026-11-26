@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+    <vehicleType id="transit_vehicle">
+        <capacity seats="50" standingRoomInPersons="50"/>
+        <length meter="20.0"/>
+    </vehicleType>
+
+    <vehicle id="local_0800" type="transit_vehicle"/>
+    <vehicle id="local_0802" type="transit_vehicle"/>
+    <vehicle id="local_0810" type="transit_vehicle"/>
+    <vehicle id="express_0805" type="transit_vehicle"/>
+    <vehicle id="feeder_0800" type="transit_vehicle"/>
+    <vehicle id="feeder_0810" type="transit_vehicle"/>
+    <vehicle id="trunk_0808" type="transit_vehicle"/>
+    <vehicle id="trunk_0815" type="transit_vehicle"/>
+    <vehicle id="trunk_0822" type="transit_vehicle"/>
+</vehicleDefinitions>

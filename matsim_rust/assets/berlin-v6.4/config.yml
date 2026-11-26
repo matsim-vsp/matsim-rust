@@ -29,10 +29,12 @@ modules:
   transit:
     type: Transit
     schedule_path: berlin-v6.4-transitSchedule.xml.gz
+    vehicles_path: berlin-v6.4-transitVehicles.xml.gz
+    simulation: ScheduleBasedTeleportation
   qsim:
     type: QSim
     start_time: 0
-    end_time: 129600
+    end_time: 36000
     ticks_per_second: 1
     sample_size: 0.001
     stuck_threshold: 30

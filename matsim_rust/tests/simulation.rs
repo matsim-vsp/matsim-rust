@@ -12,5 +12,7 @@ mod iterations;
 mod phases;
 #[path = "simulation/pt.rs"]
 mod pt;
+#[path = "simulation/pt_delays.rs"]
+mod pt_delays;
 #[path = "simulation/three_links.rs"]
 mod three_links;
