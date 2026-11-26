@@ -227,6 +227,11 @@ pub trait TransitDriverLogic: LegLogic {
     /// The arrival at the current stop while the vehicle approaches it, the departure while it
     /// halts there.
     fn next_time(&self) -> SimTime;
+    /// The arrival at [`Self::stop`] according to the schedule, for the delay of the arrival event.
+    fn scheduled_arrival(&self) -> SimTime;
+    /// The departure from [`Self::stop`] according to the schedule, for the delay of the departure
+    /// event.
+    fn scheduled_departure(&self) -> SimTime;
     fn notify_stop_arrived(&mut self, now: SimTime);
     /// The vehicle left the current stop for the next one, which it reaches at `earliest_arrival`
     /// at the earliest. Never called at the last stop.

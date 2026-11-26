@@ -134,6 +134,12 @@ impl EndTime for DepartureTracker {
     }
 }
 
+/// The delay of an event at `now` against the `scheduled` time in seconds, as in MATSim's
+/// `VehicleArrivesAtFacilityEvent` and `VehicleDepartsAtFacilityEvent`. Negative if early.
+fn delay(now: SimTime, scheduled: SimTime) -> f64 {
+    now.as_duration().as_secs_f64() - scheduled.as_duration().as_secs_f64()
+}
+
 /// The order of a vehicle among simultaneous events. Driver ids are created in the order of the
 /// departures and after all person ids, so this order is stable.
 fn order(vehicle: &TransitVehicle) -> u64 {
@@ -355,6 +361,7 @@ impl TransitEngine {
                 .time(now)
                 .vehicle(vehicle.id().clone())
                 .facility(stop.clone())
+                .delay(delay(now, vehicle.driver().scheduled_arrival()))
                 .build()
                 .unwrap(),
         );
@@ -520,6 +527,7 @@ impl TransitEngine {
                 .time(now)
                 .vehicle(vehicle.id().clone())
                 .facility(vehicle.driver().stop().clone())
+                .delay(delay(now, vehicle.driver().scheduled_departure()))
                 .build()
                 .unwrap(),
         );

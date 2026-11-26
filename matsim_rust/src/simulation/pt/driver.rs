@@ -315,6 +315,14 @@ impl TransitDriverLogic for PlannedDriver {
         self.next_time
     }
 
+    fn scheduled_arrival(&self) -> SimTime {
+        self.plan.scheduled[self.stop.index()].arrival
+    }
+
+    fn scheduled_departure(&self) -> SimTime {
+        self.plan.scheduled[self.stop.index()].departure
+    }
+
     fn notify_stop_arrived(&mut self, now: SimTime) {
         self.next_time =
             apply_stop_time_constraints(self.plan.scheduled[self.stop.index()], now).departure;
