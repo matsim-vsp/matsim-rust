@@ -1,6 +1,7 @@
 //! Scenario `pt_delays` (`assets/pt_delays`, see its README): a small transit network with
 //! alternatives between routes and transfers, for the development of exogenous transit delays (see
-//! `docs/exogenous-pt-delays.md`). The tests here cover the base case without delays.
+//! `docs/exogenous-pt-delays.md` in `parallel-qsim-berlin`). The tests here cover the base case
+//! without delays.
 
 use macros::deterministic_id_test;
 use matsim_rust::simulation::config::{CommandLineArgs, Config, PartitionMethod};

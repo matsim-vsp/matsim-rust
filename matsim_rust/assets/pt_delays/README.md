@@ -1,7 +1,7 @@
 # Scenario `pt_delays`
 
 A small transit scenario for the development of exogenous transit delays and routing with real-time
-information (see [docs/exogenous-pt-delays.md](../../../docs/exogenous-pt-delays.md)). Unlike
+information (see `docs/exogenous-pt-delays.md` in `parallel-qsim-berlin`). Unlike
 `pt_tutorial`, which has a single line with one route per direction, it has alternatives between
 routes and transfers. It will grow with the development.
 
