@@ -1,6 +1,8 @@
+pub(crate) mod bisect_partitioning;
 mod flow_cap;
 pub mod link;
 pub mod metis_partitioning;
+mod partitioning;
 pub mod sim_network;
 mod storage_cap;
 mod stuck_timer;

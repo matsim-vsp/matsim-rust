@@ -712,12 +712,12 @@ register_override!("partitioning.num_parts", |config, value| {
 });
 
 // Only `none` can be set from the command line. It makes the simulation use the partitions stored
-// in the network file. Metis options have to be configured in the config file.
+// in the network file. METIS and Bisect options have to be configured in the config file.
 register_override!("partitioning.method", |config, value| {
     config.partitioning_mut().method = match value.to_lowercase().as_str() {
         "none" => PartitionMethod::None,
         _ => panic!(
-            "Invalid partitioning method: {}. Only `none` can be overridden, configure Metis in the config file.",
+            "Invalid partitioning method: {}. Only `none` can be overridden. Configure METIS or Bisect in the config file.",
             value
         ),
     };
@@ -1555,6 +1555,7 @@ fn parse_overwrite_file(value: &str) -> OverwriteFiles {
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum PartitionMethod {
     Metis(MetisOptions),
+    Bisect(BisectOptions),
     None,
 }
 
@@ -1660,6 +1661,31 @@ impl ParquetProfilingLevel {
             _ => panic!("{} not yet implemented as profiling level!", self.level),
         }
     }
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BisectOptions {
+    pub axis: BisectAxis,
+    pub vertex_weight: VertexWeight,
+}
+
+impl Default for BisectOptions {
+    fn default() -> Self {
+        Self {
+            axis: BisectAxis::default(),
+            vertex_weight: VertexWeight::Constant,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Debug, ValueEnum, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum BisectAxis {
+    /// Split on X at every level.
+    #[default]
+    X,
+    /// Start with X and alternate between X and Y at each recursion level.
+    Alternating,
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
@@ -1850,10 +1876,10 @@ mod tests {
     use crate::simulation::config::Profiling;
     use crate::simulation::config::WriteEvents;
     use crate::simulation::config::{
-        CommandLineArgs, CompressionType, ComputationalSetup, Config, Controller, EdgeWeight,
-        MetisOptions, NonMainModeLinks, PartitionMethod, Partitioning, QSim, Replanning, Routing,
-        Scoring, ScoringMode, StrategySetting, TeleportedParams, TravelTimeCalculator,
-        VertexWeight, parse_key_val,
+        BisectAxis, BisectOptions, CommandLineArgs, CompressionType, ComputationalSetup, Config,
+        Controller, EdgeWeight, MetisOptions, NonMainModeLinks, PartitionMethod, Partitioning,
+        QSim, Replanning, Routing, Scoring, ScoringMode, StrategySetting, TeleportedParams,
+        TravelTimeCalculator, VertexWeight, parse_key_val,
     };
     use crate::simulation::config::{
         Ids, Network, Population, Transit, TransitSimulation, Vehicles,
@@ -2090,6 +2116,45 @@ mod tests {
                 min_conn: true,
             })
         );
+    }
+
+    #[test]
+    fn bisect_partitioning_round_trips() {
+        for (options, axis, vertex_weight) in [
+            ("{}", BisectAxis::X, VertexWeight::Constant),
+            (
+                "{vertex_weight: InLinkCount}",
+                BisectAxis::X,
+                VertexWeight::InLinkCount,
+            ),
+            ("{axis: X}", BisectAxis::X, VertexWeight::Constant),
+            (
+                "{axis: Alternating, vertex_weight: PreComputed}",
+                BisectAxis::Alternating,
+                VertexWeight::PreComputed,
+            ),
+        ] {
+            let yaml = format!(
+                r#"
+        modules:
+          partitioning:
+            type: Partitioning
+            num_parts: 3
+            method: !Bisect {options}
+        "#
+            );
+            let config: Config = serde_yaml::from_str(&yaml).unwrap();
+            let expected = PartitionMethod::Bisect(BisectOptions {
+                axis,
+                vertex_weight,
+            });
+            assert_eq!(config.partitioning().num_parts, 3);
+            assert_eq!(config.partitioning().method, expected);
+
+            let serialized = serde_yaml::to_string(&config).unwrap();
+            let round_trip: Config = serde_yaml::from_str(&serialized).unwrap();
+            assert_eq!(round_trip.partitioning().method, expected);
+        }
     }
 
     #[test]

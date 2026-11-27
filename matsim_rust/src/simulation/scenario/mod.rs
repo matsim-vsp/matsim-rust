@@ -223,18 +223,13 @@ impl Scenario {
     }
 
     fn load_network(config: &Config) -> Network {
-        if let Some(path) = &config.network().path {
-            let net_in_path = io::resolve_path(config.context(), path);
-            let mut network = Network::from_file(&net_in_path);
-            Network::partition_network(
-                &mut network,
-                config.partitioning(),
-                &config.qsim().main_modes,
-            );
-            network
-        } else {
-            Network::default()
-        }
+        let partitioning = config.partitioning();
+        let mut network = match &config.network().path {
+            Some(path) => Network::from_file(io::resolve_path(config.context(), path)),
+            None => return Network::default(),
+        };
+        Network::partition_network(&mut network, partitioning, &config.qsim().main_modes);
+        network
     }
 
     fn load_garage(config: &Config) -> Garage {
