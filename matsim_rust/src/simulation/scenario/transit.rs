@@ -37,6 +37,11 @@ impl StopIndexInRoute {
     /// The first stop of a route.
     pub const FIRST: Self = Self(0);
 
+    /// The stop at position `index` of a route.
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     /// The stop after this one.
     pub fn next(self) -> Self {
         Self(self.0 + 1)
