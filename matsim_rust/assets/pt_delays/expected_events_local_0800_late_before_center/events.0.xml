@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<events version="1.0">
+<event time="28680" type="actend" person="takes_later_but_faster_express" link="suburb_stop" x="0" y="0" actType="home"/>
+<event time="28680" type="actend" person="transfers_with_two_minutes_at_hub" link="village_stop" x="10000" y="6000" actType="home"/>
+<event time="28680" type="departure" person="takes_later_but_faster_express" link="suburb_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="28680" type="departure" person="transfers_with_two_minutes_at_hub" link="village_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="28680" type="travelled" person="takes_later_but_faster_express" distance="0" mode="walk"/>
+<event time="28680" type="travelled" person="transfers_with_two_minutes_at_hub" distance="0" mode="walk"/>
+<event time="28680" type="arrival" person="takes_later_but_faster_express" link="suburb_stop" legMode="walk"/>
+<event time="28680" type="arrival" person="transfers_with_two_minutes_at_hub" link="village_stop" legMode="walk"/>
+<event time="28681" type="actstart" person="takes_later_but_faster_express" link="suburb_stop" x="0" y="0" actType="pt interaction"/>
+<event time="28681" type="actstart" person="transfers_with_two_minutes_at_hub" link="village_stop" x="10000" y="6000" actType="pt interaction"/>
+<event time="28681" type="actend" person="takes_later_but_faster_express" link="suburb_stop" x="0" y="0" actType="pt interaction"/>
+<event time="28681" type="actend" person="transfers_with_two_minutes_at_hub" link="village_stop" x="10000" y="6000" actType="pt interaction"/>
+<event time="28681" type="departure" person="takes_later_but_faster_express" link="suburb_stop" legMode="pt" computationalRoutingMode="pt"/>
+<event time="28681" type="departure" person="transfers_with_two_minutes_at_hub" link="village_stop" legMode="pt" computationalRoutingMode="pt"/>
+<event time="28681" type="waitingForPt" person="takes_later_but_faster_express" agent="takes_later_but_faster_express" atStop="suburb" destinationStop="center"/>
+<event time="28681" type="waitingForPt" person="transfers_with_two_minutes_at_hub" agent="transfers_with_two_minutes_at_hub" atStop="village" destinationStop="hub"/>
+<event time="28800" type="TransitDriverStarts" driverId="pt_feeder_feeder_village_hub_feeder_0800" vehicleId="feeder_0800" transitLineId="feeder" transitRouteId="feeder_village_hub" departureId="feeder_0800"/>
+<event time="28800" type="departure" person="pt_feeder_feeder_village_hub_feeder_0800" link="village_stop" legMode="pt"/>
+<event time="28800" type="PersonEntersVehicle" person="pt_feeder_feeder_village_hub_feeder_0800" vehicle="feeder_0800"/>
+<event time="28800" type="TransitDriverStarts" driverId="pt_local_local_suburb_center_local_0800" vehicleId="local_0800" transitLineId="local" transitRouteId="local_suburb_center" departureId="local_0800"/>
+<event time="28800" type="departure" person="pt_local_local_suburb_center_local_0800" link="suburb_stop" legMode="pt"/>
+<event time="28800" type="PersonEntersVehicle" person="pt_local_local_suburb_center_local_0800" vehicle="local_0800"/>
+<event time="28800" type="VehicleArrivesAtFacility" vehicle="feeder_0800" facility="village" delay="0"/>
+<event time="28800" type="VehicleArrivesAtFacility" vehicle="local_0800" facility="suburb" delay="0"/>
+<event time="28800" type="PersonEntersVehicle" person="transfers_with_two_minutes_at_hub" vehicle="feeder_0800"/>
+<event time="28800" type="VehicleDepartsAtFacility" vehicle="feeder_0800" facility="village" delay="0"/>
+<event time="28800" type="VehicleDepartsAtFacility" vehicle="local_0800" facility="suburb" delay="0"/>
+<event time="28920" type="TransitDriverStarts" driverId="pt_local_local_suburb_center_local_0802" vehicleId="local_0802" transitLineId="local" transitRouteId="local_suburb_center" departureId="local_0802"/>
+<event time="28920" type="departure" person="pt_local_local_suburb_center_local_0802" link="suburb_stop" legMode="pt"/>
+<event time="28920" type="PersonEntersVehicle" person="pt_local_local_suburb_center_local_0802" vehicle="local_0802"/>
+<event time="28920" type="VehicleArrivesAtFacility" vehicle="local_0802" facility="suburb" delay="0"/>
+<event time="28920" type="VehicleDepartsAtFacility" vehicle="local_0802" facility="suburb" delay="0"/>
+<event time="29100" type="TransitDriverStarts" driverId="pt_express_express_suburb_center_express_0805" vehicleId="express_0805" transitLineId="express" transitRouteId="express_suburb_center" departureId="express_0805"/>
+<event time="29100" type="departure" person="pt_express_express_suburb_center_express_0805" link="suburb_stop" legMode="pt"/>
+<event time="29100" type="PersonEntersVehicle" person="pt_express_express_suburb_center_express_0805" vehicle="express_0805"/>
+<event time="29100" type="VehicleArrivesAtFacility" vehicle="express_0805" facility="suburb" delay="0"/>
+<event time="29100" type="VehicleArrivesAtFacility" vehicle="local_0800" facility="midtown" delay="0"/>
+<event time="29100" type="PersonEntersVehicle" person="takes_later_but_faster_express" vehicle="express_0805"/>
+<event time="29100" type="VehicleDepartsAtFacility" vehicle="express_0805" facility="suburb" delay="0"/>
+<event time="29100" type="VehicleDepartsAtFacility" vehicle="local_0800" facility="midtown" delay="0"/>
+<event time="29160" type="VehicleArrivesAtFacility" vehicle="feeder_0800" facility="hub" delay="0"/>
+<event time="29160" type="PersonLeavesVehicle" person="transfers_with_two_minutes_at_hub" vehicle="feeder_0800"/>
+<event time="29160" type="VehicleDepartsAtFacility" vehicle="feeder_0800" facility="hub" delay="0"/>
+<event time="29160" type="PersonLeavesVehicle" person="pt_feeder_feeder_village_hub_feeder_0800" vehicle="feeder_0800"/>
+<event time="29160" type="arrival" person="transfers_with_two_minutes_at_hub" link="hub_stop" legMode="pt"/>
+<event time="29160" type="arrival" person="pt_feeder_feeder_village_hub_feeder_0800" link="hub_stop" legMode="pt"/>
+<event time="29161" type="actstart" person="transfers_with_two_minutes_at_hub" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29161" type="actend" person="transfers_with_two_minutes_at_hub" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29161" type="departure" person="transfers_with_two_minutes_at_hub" link="hub_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29161" type="travelled" person="transfers_with_two_minutes_at_hub" distance="0" mode="walk"/>
+<event time="29161" type="arrival" person="transfers_with_two_minutes_at_hub" link="hub_stop" legMode="walk"/>
+<event time="29162" type="actstart" person="transfers_with_two_minutes_at_hub" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29162" type="actend" person="transfers_with_two_minutes_at_hub" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29162" type="departure" person="transfers_with_two_minutes_at_hub" link="hub_stop" legMode="pt" computationalRoutingMode="pt"/>
+<event time="29162" type="waitingForPt" person="transfers_with_two_minutes_at_hub" agent="transfers_with_two_minutes_at_hub" atStop="hub" destinationStop="center"/>
+<event time="29220" type="VehicleArrivesAtFacility" vehicle="local_0802" facility="midtown" delay="0"/>
+<event time="29220" type="VehicleDepartsAtFacility" vehicle="local_0802" facility="midtown" delay="0"/>
+<event time="29280" type="actend" person="waits_at_hub_after_just_missing_trunk" link="village_stop" x="10000" y="6000" actType="home"/>
+<event time="29280" type="departure" person="waits_at_hub_after_just_missing_trunk" link="village_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29280" type="TransitDriverStarts" driverId="pt_trunk_trunk_hub_center_trunk_0808" vehicleId="trunk_0808" transitLineId="trunk" transitRouteId="trunk_hub_center" departureId="trunk_0808"/>
+<event time="29280" type="departure" person="pt_trunk_trunk_hub_center_trunk_0808" link="hub_stop" legMode="pt"/>
+<event time="29280" type="PersonEntersVehicle" person="pt_trunk_trunk_hub_center_trunk_0808" vehicle="trunk_0808"/>
+<event time="29280" type="VehicleArrivesAtFacility" vehicle="trunk_0808" facility="hub" delay="0"/>
+<event time="29280" type="PersonEntersVehicle" person="transfers_with_two_minutes_at_hub" vehicle="trunk_0808"/>
+<event time="29280" type="VehicleDepartsAtFacility" vehicle="trunk_0808" facility="hub" delay="0"/>
+<event time="29280" type="travelled" person="waits_at_hub_after_just_missing_trunk" distance="0" mode="walk"/>
+<event time="29280" type="arrival" person="waits_at_hub_after_just_missing_trunk" link="village_stop" legMode="walk"/>
+<event time="29281" type="actstart" person="waits_at_hub_after_just_missing_trunk" link="village_stop" x="10000" y="6000" actType="pt interaction"/>
+<event time="29281" type="actend" person="waits_at_hub_after_just_missing_trunk" link="village_stop" x="10000" y="6000" actType="pt interaction"/>
+<event time="29281" type="departure" person="waits_at_hub_after_just_missing_trunk" link="village_stop" legMode="pt" computationalRoutingMode="pt"/>
+<event time="29281" type="waitingForPt" person="waits_at_hub_after_just_missing_trunk" agent="waits_at_hub_after_just_missing_trunk" atStop="village" destinationStop="hub"/>
+<event time="29400" type="TransitDriverStarts" driverId="pt_feeder_feeder_village_hub_feeder_0810" vehicleId="feeder_0810" transitLineId="feeder" transitRouteId="feeder_village_hub" departureId="feeder_0810"/>
+<event time="29400" type="departure" person="pt_feeder_feeder_village_hub_feeder_0810" link="village_stop" legMode="pt"/>
+<event time="29400" type="PersonEntersVehicle" person="pt_feeder_feeder_village_hub_feeder_0810" vehicle="feeder_0810"/>
+<event time="29400" type="TransitDriverStarts" driverId="pt_local_local_suburb_center_local_0810" vehicleId="local_0810" transitLineId="local" transitRouteId="local_suburb_center" departureId="local_0810"/>
+<event time="29400" type="departure" person="pt_local_local_suburb_center_local_0810" link="suburb_stop" legMode="pt"/>
+<event time="29400" type="PersonEntersVehicle" person="pt_local_local_suburb_center_local_0810" vehicle="local_0810"/>
+<event time="29400" type="VehicleArrivesAtFacility" vehicle="feeder_0810" facility="village" delay="0"/>
+<event time="29400" type="VehicleArrivesAtFacility" vehicle="local_0800" facility="hub" delay="0"/>
+<event time="29400" type="VehicleArrivesAtFacility" vehicle="local_0810" facility="suburb" delay="0"/>
+<event time="29400" type="PersonEntersVehicle" person="waits_at_hub_after_just_missing_trunk" vehicle="feeder_0810"/>
+<event time="29400" type="VehicleDepartsAtFacility" vehicle="feeder_0810" facility="village" delay="0"/>
+<event time="29400" type="VehicleDepartsAtFacility" vehicle="local_0800" facility="hub" delay="0"/>
+<event time="29400" type="VehicleDepartsAtFacility" vehicle="local_0810" facility="suburb" delay="0"/>
+<event time="29520" type="VehicleArrivesAtFacility" vehicle="local_0802" facility="hub" delay="0"/>
+<event time="29520" type="VehicleDepartsAtFacility" vehicle="local_0802" facility="hub" delay="0"/>
+<event time="29640" type="VehicleArrivesAtFacility" vehicle="trunk_0808" facility="center" delay="0"/>
+<event time="29640" type="PersonLeavesVehicle" person="transfers_with_two_minutes_at_hub" vehicle="trunk_0808"/>
+<event time="29640" type="VehicleDepartsAtFacility" vehicle="trunk_0808" facility="center" delay="0"/>
+<event time="29640" type="PersonLeavesVehicle" person="pt_trunk_trunk_hub_center_trunk_0808" vehicle="trunk_0808"/>
+<event time="29640" type="arrival" person="transfers_with_two_minutes_at_hub" link="center_stop" legMode="pt"/>
+<event time="29640" type="arrival" person="pt_trunk_trunk_hub_center_trunk_0808" link="center_stop" legMode="pt"/>
+<event time="29641" type="actstart" person="transfers_with_two_minutes_at_hub" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="29641" type="actend" person="transfers_with_two_minutes_at_hub" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="29641" type="departure" person="transfers_with_two_minutes_at_hub" link="center_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29641" type="travelled" person="transfers_with_two_minutes_at_hub" distance="0" mode="walk"/>
+<event time="29641" type="arrival" person="transfers_with_two_minutes_at_hub" link="center_stop" legMode="walk"/>
+<event time="29642" type="actstart" person="transfers_with_two_minutes_at_hub" link="center_stop" x="20000" y="0" actType="work"/>
+<event time="29700" type="TransitDriverStarts" driverId="pt_trunk_trunk_hub_center_trunk_0815" vehicleId="trunk_0815" transitLineId="trunk" transitRouteId="trunk_hub_center" departureId="trunk_0815"/>
+<event time="29700" type="departure" person="pt_trunk_trunk_hub_center_trunk_0815" link="hub_stop" legMode="pt"/>
+<event time="29700" type="PersonEntersVehicle" person="pt_trunk_trunk_hub_center_trunk_0815" vehicle="trunk_0815"/>
+<event time="29700" type="VehicleArrivesAtFacility" vehicle="express_0805" facility="center" delay="0"/>
+<event time="29700" type="VehicleArrivesAtFacility" vehicle="local_0810" facility="midtown" delay="0"/>
+<event time="29700" type="VehicleArrivesAtFacility" vehicle="trunk_0815" facility="hub" delay="0"/>
+<event time="29700" type="PersonLeavesVehicle" person="takes_later_but_faster_express" vehicle="express_0805"/>
+<event time="29700" type="VehicleDepartsAtFacility" vehicle="express_0805" facility="center" delay="0"/>
+<event time="29700" type="PersonLeavesVehicle" person="pt_express_express_suburb_center_express_0805" vehicle="express_0805"/>
+<event time="29700" type="VehicleDepartsAtFacility" vehicle="local_0810" facility="midtown" delay="0"/>
+<event time="29700" type="VehicleDepartsAtFacility" vehicle="trunk_0815" facility="hub" delay="0"/>
+<event time="29700" type="arrival" person="takes_later_but_faster_express" link="center_stop" legMode="pt"/>
+<event time="29700" type="arrival" person="pt_express_express_suburb_center_express_0805" link="center_stop" legMode="pt"/>
+<event time="29701" type="actstart" person="takes_later_but_faster_express" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="29701" type="actend" person="takes_later_but_faster_express" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="29701" type="departure" person="takes_later_but_faster_express" link="center_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29701" type="travelled" person="takes_later_but_faster_express" distance="0" mode="walk"/>
+<event time="29701" type="arrival" person="takes_later_but_faster_express" link="center_stop" legMode="walk"/>
+<event time="29702" type="actstart" person="takes_later_but_faster_express" link="center_stop" x="20000" y="0" actType="work"/>
+<event time="29760" type="VehicleArrivesAtFacility" vehicle="feeder_0810" facility="hub" delay="0"/>
+<event time="29760" type="PersonLeavesVehicle" person="waits_at_hub_after_just_missing_trunk" vehicle="feeder_0810"/>
+<event time="29760" type="VehicleDepartsAtFacility" vehicle="feeder_0810" facility="hub" delay="0"/>
+<event time="29760" type="PersonLeavesVehicle" person="pt_feeder_feeder_village_hub_feeder_0810" vehicle="feeder_0810"/>
+<event time="29760" type="arrival" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" legMode="pt"/>
+<event time="29760" type="arrival" person="pt_feeder_feeder_village_hub_feeder_0810" link="hub_stop" legMode="pt"/>
+<event time="29761" type="actstart" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29761" type="actend" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29761" type="departure" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29761" type="travelled" person="waits_at_hub_after_just_missing_trunk" distance="0" mode="walk"/>
+<event time="29761" type="arrival" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" legMode="walk"/>
+<event time="29762" type="actstart" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29762" type="actend" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29762" type="departure" person="waits_at_hub_after_just_missing_trunk" link="hub_stop" legMode="pt" computationalRoutingMode="pt"/>
+<event time="29762" type="waitingForPt" person="waits_at_hub_after_just_missing_trunk" agent="waits_at_hub_after_just_missing_trunk" atStop="hub" destinationStop="center"/>
+<event time="29880" type="actend" person="starts_at_hub_after_trunk_departed" link="hub_stop" x="10000" y="0" actType="home"/>
+<event time="29880" type="departure" person="starts_at_hub_after_trunk_departed" link="hub_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="29880" type="travelled" person="starts_at_hub_after_trunk_departed" distance="0" mode="walk"/>
+<event time="29880" type="arrival" person="starts_at_hub_after_trunk_departed" link="hub_stop" legMode="walk"/>
+<event time="29881" type="actstart" person="starts_at_hub_after_trunk_departed" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29881" type="actend" person="starts_at_hub_after_trunk_departed" link="hub_stop" x="10000" y="0" actType="pt interaction"/>
+<event time="29881" type="departure" person="starts_at_hub_after_trunk_departed" link="hub_stop" legMode="pt" computationalRoutingMode="pt"/>
+<event time="29881" type="waitingForPt" person="starts_at_hub_after_trunk_departed" agent="starts_at_hub_after_trunk_departed" atStop="hub" destinationStop="center"/>
+<event time="30000" type="VehicleArrivesAtFacility" vehicle="local_0810" facility="hub" delay="0"/>
+<event time="30000" type="VehicleDepartsAtFacility" vehicle="local_0810" facility="hub" delay="0"/>
+<event time="30060" type="VehicleArrivesAtFacility" vehicle="trunk_0815" facility="center" delay="0"/>
+<event time="30060" type="VehicleDepartsAtFacility" vehicle="trunk_0815" facility="center" delay="0"/>
+<event time="30060" type="PersonLeavesVehicle" person="pt_trunk_trunk_hub_center_trunk_0815" vehicle="trunk_0815"/>
+<event time="30060" type="arrival" person="pt_trunk_trunk_hub_center_trunk_0815" link="center_stop" legMode="pt"/>
+<event time="30120" type="TransitDriverStarts" driverId="pt_trunk_trunk_hub_center_trunk_0822" vehicleId="trunk_0822" transitLineId="trunk" transitRouteId="trunk_hub_center" departureId="trunk_0822"/>
+<event time="30120" type="departure" person="pt_trunk_trunk_hub_center_trunk_0822" link="hub_stop" legMode="pt"/>
+<event time="30120" type="PersonEntersVehicle" person="pt_trunk_trunk_hub_center_trunk_0822" vehicle="trunk_0822"/>
+<event time="30120" type="VehicleArrivesAtFacility" vehicle="trunk_0822" facility="hub" delay="0"/>
+<event time="30120" type="PersonEntersVehicle" person="waits_at_hub_after_just_missing_trunk" vehicle="trunk_0822"/>
+<event time="30120" type="PersonEntersVehicle" person="starts_at_hub_after_trunk_departed" vehicle="trunk_0822"/>
+<event time="30120" type="VehicleDepartsAtFacility" vehicle="trunk_0822" facility="hub" delay="0"/>
+<event time="30240" type="VehicleArrivesAtFacility" vehicle="local_0800" facility="center" delay="240"/>
+<event time="30240" type="VehicleArrivesAtFacility" vehicle="local_0802" facility="center" delay="120"/>
+<event time="30240" type="VehicleDepartsAtFacility" vehicle="local_0800" facility="center" delay="240"/>
+<event time="30240" type="PersonLeavesVehicle" person="pt_local_local_suburb_center_local_0800" vehicle="local_0800"/>
+<event time="30240" type="VehicleDepartsAtFacility" vehicle="local_0802" facility="center" delay="120"/>
+<event time="30240" type="PersonLeavesVehicle" person="pt_local_local_suburb_center_local_0802" vehicle="local_0802"/>
+<event time="30240" type="arrival" person="pt_local_local_suburb_center_local_0800" link="center_stop" legMode="pt"/>
+<event time="30240" type="arrival" person="pt_local_local_suburb_center_local_0802" link="center_stop" legMode="pt"/>
+<event time="30480" type="VehicleArrivesAtFacility" vehicle="trunk_0822" facility="center" delay="0"/>
+<event time="30480" type="PersonLeavesVehicle" person="waits_at_hub_after_just_missing_trunk" vehicle="trunk_0822"/>
+<event time="30480" type="PersonLeavesVehicle" person="starts_at_hub_after_trunk_departed" vehicle="trunk_0822"/>
+<event time="30480" type="VehicleDepartsAtFacility" vehicle="trunk_0822" facility="center" delay="0"/>
+<event time="30480" type="PersonLeavesVehicle" person="pt_trunk_trunk_hub_center_trunk_0822" vehicle="trunk_0822"/>
+<event time="30480" type="arrival" person="waits_at_hub_after_just_missing_trunk" link="center_stop" legMode="pt"/>
+<event time="30480" type="arrival" person="starts_at_hub_after_trunk_departed" link="center_stop" legMode="pt"/>
+<event time="30480" type="arrival" person="pt_trunk_trunk_hub_center_trunk_0822" link="center_stop" legMode="pt"/>
+<event time="30481" type="actstart" person="waits_at_hub_after_just_missing_trunk" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="30481" type="actstart" person="starts_at_hub_after_trunk_departed" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="30481" type="actend" person="waits_at_hub_after_just_missing_trunk" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="30481" type="actend" person="starts_at_hub_after_trunk_departed" link="center_stop" x="20000" y="0" actType="pt interaction"/>
+<event time="30481" type="departure" person="waits_at_hub_after_just_missing_trunk" link="center_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="30481" type="departure" person="starts_at_hub_after_trunk_departed" link="center_stop" legMode="walk" computationalRoutingMode="pt"/>
+<event time="30481" type="travelled" person="starts_at_hub_after_trunk_departed" distance="0" mode="walk"/>
+<event time="30481" type="travelled" person="waits_at_hub_after_just_missing_trunk" distance="0" mode="walk"/>
+<event time="30481" type="arrival" person="starts_at_hub_after_trunk_departed" link="center_stop" legMode="walk"/>
+<event time="30481" type="arrival" person="waits_at_hub_after_just_missing_trunk" link="center_stop" legMode="walk"/>
+<event time="30482" type="actstart" person="starts_at_hub_after_trunk_departed" link="center_stop" x="20000" y="0" actType="work"/>
+<event time="30482" type="actstart" person="waits_at_hub_after_just_missing_trunk" link="center_stop" x="20000" y="0" actType="work"/>
+<event time="30600" type="VehicleArrivesAtFacility" vehicle="local_0810" facility="center" delay="0"/>
+<event time="30600" type="VehicleDepartsAtFacility" vehicle="local_0810" facility="center" delay="0"/>
+<event time="30600" type="PersonLeavesVehicle" person="pt_local_local_suburb_center_local_0810" vehicle="local_0810"/>
+<event time="30600" type="arrival" person="pt_local_local_suburb_center_local_0810" link="center_stop" legMode="pt"/>
+</events>
