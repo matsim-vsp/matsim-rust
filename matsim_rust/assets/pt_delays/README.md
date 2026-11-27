@@ -46,26 +46,50 @@ only at 08:30, after `trunk_0822`.
 
 ## Tests
 
-`tests/simulation/pt_delays.rs`, `pt_delays_base_case`: runs the base case with one partition and
-with two, where the test puts hub and the links into it on partition 1, and compares the events
-of both with `expected_events_base_case/events.0.xml`. In these, each person enters the vehicles its
-name describes and starts work two seconds after the arrival of its last vehicle (one tick for the pt
-leg to end, one for the walk of 0 s), and every vehicle arrives at and departs from each stop, the
-first and the last included, at the planned time with delay 0.
+`tests/simulation/pt_delays.rs` runs each case with one partition and with two, where the test puts
+hub and the links into it on partition 1, and compares the events of both with
+`expected_events_<case>/events.0.xml`.
 
-## Planned delay variants
+`pt_delays_base_case`: each person enters the vehicles its name describes and starts work two
+seconds after the arrival of its last vehicle (one tick for the pt leg to end, one for the walk of
+0 s), and every vehicle arrives at and departs from each stop, the first and the last included, at
+the planned time with delay 0.
 
-Not implemented yet; the input format of delays is still open, so the variants will be given by the
-test code as fixed extra times per departure. How persons react to them depends on the open
-decisions D05 and D06, so only the question each variant raises is fixed here.
+## Delay variants
 
-| Variant | Person concerned | Question |
-|---|---|---|
-| `express_0805_late` (+10 min) | `takes_later_but_faster_express` | The chosen express is no longer the fastest connection. |
-| `feeder_0800_late` (+3 min) | `transfers_with_two_minutes_at_hub` | The connection to `trunk_0808` is lost. |
-| `trunk_0815_late_2min` (+2 min) | `waits_at_hub_after_just_missing_trunk` | A connection missed before becomes reachable. |
-| `trunk_0815_late_5min` (+5 min) | `starts_at_hub_after_trunk_departed` | A departure that left on schedule is still there. |
-| `local_0800_late` (+5 min at suburb) | none | Vehicles only: `local_0802` stays behind `local_0800` at every stop. |
+In each variant, one departure has exogenous delays at one stop of its route. The test sets them as
+the attribute `delays` of the departure, which a transit schedule file can give as well. It is a
+JSON array with one object per stop with delays:
+
+```xml
+<departure id="trunk_0815" departureTime="08:15:00" vehicleRefId="trunk_0815">
+	<attributes>
+		<attribute name="delays" class="java.lang.String">[{"stopIndex":0,"departureDelayOffset":120}]</attribute>
+	</attributes>
+</departure>
+```
+
+`stopIndex` is the position of the stop in the route, from 0. `arrivalDelayOffset` is added to the
+arrival at the stop (at the first stop, the departure starts later), `departureDelayOffset` to the
+departure from it (the vehicle halts longer). Both are whole seconds, optional and 0 by default. The
+vehicle carries the delay on to the next stops, where a halt can absorb it.
+
+Only the drivers of `StopDelayDriverAgentSource` carry out these delays; the test adds it to the
+agent sources of the controller. Without it, the default source creates drivers who ignore the
+attributes.
+
+The persons follow their plans; how they react to delays with new routes depends on the open
+decisions D05 and D06. A passenger boards the next vehicle of its planned line that serves its
+egress stop.
+
+| Variant | Delay | Question | Result |
+|---|---|---|---|
+| `express_0805_late` | arrival +10 min at center (1) | The chosen express is no longer the fastest connection. | `takes_later_but_faster_express` still rides it, center 08:25 |
+| `feeder_0800_late` | arrival +3 min at hub (1) | The connection to `trunk_0808` is lost. | `transfers_with_two_minutes_at_hub` reaches hub at 08:09 and takes `trunk_0815`, center 08:21 |
+| `trunk_0815_late_2min` | departure +2 min at hub (0) | A connection missed before becomes reachable. | `waits_at_hub_after_just_missing_trunk` catches `trunk_0815` (leaves 08:17), center 08:23 |
+| `trunk_0815_late_5min` | departure +5 min at hub (0) | A departure that left on schedule is still there. | `starts_at_hub_after_trunk_departed` and `waits_at_hub_after_just_missing_trunk` catch it (leaves 08:20), center 08:26 |
+| `local_0800_late` | departure +5 min at suburb (0) | Vehicles only: `local_0802` stays behind `local_0800` at every stop. | `local_0802` leaves suburb and reaches each stop in the same tick as `local_0800`, after it |
+| `local_0800_late_before_center` | arrival +4 min at center (3) | The delay takes effect on another partition than the one where the driver started. | `local_0800` reaches center at 08:24, `local_0802` waits in front of center until then |
 
 ## Not there yet
 

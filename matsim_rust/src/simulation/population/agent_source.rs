@@ -3,7 +3,7 @@ use crate::simulation::agents::agent_logic::{
     AdaptivePlanBasedSimulationLogic, PlanBasedSimulationLogic,
 };
 use crate::simulation::id::Id;
-use crate::simulation::pt::driver::WaitingDriver;
+use crate::simulation::pt::driver::{PlannedStart, WaitingDriver};
 use crate::simulation::scenario::population::InternalPerson;
 use crate::simulation::scenario::{MobsimScenarioPartition, PopulationShard};
 use ahash::HashMapExt;
@@ -23,6 +23,14 @@ pub trait AgentSource {
         population: &mut PopulationShard,
         partition: &MobsimScenarioPartition,
     ) -> AgentSet;
+
+    /// Whether the source creates the drivers of the transit departures, like
+    /// [`TransitDriverAgentSource`]. If no source of a controller does, it adds a
+    /// [`TransitDriverAgentSource`] for schedule-based transit, see
+    /// [`ControllerBuilder::build`](crate::simulation::controller::controller::ControllerBuilder::build).
+    fn creates_transit_drivers(&self) -> bool {
+        false
+    }
 }
 
 /// The agent sources of a mobsim by default: the persons of the population.
@@ -104,8 +112,9 @@ impl AgentSource for PreplanningHorizonAgentSource {
 }
 
 /// Creates the drivers of the transit departures whose first stop is on the partition. Each waits
-/// in an activity until its departure, like the drivers that MATSim's transit engines insert. With
-/// teleported transit, the schedule is empty and there are no drivers.
+/// in an activity until its departure, like the drivers that MATSim's transit engines insert, and
+/// then follows the schedule as a [`PlannedDriver`](crate::simulation::pt::driver::PlannedDriver).
+/// With teleported transit, the schedule is empty and there are no drivers.
 pub struct TransitDriverAgentSource;
 
 impl AgentSource for TransitDriverAgentSource {
@@ -120,10 +129,14 @@ impl AgentSource for TransitDriverAgentSource {
             .map(|index| {
                 (
                     schedule.driver(index).clone(),
-                    WaitingDriver::new_agent(schedule.clone(), index),
+                    WaitingDriver::new_agent(schedule.clone(), index, PlannedStart),
                 )
             })
             .collect()
+    }
+
+    fn creates_transit_drivers(&self) -> bool {
+        true
     }
 }
 
