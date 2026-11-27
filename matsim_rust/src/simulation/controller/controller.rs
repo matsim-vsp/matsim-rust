@@ -182,7 +182,10 @@ impl ControllerBuilder {
         if matches!(
             config.transit().simulation,
             TransitSimulation::ScheduleBasedTeleportation
-        ) {
+        ) && !agent_sources
+            .iter()
+            .any(|source| source.creates_transit_drivers())
+        {
             agent_sources.push(Arc::new(TransitDriverAgentSource));
         }
 
@@ -211,7 +214,9 @@ impl ControllerBuilder {
     }
 
     /// Replaces the agent sources, by default [`default_agent_sources`]. A mobsim asks them one
-    /// after the other.
+    /// after the other. For schedule-based transit, [`Self::build`] adds a
+    /// [`TransitDriverAgentSource`](crate::simulation::population::agent_source::TransitDriverAgentSource)
+    /// unless one of the sources creates the transit drivers.
     pub fn agent_sources(mut self, sources: Vec<DynAgentSource>) -> Self {
         self.agent_sources = sources;
         self

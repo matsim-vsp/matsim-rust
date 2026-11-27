@@ -17,6 +17,7 @@ use crate::simulation::scenario::transit::{
 use crate::simulation::scenario::vehicles::InternalVehicle;
 use crate::simulation::time::SimTime;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The activities of drivers emit no events, so their coordinate is never reported.
 static NO_COORDINATE: Coordinate = Coordinate {
@@ -63,22 +64,51 @@ fn apply_stop_time_constraints(scheduled: StopTimes, earliest_arrival: SimTime) 
     }
 }
 
-/// A driver before its departure. Like MATSim's `TransitDriverAgentImpl`, it waits in an activity
-/// at the start link of the route until the departure time. Then it copies its departure into a
-/// [`PlannedDriver`]. Until then, it only holds the schedule and the index of its departure.
-pub struct WaitingDriver {
-    schedule: Arc<TransitSimSchedule>,
-    departure: DepartureIndex,
+/// Creates the driver of a departure when it starts, see [`WaitingDriver`].
+pub trait DriverStart: Send + 'static {
+    /// The driver who starts `departure` at `now` and approaches the first stop.
+    fn start(
+        self,
+        schedule: &TransitSimSchedule,
+        departure: DepartureIndex,
+        now: SimTime,
+    ) -> LegAgent;
 }
 
-impl WaitingDriver {
+/// Starts a departure with a [`PlannedDriver`].
+pub struct PlannedStart;
+
+impl DriverStart for PlannedStart {
+    fn start(
+        self,
+        schedule: &TransitSimSchedule,
+        departure: DepartureIndex,
+        now: SimTime,
+    ) -> LegAgent {
+        Box::new(PlannedDriver::new(schedule, departure, now))
+    }
+}
+
+/// A driver before its departure. Like MATSim's `TransitDriverAgentImpl`, it waits in an activity
+/// at the start link of the route until the departure time. Then `start` creates the driver of the
+/// departure, e.g. a [`PlannedDriver`] with [`PlannedStart`]. Until then, it only holds the schedule
+/// and the index of its departure.
+pub struct WaitingDriver<S> {
+    schedule: Arc<TransitSimSchedule>,
+    departure: DepartureIndex,
+    start: S,
+}
+
+impl<S: DriverStart> WaitingDriver<S> {
     pub fn new_agent(
         schedule: Arc<TransitSimSchedule>,
         departure: DepartureIndex,
+        start: S,
     ) -> ActivityAgent {
         Box::new(Self {
             schedule,
             departure,
+            start,
         })
     }
 
@@ -87,19 +117,19 @@ impl WaitingDriver {
     }
 }
 
-impl Identifiable<InternalPerson> for WaitingDriver {
+impl<S: DriverStart> Identifiable<InternalPerson> for WaitingDriver<S> {
     fn id(&self) -> &Id<InternalPerson> {
         self.schedule.driver(self.departure)
     }
 }
 
-impl SimulationAgentLogic for WaitingDriver {
+impl<S: DriverStart> SimulationAgentLogic for WaitingDriver<S> {
     fn into_person(self: Box<Self>) -> Option<InternalPerson> {
         None
     }
 }
 
-impl ActivityLogic for WaitingDriver {
+impl<S: DriverStart> ActivityLogic for WaitingDriver<S> {
     fn act_type(&self) -> &Id<String> {
         self.schedule.driver_activity_type()
     }
@@ -138,11 +168,12 @@ impl ActivityLogic for WaitingDriver {
     }
     fn notify_finished(&mut self, _now: SimTime) {}
     fn finish_activity(self: Box<Self>, now: SimTime) -> NextPhase {
-        NextPhase::Leg(Box::new(PlannedDriver::new(
-            &self.schedule,
-            self.departure,
-            now,
-        )))
+        let Self {
+            schedule,
+            departure,
+            start,
+        } = *self;
+        NextPhase::Leg(start.start(&schedule, departure, now))
     }
 }
 
@@ -223,6 +254,13 @@ impl PlannedDriver {
             stop: StopIndexInRoute::FIRST,
             next_time,
         }
+    }
+
+    /// Postpones the next time, the arrival at the current stop while approaching it or the
+    /// departure while halting there, by `delay`. For drivers with exogenous delays, see
+    /// [`StopDelayDriver`](super::stop_delays::StopDelayDriver).
+    pub(super) fn delay_next_time(&mut self, delay: Duration) {
+        self.next_time += SimTime::from_duration(delay);
     }
 }
 
@@ -315,6 +353,14 @@ impl TransitDriverLogic for PlannedDriver {
         self.next_time
     }
 
+    fn scheduled_arrival(&self) -> SimTime {
+        self.plan.scheduled[self.stop.index()].arrival
+    }
+
+    fn scheduled_departure(&self) -> SimTime {
+        self.plan.scheduled[self.stop.index()].departure
+    }
+
     fn notify_stop_arrived(&mut self, now: SimTime) {
         self.next_time =
             apply_stop_time_constraints(self.plan.scheduled[self.stop.index()], now).departure;
@@ -398,8 +444,9 @@ impl ActivityLogic for FinishedDriver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{PlannedDriver, StopTimes, WaitingDriver};
+pub(crate) mod tests {
+    use super::{PlannedDriver, PlannedStart, StopTimes, WaitingDriver};
+    use crate::simulation::InternalAttributes;
     use crate::simulation::agents::agent::{TransitDriverAgent, TransitDriverLogic};
     use crate::simulation::config::TransitSimulation;
     use crate::simulation::pt::schedule::{
@@ -414,14 +461,33 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    const SIX: u64 = 6 * 3600;
+    pub(crate) const SIX: u64 = 6 * 3600;
 
     /// The tutorial schedule and the 06:00 departure of route 1to3: stop 1 (departure offset 0),
     /// stop 2a (arrival 200 s, departure 240 s) and stop 3 (arrival 540 s).
     fn tutorial_departure() -> (TransitSimSchedule, DepartureIndex) {
+        tutorial_departure_with(|_| {})
+    }
+
+    /// Like [`tutorial_departure`], with the attributes of the departure set by `set`.
+    pub(crate) fn tutorial_departure_with(
+        set: impl FnOnce(&mut InternalAttributes),
+    ) -> (TransitSimSchedule, DepartureIndex) {
         let network = Network::from_file("./assets/pt_tutorial/multimodalnetwork.xml");
         let mut schedule =
             TransitSchedule::from_file(Path::new("./assets/pt_tutorial/transitschedule.xml"));
+        let (index, _) = schedule
+            .indexed_departures()
+            .find(|(index, departure)| {
+                departure.id.external() == "01"
+                    && schedule
+                        .route(schedule.departure_route(*index))
+                        .id
+                        .external()
+                        == "1to3"
+            })
+            .unwrap();
+        set(&mut schedule.departure_mut(index).attributes);
         let mut garage =
             Garage::from_file(&PathBuf::from("./assets/pt_tutorial/transitVehicles.xml"));
         give_each_departure_its_own_vehicle(&mut schedule, &mut garage);
@@ -432,11 +498,7 @@ mod tests {
             &Population::default(),
             TransitSimulation::ScheduleBasedTeleportation,
         );
-        let (index, _) = schedule
-            .schedule()
-            .indexed_departures()
-            .find(|(index, _)| schedule.driver(*index).external() == "pt_Blue Line_1to3_01")
-            .unwrap();
+        assert_eq!("pt_Blue Line_1to3_01", schedule.driver(index).external());
         (schedule, index)
     }
 
@@ -450,16 +512,16 @@ mod tests {
         ))
     }
 
-    fn arrived(driver: &mut TransitDriverAgent, now: u64) {
+    pub(crate) fn arrived(driver: &mut TransitDriverAgent, now: u64) {
         driver.notify_stop_arrived(SimTime::from_secs(now));
     }
 
-    fn departed(driver: &mut TransitDriverAgent, now: u64) {
+    pub(crate) fn departed(driver: &mut TransitDriverAgent, now: u64) {
         driver.notify_stop_departed(SimTime::from_secs(now + 1), SimTime::from_secs(now));
     }
 
     /// The current stop and the next time.
-    fn state(driver: &TransitDriverAgent) -> (&str, u64) {
+    pub(crate) fn state(driver: &TransitDriverAgent) -> (&str, u64) {
         (driver.stop().external(), driver.next_time().as_secs())
     }
 
@@ -557,7 +619,7 @@ mod tests {
     #[deterministic_id_test]
     fn driver_waits_drives_its_departure_and_stays() {
         let (schedule, index) = tutorial_departure();
-        let waiting = WaitingDriver::new_agent(Arc::new(schedule), index);
+        let waiting = WaitingDriver::new_agent(Arc::new(schedule), index, PlannedStart);
         assert_eq!("pt_Blue Line_1to3_01", waiting.id().external());
         assert_eq!("11", waiting.link_id().external());
         assert_eq!(SIX, waiting.end_time(SimTime::default()).as_secs());
@@ -580,5 +642,24 @@ mod tests {
         assert!(!finished.has_next_leg());
         assert!(!finished.has_activity_events());
         assert_eq!(None, finished.into_person());
+    }
+
+    /// The scheduled times of the current stop, which the events report the delay against, stay
+    /// those of the schedule however late the vehicle is.
+    #[deterministic_id_test]
+    fn driver_reports_the_scheduled_times_of_its_stop() {
+        let driver = &mut driver(SIX);
+        let scheduled = |driver: &TransitDriverAgent| {
+            (
+                driver.scheduled_arrival().as_secs(),
+                driver.scheduled_departure().as_secs(),
+            )
+        };
+        assert_eq!((SIX, SIX), scheduled(driver));
+        arrived(driver, SIX);
+        departed(driver, SIX + 300);
+        assert_eq!((SIX + 200, SIX + 240), scheduled(driver));
+        arrived(driver, SIX + 500);
+        assert_eq!((SIX + 200, SIX + 240), scheduled(driver));
     }
 }
