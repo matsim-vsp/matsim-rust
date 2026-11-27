@@ -21,20 +21,33 @@ Network links must list their allowed modes explicitly: a link without modes all
 assumes `car` for links without a `modes` attribute, nothing is implied. Loading a network with such links logs a
 warning.
 
-With `PartitionMethod::Metis`, the nodes of the network are partitioned with METIS, and every link belongs to the
-partition of its `to` node. METIS partitions undirected graphs and requires them to be symmetric, without loops and
+With `PartitionMethod::Metis` or `PartitionMethod::Bisect`, each link belongs to the partition of its `to` node.
+Both methods assign all nodes and links to partition `0` when the requested partition count is zero or one.
+METIS partitions undirected graphs and requires them to be symmetric, without loops and
 without duplicate edges. It does not check this, and invalid input makes it access memory out of bounds. Therefore,
 each pair of nodes connected by at least one link becomes one edge. Its weight is the sum of the weights of all links
 between both nodes in either direction (each truncated to an integer), but at least 1. Loop links are ignored.
 `partitioning.non_main_mode_links` controls links that allow none of the `qsim.main_modes`, e.g. the links of a transit
 network whose vehicles are teleported. No vehicle moves on them, but agents perform activities on them, e.g.
-`pt interaction`. With the default `AssignAfterPartitioningToNearest`, METIS only partitions the nodes incident to a
-link that allows a main mode, and only these links become edges and contribute to vertex weights. Afterwards, every
-other node is assigned to the partition of the nearest partitioned node in the x/y plane; ties are broken by the
+`pt interaction`. With the default `AssignAfterPartitioningToNearest`, the selected method partitions the nodes incident
+to a link that allows a main mode. Only these links contribute to link-based weights and to the METIS graph. Afterwards,
+every other node is assigned to the partition of the nearest partitioned node in the x/y plane; ties are broken by the
 smallest external node id. Only if no link allows a main mode, e.g. because `qsim.main_modes` is empty, all nodes and
 links are partitioned. With `Include`, all nodes and links are partitioned regardless of their modes, as before
-October 2026. `Network::from_file_with_partitioning` always partitions all nodes and links. `contiguous: true` requires a connected
-graph, i.e. a connected main-mode network with `AssignAfterPartitioningToNearest`. Networks with separate components,
+October 2026. `Network::from_file_with_partitioning` always partitions all nodes and links.
+
+Bisect defaults to `axis: X`, which sorts the nodes once by X coordinate. With `axis: Alternating`, it sorts each
+subregion by X on the first level, by Y on the second, and continues alternating at each level. Ties in the sort
+are broken by external node ID. Each recursive cut divides the requested partitions between both sides and selects
+the boundary closest to the corresponding share of the total node weight.
+For three partitions, the first cut targets one third of the weight for the single partition on the left. Each side
+must have enough nodes for its partitions. Equal weight errors favor a proportional node count, then the earlier
+boundary. Bisect uses one node weight, which defaults to `Constant` and can also be `InLinkCount`, `InLinkCapacity`
+(including fractional capacities), or `PreComputed` for the node's `cmp_weight` attribute. MATSim Java's bisect
+derives weights from selected plans and targets half of the weight at each cut.
+
+For METIS, `contiguous: true` requires a connected graph, i.e. a connected main-mode network with
+`AssignAfterPartitioningToNearest`. Networks with separate components,
 e.g. transit stop nodes with only a loop link or a transit network that is not connected to the road network, need
 `contiguous: false` with `Include`. `imbalance_factor` is METIS's load imbalance, the largest allowed partition
 weight relative to the mean (1.03 = 3 %); before October 2026 it was the excess itself, so that 1.1 allowed partitions

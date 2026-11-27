@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use tracing::info;
 
 use matsim_rust::simulation::config::{
-    MetisOptions, NonMainModeLinks, PartitionMethod, Partitioning,
+    BisectOptions, MetisOptions, NonMainModeLinks, PartitionMethod, Partitioning,
 };
 use matsim_rust::simulation::id;
 use matsim_rust::simulation::scenario::network::Network;
@@ -17,6 +17,10 @@ use matsim_rust::simulation::scenario::network::Network;
 fn main() {
     let _guard = matsim_rust::simulation::logging::init_std_out_logging_thread_local();
     let args = InputArgs::parse();
+    let method = match args.method {
+        Method::Metis => PartitionMethod::Metis(MetisOptions::default()),
+        Method::Bisect => PartitionMethod::Bisect(BisectOptions::default()),
+    };
 
     if let Some(id_path) = args.id_path {
         id::load_from_file(&id_path);
@@ -49,7 +53,7 @@ fn main() {
     let mut net1 = Network::from_file(&args.net_path);
     let partitioning = Partitioning {
         num_parts: args.num_parts,
-        method: PartitionMethod::Metis(MetisOptions::default()),
+        method,
         non_main_mode_links: args.non_main_mode_links,
     };
     Network::partition_network(&mut net1, &partitioning, &args.main_modes);
@@ -67,6 +71,12 @@ fn main() {
     );
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Method {
+    Metis,
+    Bisect,
+}
+
 #[derive(Parser, Debug)]
 struct InputArgs {
     #[arg(short, long)]
@@ -75,6 +85,9 @@ struct InputArgs {
     pub id_path: Option<PathBuf>,
     #[arg(long)]
     pub num_parts: u32,
+    /// Algorithm for partitioning the network.
+    #[arg(long, value_enum, default_value = "metis")]
+    pub method: Method,
     /// Modes simulated on the network, as `qsim.main_modes`. Without them, all nodes and links are
     /// partitioned.
     #[arg(long, value_delimiter = ',')]

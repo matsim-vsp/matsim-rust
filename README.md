@@ -154,6 +154,8 @@ was available at build time.
 
 ## Create input files
 
+### Convert inputs to protobuf
+
 Inputs can be loaded from XML or converted to protobuf for faster reading. To create protobuf files, run:
 
 ```shell

@@ -11,7 +11,7 @@ use crate::simulation::io::xml::network;
 use crate::simulation::io::xml::network::{
     IOLink, IONetwork, IONode, write_to_xml_with_link_attribute_overrides,
 };
-use crate::simulation::network::metis_partitioning;
+use crate::simulation::network::{bisect_partitioning, metis_partitioning};
 use crate::simulation::scenario::Coordinate;
 use itertools::Itertools;
 use nohash_hasher::{IntMap, IntSet};
@@ -282,17 +282,29 @@ impl Network {
                     partitioning.non_main_mode_links,
                     main_modes,
                 );
-                for (id, node) in network.nodes.iter_mut() {
-                    let partition = partitions.get(id).unwrap();
-                    node.partition = *partition as u32;
-
-                    for link_id in &node.in_links {
-                        let link = network.links.get_mut(link_id).unwrap();
-                        link.partition = *partition as u32;
-                    }
-                }
+                network.assign_partitions(|id| partitions[id] as u32);
+            }
+            PartitionMethod::Bisect(options) => {
+                let partitions = bisect_partitioning::partition_with_bisect(
+                    network,
+                    partitioning.num_parts,
+                    options,
+                    partitioning.non_main_mode_links,
+                    main_modes,
+                );
+                network.assign_partitions(|id| partitions[id]);
             }
             PartitionMethod::None => {}
+        }
+    }
+
+    fn assign_partitions(&mut self, partition_of: impl Fn(&Id<Node>) -> u32) {
+        for (id, node) in &mut self.nodes {
+            let partition = partition_of(id);
+            node.partition = partition;
+            for link_id in &node.in_links {
+                self.links.get_mut(link_id).unwrap().partition = partition;
+            }
         }
     }
 
@@ -593,8 +605,8 @@ pub mod utils {
 #[cfg(test)]
 mod tests {
     use crate::simulation::config::{
-        EdgeWeight, MetisOptions, ModalLinkSelection, NonMainModeLinks, PartitionMethod,
-        Partitioning,
+        BisectOptions, EdgeWeight, MetisOptions, ModalLinkSelection, NonMainModeLinks,
+        PartitionMethod, Partitioning, VertexWeight,
     };
     use crate::simulation::id;
     use crate::simulation::id::Id;
@@ -953,6 +965,44 @@ mod tests {
                 link.id.external()
             );
         }
+    }
+
+    #[deterministic_id_test]
+    fn bisect_uses_only_main_mode_links_for_weighting_and_assigns_other_nodes_by_distance() {
+        let mut network = network_with_transit();
+        network
+            .links
+            .get_mut(&Id::get_from_ext("r1r4"))
+            .unwrap()
+            .capacity = 1_000.0;
+        let mut partitioning = Partitioning {
+            num_parts: 2,
+            method: PartitionMethod::Bisect(BisectOptions {
+                vertex_weight: VertexWeight::InLinkCapacity,
+                ..Default::default()
+            }),
+            non_main_mode_links: NonMainModeLinks::AssignAfterPartitioningToNearest,
+        };
+        let modes = ["car".to_owned()];
+        Network::partition_network(&mut network, &partitioning, &modes);
+        assert_eq!(partition_of(&network, "r2"), 0);
+        assert_eq!(partition_of(&network, "r3"), 1);
+        assert_eq!(partition_of(&network, "s0"), 0);
+        assert_eq!(partition_of(&network, "s1"), 1);
+        assert_eq!(partition_of(&network, "iso"), 0);
+        assert_eq!(partition_of(&network, "tie"), 0);
+        assert_links_belong_to_their_to_node(&network);
+
+        let mut included = network.clone();
+        partitioning.non_main_mode_links = NonMainModeLinks::Include;
+        Network::partition_network(&mut included, &partitioning, &modes);
+        assert_eq!(partition_of(&included, "r3"), 0);
+        assert_links_belong_to_their_to_node(&included);
+
+        partitioning.non_main_mode_links = NonMainModeLinks::AssignAfterPartitioningToNearest;
+        Network::partition_network(&mut network, &partitioning, &["ship".to_owned()]);
+        assert_eq!(network, included);
+        assert!(Id::<String>::try_get_from_ext("ship").is_none());
     }
 
     #[deterministic_id_test]

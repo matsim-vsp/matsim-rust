@@ -1,5 +1,7 @@
 use macros::deterministic_id_test;
-use matsim_rust::simulation::config::{CommandLineArgs, Config, WriteEvents};
+use matsim_rust::simulation::config::{
+    BisectOptions, CommandLineArgs, Config, PartitionMethod, WriteEvents,
+};
 use matsim_rust::simulation::controller::controller::ControllerBuilder;
 use matsim_rust::simulation::events::utils::compare_event_folder;
 use matsim_rust::simulation::events::{LinkEnterEvent, LinkLeaveEvent, PersonStuckEvent};
@@ -125,6 +127,37 @@ fn three_links_two_parts_match_expected_events() {
     compare_event_folder(
         "./tests/resources/3-links/expected_events",
         output_dir.join("events"),
+    )
+    .unwrap();
+}
+
+#[deterministic_id_test(matsim_rust)]
+fn three_links_bisect_completes_a_trip_across_partitions() {
+    let mut config = Config::from_args(CommandLineArgs::new_with_path(
+        "./tests/resources/3-links/3-links-config-2.yml",
+    ));
+    config.partitioning_mut().method = PartitionMethod::Bisect(BisectOptions::default());
+    let output = tempfile::tempdir().unwrap();
+    config.output_mut().output_dir = output.path().join("bisect");
+    let scenario = Scenario::load(config);
+    assert_ne!(
+        scenario
+            .network
+            .get_link(&Id::get_from_ext("link1"))
+            .partition,
+        scenario
+            .network
+            .get_link(&Id::get_from_ext("link3"))
+            .partition,
+    );
+
+    ControllerBuilder::default_with_scenario(scenario)
+        .build()
+        .unwrap()
+        .run();
+    compare_event_folder(
+        "./tests/resources/3-links/expected_events",
+        output.path().join("bisect/events"),
     )
     .unwrap();
 }
